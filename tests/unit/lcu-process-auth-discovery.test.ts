@@ -5,9 +5,18 @@ import {
   parseLcuAuthFromLockfile,
   queryLeagueClientProcessesWithRunner,
   shouldUseDiscoveryCache,
+  getLeagueDirectoriesFromProcessRecords,
 } from '../../src/main/services/lcu/process-auth-discovery.ts'
 
 describe('LCU process auth discovery', () => {
+  it('derives directories from running clients at non-default paths without exposing launch arguments', () => {
+    expect(getLeagueDirectoriesFromProcessRecords([
+      { ExecutablePath: 'F:\\Games\\英雄联盟\\LeagueClient\\LeagueClientUx.exe', CommandLine: '--remoting-auth-token=fixture-only' },
+      { ExecutablePath: 'F:\\Games\\英雄联盟\\LeagueClient\\LeagueClient.exe' },
+      { ExecutablePath: 'C:\\Other\\unrelated.exe' },
+      { ExecutablePath: null },
+    ])).toEqual(['F:\\Games\\英雄联盟\\LeagueClient'])
+  })
   it('extracts auth from LeagueClientUx command line arguments', () => {
     const [token, port, url] = parseLcuAuthFromCommandLine(
       '"C:\\Riot Games\\League of Legends\\LeagueClientUx.exe" --app-port=58123 --remoting-auth-token=test-token-123 --app-name=LeagueClientUx'

@@ -201,6 +201,7 @@ export class HextechAramQueryService {
 
     const currentPuuid = currentSummoner.puuid
     let platformId = normalizePlatformId(currentSummoner.platformId ?? currentSummoner.currentPlatformId)
+    if (!platformId) platformId = normalizePlatformId(await this.lcuService.getCurrentPlatformId())
     if (!platformId) {
       platformId = getBootstrapPlatformId(
         await this.lcuService.getCurrentSummonerMatchHistory(0, 0),

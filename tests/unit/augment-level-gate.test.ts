@@ -1,0 +1,56 @@
+import { describe, expect, it } from 'vitest'
+import { AugmentLevelGate } from '../../src/main/augment-level-gate.ts'
+
+describe('level scheduling without losing deferred offers', () => {
+  it('fails open when unavailable, stale or time moves backwards', () => {
+    const gate = new AugmentLevelGate()
+    expect(gate.decide(20000).mode).toBe('fallback')
+    gate.updateLevel(4, 20000)
+    expect(gate.decide(31000).capture).toBe(true)
+    expect(gate.decide(19000).mode).toBe('fallback')
+  })
+  it('keeps an unclaimed level 7 offer active at level 8 and beyond', () => {
+    const gate = new AugmentLevelGate()
+    gate.completed.add(3); gate.updateLevel(8, 10000)
+    expect(gate.decide(10000)).toMatchObject({ mode: 'pending', capture: true, nextLevel: 7 })
+    gate.updateLevel(13, 12000)
+    expect(gate.decide(12000).mode).toBe('pending')
+  })
+  it('does not mistake short rerolls for a completed choice', () => {
+    const gate = new AugmentLevelGate()
+    gate.updateLevel(3, 10000); gate.observeSelection(true, 10000)
+    for (const time of [10500, 11000, 12000]) gate.observeSelection(false, time)
+    expect(gate.visible).toBe(true)
+    expect(gate.completed.size).toBe(0)
+    gate.observeSelection(true, 12500)
+    expect(gate.decide(12500).mode).toBe('selection')
+  })
+  it('sleeps after a confirmed disappearance but preserves an 8 second watchdog', () => {
+    const gate = new AugmentLevelGate()
+    gate.updateLevel(4, 10000); gate.observeSelection(true, 10000)
+    for (const time of [11000, 14000, 17000]) gate.observeSelection(false, time)
+    expect(gate.completed.has(3)).toBe(true)
+    expect(gate.decide(17000)).toMatchObject({ mode: 'saving', capture: true })
+    gate.updateLevel(4, 19000)
+    expect(gate.decide(19000).capture).toBe(false)
+    gate.updateLevel(4, 25000)
+    expect(gate.decide(25000).capture).toBe(true)
+    gate.observeSelection(true, 25000)
+    expect(gate.decide(25100).mode).toBe('selection')
+  })
+  it('prepares at level 6 and keeps the final pending choice active above level 15', () => {
+    const gate = new AugmentLevelGate()
+    gate.completed.add(3); gate.updateLevel(6, 10000)
+    expect(gate.decide(10000)).toMatchObject({ mode: 'preparing', prepare: true })
+    gate.completed.add(7); gate.completed.add(11); gate.updateLevel(18, 12000)
+    expect(gate.decide(12000)).toMatchObject({ mode: 'pending', nextLevel: 15 })
+  })
+  it('resets per match and never infers several picks from a level jump', () => {
+    const gate = new AugmentLevelGate()
+    gate.updateLevel(15, 10000); gate.observeSelection(true, 10000)
+    for (const time of [11000, 14000, 17000]) gate.observeSelection(false, time)
+    expect([...gate.completed]).toEqual([3])
+    gate.updateLevel(3, 20000)
+    expect(gate.completed.size).toBe(0)
+  })
+})

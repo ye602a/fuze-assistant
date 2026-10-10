@@ -56,7 +56,7 @@ let augmentSidePanelWindow: BrowserWindow | null = null
 let mainWindowCloseAllowed = false
 let rendererServerPromise: Promise<string> | null = null
 
-const MAIN_WINDOW_SIZE = { width: 472, height: 752 }
+const MAIN_WINDOW_SIZE = { width: 1120, height: 840 }
 const POPUP_WINDOW_SIZE = { width: 360, height: 640 }
 const POPUP_WINDOW_POSITION_KEY = 'windows.championInsightPosition'
 const FLOATING_WINDOW_SIZE = { width: 760, height: 170 }
@@ -80,7 +80,7 @@ const MIME_TYPES: Record<string, string> = {
 function getMainWindowBounds(): Rectangle {
     const display = screen.getPrimaryDisplay()
     const area = display.workArea || display.bounds
-    const width = Math.min(MAIN_WINDOW_SIZE.width, area.width)
+    const width = Math.min(Math.max(780, Math.round(area.width * 0.62)), MAIN_WINDOW_SIZE.width, area.width)
     const height = Math.min(MAIN_WINDOW_SIZE.height, area.height)
     const rightAlignedX = area.x + area.width - width - 20
 
@@ -524,7 +524,11 @@ export const createMainWindow = async (
         ...bounds,
         frame: false,
         webPreferences,
-        title: 'ARAMGG助手',
+        title: '符择',
+        show: process.env.ARAMGG_START_HIDDEN !== '1' && process.env.ARAMGG_RELEASE_SMOKE_HIDDEN !== '1',
+        resizable: true,
+        minWidth: Math.min(600, bounds.width),
+        minHeight: Math.min(520, bounds.height),
     })
     const window = mainWindow
     attachWindowDiagnostics('main', window)

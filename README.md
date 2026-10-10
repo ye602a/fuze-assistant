@@ -1,167 +1,46 @@
-<p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="ARAMGG 助手：只读 LCU 选人建议、本地海克斯 OCR 与游戏内推荐浮窗" />
-</p>
+# 符择 Fuze
 
-<p align="center">
-  <strong>简体中文</strong> · <a href="./README.en.md">English</a>
-</p>
+本地优先的 Windows 海克斯大乱斗助手。源码与发布版本位于私有仓库 `ye602a/fuze-assistant`。
 
-<p align="center">
-  <a href="https://github.com/valkia/aramgg_client/releases/latest"><img src="https://img.shields.io/github/v/release/valkia/aramgg_client?style=flat-square&color=c8a96a&label=release" alt="最新版本" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20x64-111923?style=flat-square&logo=windows11&logoColor=f4ecdc" alt="Windows x64" />
-  <img src="https://img.shields.io/badge/LCU-read--only-54d884?style=flat-square" alt="LCU 只读" />
-  <img src="https://img.shields.io/badge/UI-zh--CN%20%7C%20en--US%20%7C%20zh--TW-c29c6d?style=flat-square" alt="支持简体中文、英文与繁体中文" />
-</p>
+- 从正在运行的 League 客户端自动发现 LCU，界面展示实际连接、游戏阶段、截图、OCR 与数据状态；游戏目录仅作高级回退。
+- 持续低帧率截图、原始像素复用、重复帧过滤；OCR 在独立进程运行，WebGPU 预热失败时切换单线程 CPU。
+- 使用官方本地只读接口读取等级。普通阶段省电等待，临近强化等级、待领取和重选时恢复检测；接口失效时兼容检测，低频兜底不遗漏特殊触发。
+- 独立识别字典与胜率统计分开缓存、更新。胜率不混合不同补丁；历史、未验证和缺失数据明确标注。
+- 顶部三卡保持游戏左右顺序；侧边详情、战绩与偏好分别呈现。
+- 个人分支关闭遥测及后台战绩上传，不向游戏进程注入或读取游戏内存。
 
-<p align="center">
-  面向 Windows 的英雄联盟极地大乱斗桌面助手：选人阶段给出英雄与席位建议，对局中识别三张海克斯卡片，并把胜率、出装与技能建议放到游戏旁边。
-</p>
+## 安装与更新
 
-<p align="center">
-  <a href="https://github.com/valkia/aramgg_client/releases/latest"><strong>下载 Windows 安装包</strong></a>
-  ·
-  <a href="https://aramgg.com"><strong>访问 ARAMGG 主站</strong></a>
-  ·
-  <a href="./docs/USER_GUIDE_AUTO_AUGMENT.md">使用指南</a>
-  ·
-  <a href="./docs/LCU_TROUBLESHOOTING.md">LCU 排障</a>
-</p>
+从本仓库 Releases 下载 `Fuze Setup <version>.exe`。首次安装需要手动运行安装包；早期 ARAMGG 或 Fuze 本地包不会自动切换到这个频道。
 
-## 先看实际效果
+设置页的“软件更新”支持私有 GitHub Releases：检查版本 → 手动下载 → SHA-512 校验 → 确认安装。选人、载入和对局阶段暂停下载、禁止安装，退出应用不会自动安装。当前没有 Windows 发布者签名，完整性校验不等于发布者签名；不启用静默自动更新。
 
-<p align="center">
-  <img src="./docs/aramgg-in-game-preview.png" width="100%" alt="ARAM 对局中的三卡海克斯识别浮窗和右侧推荐列表" />
-</p>
+私有仓库需要每台电脑独立授权：在 GitHub 创建 Fine-grained personal access token，限定 `fuze-assistant`，仅授予 Contents: Read-only 权限，然后在设置中加密保存。Windows `safeStorage` 将其绑定本机用户；令牌不能写入源码、工作流文件或安装包。不要将开发者写权限令牌分发给测试者。环境变量 `FUZE_GITHUB_TOKEN` 可用于临时自动化测试，优先于已保存授权；取消授权时也需移除此环境变量。
 
-<p align="center">
-  <sub>顶部浮窗保持左、中、右卡位顺序；右侧列表继续展示海克斯胜率、推荐度和关联出装。</sub>
-</p>
+没有授权的用户只能在浏览器登录有仓库访问权限的 GitHub 账号后下载。便携包不原地安装，需下载新目录，并保留旧包作为回退。
 
-<p align="center">
-  <img src="./docs/image.png" alt="ARAMGG 助手主控制台" width="380" />
-  <img src="./docs/image0.png" alt="英雄详情与 ARAM 席位推荐" width="360" />
-</p>
+## 本地开发与验证
 
-## 一局游戏里，它做什么
-
-| 阶段 | ARAMGG 读取 | 你会看到 |
-| --- | --- | --- |
-| `ChampSelect` | 只读 LCU 选人、英雄与 bench 状态 | 当前英雄数据和所有可用席位英雄建议 |
-| `InProgress` | 屏幕中的左 / 中 / 右海克斯标题区域 | 顶部三卡浮窗和右侧胜率、推荐列表 |
-| 全程 | 当前语言的本地缓存或内置数据 | 英雄、海克斯、出装、召唤师技能与加点建议 |
-
-> [!IMPORTANT]
-> 推荐链路只读取状态和统计数据。它不会自动选英雄、交换 bench、锁定英雄或接受交易；最终操作始终由玩家完成。
-
-## 为什么它不只是一个数据浮窗
-
-- **先识别游戏阶段。** 应用通过 LCU gameflow 决定何时展示选人建议、何时运行游戏内 OCR，离开对局后会清理过期结果。
-- **按真实卡位识别。** PaddleOCR 只读取左、中、右标题区域；某个位置读不到时保留空槽，不用宽区域结果打乱顺序。
-- **本地优先展示。** 完整的内置或缓存数据会先渲染，远端版本检查与下载在后台进行，且只在必需文件完整后切换。
-- **界面与数据同语言。** `zh-CN`、`en-US`、`zh-TW` 采用事务式切换，避免界面已经变更但数据仍停留在旧语言。
-- **内置反馈与诊断。** 原生反馈表单支持可选截图，并在明确提示后自动附带已脱敏的近两天客户端日志，帮助复现问题。
-
-## 安装与使用
-
-1. 从 [Releases](https://github.com/valkia/aramgg_client/releases/latest) 下载最新的 `aramgg_client Setup <version>.exe`。
-2. 安装并启动 ARAMGG 助手，再启动 League Client。应用会优先从运行中的客户端自动发现 LCU。
-3. 进入极地大乱斗：选人阶段查看英雄详情与席位建议；进入对局后等待海克斯界面出现。
-4. 自动识别失败时可按 `F1` 手动截图分析。
-
-「游戏目录」不是必填项。只有进程优先的 LCU 自动发现失败时，才需要把它作为读取 lockfile / 日志的高级兜底。
-
-## 工作方式
+Node 22.18+，npm 10；按锁文件安装：`npm ci --ignore-scripts`。Electron 安装脚本被禁用时，首次开发需执行 `node node_modules/electron/install.js` 下载运行时。
 
 ```text
-League Client ──只读 LCU──> 游戏阶段路由 ──ChampSelect──> 英雄详情 / 席位建议
-                                          └─InProgress──> 屏幕截图
-                                                            │
-本地优先的同语言数据 <────────────── PaddleOCR 标题识别 <────┘
-          │
-          └──────────────> 顶部三卡浮窗 / 右侧推荐列表
-```
-
-Renderer 不拥有 Node 能力，只能通过 sandbox preload 暴露的业务 API 与主进程通信。Electron 窗口保持 `contextIsolation`、`sandbox` 和 `webSecurity` 开启。
-
-## 本地开发
-
-需要 Node `22.18.0` 与 npm 10。
-
-```bash
-git clone https://github.com/valkia/aramgg_client.git
-cd aramgg_client
-npm install
-npm run prepare:client-data
 npm run dev
-```
-
-提交前建议依次运行：
-
-```bash
 npm run test:unit
-npm run test:augment-ocr
 npm run lint
 npm run type-check
-npm run build
+npm run test:augment-ocr
+npm run pack
+npm run test:packaged-windows
 ```
 
-项目基于 Electron、Vue 3、electron-vite、TypeScript 和 PaddleOCR。源码按进程边界组织在 `src/main/`、`src/preload/`、`src/renderer/` 与 `src/shared/`；测试位于 `tests/unit/` 和 `tests/electron/`。
+打包会准备三种语言的公开数据缓存，失败时停止发布。真实打包窗口检查使用隔离数据，不操作游戏、鼠标或键盘。设置 `ARAMGG_RELEASE_SMOKE_HIDDEN=1` 可隐藏测试窗口；设置 `FUZE_PIPELINE_FIXTURES` 为 `tests/fixtures/augment-ocr` 的绝对路径，可验证 GPU、CPU 回退和截图链路。
 
-## 文档导航
+`build/`、`dist/`、`dist-electron/`、用户缓存、配置和日志不提交。发布使用 `npm run release:minor` 或 `npm run release:patch` 创建版本提交与附注标签，再推送本仓库；Windows 工作流验证通过才发布安装包及 `latest.yml`。工作流不启用原作者的上传服务。
 
-- [完整架构](./COMPLETE_ARCHITECTURE.md)
-- [自动海克斯检测使用指南](./docs/USER_GUIDE_AUTO_AUGMENT.md)
-- [客户端反馈与日志边界](./docs/FEEDBACK.md)
-- [LCU 排障指南](./docs/LCU_TROUBLESHOOTING.md)
-- [性能与发热排查](./docs/PERFORMANCE_DIAGNOSTICS.md)
-- [大乱斗 LCU 只读推荐进度](./docs/ARAM_LCU_READONLY_RECOMMENDATION_PROGRESS.md)
-- [客户端数据 API 分发策略](./docs/client-api-strategy.md)
-- [Electron 客户端版本更新方案](./docs/ELECTRON_APP_UPDATE_STRATEGY.md)
-- [TypeScript 开发约定](./docs/TYPESCRIPT_INTEGRATION.md)
+## 数据与来源
 
-客户端数据接口、API Key 申请和接入说明见 [ARAMGG 数据 API 开发者页面](https://data.dtodo.cn/developer.html)。
+识别字典：ARAMMayhem 公共 CC BY 4.0 数据，完整归属信息随缓存保存；腾讯公开静态数据仅提供版本参考。胜率主源沿用 ARAMGG 客户端公开数据通道，不能把静态版本号当成本机版本实测，也不能把识别字典新版本当成新胜率。
 
-<details>
-<summary><strong>维护者：发布与质量检查</strong></summary>
+基于 `valkia/aramgg_client` 开发，保留上游提交历史与第三方声明，详见 [THANKS.md](THANKS.md)。本仓库不对未明确授权的上游素材另行授予许可。
 
-GitHub Actions 会在 Windows Runner 上执行 lint、type-check、unit tests 和打包。正式发布使用 `npm run release:patch|minor|major` 创建版本提交与 annotated tag，再运行 `npm run release:push`。
-
-源码开发和普通本地打包不会向生产服上传战绩；只有该 GitHub 官方发布 workflow 会注入官方通道标记和生产写接口 origin。
-
-依赖或 lockfile 变更后，发布前使用 npm 10 验证：
-
-```bash
-npx -p npm@10 npm ci --ignore-scripts
-```
-
-安装包发布后，还需要更新远端 `/api/client/v1/config` 中的 `client.latestVersion`、`client.downloadUrl` 和更新日志。自动更新链路未完整验证前保持 `client.autoUpdateEnabled` 关闭。
-
-</details>
-
-<details>
-<summary><strong>Star 趋势</strong></summary>
-
-<p align="center">
-  <a href="https://www.star-history.com/?repos=valkia%2Faramgg_client&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=valkia/aramgg_client&type=date&theme=dark&legend=top-left&sealed_token=4WUaLyfHuhwVpa6CaVWxo9JwrU2ORlLI9dAYuWiPKDmieAkfPBMEhZVkaRE_Uh1S09rcn68ut9p3OTdv9g44qUeyk6rhtzkLF2KZ2_fbpLsIYVIxlwgpXj4aGR84y6dlAebI8UBtjKZlyxHepOvNbgHdzcQZqUinKSJCfAOSVoRjwL1xngr9YyeBPBBN" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=valkia/aramgg_client&type=date&legend=top-left&sealed_token=4WUaLyfHuhwVpa6CaVWxo9JwrU2ORlLI9dAYuWiPKDmieAkfPBMEhZVkaRE_Uh1S09rcn68ut9p3OTdv9g44qUeyk6rhtzkLF2KZ2_fbpLsIYVIxlwgpXj4aGR84y6dlAebI8UBtjKZlyxHepOvNbgHdzcQZqUinKSJCfAOSVoRjwL1xngr9YyeBPBBN" />
-      <img src="https://api.star-history.com/chart?repos=valkia/aramgg_client&type=date&legend=top-left&sealed_token=4WUaLyfHuhwVpa6CaVWxo9JwrU2ORlLI9dAYuWiPKDmieAkfPBMEhZVkaRE_Uh1S09rcn68ut9p3OTdv9g44qUeyk6rhtzkLF2KZ2_fbpLsIYVIxlwgpXj4aGR84y6dlAebI8UBtjKZlyxHepOvNbgHdzcQZqUinKSJCfAOSVoRjwL1xngr9YyeBPBBN" alt="aramgg_client Star 趋势图" width="900" />
-    </picture>
-  </a>
-</p>
-
-</details>
-
-<details>
-<summary><strong>支持项目</strong></summary>
-
-如果这个项目对你有帮助，欢迎支持后续开发与维护。
-
-<p align="center">
-  <img src="./docs/assets/support/wechat.jpg" alt="微信赞赏码" width="220" />
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="./docs/assets/support/alipay.jpg" alt="支付宝收款码" width="220" />
-</p>
-
-</details>
+离线测试不能代替腾讯国服真实对局验收。升级后需实测三卡出现、重选、领取后关闭、游戏结束以及远程桌面下的截图兼容性。

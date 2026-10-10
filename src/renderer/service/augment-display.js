@@ -101,10 +101,15 @@ export const mapDetectedAugmentsForFallback = (augments = [], previousAugments =
     }
 
     const id = getAugmentId(augment)
-    const previous = previousBySlotAndId.get(`${detectedSlot}:${id}`) || null
+    const previous = augment?.statistics ? null : previousBySlotAndId.get(`${detectedSlot}:${id}`) || null
 
     return {
       ...previous,
+      statistics: augment?.statistics ?? previous?.statistics ?? null,
+      recognitionSource: augment?.recognitionSource ?? previous?.recognitionSource,
+      recognitionPatch: augment?.recognitionPatch ?? previous?.recognitionPatch,
+      popularity: augment?.popularity ?? previous?.popularity,
+      popularityPatch: augment?.popularityPatch ?? previous?.popularityPatch,
       augmentId: id,
       id,
       name: augment?.name || previous?.name || '',
@@ -152,6 +157,7 @@ export const mergeWinrateWithDetectedSlots = (
     return {
       ...augment,
       ...winrate,
+      name: augment.name || winrate.name,
       id: winrate.id || winrate.augmentId || id,
       augmentId: winrate.augmentId || winrate.id || id,
       detectedSlot: augment.detectedSlot,

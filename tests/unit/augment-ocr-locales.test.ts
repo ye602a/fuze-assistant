@@ -33,7 +33,7 @@ describe('localized augment OCR loading', () => {
         { code: 'zh-TW' },
       ],
       getDataLocale: () => 'zh-CN',
-      loadAugmentBaseForOcrLocale: loadLocale,
+      loadRecognitionBaseForOcrLocale: loadLocale,
       tryNormalizeDataLocale: () => null,
     }))
     vi.doMock('../../src/main/services/lcu/process-auth-discovery.ts', () => ({

@@ -13,6 +13,11 @@ const SUMMARY_TEXT_LIMIT = 220
 
 export const LOCAL_CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '0.4.0', date: '2026-10-10', title: '符择私有更新与弹窗改版',
+    summary: '本地缓存、等级调度、GPU OCR 和个人 GitHub 更新频道。',
+    changes: ['真实连接状态与自动客户端发现。', '识别字典与胜率分开更新，标注历史统计。', '私有更新授权在本机加密；手动下载和安装，对局中禁止安装。', '重新设计三卡和详情弹窗，保留左右顺序。'],
+  },
+  {
     version: '0.2.17',
     date: '2026-09-09',
     title: '修复海克斯推荐与悬浮窗无法显示',

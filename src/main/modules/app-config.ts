@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { app, globalShortcut, BrowserWindow } from 'electron'
+import { loadRecognitionCatalogLocal, startRecognitionUpdates } from '../services/recognition-data-service.ts'
 import { getLolGameStatus } from '../screenshot.ts'
 import { registerIpcHandlers } from './ipc-handlers.ts'
 import {
@@ -20,22 +21,18 @@ import {
 import autoScreenshotService from '../auto-screenshot-service.ts'
 import { getLCUServiceInstance } from '../services/lcu/lcu-service.ts'
 import {
-    requestLocalMatchHistoryBackgroundSync,
-    startLocalMatchHistoryBackgroundSync,
     stopLocalMatchHistoryBackgroundSync,
 } from '../services/match-history/background-sync.ts'
 import { checkForClientUpdate } from '../version-checker.ts'
 import {
-    checkForAppUpdate,
     initializeAppUpdateService,
     installDownloadedAppUpdate,
     isAppUpdateInstallInProgress,
-    refreshAppUpdateConfig,
     setAppUpdateGamePhase,
     setAppUpdateInstallCleanup,
     shouldInstallDownloadedAppUpdateOnQuit,
 } from '../app-update-service.ts'
-import { initAnalyticsService, markAnalyticsAppCleanExit } from '../services/analytics-service.ts'
+import { markAnalyticsAppCleanExit } from '../services/analytics-service.ts'
 import {
     collectAramCandidateChampionIds,
     getAramBenchRecommendation,
@@ -87,7 +84,7 @@ const GAME_WINDOW_STATUS_LOG_INTERVAL_MS = 30000
 const GAMEFLOW_AUGMENT_ANALYSIS_PHASE = 'InProgress'
 const GAMEFLOW_POLL_FALLBACK_INTERVAL_MS = 1000
 const GAMEFLOW_TOKEN_REFRESH_INTERVAL_MS = 60000
-const GAMEFLOW_WS_STALE_MS = 15000
+const GAMEFLOW_WS_STALE_MS = 5000
 const GAMEFLOW_WS_RECONNECT_BASE_MS = 2000
 const GAMEFLOW_WS_RECONNECT_MAX_MS = 30000
 const GAME_API_DIAGNOSTIC_INTERVAL_MS = 15000
@@ -140,7 +137,7 @@ const itemSetPreloadDataByChampionId = new Map()
  */
 export async function init({ startBackgroundServices = true } = {}) {
     logger.info(`${'='.repeat(50)}`)
-    logger.info(`ARAMGG助手启动中...`)
+    logger.info(`符择启动中...`)
     logger.info(`${'='.repeat(50)}`)
 
     // 设置应用菜单为空
@@ -170,8 +167,9 @@ export async function init({ startBackgroundServices = true } = {}) {
         })
     }
 
+    await loadRecognitionCatalogLocal()
     const mainWindow = await createMainWindow(isDev, devServerUrl)
-    const [popupWindow, floatingWindow, augmentSidePanelWindow] = await Promise.all([
+    const [popupWindow, floatingWindow, augmentSidePanelWindow] = startBackgroundServices ? [null, null, null] : await Promise.all([
         ensurePopupWindow(),
         ensureFloatingWindow(),
         ensureAugmentSidePanelWindow(),
@@ -190,31 +188,17 @@ export async function init({ startBackgroundServices = true } = {}) {
         return { mainWindow, popupWindow, toggleMainWindow }
     }
     startPerformanceMonitor()
+    startRecognitionUpdates()
 
-    initializeAppUpdateService({ isDev })
+    initializeAppUpdateService({ isDev: !app.isPackaged })
     setAppUpdateInstallCleanup(() => ensureQuitCleanup('app update install'))
-    refreshAppUpdateConfig({ reason: 'startup' }).catch((error) => {
-        logger.warn('[update] startup config refresh failed:', error.message)
-    })
-
     setTimeout(() => {
         checkForClientUpdate(mainWindow).catch((error) => {
             logger.warn('Client update check failed:', error.message)
         })
     }, 1000)
 
-    setTimeout(() => {
-        checkForAppUpdate('startup').catch((error) => {
-            logger.warn('[update] startup app update check failed:', error.message)
-        })
-    }, 2500)
-
-    initAnalyticsService().catch((error) => {
-        logger.debug('[analytics] initialization skipped:', error.message)
-    })
-    startLocalMatchHistoryBackgroundSync((updatedAt) => {
-        notifyAllWindows('match-history-updated', { updatedAt })
-    }, app.getVersion())
+    // History is queried only when requested; no startup sync/upload or telemetry.
 
     // 初始化游戏流程监控（延迟初始化，避免阻塞应用启动）
     logger.info('将在后台初始化游戏流程监控...')
@@ -606,7 +590,8 @@ async function resolveChampionIdFromLiveClientData(liveClientData, currentSummon
 }
 
 function isAramItemSetAutoApplyEnabled() {
-    return store.get(ITEM_SET_AUTO_APPLY_KEY) !== false
+    // This fork keeps game files read-only unless the user explicitly presses install.
+    return false
 }
 
 function resetChampSelectItemSetState(reason) {
@@ -1194,6 +1179,11 @@ async function initGameFlowMonitor() {
 
         const handleGameflowPhase = async (phase, source) => {
             if (!phase) {
+                // A disappearing client must not leave capture running after the game exits.
+                if (autoScreenshotService.isRunning) {
+                    const game = await getLolGameStatus()
+                    if (game.processRunning === false) stopAutoScreenshotForGame('game process exited while LCU unavailable')
+                }
                 return
             }
 
@@ -1210,9 +1200,6 @@ async function initGameFlowMonitor() {
                 notifyAllWindows('game-phase-changed', { phase: currentPhase, prevPhase })
                 clearAugmentOverlayForPhase(currentPhase)
                 void logReadOnlyGameApiDiagnostics(lcuService, currentPhase, `phase-change:${source}`, true)
-                if (currentPhase === 'Lobby' || currentPhase === 'None') {
-                    requestLocalMatchHistoryBackgroundSync(`phase-change:${currentPhase}`)
-                }
 
                 // 状态机只决定阶段入口效果，Electron/LCU 副作用仍由主进程执行。
                 switch (transition.entryEffect) {
@@ -1242,26 +1229,26 @@ async function initGameFlowMonitor() {
                         notifyAllWindows('game-in-progress', {})
                         resetChampSelectItemSetState('LCU phase InProgress')
                         void recoverChampionInsightForInProgress(lcuService, 'LCU phase InProgress')
-                        void capturePostGameShareSnapshot(lcuService, 'LCU phase InProgress')
+
                         await startAutoScreenshotForGame('LCU phase InProgress')
                         break
                     case 'ENTER_WAITING_FOR_STATS':
                         logger.info('游戏已结束')
                         notifyAllWindows('game-ended', {})
-                        void prepareAndNotifyPostGameShare(lcuService, 'LCU phase WaitingForStats')
+
                         resetChampSelectItemSetState('LCU phase WaitingForStats')
                         stopAutoScreenshotForGame('LCU phase WaitingForStats')
                         break
                     case 'ENTER_PRE_END_OF_GAME':
                         logger.info('游戏结束统计阶段')
-                        void prepareAndNotifyPostGameShare(lcuService, 'LCU phase PreEndOfGame')
+
                         resetChampSelectItemSetState('LCU phase PreEndOfGame')
                         stopAutoScreenshotForGame('LCU phase PreEndOfGame')
                         break
                     case 'ENTER_END_OF_GAME':
                         logger.info('游戏完全结束')
                         notifyAllWindows('end-of-game', {})
-                        void prepareAndNotifyPostGameShare(lcuService, 'LCU phase EndOfGame')
+
                         resetChampSelectItemSetState('LCU phase EndOfGame')
                         stopAutoScreenshotForGame('LCU phase EndOfGame')
                         break
@@ -1272,7 +1259,7 @@ async function initGameFlowMonitor() {
 
             if (phase === GAMEFLOW_AUGMENT_ANALYSIS_PHASE) {
                 void logReadOnlyGameApiDiagnostics(lcuService, phase, `heartbeat:${source}`)
-                void capturePostGameShareSnapshot(lcuService, `heartbeat:${source}`)
+
                 if (lastInProgressInsightChampionId == null) {
                     void recoverChampionInsightForInProgress(lcuService, 'LCU phase InProgress heartbeat')
                 }
@@ -1360,6 +1347,7 @@ async function initGameFlowMonitor() {
         await handleGameflowPhase(initialPhase, 'initial')
         void connectGameflowWebSocket()
 
+        let lastPhasePollAt = 0
         lcuPollingTimer = setInterval(async () => {
             if (lcuGameflowMonitorStopping || pollInFlight) return
             pollInFlight = true
@@ -1386,9 +1374,10 @@ async function initGameFlowMonitor() {
                 const websocketFresh =
                     websocketConnected &&
                     lcuGameflowSubscription?.isConnected() &&
-                    now - websocketLastEventAt <= GAMEFLOW_WS_STALE_MS
+                    now - Math.max(websocketLastEventAt, lastPhasePollAt) <= GAMEFLOW_WS_STALE_MS
 
                 if (!websocketFresh) {
+                    lastPhasePollAt = now
                     const phase = await lcuService.getGameflowPhase()
                     if (lcuGameflowMonitorStopping) return
                     await handleGameflowPhase(phase, 'poll')
@@ -1432,7 +1421,7 @@ async function runQuitCleanup(reason = 'app quit') {
         logger.info('自动截图服务已停止')
     }
 
-    await logger.cleanupOldLogs(7)
+    // Preserve existing logs in this local diagnostic fork.
 }
 
 function ensureQuitCleanup(reason = 'app quit') {

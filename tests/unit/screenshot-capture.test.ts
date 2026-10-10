@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getSources: vi.fn(),
@@ -30,6 +30,7 @@ describe('captureScreenshot', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+  afterEach(() => vi.useRealTimers())
 
   it('prefers the LoL game window by default', async () => {
     mocks.getSources.mockResolvedValue([
@@ -56,6 +57,7 @@ describe('captureScreenshot', () => {
     expect(result.height).toBe(900)
     expect(mocks.getSources).toHaveBeenCalledWith({
       types: ['window', 'screen'],
+      fetchWindowIcons: false,
       thumbnailSize: { width: 1280, height: 720 },
     })
   })
@@ -78,7 +80,28 @@ describe('captureScreenshot', () => {
     expect(result.success).toBe(true)
     expect(mocks.getSources).toHaveBeenCalledWith({
       types: ['screen'],
+      fetchWindowIcons: false,
       thumbnailSize: { width: 1024, height: 576 },
     })
+  })
+
+  it('does not start another native request while a timed-out capture is unresolved', async () => {
+    vi.useFakeTimers()
+    let resolve!: (sources: any[]) => void
+    mocks.getSources.mockReturnValue(new Promise(done => { resolve = done }))
+    const { captureScreenshot } = await import('../../src/main/screenshot.ts')
+    const options = { preferScreen: true, timeoutMs: 100, thumbnailSize: { width: 8, height: 8 } }
+    const first = captureScreenshot(options)
+    await vi.advanceTimersByTimeAsync(101)
+    expect((await first).success).toBe(false)
+    const second = captureScreenshot(options)
+    await vi.advanceTimersByTimeAsync(101)
+    expect((await second).success).toBe(false)
+    expect(mocks.getSources).toHaveBeenCalledTimes(1)
+    resolve([{ id: 'screen:0:0', name: 'Screen', thumbnail: createThumbnail(8, 8) }])
+    await vi.advanceTimersByTimeAsync(0)
+    mocks.getSources.mockResolvedValue([{ id: 'screen:0:0', name: 'Screen', thumbnail: createThumbnail(8, 8) }])
+    expect((await captureScreenshot(options)).success).toBe(true)
+    expect(mocks.getSources).toHaveBeenCalledTimes(2)
   })
 })

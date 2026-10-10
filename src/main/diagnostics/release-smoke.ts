@@ -37,6 +37,11 @@ export function createReleaseSmoke() {
     })
     app.on('browser-window-created', (_event, window) => {
         windows.push(window)
+        if (process.env.ARAMGG_RELEASE_SMOKE_HIDDEN === '1') {
+            window.show = () => {}
+            window.showInactive = () => {}
+            window.focus = () => {}
+        }
         const contents = window.webContents
         contents.on('preload-error', (_event, preload, error) => fail(`Preload ${preload}: ${error.message}`))
         contents.on('render-process-gone', (_event, details) => fail(`Renderer crashed: ${details.reason}`))
@@ -68,6 +73,10 @@ export function createReleaseSmoke() {
                         const { default: store } = await import('../modules/app-store.ts')
                         store.set('itemSets.autoApplyAram', false)
                         await initialize()
+                        const { getRecognitionDataStatus } = await import('../services/recognition-data-service.ts')
+                        const recognitionData = getRecognitionDataStatus()
+                        if (!recognitionData.count) throw new Error('Bundled independent recognition catalog is unavailable offline')
+                        await fs.writeFile(path.join(outputDir, 'recognition-data.json'), JSON.stringify(recognitionData, null, 2))
                         while (ready.size < ROUTES.length) {
                             if (failures.length) throw new Error(failures.join('\n'))
                             await new Promise((resolve) => setTimeout(resolve, 50))
@@ -78,8 +87,12 @@ export function createReleaseSmoke() {
                         const preview = {
                             championId: 1, championName: 'Smoke champion', dataSource: 'test',
                             augments: [1, 2, 3].map((id) => ({
-                                id, augmentId: id, name: `Smoke augment ${id}`, detectedSlot: id - 1,
-                                winRate: 0.55, pickRate: 0.2, recommendScore: 0.6, rarity: 'silver',
+                                id: id === 1 ? 'mayhem:smoke-new' : id, augmentId: id === 1 ? 'mayhem:smoke-new' : id,
+                                name: `Smoke augment ${id}`, detectedSlot: id - 1,
+                                winRate: id === 1 ? null : 0.55, pickRate: id === 1 ? null : 0.2,
+                                recommendScore: id === 1 ? null : 0.6, rarity: 'silver',
+                                statistics: { status: id === 1 ? 'missing' : 'historical', patch: id === 1 ? null : '16.19' },
+                                recognitionSource: 'arammayhem.com',
                             })),
                         }
                         const shown = await main.webContents.executeJavaScript(`(async () => {
@@ -107,7 +120,7 @@ export function createReleaseSmoke() {
                                 typeof snapshot.monitor?.revision !== 'number' || !snapshot.locale?.locale) {
                                 throw new Error(`Invalid mounted window: ${route} ${JSON.stringify(snapshot)}`)
                             }
-                            if (!window.isVisible()) throw new Error(`Window cannot be shown: ${route}`)
+                            if (process.env.ARAMGG_RELEASE_SMOKE_HIDDEN !== '1' && !window.isVisible()) throw new Error(`Window cannot be shown: ${route}`)
                             if (route === '/floating-overlay' && !snapshot.text.includes('Smoke augment')) {
                                 throw new Error('Floating window did not render the diagnostic payload')
                             }
@@ -116,7 +129,38 @@ export function createReleaseSmoke() {
                             await fs.writeFile(path.join(outputDir, `${route.slice(1)}.png`), screenshot.toPNG())
                             snapshots.push(snapshot)
                         }
+                        // Exercise the isolated app's own settings without OS input or game access.
+                        await main.webContents.executeJavaScript(`document.querySelectorAll('.rail nav button')[2].click()`)
+                        await new Promise((resolve) => setTimeout(resolve, 100))
+                        const settings = await main.webContents.executeJavaScript(`(() => {
+                            const fallback = document.querySelector('details.manual-fallback');
+                            return { fallbackCollapsed: !!fallback && !fallback.open,
+                                manualInputPresent: !!fallback?.querySelector('input'),
+                                text: document.querySelector('main')?.textContent || '' };
+                        })()`)
+                        if (!settings.fallbackCollapsed || !settings.manualInputPresent) {
+                            throw new Error('Manual directory must remain a collapsed advanced fallback')
+                        }
+                        const updateUi = await main.webContents.executeJavaScript(`(() => ({
+                            panel: !!document.querySelector('.update-panel'),
+                            password: document.querySelector('#update-token')?.type === 'password',
+                            tokenEmpty: document.querySelector('#update-token')?.value === '',
+                            overflow: document.querySelector('.update-panel')?.scrollWidth > document.querySelector('.update-panel')?.clientWidth,
+                        }))()`)
+                        if (!updateUi.panel || !updateUi.password || !updateUi.tokenEmpty || updateUi.overflow) {
+                            throw new Error('Private update settings UI failed its packaged check')
+                        }
+                        await fs.writeFile(path.join(outputDir, 'update-ui.json'), JSON.stringify(updateUi, null, 2))
+                        await fs.writeFile(path.join(outputDir, 'updates.png'), (await main.webContents.capturePage()).toPNG())
+                        await main.webContents.executeJavaScript(`document.querySelector('details.manual-fallback').scrollIntoView({block:'center'})`)
+                        await new Promise((resolve) => setTimeout(resolve, 250))
+                        await fs.writeFile(path.join(outputDir, 'settings.json'), JSON.stringify(settings, null, 2))
+                        await fs.writeFile(path.join(outputDir, 'settings.png'), (await main.webContents.capturePage()).toPNG())
                         // Include delayed mount effects, not just the first IPC notification.
+                        if (process.env.FUZE_PIPELINE_FIXTURES) {
+                            const { runPipelineSmoke } = await import('./pipeline-smoke.ts')
+                            await runPipelineSmoke(outputDir)
+                        }
                         await new Promise((resolve) => setTimeout(resolve, 1000))
                         if (failures.length) throw new Error(failures.join('\n'))
                     })(),
@@ -130,6 +174,7 @@ export function createReleaseSmoke() {
                 clearTimeout(timeout)
                 await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify({
                     passed: failures.length === 0, packaged: app.isPackaged,
+                    hidden: process.env.ARAMGG_RELEASE_SMOKE_HIDDEN === '1',
                     version: app.getVersion(), platform: process.platform,
                     durationMs: Date.now() - startedAt, readyCount: ready.size,
                     windows: snapshots, failures,

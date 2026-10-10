@@ -26,12 +26,14 @@ import {
     DEFAULT_DATA_LOCALE,
     SUPPORTED_DATA_LOCALES,
     getDataLocale,
-    loadAugmentBaseForOcrLocale,
+    loadRecognitionBaseForOcrLocale,
     tryNormalizeDataLocale,
 } from './data-loader.ts'
 import logger from './modules/logger.ts'
+import { getRecognitionRevision } from './services/recognition-data-service.ts'
 import { ensureOnnxruntimeNativeDllPath } from './modules/onnxruntime-native-path.ts'
 import { discoverLcuAuthFromProcess } from './services/lcu/process-auth-discovery.ts'
+import { isRawFrame } from '../shared/raw-frame.ts'
 
 sharp.concurrency(Number(process.env.ARAMGG_SHARP_CONCURRENCY) || 2)
 
@@ -76,6 +78,7 @@ const AUGMENT_COLORS = {
 // 加载完整的海克斯数据库
 let AUGMENT_DATABASE = null
 const loadedAugmentLocales = new Set()
+const loadedCatalogRevisions = new Map()
 const augmentLocaleLoadPromises = new Map()
 const augmentLocaleRetryAfter = new Map()
 let cachedGameOcrLocaleHint = null
@@ -260,6 +263,10 @@ function createAugmentOcrRecord(augment) {
         name: augment.name,
         rarity: AUGMENT_RARITY_MAP[augment.rarity] || 'unknown',
         iconPath: augment.iconPath,
+        recognitionSource: augment.recognitionSource || 'legacy-cache',
+        recognitionPatch: augment.recognitionPatch || null,
+        popularity: augment.popularity ?? null,
+        popularityPatch: augment.popularityPatch || null,
         localizedNames: {},
         ocrNames: [],
     }
@@ -281,6 +288,10 @@ function mergeAugmentBaseRecord(database, augment, locale) {
         })
         database[id] = record
     } else if (locale === DEFAULT_DATA_LOCALE) {
+        record.recognitionSource = augment.recognitionSource || record.recognitionSource
+        record.recognitionPatch = augment.recognitionPatch || record.recognitionPatch
+        record.popularity = augment.popularity ?? record.popularity
+        record.popularityPatch = augment.popularityPatch || record.popularityPatch
         record.name = name
         record.rarity = AUGMENT_RARITY_MAP[augment.rarity] || record.rarity || 'unknown'
         record.iconPath = augment.iconPath || record.iconPath
@@ -308,7 +319,7 @@ function mergeAugmentBaseRecord(database, augment, locale) {
 }
 
 async function loadAugmentOcrLocale(locale) {
-    if (loadedAugmentLocales.has(locale)) {
+    if (loadedAugmentLocales.has(locale) && loadedCatalogRevisions.get(locale) === getRecognitionRevision()) {
         return true
     }
 
@@ -324,7 +335,7 @@ async function loadAugmentOcrLocale(locale) {
 
     const request = (async () => {
         try {
-            const result = await loadAugmentBaseForOcrLocale(locale)
+            const result = await loadRecognitionBaseForOcrLocale(locale)
             if (result.locale !== locale) {
                 throw new Error(`requested ${locale}, received ${result.locale}`)
             }
@@ -344,6 +355,7 @@ async function loadAugmentOcrLocale(locale) {
             }
 
             loadedAugmentLocales.add(locale)
+            loadedCatalogRevisions.set(locale, getRecognitionRevision())
             augmentLocaleRetryAfter.delete(locale)
             AUGMENT_MATCH_ENTRIES = null
             logger.info('[augment-ocr] locale augment names loaded', {
@@ -416,6 +428,10 @@ async function initAugmentDatabase(preferredLocale = null) {
 
 let paddleOcrService = null
 let paddleOcrServicePromise = null
+let readWorkerStatus = null
+export function getOcrExecutionStatus() {
+    return readWorkerStatus?.() || { backend: paddleOcrService ? 'cpu' : 'idle', warming: !!paddleOcrServicePromise && !paddleOcrService, fallback: false, reason: '' }
+}
 let paddleOcrDisabled = false
 let paddleOcrUnavailableLogged = false
 let paddleOcrReadyLogged = false
@@ -549,6 +565,17 @@ function logPaddleOcrUnavailable(message) {
     logger.warn(`PaddleOCR unavailable, falling back to legacy OCR: ${message}`)
 }
 
+export function getOcrRuntimeStatus() {
+    if (paddleOcrDisabled) return 'error' as const
+    if (readWorkerStatus) {
+        const status = readWorkerStatus()
+        if (status.warming) return 'loading' as const
+        if (status.backend === 'idle' && paddleOcrService) return 'idle' as const
+    }
+    if (paddleOcrService) return 'ready' as const
+    return paddleOcrServicePromise ? 'loading' as const : 'idle' as const
+}
+
 async function getPaddleOcrService() {
     if (paddleOcrDisabled) {
         return null
@@ -567,6 +594,18 @@ async function getPaddleOcrService() {
         }
 
         paddleOcrServicePromise = (async () => {
+            if (process.versions.electron && process.type === 'browser') {
+                const client = await import('./ocr-worker-client.ts')
+                readWorkerStatus = client.getOcrWorkerStatus
+                const service = await client.createOcrWorkerService({
+                    detModelPath: modelPaths.detModelPath, recModelPath: modelPaths.recModelPath,
+                    detection: { maxSideLength: PADDLE_OCR_MAX_SIDE_LENGTH, minimumAreaThreshold: PADDLE_OCR_MINIMUM_AREA_THRESHOLD,
+                        textPixelThreshold: PADDLE_OCR_TEXT_PIXEL_THRESHOLD, paddingBoxVertical: PADDLE_OCR_PADDING_BOX_VERTICAL, paddingBoxHorizontal: PADDLE_OCR_PADDING_BOX_HORIZONTAL },
+                    recognition: { charactersDictionary: readPaddleOcrCharacterDictionary(readFileSync(modelPaths.recConfigPath, 'utf8')), imageHeight: PADDLE_OCR_RECOGNITION_IMAGE_HEIGHT },
+                })
+                paddleOcrService = service
+                return service
+            }
             ensureOnnxruntimeNativeDllPath(logger)
             const [{ PaddleOcrService }, ort] = await Promise.all([
                 import('paddleocr'),
@@ -576,7 +615,18 @@ async function getPaddleOcrService() {
                 readFileSync(modelPaths.recConfigPath, 'utf8')
             )
             const service = await PaddleOcrService.createInstance({
-                ort,
+                ort: {
+                    ...ort,
+                    InferenceSession: {
+                        create: (buffer) => ort.InferenceSession.create(buffer, {
+                            // Small title crops measured lower CPU at one thread on this PC.
+                            intraOpNumThreads: 1,
+                            interOpNumThreads: 1,
+                            executionMode: 'sequential',
+                            extra: { session: { intra_op: { allow_spinning: '0' }, inter_op: { allow_spinning: '0' } } },
+                        }),
+                    },
+                },
                 detection: {
                     modelBuffer: bufferToArrayBuffer(readFileSync(modelPaths.detModelPath)),
                     maxSideLength: PADDLE_OCR_MAX_SIDE_LENGTH,
@@ -616,7 +666,9 @@ async function getPaddleOcrService() {
 }
 
 async function warmupPaddleOcrService() {
-    return Boolean(await getPaddleOcrService())
+    const service = await getPaddleOcrService()
+    if (service?.warmup) await service.warmup()
+    return Boolean(service)
 }
 
 async function resetPaddleOcrService() {
@@ -663,6 +715,7 @@ async function performPaddleOCR(imageBuffer) {
  * 运行时截图传 Buffer，IPC 和测试脚本通常传图片路径。
  */
 function resolveImageBuffer(imageInput) {
+    if (isRawFrame(imageInput)) return { buffer: imageInput, sourceType: 'raw', sourcePath: null }
     if (Buffer.isBuffer(imageInput)) {
         return {
             buffer: imageInput,
@@ -709,6 +762,7 @@ function sharpFromImage(imageInput) {
 }
 
 async function decodeImageToRaw(imageBuffer) {
+    if (isRawFrame(imageBuffer)) return imageBuffer
     const { data, info } = await sharp(imageBuffer)
         .ensureAlpha()
         .raw()
@@ -1739,10 +1793,14 @@ export const warmupImageAnalyzer = async () => {
     const startedAt = performance.now()
 
     try {
-        await Promise.all([
+        const [, ready] = await Promise.all([
             initAugmentDatabase(),
             warmupPaddleOcrService(),
         ])
+        if (!ready) {
+            logger.warn('Image analyzer warmup failed: OCR unavailable')
+            return false
+        }
 
         logger.info('Image analyzer warmup completed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -2245,14 +2303,18 @@ export const analyzeScreenshotGate = async (imageInput) => {
         const startTime = performance.now()
         const { buffer: imageBuffer, sourceType, sourcePath } = resolveImageBuffer(imageInput)
 
-        if (!imageBuffer || !Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+        if (!imageBuffer || (!isRawFrame(imageBuffer) && (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0))) {
             return {
                 success: false,
                 error: '截图数据无效',
             }
         }
 
-        const rawImage = await decodeImageToRaw(imageBuffer)
+        let rawImage = await decodeImageToRaw(imageBuffer)
+        if (rawImage.width > 640) {
+            const resized = await sharpFromImage(rawImage).resize({ width: 640 }).raw().toBuffer({ resolveWithObject: true })
+            rawImage = { buffer: resized.data, width: resized.info.width, height: resized.info.height, channels: resized.info.channels }
+        }
         const { width, height } = rawImage
         const titleActivity = await getAugmentTitleActivity(rawImage, width, height)
         const rerollButtons = await detectAugmentRerollButtons(rawImage, width, height)
@@ -2292,7 +2354,7 @@ export const analyzeScreenshot = async (imageInput) => {
         const { buffer: imageBuffer, sourceType, sourcePath } = resolveImageBuffer(imageInput)
 
         // 验证图片数据有效性
-        if (!imageBuffer || !Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+        if (!imageBuffer || (!isRawFrame(imageBuffer) && (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0))) {
             return {
                 success: false,
                 error: '截图数据无效',
@@ -2300,7 +2362,7 @@ export const analyzeScreenshot = async (imageInput) => {
         }
 
         const timestamp = Date.now()
-        logger.debug(`Screenshot analysis started: source=${sourceType}${sourcePath ? `, path=${sourcePath}` : ''}, buffer=${(imageBuffer.length / 1024).toFixed(1)}KB`)
+        logger.debug(`Screenshot analysis started: source=${sourceType}${sourcePath ? `, path=${sourcePath}` : ''}, buffer=${((isRawFrame(imageBuffer) ? imageBuffer.buffer.length : imageBuffer.length) / 1024).toFixed(1)}KB`)
 
         // 【新方案】使用OCR识别海克斯名称
         const recognition = await recognizeAugmentsFromImage(imageBuffer)
@@ -2332,10 +2394,10 @@ export const analyzeScreenshot = async (imageInput) => {
                 augmentGate,
             },
             metadata: {
-                bufferSize: imageBuffer.length,
+                bufferSize: isRawFrame(imageBuffer) ? imageBuffer.buffer.length : imageBuffer.length,
                 sourceType,
                 sourcePath,
-                format: 'png',
+                format: isRawFrame(imageBuffer) ? 'rgba' : 'png',
                 detectionMethod: 'ocr',
                 rerollButtons,
                 augmentGate,

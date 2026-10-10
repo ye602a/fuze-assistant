@@ -6,7 +6,7 @@
       :class="{ 'side-panel-mode': isSidePanel }"
     >
       <header class="insight-titlebar">
-        <h1>{{ isSidePanel ? t('augment.recommendation') : t('augment.championDetails') }}</h1>
+        <h1><span class="fuze-label">FUZE</span>{{ isSidePanel ? t('augment.recommendation') : t('augment.championDetails') }}</h1>
         <div class="window-controls">
           <button v-if="isSidePanel" class="window-control" type="button" :aria-label="t('common.minimize')" @click="closeOverlay('manual')">
             <Minus class="window-icon" />
@@ -185,7 +185,7 @@
                   </div>
                   <div class="augment-main">
                     <div class="augment-name-row">
-                      <div class="augment-name">{{ augment.name }}</div>
+                      <div class="augment-name">{{ augment.name }}<small v-if="augment.statistics"> · {{ t('workbench.stats_' + augment.statistics.status) }} {{ augment.statistics.patch || '' }}</small></div>
                       <span
                         v-if="formatAugmentTier(augment.tier) !== '--'"
                         class="augment-tier"
@@ -548,9 +548,8 @@ const displayAugments = ref([])
 const benchPreviewRecommendation = ref(null)
 const unsubscribeEvents = []
 const itemSetApplying = ref(false)
-const itemSetAutoEnabled = ref(true)
+const itemSetAutoEnabled = ref(false)
 const itemSetToast = ref({ type: '', message: '' })
-const ITEM_SET_AUTO_KEY = 'itemSets.autoApplyAram'
 const CHAMPION_DATA_CACHE_TTL_MS = 15000
 const MAX_ITEM_SET_BUILDS = 4
 let itemSetToastTimer = null
@@ -633,18 +632,7 @@ const logOverlayInfo = (message, details = {}) => {
 }
 
 const loadItemSetAutoPreference = async () => {
-  try {
-    const storedValue = await electronAPI.store.get(ITEM_SET_AUTO_KEY)
-    if (storedValue == null) {
-      await electronAPI.store.set(ITEM_SET_AUTO_KEY, true)
-      itemSetAutoEnabled.value = true
-      return
-    }
-
-    itemSetAutoEnabled.value = Boolean(storedValue)
-  } catch (err) {
-    console.warn('Failed to load item set preference:', err)
-  }
+  itemSetAutoEnabled.value = false
 }
 
 const loadChampionDataOnce = async (requestedChampionId, requestedLocale = activeDataLocale.value) => {
@@ -833,6 +821,7 @@ const mapIncomingAugmentsForFallback = (augments = []) => augments.map(aug => ({
   iconPath: aug.iconPath || aug.iconUrl || null,
   description: aug.description || null,
   tooltip: aug.tooltip || null,
+  statistics: aug.statistics || null,
 }))
 
 const toNullableNumber = (value) => {
@@ -1240,9 +1229,9 @@ const closeOverlay = (reason = 'manual') => {
 const withClientUtm = (url) => {
   try {
     const parsedUrl = new URL(url)
-    parsedUrl.searchParams.set('utm_source', 'aramgg_client')
-    parsedUrl.searchParams.set('utm_medium', 'desktop_app')
-    parsedUrl.searchParams.set('utm_campaign', 'champion_detail')
+    parsedUrl.searchParams.delete('utm_source')
+    parsedUrl.searchParams.delete('utm_medium')
+    parsedUrl.searchParams.delete('utm_campaign')
 
     if (championId.value) {
       parsedUrl.searchParams.set('utm_content', `champion_${championId.value}`)
@@ -1396,7 +1385,7 @@ defineExpose({
     var(--lol-panel-raised);
   border: 1px solid rgba(200, 169, 106, 0.2);
   border-radius: 4px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(194, 156, 109, 0.08);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(105, 171, 201, 0.08);
   padding: 0;
   color: var(--lol-ivory);
   font-family: 'Microsoft YaHei', Arial, sans-serif;
@@ -1491,7 +1480,7 @@ defineExpose({
 /* 英雄头部 */
 .champion-header {
   background:
-    linear-gradient(135deg, rgba(194, 156, 109, 0.12), transparent 48%),
+    linear-gradient(135deg, rgba(105, 171, 201, 0.12), transparent 48%),
     radial-gradient(circle at 84% 0%, rgba(200, 169, 106, 0.12), transparent 260px),
     rgba(7, 10, 13, 0.3);
   padding: 24px;
@@ -1677,8 +1666,8 @@ defineExpose({
 }
 
 .filter-chip.active {
-  background: rgba(194, 156, 109, 0.16);
-  border-color: rgba(194, 156, 109, 0.38);
+  background: rgba(105, 171, 201, 0.16);
+  border-color: rgba(105, 171, 201, 0.38);
   color: var(--lol-primary-2);
 }
 
@@ -1689,8 +1678,8 @@ defineExpose({
 }
 
 .filter-chip.kPrismatic.active {
-  background: rgba(194, 156, 109, 0.16);
-  border-color: rgba(194, 156, 109, 0.38);
+  background: rgba(105, 171, 201, 0.16);
+  border-color: rgba(105, 171, 201, 0.38);
   color: var(--lol-primary-2);
 }
 
@@ -1723,9 +1712,9 @@ defineExpose({
 }
 
 .augment-card:hover {
-  background: rgba(194, 156, 109, 0.07);
+  background: rgba(105, 171, 201, 0.07);
   transform: translateX(2px);
-  border-color: rgba(194, 156, 109, 0.22);
+  border-color: rgba(105, 171, 201, 0.22);
 }
 
 .augment-card.rarity-kGold {
@@ -1735,7 +1724,7 @@ defineExpose({
 
 .augment-card.rarity-kPrismatic {
   border-left-color: var(--lol-primary);
-  background: rgba(194, 156, 109, 0.07);
+  background: rgba(105, 171, 201, 0.07);
 }
 
 .augment-card.rarity-kSilver {
@@ -1749,8 +1738,8 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(194, 156, 109, 0.14);
-  border: 1px solid rgba(194, 156, 109, 0.26);
+  background: rgba(105, 171, 201, 0.14);
+  border: 1px solid rgba(105, 171, 201, 0.26);
   border-radius: 7px;
   font-size: 12px;
   font-weight: 900;
@@ -1979,7 +1968,7 @@ defineExpose({
 }
 
 .tab-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(194, 156, 109, 0.5);
+  background: rgba(105, 171, 201, 0.5);
 }
 
 /* 响应式 */
@@ -2021,9 +2010,9 @@ defineExpose({
   background:
     linear-gradient(180deg, rgba(42, 54, 64, 0.96), rgba(31, 43, 53, 0.98)),
     #15212a;
-  border: 1px solid rgba(226, 195, 132, 0.28);
+  border: 1px solid rgba(112, 221, 204, 0.28);
   border-radius: 4px;
-  box-shadow: 0 0 40px rgba(194, 156, 109, 0.15), 0 28px 80px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 40px rgba(105, 171, 201, 0.15), 0 28px 80px rgba(0, 0, 0, 0.5);
   font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
 }
 
@@ -2037,7 +2026,7 @@ defineExpose({
   background:
     linear-gradient(180deg, rgba(42, 54, 64, 0.68), rgba(12, 20, 27, 0.74)),
     rgba(8, 21, 30, 0.42);
-  border-color: rgba(226, 195, 132, 0.2);
+  border-color: rgba(112, 221, 204, 0.2);
   box-shadow: 0 20px 58px rgba(0, 0, 0, 0.34);
 }
 
@@ -2055,23 +2044,23 @@ defineExpose({
   gap: 12px;
   padding: 10px 16px;
   background: rgba(42, 54, 64, 0.92);
-  border-bottom: 1px solid rgba(226, 192, 143, 0.28);
-  box-shadow: inset 0 0 15px rgba(194, 156, 109, 0.18);
+  border-bottom: 1px solid rgba(112, 221, 204, 0.28);
+  box-shadow: inset 0 0 15px rgba(105, 171, 201, 0.18);
   -webkit-app-region: drag;
 }
 
 .side-panel-mode .insight-titlebar {
   background: rgba(31, 43, 53, 0.54);
-  box-shadow: inset 0 0 12px rgba(194, 156, 109, 0.1);
+  box-shadow: inset 0 0 12px rgba(105, 171, 201, 0.1);
 }
 
 .insight-titlebar h1 {
   margin: 0;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 18px;
   font-weight: 700;
   line-height: 1.1;
-  text-shadow: 0 0 8px rgba(226, 192, 143, 0.36);
+  text-shadow: 0 0 8px rgba(112, 221, 204, 0.36);
 }
 
 .window-controls {
@@ -2104,9 +2093,9 @@ defineExpose({
 }
 
 .window-control:hover {
-  color: #e2c08f;
-  background: rgba(226, 192, 143, 0.08);
-  border-color: rgba(226, 192, 143, 0.18);
+  color: #8bdfd0;
+  background: rgba(112, 221, 204, 0.08);
+  border-color: rgba(112, 221, 204, 0.18);
 }
 
 .window-control.danger:hover {
@@ -2123,13 +2112,13 @@ defineExpose({
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse at top, rgba(194, 156, 109, 0.07), transparent 54%),
+    radial-gradient(ellipse at top, rgba(105, 171, 201, 0.07), transparent 54%),
     rgba(42, 54, 64, 0.84);
 }
 
 .side-panel-mode .overlay-content {
   background:
-    radial-gradient(ellipse at top, rgba(194, 156, 109, 0.06), transparent 48%),
+    radial-gradient(ellipse at top, rgba(105, 171, 201, 0.06), transparent 48%),
     rgba(17, 29, 38, 0.34);
 }
 
@@ -2175,7 +2164,7 @@ defineExpose({
   font-size: 38px;
   font-weight: 900;
   background:
-    linear-gradient(135deg, rgba(226, 192, 143, 0.08), rgba(226, 195, 132, 0.08)),
+    linear-gradient(135deg, rgba(112, 221, 204, 0.08), rgba(112, 221, 204, 0.08)),
     rgba(8, 21, 30, 0.92);
 }
 
@@ -2208,10 +2197,10 @@ defineExpose({
   height: 42px;
   flex: 0 0 42px;
   overflow: hidden;
-  border: 1px solid rgba(226, 192, 143, 0.42);
+  border: 1px solid rgba(112, 221, 204, 0.42);
   border-radius: 4px;
   background: rgba(8, 21, 30, 0.86);
-  box-shadow: 0 0 16px rgba(194, 156, 109, 0.16);
+  box-shadow: 0 0 16px rgba(105, 171, 201, 0.16);
 }
 
 .hero-avatar img {
@@ -2224,7 +2213,7 @@ defineExpose({
 .hero-kicker {
   display: block;
   margin-bottom: 2px;
-  color: #e2c384;
+  color: #8bdfd0;
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0;
@@ -2233,14 +2222,14 @@ defineExpose({
 .champion-name {
   min-width: 0;
   margin: 0;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 28px;
   font-weight: 900;
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-shadow: 0 0 12px rgba(226, 192, 143, 0.5);
+  text-shadow: 0 0 12px rgba(112, 221, 204, 0.5);
 }
 
 .hero-badges {
@@ -2268,15 +2257,15 @@ defineExpose({
   gap: 4px;
   color: #f4ecdc;
   background: rgba(8, 21, 30, 0.78);
-  border: 1px solid rgba(226, 192, 143, 0.46);
+  border: 1px solid rgba(112, 221, 204, 0.46);
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
 }
 
 .blog-link-badge:hover {
   color: #08151e;
-  background: #e2c08f;
-  border-color: rgba(226, 192, 143, 0.72);
+  background: #8bdfd0;
+  border-color: rgba(112, 221, 204, 0.72);
 }
 
 .blog-link-icon {
@@ -2286,15 +2275,15 @@ defineExpose({
 }
 
 .tier-badge {
-  color: #e2c384;
+  color: #8bdfd0;
   background: rgba(31, 43, 53, 0.82);
-  border: 1px solid rgba(226, 195, 132, 0.5);
+  border: 1px solid rgba(112, 221, 204, 0.5);
 }
 
 .winrate-badge {
-  color: #e2c08f;
-  background: rgba(194, 156, 109, 0.14);
-  border: 1px solid rgba(226, 192, 143, 0.5);
+  color: #8bdfd0;
+  background: rgba(105, 171, 201, 0.14);
+  border: 1px solid rgba(112, 221, 204, 0.5);
 }
 
 .related-blogs {
@@ -2332,9 +2321,9 @@ defineExpose({
 }
 
 .related-blog-link:hover {
-  color: #e2c08f;
-  background: rgba(194, 156, 109, 0.08);
-  border-color: rgba(226, 192, 143, 0.2);
+  color: #8bdfd0;
+  background: rgba(105, 171, 201, 0.08);
+  border-color: rgba(112, 221, 204, 0.2);
 }
 
 .related-blog-link span {
@@ -2359,7 +2348,7 @@ defineExpose({
   padding: 10px 18px;
   background:
     linear-gradient(180deg, rgba(17, 29, 38, 0.94), rgba(8, 21, 30, 0.98));
-  border-top: 1px solid rgba(226, 192, 143, 0.24);
+  border-top: 1px solid rgba(112, 221, 204, 0.24);
   box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.26);
 }
 
@@ -2372,9 +2361,9 @@ defineExpose({
   justify-content: center;
   gap: 6px;
   padding: 8px 12px;
-  border: 1px solid rgba(226, 192, 143, 0.42);
+  border: 1px solid rgba(112, 221, 204, 0.42);
   border-radius: 4px;
-  background: linear-gradient(135deg, rgba(226, 192, 143, 0.22), rgba(194, 156, 109, 0.16));
+  background: linear-gradient(135deg, rgba(112, 221, 204, 0.22), rgba(105, 171, 201, 0.16));
   color: #f4ecdc;
   font-size: 12px;
   font-weight: 900;
@@ -2383,8 +2372,8 @@ defineExpose({
 }
 
 .item-set-btn:hover:not(:disabled) {
-  border-color: rgba(226, 192, 143, 0.68);
-  background: rgba(194, 156, 109, 0.28);
+  border-color: rgba(112, 221, 204, 0.68);
+  background: rgba(105, 171, 201, 0.28);
   color: #f4ecdc;
 }
 
@@ -2424,8 +2413,8 @@ defineExpose({
 }
 
 .item-set-toast.loading {
-  color: #e2c08f;
-  border-color: rgba(226, 192, 143, 0.28);
+  color: #8bdfd0;
+  border-color: rgba(112, 221, 204, 0.28);
 }
 
 .item-set-toast.success {
@@ -2478,12 +2467,12 @@ defineExpose({
 
 .stat-box strong.high,
 .winrate-badge.high {
-  color: #e2c08f;
+  color: #8bdfd0;
 }
 
 .stat-box strong.medium,
 .winrate-badge.medium {
-  color: #e2c384;
+  color: #8bdfd0;
 }
 
 .stat-box strong.low,
@@ -2523,8 +2512,8 @@ defineExpose({
 
 .tab-btn.active {
   color: #00201d;
-  background: #e2c08f;
-  border-color: rgba(226, 192, 143, 0.7);
+  background: #8bdfd0;
+  border-color: rgba(112, 221, 204, 0.7);
 }
 
 .tab-icon {
@@ -2577,7 +2566,7 @@ defineExpose({
   height: 1px;
   flex: 1;
   min-width: 24px;
-  background: linear-gradient(90deg, rgba(226, 192, 143, 0.72), transparent);
+  background: linear-gradient(90deg, rgba(112, 221, 204, 0.72), transparent);
 }
 
 .filter-bar {
@@ -2596,9 +2585,9 @@ defineExpose({
 }
 
 .filter-chip.active {
-  background: rgba(194, 156, 109, 0.15);
-  border-color: rgba(226, 192, 143, 0.46);
-  color: #e2c08f;
+  background: rgba(105, 171, 201, 0.15);
+  border-color: rgba(112, 221, 204, 0.46);
+  color: #8bdfd0;
 }
 
 .augments-list {
@@ -2616,7 +2605,7 @@ defineExpose({
   border-radius: 0;
   border-left: 0;
   background: rgba(17, 29, 38, 0.72);
-  box-shadow: inset 0 0 10px rgba(194, 156, 109, 0.08);
+  box-shadow: inset 0 0 10px rgba(105, 171, 201, 0.08);
 }
 
 .side-panel-mode .augment-card,
@@ -2628,7 +2617,7 @@ defineExpose({
 
 .augment-card:hover {
   transform: none;
-  border-color: rgba(226, 192, 143, 0.38);
+  border-color: rgba(112, 221, 204, 0.38);
   background: rgba(17, 29, 38, 0.84);
 }
 
@@ -2638,10 +2627,10 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(226, 192, 143, 0.38);
+  border: 1px solid rgba(112, 221, 204, 0.38);
   border-radius: 4px;
   background: rgba(8, 21, 30, 0.84);
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 14px;
   font-weight: 900;
   cursor: help;
@@ -2649,7 +2638,7 @@ defineExpose({
 }
 
 .augment-icon-wrapper:focus-visible {
-  outline: 2px solid rgba(226, 192, 143, 0.82);
+  outline: 2px solid rgba(112, 221, 204, 0.82);
   outline-offset: 2px;
 }
 
@@ -2714,7 +2703,7 @@ defineExpose({
 
 .augment-rate strong {
   display: block;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 15px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -2752,13 +2741,13 @@ defineExpose({
 
 .build-route-tab:hover,
 .build-route-tab.active {
-  border-color: rgba(226, 192, 143, 0.62);
-  background: rgba(226, 192, 143, 0.14);
-  color: #e2c08f;
+  border-color: rgba(112, 221, 204, 0.62);
+  background: rgba(112, 221, 204, 0.14);
+  color: #8bdfd0;
 }
 
 .build-route-tab:focus-visible {
-  outline: 2px solid rgba(226, 192, 143, 0.78);
+  outline: 2px solid rgba(112, 221, 204, 0.78);
   outline-offset: 2px;
 }
 
@@ -2798,7 +2787,7 @@ defineExpose({
 
 .build-route + .build-route {
   padding-top: 14px;
-  border-top: 1px solid rgba(226, 192, 143, 0.18);
+  border-top: 1px solid rgba(112, 221, 204, 0.18);
 }
 
 .build-route-header {
@@ -2815,7 +2804,7 @@ defineExpose({
 
 .build-route-title h4 {
   margin: 0;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 14px;
   font-weight: 900;
   line-height: 1.2;
@@ -2839,7 +2828,7 @@ defineExpose({
 
 .build-route-stats strong {
   display: block;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 13px;
   font-weight: 900;
   line-height: 1.1;
@@ -2892,7 +2881,7 @@ defineExpose({
 .item-icon {
   width: 32px;
   height: 32px;
-  border: 1px solid rgba(226, 192, 143, 0.28);
+  border: 1px solid rgba(112, 221, 204, 0.28);
   border-radius: 4px;
   object-fit: cover;
 }
@@ -2909,7 +2898,7 @@ defineExpose({
 
 .build-stats span,
 .starter-row > span {
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 13px;
   font-weight: 900;
 }
@@ -2979,8 +2968,8 @@ defineExpose({
   flex: 0 0 auto;
   padding: 3px 6px;
   border-radius: 3px;
-  background: rgba(226, 192, 143, 0.12);
-  color: #e2c08f;
+  background: rgba(112, 221, 204, 0.12);
+  color: #8bdfd0;
   font-size: 10px;
   font-weight: 900;
 }
@@ -3069,7 +3058,7 @@ defineExpose({
 }
 
 .skill-step.skill-e strong {
-  color: #e2c384;
+  color: #8bdfd0;
 }
 
 .skill-step.skill-r {
@@ -3102,7 +3091,7 @@ defineExpose({
   max-height: min(320px, calc(100vh - 24px));
   overflow: auto;
   padding: 12px;
-  border: 1px solid rgba(226, 192, 143, 0.48);
+  border: 1px solid rgba(112, 221, 204, 0.48);
   border-radius: 6px;
   background: rgba(5, 14, 21, 0.96);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.44);
@@ -3120,14 +3109,14 @@ defineExpose({
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
-  border: 1px solid rgba(226, 192, 143, 0.34);
+  border: 1px solid rgba(112, 221, 204, 0.34);
   border-radius: 4px;
   object-fit: cover;
 }
 
 .augment-tooltip-header strong {
   display: block;
-  color: #e2c08f;
+  color: #8bdfd0;
   font-size: 14px;
   font-weight: 900;
   line-height: 1.2;
@@ -3175,7 +3164,7 @@ defineExpose({
 }
 
 .insight-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(226, 195, 132, 0.68), rgba(226, 192, 143, 0.46));
+  background: linear-gradient(180deg, rgba(112, 221, 204, 0.68), rgba(112, 221, 204, 0.46));
   border-radius: 4px;
 }
 
@@ -3203,4 +3192,7 @@ defineExpose({
     padding: 10px 12px;
   }
 }
+
+/* Fuze popup system: readable flat surfaces, compact data rows, no bloom. */
+.augment-overlay{--lol-primary:#7ddfcd;--lol-gold-2:#9bdacb;--lol-ivory:#e6eef8;--lol-muted:#a0b3ca;--lol-faint:#829ab5;--lol-border-soft:#314357;border-radius:14px;background:#111e2e;border:1px solid #354d63;box-shadow:0 16px 44px #0005}.augment-overlay.side-panel-mode{background:#111e2ef5;border-radius:12px;border-color:#354d63;box-shadow:none}.insight-titlebar,.side-panel-mode .insight-titlebar{background:#172a3b;border-bottom:1px solid #355168;box-shadow:none;padding:12px 14px}.insight-titlebar h1{font-size:14px;font-weight:600;color:#d7e8f7;text-shadow:none;display:flex;align-items:center;gap:12px}.fuze-label{font-size:10px;letter-spacing:2px;color:#83dfca;border-right:1px solid #395366;padding-right:12px}.window-control{width:28px;height:28px;border-radius:7px}.augment-card,.side-panel-mode .augment-card{border:1px solid #2b4057;border-radius:9px;background:#1a2b3e;box-shadow:none;margin-bottom:6px;padding:10px;gap:10px;min-height:63px}.augment-card:hover{background:#233a50;border-color:#5b8b93}.augment-name-row{flex-wrap:wrap;gap:5px}.augment-name-row small{display:block;flex-basis:100%;font-size:10px;line-height:1.4;color:#93abc1;font-weight:400}.augment-name{font-weight:600;line-height:1.4}.augment-tier{background:#28465a;color:#aee4d9}.augment-icon-wrapper{border-radius:8px;border-color:#466277}.augment-rate strong{font-size:17px;color:#94e6d1}.tabs-list{gap:6px}.tab-btn{border-radius:7px}.tab-btn.active{background:#284952;color:#9aefde;text-shadow:none;box-shadow:none}.stat-strip{background:#192d40;border-color:#354a60;border-radius:9px}.hero-content{background:linear-gradient(transparent,#122337)}.tier-badge,.winrate-badge{box-shadow:none;border-radius:6px}.item-set-toast{border-radius:9px}.augment-tooltip{background:#172a3f;border-color:#4c718a;border-radius:11px;box-shadow:0 12px 28px #0005}.section-title-row h3{font-size:13px;letter-spacing:0}.insight-scroll{scrollbar-color:#405a72 transparent}
 </style>

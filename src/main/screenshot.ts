@@ -1,10 +1,24 @@
 import { execFile } from 'child_process'
 import { desktopCapturer, type DesktopCapturerSource, type Size } from 'electron'
 import logger from './modules/logger.ts'
+import { bitmapToRgba } from '../shared/raw-frame.ts'
+import { readCaptureStream } from './capture-stream.ts'
 
 let lastCaptureSourceKey: string | null = null
 export const CAPTURE_THUMBNAIL_SIZE = { width: 1280, height: 720 }
 const DEFAULT_CAPTURE_TIMEOUT_MS = 4000
+const pendingSourceRequests = new Map<string, Promise<DesktopCapturerSource[]>>()
+
+function captureSources(types: Array<'screen' | 'window'>, thumbnailSize: Size) {
+    const key = `${types.join(',')}:${thumbnailSize.width}x${thumbnailSize.height}`
+    const previous = pendingSourceRequests.get(key)
+    if (previous) return previous
+    // A timeout cannot cancel the native call. Reuse it until it really settles.
+    const request = Promise.resolve().then(() => desktopCapturer.getSources({ types, thumbnailSize, fetchWindowIcons: false }))
+        .finally(() => { if (pendingSourceRequests.get(key) === request) pendingSourceRequests.delete(key) })
+    pendingSourceRequests.set(key, request)
+    return request
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     if (!timeoutMs || timeoutMs <= 0) {
@@ -36,7 +50,7 @@ const findGameWindow = (sources: DesktopCapturerSource[]): DesktopCapturerSource
         const isOwnWindow =
             name.includes('aramgg_client') ||
             name.includes('lol_tips_client') ||
-            name.includes('champr')
+            name.includes('champr') || name.includes('符择')
 
         if (isOwnWindow) {
             return { source, score: 0 }
@@ -66,7 +80,7 @@ const isLolGameProcessRunning = (): Promise<boolean | null> => {
         return Promise.resolve(null)
     }
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<boolean | null>((resolve) => {
         execFile(
             'tasklist',
             ['/FI', 'IMAGENAME eq League of Legends.exe', '/FO', 'CSV', '/NH'],
@@ -74,7 +88,7 @@ const isLolGameProcessRunning = (): Promise<boolean | null> => {
             (error, stdout = '') => {
                 if (error) {
                     logger.debug('Unable to query LoL game process:', error.message)
-                    resolve(false)
+                    resolve(null)
                     return
                 }
 
@@ -138,17 +152,21 @@ export const getLolGameWindowInfo = async () => {
     }
 }
 
-export const getLolGameStatus = async () => {
-    const [processRunning, windowInfo] = await Promise.all([
-        isLolGameProcessRunning(),
-        getLolGameWindowInfo(),
-    ])
-
-    return {
-        ...windowInfo,
-        processRunning,
-        isGameOpen: windowInfo.found && (processRunning === null || processRunning),
+async function queryLolGameStatus() {
+    const processRunning = await isLolGameProcessRunning()
+    const windowInfo = processRunning === false
+        ? { found: false, id: null, name: null }
+        : await getLolGameWindowInfo()
+    return { ...windowInfo, processRunning, isGameOpen: windowInfo.found && processRunning !== false }
+}
+let gameStatusPromise: ReturnType<typeof queryLolGameStatus> | null = null
+let gameStatusExpires = 0
+export const getLolGameStatus = () => {
+    if (!gameStatusPromise || Date.now() >= gameStatusExpires) {
+        gameStatusExpires = Infinity
+        gameStatusPromise = queryLolGameStatus().finally(() => { gameStatusExpires = Date.now() + 5000 })
     }
+    return gameStatusPromise
 }
 
 /**
@@ -158,6 +176,8 @@ export const getLolGameStatus = async () => {
  * @returns {Promise<Object>} 截图结果
  */
 type CaptureScreenshotOptions = {
+    stream?: boolean
+    raw?: boolean
     preferScreen?: boolean
     timeoutMs?: number
     thumbnailSize?: Size
@@ -166,21 +186,24 @@ type CaptureScreenshotOptions = {
 export const captureScreenshot = async (options: CaptureScreenshotOptions = {}) => {
     try {
         const {
+            raw = false,
             preferScreen = false,
             timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
             thumbnailSize = CAPTURE_THUMBNAIL_SIZE,
         } = options || {}
         const timestamp = Date.now()
+        if (raw && preferScreen && options.stream !== false) {
+            const frame = await readCaptureStream()
+            if (frame === 'unchanged') return { success: false, unchanged: true, error: 'unchanged-frame' }
+            if (frame) return { success: true, buffer: frame, timestamp, hasLolWindow: false, captureMode: 'screen', width: frame.width, height: frame.height }
+        }
         const sourceTypes: Array<'screen' | 'window'> = preferScreen
             ? ['screen']
             : ['window', 'screen']
 
         // 获取所有窗口和屏幕源
         const sources = await withTimeout(
-            desktopCapturer.getSources({
-                types: sourceTypes,
-                thumbnailSize,
-            }),
+            captureSources(sourceTypes, thumbnailSize),
             timeoutMs,
             `desktopCapturer.getSources(${sourceTypes.join(',')})`
         )
@@ -209,11 +232,14 @@ export const captureScreenshot = async (options: CaptureScreenshotOptions = {}) 
         }
 
         // 转换为 PNG Buffer（内存中，不保存到文件）
-        const pngBuffer = screenshot.toPNG()
+        const bitmapSize = screenshot.getSize()
+        const pngBuffer = raw
+            ? bitmapToRgba(screenshot.toBitmap(), bitmapSize.width, bitmapSize.height)
+            : screenshot.toPNG()
         const hasLolWindow = !!gameWindow
         const size = screenshot.getSize()
         const sourceName = gameWindow?.name || captureSource.name || 'screen'
-        const sourceKey = `${captureMode}:${sourceName}:${size.width}x${size.height}`
+        const sourceKey = `${captureMode}:${captureSource.id}`
 
         if (sourceKey !== lastCaptureSourceKey) {
             lastCaptureSourceKey = sourceKey
@@ -226,7 +252,7 @@ export const captureScreenshot = async (options: CaptureScreenshotOptions = {}) 
             }
         }
 
-        logger.debug(`Screenshot captured: mode=${captureMode}, size=${size.width}x${size.height}, buffer=${(pngBuffer.length / 1024).toFixed(1)}KB`)
+        logger.debug(`Screenshot captured: mode=${captureMode}, size=${size.width}x${size.height}, raw=${raw}`)
 
         return {
             success: true,

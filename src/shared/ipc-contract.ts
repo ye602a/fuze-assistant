@@ -1,6 +1,8 @@
 export type Unsubscribe = () => void
 
 export type AppStoreKey =
+  | 'ocr.gpuEnabled'
+  | 'ocr.levelGateEnabled'
   | 'lastSelectedChampionId'
   | 'itemSets.autoApplyAram'
   | 'championInsight.showDetails'
@@ -164,13 +166,16 @@ export interface ClientVersionInfo extends LooseRecord {
 }
 
 export interface AppUpdateState extends LooseRecord {
+  credentialConfigured?: boolean
+  installationSupported?: boolean
+  canDownload?: boolean
   phase?: string
   latestVersion?: string
   manualDownloadUrl?: string
   downloadDeferred?: boolean
   canCheck?: boolean
   canInstall?: boolean
-  progress?: {
+  progress?: null | {
     percent?: number
     bytesPerSecond?: number
     [key: string]: unknown
@@ -384,10 +389,13 @@ export interface ElectronAPI {
     restart(): void
   }
   appInfo: {
+    setAutomatic(enabled: boolean): Promise<OperationResult>
+    getRuntimeStatus(): Promise<import('./runtime-status.ts').RuntimeStatus>
     getVersionInfo(): Promise<OperationResult & { data?: ClientVersionInfo }>
     openLogDirectory(): Promise<OperationResult>
   }
   appUpdate: {
+    setCredential(token: string): Promise<OperationResult & { data?: AppUpdateState }>
     getState(): Promise<OperationResult & { data?: AppUpdateState }>
     check(): Promise<OperationResult & { data?: AppUpdateState }>
     download(): Promise<OperationResult & { data?: AppUpdateState }>

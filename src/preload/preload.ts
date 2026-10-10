@@ -77,10 +77,13 @@ const electronAPI: ElectronAPI = {
     restart: () => ipcRenderer.send('restart-app'),
   },
   appInfo: {
+    setAutomatic: (enabled) => ipcRenderer.invoke('set-automatic-recognition', enabled),
+    getRuntimeStatus: () => ipcRenderer.invoke('get-runtime-status'),
     getVersionInfo: () => ipcRenderer.invoke('get-version-info'),
     openLogDirectory: () => ipcRenderer.invoke('open-log-directory'),
   },
   appUpdate: {
+    setCredential: (token) => ipcRenderer.invoke('app-update-set-credential', token),
     getState: () => ipcRenderer.invoke('app-update-get-state'),
     check: () => ipcRenderer.invoke('app-update-check'),
     download: () => ipcRenderer.invoke('app-update-download'),

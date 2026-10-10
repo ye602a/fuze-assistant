@@ -11,7 +11,7 @@ import {
 
 let tray: Tray | null = null
 
-const TRAY_TOOLTIP = 'ARAMGG助手'
+const TRAY_TOOLTIP = '符择'
 
 function uniqueExistingPaths(paths: string[]) {
     const seen = new Set<string>()
@@ -28,6 +28,8 @@ function uniqueExistingPaths(paths: string[]) {
 function getTrayIconPath() {
     const appPath = app.getAppPath()
     const candidates = uniqueExistingPaths([
+        path.join(appPath, 'dist', 'fuze.png'),
+        path.join(appPath, 'public', 'fuze.png'),
         path.join(appPath, 'dist', 'icon.ico'),
         path.join(appPath, 'public', 'icon.ico'),
         path.join(process.cwd(), 'dist', 'icon.ico'),

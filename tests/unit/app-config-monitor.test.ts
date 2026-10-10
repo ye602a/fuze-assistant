@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../../src/main/services/recognition-data-service.ts', () => ({
+  loadRecognitionCatalogLocal: vi.fn(async () => {}), startRecognitionUpdates: vi.fn(),
+}))
 
 const mocks = vi.hoisted(() => ({
   store: new Map<string, unknown>(),
   write: vi.fn(),
   phase: vi.fn(),
+  captureRunning: false,
+  stopCapture: vi.fn(),
   snapshot: vi.fn(),
   subscribe: vi.fn(),
   createMain: vi.fn(),
@@ -37,10 +42,11 @@ vi.mock('../../src/main/modules/window-manager.ts', () => ({
   toggleMainWindow: vi.fn(), applyPopupWindowLayout: vi.fn(), applyPopupWindowPreferences: mocks.applyPopupPreferences,
   notifyAllWindows: mocks.notify,
 }))
-vi.mock('../../src/main/screenshot.ts', () => ({ getLolGameStatus: async () => ({ isGameOpen: false }) }))
+vi.mock('../../src/main/screenshot.ts', () => ({ getLolGameStatus: async () => ({ isGameOpen: false, processRunning: false }) }))
 vi.mock('../../src/main/modules/ipc-handlers.ts', () => ({ registerIpcHandlers: vi.fn() }))
 vi.mock('../../src/main/auto-screenshot-service.ts', () => ({ default: {
-  isRunning: false, setGameflowPhase: vi.fn(), clearAugmentState: vi.fn(),
+  get isRunning() { return mocks.captureRunning },
+  getConfig: () => ({ controlOwner: 'gameflow' }), stop: mocks.stopCapture, setGameflowPhase: vi.fn(), clearAugmentState: vi.fn(),
   setConfig: vi.fn(), start: vi.fn(async () => true),
 } }))
 vi.mock('../../src/main/services/lcu/lcu-service.ts', () => ({ getLCUServiceInstance: () => ({
@@ -79,6 +85,8 @@ vi.mock('../../src/main/modules/user-preferences.ts', () => ({
 beforeEach(() => {
   vi.resetModules()
   vi.useFakeTimers()
+  mocks.captureRunning = false
+  mocks.stopCapture.mockImplementation(() => { mocks.captureRunning = false; return true })
   mocks.store.clear()
   mocks.store.set('diagnostics.lcuHeartbeat', false)
   mocks.store.set('itemSets.autoApplyAram', false)
@@ -115,21 +123,21 @@ describe('main-process monitoring ownership', () => {
     expect(mocks.popup.show).not.toHaveBeenCalled()
   })
 
-  it('prepares all four windows at startup without showing champion details', async () => {
+  it('keeps unused overlays uncreated during idle startup', async () => {
     await start()
     expect(mocks.createMain).toHaveBeenCalledOnce()
     for (const prepare of [mocks.ensurePopup, mocks.ensureFloating, mocks.ensureSidePanel]) {
-      expect(prepare).toHaveBeenCalledOnce()
+      expect(prepare).not.toHaveBeenCalled()
     }
     expect(mocks.popup.show).not.toHaveBeenCalled()
     expect(mocks.popup.webContents.send).not.toHaveBeenCalled()
   })
 
-  it('waits for every auxiliary renderer before starting game monitoring', async () => {
+  it('waits for all auxiliary renderers in smoke without starting background monitoring', async () => {
     let ready!: (value: unknown) => void
     mocks.ensureFloating.mockReturnValueOnce(new Promise(done => { ready = done }))
     const { init } = await import('../../src/main/modules/app-config.ts')
-    const starting = init()
+    const starting = init({ startBackgroundServices: false })
     await vi.dynamicImportSettled()
     await vi.advanceTimersByTimeAsync(6000)
     expect(mocks.ensurePopup).toHaveBeenCalledOnce()
@@ -139,7 +147,7 @@ describe('main-process monitoring ownership', () => {
     ready({})
     await starting
     await vi.advanceTimersByTimeAsync(2000)
-    expect(mocks.phase).toHaveBeenCalledOnce()
+    expect(mocks.phase).not.toHaveBeenCalled()
     expect(mocks.logError).not.toHaveBeenCalled()
   })
 
@@ -149,9 +157,18 @@ describe('main-process monitoring ownership', () => {
     await vi.advanceTimersByTimeAsync(60000)
     expect(mocks.snapshot.mock.calls.length).toBeGreaterThan(1)
     expect(mocks.write.mock.calls.filter(([key]) => key === 'lastSelectedChampionId')).toEqual([['lastSelectedChampionId', 22]])
-    expect(mocks.ensurePopup).toHaveBeenCalledTimes(2)
+    expect(mocks.ensurePopup).toHaveBeenCalledOnce()
     expect(mocks.popup.webContents.send).toHaveBeenCalledOnce()
     expect(mocks.logError).not.toHaveBeenCalled()
+  })
+
+  it('stops capture if LCU disappears and the game process has exited', async () => {
+    await start()
+    mocks.captureRunning = true
+    mocks.phase.mockResolvedValue(null)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(mocks.stopCapture).toHaveBeenCalledWith('gameflow')
+    expect(mocks.captureRunning).toBe(false)
   })
 
   it('does not overlap slow gameflow polling requests', async () => {

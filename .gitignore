@@ -36,6 +36,13 @@ yarn-error.log*
 # Local archives and backups
 *.zip
 *.bak
+*.log
+/user-profile/
+/aramgg_client-data/
+/release-smoke/
+/config.json
+*.pfx
+*.p12
 
 # Editor directories and files
 .idea

@@ -42,6 +42,15 @@ try {
     throw error
 }
 
+// Load ORT before shell integrations can load an older MSVC runtime (e.g. SVN).
+try {
+    const { ensureOnnxruntimeNativeDllPath } = await import('./modules/onnxruntime-native-path.ts')
+    ensureOnnxruntimeNativeDllPath(console)
+    await import('onnxruntime-node')
+} catch {
+    writeBootstrapError('OCR native preload failed', new Error('OCR will retry on first use'))
+}
+
 let init: typeof import('./modules/app-config.ts').init
 let windowManager: typeof import('./modules/window-manager.ts')
 let logger: typeof import('./modules/logger.ts').default

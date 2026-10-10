@@ -9,6 +9,11 @@
  */
 
 import { CAPTURE_THUMBNAIL_SIZE, captureScreenshot } from './screenshot.ts'
+import { stopCaptureStream } from './capture-stream.ts'
+import { AugmentLevelGate } from './augment-level-gate.ts'
+import { LiveLevelReader } from './live-level-reader.ts'
+import { isRawFrame } from '../shared/raw-frame.ts'
+import sharp from 'sharp'
 import {
     GATE_CAPTURE_THUMBNAIL_SIZE,
     resolveCandidateStreak,
@@ -167,8 +172,9 @@ function wait(ms) {
 function getPayloadAugmentIds(augments = []) {
     return augments
         .slice(0, 3)
-        .map(augment => Number(augment?.id ?? augment?.augmentId))
-        .filter(id => Number.isFinite(id))
+        .filter(augment => !augment?.missing)
+        .map(augment => augment?.id ?? augment?.augmentId)
+        .filter(id => id !== null && id !== undefined && String(id) !== '')
 }
 
 function isConfirmedAugmentSelectionUi(analysis = {}) {
@@ -185,7 +191,11 @@ function isKnownSubsetOfPrevious(currentIds = [], previousIds = []) {
 }
 
 class AutoScreenshotService {
+    levelGateStatus: ReturnType<AugmentLevelGate['decide']> | null = null
     constructor() {
+        this.levelGate = new AugmentLevelGate()
+        this.levelReader = new LiveLevelReader()
+        this.levelGateStatus = null
         this.isRunning = false
         this.intervalId = null
         this.interval = 5000 // 默认5秒
@@ -203,6 +213,7 @@ class AutoScreenshotService {
         this.maxScreenshots = 50 // 保留字段但已不再使用（截图直接使用内存 Buffer）
         this.screenshotCount = 0
         this.lastScreenshotTime = null
+        this.lastCaptureError = null
         this.enableAnalysis = true // 是否启用自动分析
         this.gameflowPhase = null
         this.controlOwner = null
@@ -237,6 +248,7 @@ class AutoScreenshotService {
         // 上一次检测到的海克斯ID列表（用于判断是否需要更新显示）
         this.lastDetectedAugmentIds = []
         this.lastDetectedAugments = []
+        this.latestRecommendation = null
         this.lastDetectedAugmentSlotFingerprints = []
         this.lastFullDetectionDiagnosticKey = ''
         this.lastFullDetectionDiagnosticLogAt = 0
@@ -282,6 +294,7 @@ class AutoScreenshotService {
         this.droppedAnalysisCount = 0
         this.analysisBackpressureSkipCount = 0
         this.lastScreenshotTime = null
+        this.lastCaptureError = null
         this.lastAnalysisTime = null
         this.lastAnalysisDuration = 0
         this.lastSummaryLogAt = 0
@@ -295,6 +308,7 @@ class AutoScreenshotService {
         this.visibleAugmentMissCount = 0
         this.lastDetectedAugmentIds = []
         this.lastDetectedAugments = []
+        this.latestRecommendation = null
         this.lastDetectedAugmentSlotFingerprints = []
         this.lastFullDetectionDiagnosticKey = ''
         this.lastFullDetectionDiagnosticLogAt = 0
@@ -341,6 +355,11 @@ class AutoScreenshotService {
         clearTimeout(this.intervalId)
         this.isRunning = false
         this.runId++
+        stopCaptureStream()
+        this.levelReader.reset()
+        this.levelGate.reset()
+        this.levelGateStatus = null
+        this.lastRawCapture = null
         this.intervalId = null
         this.pendingAnalysisBuffer = null
         this.controlOwner = null
@@ -357,7 +376,13 @@ class AutoScreenshotService {
      * 同步 LCU gameflow 阶段。实际对局的 InProgress 允许 OCR；None 保留游戏窗口兜底。
      */
     setGameflowPhase(phase) {
+        if (phase && phase !== 'InProgress' && phase !== 'None') {
+            this.levelReader.reset()
+            this.levelGate.reset()
+            this.levelGateStatus = null
+        }
         this.gameflowPhase = phase || null
+        if (store.get('autoScreenshotGameflowControl') !== false && (phase === 'ChampSelect' || phase === 'GameStart')) void warmupImageAnalyzer()
 
         if (phase && phase !== 'InProgress' && phase !== 'None') {
             this.pendingAnalysisBuffer = null
@@ -387,6 +412,7 @@ class AutoScreenshotService {
         const ageMs = this.lastDetectedAugmentAt ? Date.now() - this.lastDetectedAugmentAt : null
         this.lastDetectedAugmentIds = []
         this.lastDetectedAugments = []
+        this.latestRecommendation = null
         this.lastDetectedAugmentSlotFingerprints = []
         this.lastFullDetectionDiagnosticKey = ''
         this.lastFullDetectionDiagnosticLogAt = 0
@@ -522,6 +548,16 @@ class AutoScreenshotService {
             }
         }
 
+        if (this.controlOwner === 'gameflow' && this.gameflowPhase === 'InProgress' && store.get('ocr.levelGateEnabled') !== false) {
+            const value = await this.levelReader.poll()
+            if (!this._isCurrentAnalysisRun(runId)) return { success: false, error: 'capture-stopped' }
+            if (value) this.levelGate.updateLevel(value.level, value.checkedAt)
+            else this.levelGate.checkedAt = 0
+            this.levelGateStatus = this.levelGate.decide(Date.now())
+            if (this.levelGateStatus.prepare) void warmupImageAnalyzer()
+            if (this.levelGateStatus.mode === 'saving') stopCaptureStream()
+            if (!this.levelGateStatus.capture) return { success: false, error: 'level-gate-idle' }
+        } else this.levelGateStatus = null
         const startTime = performance.now()
         this.isCapturing = true
 
@@ -542,14 +578,17 @@ class AutoScreenshotService {
             if (stage === 'gate' && this.pendingFullCapture && this.fullOcrCooldownUntil > Date.now()) {
                 this.fullOcrBackoffSkips++
             }
-            const thumbnailSize = stage === 'gate'
-                ? this._getCurrentGateThumbnailSize()
-                : this._getCurrentThumbnailSize()
-            const result = await captureScreenshot({
+            const thumbnailSize = this._getCurrentThumbnailSize()
+            let result = await captureScreenshot({
+                raw: true,
+                stream: this.levelGateStatus?.mode !== 'saving',
                 preferScreen: this.preferScreenCapture,
                 timeoutMs: this.captureTimeoutMs,
                 thumbnailSize,
             })
+            if (result.unchanged && this.candidateStreak > 0 && this.lastRawCapture) {
+                result = { success: true, buffer: this.lastRawCapture, timestamp: Date.now() }
+            }
 
             if (!this.isRunning || runId !== this.runId) {
                 return {
@@ -557,6 +596,7 @@ class AutoScreenshotService {
                     error: 'capture-stopped',
                 }
             }
+            if (result.success && isRawFrame(result.buffer)) this.lastRawCapture = result.buffer
 
             const endTime = performance.now()
             const captureTimeMs = endTime - startTime
@@ -564,6 +604,7 @@ class AutoScreenshotService {
             if (result.success) {
                 this.screenshotCount++
                 this.lastScreenshotTime = Date.now()
+                this.lastCaptureError = null
 
                 // 记录性能数据
                 this._recordPerformance(captureTimeMs)
@@ -579,7 +620,8 @@ class AutoScreenshotService {
                         stage,
                         thumbnailSize,
                     })
-                } else if (captureTimeMs > 1000) {
+                } else if (captureTimeMs > 1000 && Date.now() - (this.lastSlowCaptureWarningAt || 0) >= 30000) {
+                    this.lastSlowCaptureWarningAt = Date.now()
                     logger.warn('Auto screenshot slow capture', {
                         captureTimeMs: Number(captureTimeMs.toFixed(1)),
                         screenshotCount: this.screenshotCount,
@@ -592,6 +634,13 @@ class AutoScreenshotService {
                     this.gateScreenshotCount++
                     if (this.enableAnalysis && this.isAnalysisAllowedByGameflow()) {
                         await this._analyzeGateScreenshot(result.buffer, runId)
+                        // Reuse the full-resolution candidate; never capture again just to upgrade the gate.
+                        if (this.pendingFullCapture && this._isCurrentAnalysisRun(runId)) {
+                            this.pendingFullCapture = false
+                            this.candidateStreak = 0
+                            this.fullOcrScreenshotCount++
+                            this._queueAnalysis(result.buffer)
+                        }
                     }
                 } else {
                     if (this.controlOwner === 'gameflow') {
@@ -608,10 +657,13 @@ class AutoScreenshotService {
                     stage,
                 }
             } else {
+                if (result.unchanged) return result
+                this.lastCaptureError = 'capture-failed'
                 logger.error('Auto screenshot failed:', result.error)
                 return result
             }
         } catch (error) {
+            if (runId === this.runId) this.lastCaptureError = 'capture-failed'
             logger.error('Auto screenshot error:', error)
             return {
                 success: false,
@@ -649,6 +701,7 @@ class AutoScreenshotService {
 
             const gateLikely = gateResult.likely === true
             const rerollVisible = gateResult.rerollVisible === true
+            this.levelGate.observeSelection(gateLikely && rerollVisible, Date.now())
             this.candidateStreak = resolveCandidateStreak({
                 gateLikely,
                 rerollVisible,
@@ -785,6 +838,7 @@ class AutoScreenshotService {
             }
 
             const { cardCount, confidence, isAugmentPhase, augments } = analysisResult.analysis
+            this.levelGate.observeSelection(isConfirmedAugmentSelectionUi(analysisResult.analysis) || cardCount > 0, Date.now())
             const hasVisibleAugments = this.lastDetectedAugmentIds.length > 0
             const confirmedSelectionUi = shouldActivateSelectionCapture({
                 confirmedSelectionUi: isConfirmedAugmentSelectionUi(analysisResult.analysis),
@@ -952,6 +1006,7 @@ class AutoScreenshotService {
                         })
                         this.lastDetectedAugmentIds = []
                         this.lastDetectedAugments = []
+        this.latestRecommendation = null
                         this.lastDetectedAugmentSlotFingerprints = []
                         this.lastDetectedAugmentAt = 0
                         this.visibleAugmentMissCount = 0
@@ -1137,7 +1192,10 @@ class AutoScreenshotService {
         void (async () => {
             try {
                 await fs.ensureDir(dir)
-                await fs.writeFile(filePath, imageBuffer)
+                const bytes = isRawFrame(imageBuffer)
+                    ? await sharp(imageBuffer.buffer, { raw: { width: imageBuffer.width, height: imageBuffer.height, channels: 4 } }).png().toBuffer()
+                    : imageBuffer
+                await fs.writeFile(filePath, bytes)
                 if (!this._isCurrentAnalysisRun(runId)) {
                     return
                 }
@@ -1241,14 +1299,14 @@ class AutoScreenshotService {
         try {
             const { getChampionAugmentStats } = await import('./data-loader.ts')
             const augmentStats = await getChampionAugmentStats(championId)
-            const augmentIdSet = new Set(augmentIds)
+            const augmentIdSet = new Set(augmentIds.map(String))
             const statById = new Map(
                 augmentStats
-                    .filter(augment => augmentIdSet.has(Number(augment.augmentId ?? augment.id)))
-                    .map(augment => [Number(augment.augmentId ?? augment.id), augment])
+                    .filter(augment => augmentIdSet.has(String(augment.augmentId ?? augment.id)))
+                    .map(augment => [String(augment.augmentId ?? augment.id), augment])
             )
             const enrichedAugments = winrateData.augments.map(augment => {
-                const augmentId = Number(augment?.id ?? augment?.augmentId)
+                const augmentId = String(augment?.id ?? augment?.augmentId)
                 const stat = statById.get(augmentId)
                 if (!stat || augment?.missing) {
                     return augment
@@ -1257,6 +1315,7 @@ class AutoScreenshotService {
                 return {
                     ...augment,
                     ...stat,
+                    name: augment.name,
                     id: stat.id || stat.augmentId || augment.id,
                     augmentId: stat.augmentId || stat.id || augment.id,
                     detectedSlot: augment.detectedSlot,
@@ -1292,6 +1351,7 @@ class AutoScreenshotService {
     async _sendAugmentDetectedPayload(winrateData, notifyMode = 'detected', expectedRunId = this.runId) {
         try {
             if (!this.isRunning || expectedRunId !== this.runId || !this._isCurrentAugmentPayload(winrateData)) return
+            this.latestRecommendation = winrateData
             await ensureAugmentOverlayWindows()
             if (!this.isRunning || expectedRunId !== this.runId || !this._isCurrentAugmentPayload(winrateData)) return
             if (this._isManualHiddenAugmentSuppressed(winrateData)) {
@@ -1392,6 +1452,11 @@ class AutoScreenshotService {
                     confidence: aug.confidence ?? null,
                     detectedSlot: Number.isInteger(aug.detectedSlot) ? aug.detectedSlot : index,
                     missing: aug.missing === true,
+                    recognitionSource: aug.recognitionSource,
+                    recognitionPatch: aug.recognitionPatch,
+                    popularity: aug.popularity ?? null,
+                    popularityPatch: aug.popularityPatch,
+                    statistics: { status: 'missing', patch: null, source: null },
                 })),
                 analysisConfidence: analysisResult.analysis.confidence,
                 partialUpdate: analysisResult.analysis.partialUpdate === true,
@@ -1599,10 +1664,11 @@ class AutoScreenshotService {
             captureTimeoutMs: this.captureTimeoutMs,
             preferScreenCapture: this.preferScreenCapture,
             lastAnalysisTime: this.lastAnalysisTime,
+            lastScreenshotTime: this.lastScreenshotTime,
+            lastCaptureError: this.lastCaptureError,
             lastAnalysisDuration: parseFloat(this.lastAnalysisDuration.toFixed(2)),
             detectionRate: this.analysisCount > 0 ? (this.detectionCount / this.analysisCount * 100).toFixed(1) : 0,
             interval: this.interval,
-            lastScreenshotTime: this.lastScreenshotTime,
             averageCaptureTime: parseFloat(avgCapture.toFixed(2)),
             maxCaptureTime: parseFloat(maxCapture.toFixed(2)),
             minCaptureTime: parseFloat(minCapture.toFixed(2)),
@@ -1726,6 +1792,8 @@ class AutoScreenshotService {
             captureMode: this.captureMode,
             thumbnailSize: this._getCurrentThumbnailSize(),
             activeInterval: this._getCurrentCaptureInterval(),
+            lastScreenshotTime: this.lastScreenshotTime,
+            lastCaptureError: this.lastCaptureError,
             lastAnalysisDuration: parseFloat(this.lastAnalysisDuration.toFixed(2)),
         }
     }
@@ -1744,6 +1812,7 @@ class AutoScreenshotService {
                 rarity: augment?.rarity || 'unknown',
                 detectedSlot: Number.isInteger(augment?.detectedSlot) ? augment.detectedSlot : index,
                 missing: Boolean(augment?.missing),
+                tier: this.latestRecommendation?.augments?.find(item => Number(item.id) === Number(augment.id))?.tier || null,
             })),
             slotFingerprints: [...this.lastDetectedAugmentSlotFingerprints],
         }
@@ -1760,6 +1829,7 @@ class AutoScreenshotService {
         this.droppedAnalysisCount = 0
         this.analysisBackpressureSkipCount = 0
         this.lastScreenshotTime = null
+        this.lastCaptureError = null
         this.lastAnalysisTime = null
         this.lastAnalysisDuration = 0
         this.lastSummaryLogAt = 0
@@ -1786,6 +1856,7 @@ class AutoScreenshotService {
         this.isAnalyzing = false
         this.lastDetectedAugmentIds = []
         this.lastDetectedAugments = []
+        this.latestRecommendation = null
         this.lastDetectedAugmentSlotFingerprints = []
         this.lastFullDetectionDiagnosticKey = ''
         this.lastFullDetectionDiagnosticLogAt = 0

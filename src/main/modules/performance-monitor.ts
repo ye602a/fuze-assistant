@@ -39,6 +39,9 @@ type ProcessPerformanceState = {
     privateMemoryMB: number | null
 }
 
+let latestResourceSample: { sampledAt: number; cpuPercent: number; workingSetMB: number; windows: number } | null = null
+export const getLatestResourceSample = () => latestResourceSample ? { ...latestResourceSample } : null
+
 let sampleTimer: NodeJS.Timeout | null = null
 let eventLoopDelay: IntervalHistogram | null = null
 let previousEventLoopUtilization: EventLoopUtilization | null = null
@@ -227,6 +230,7 @@ function takePerformanceSample(): void {
             processes.reduce((total, metric) => total + metric.workingSetMB, 0),
             1
         )
+        latestResourceSample = { sampledAt, cpuPercent: totalCpuPercent, workingSetMB: totalWorkingSetMB, windows: windows.length }
         const mainMemory = process.memoryUsage()
         const eventLoop = readEventLoopState()
         const lcuDiscovery = collectLcuDiscoveryState()

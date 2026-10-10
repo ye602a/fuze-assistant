@@ -15,6 +15,8 @@ import { trustedIpcMain as ipcMain } from '../security/trusted-ipc.ts'
 
 const APP_LOCALE_KEY = 'app.locale'
 const RENDERER_STORE_KEYS = new Set<AppStoreKey>([
+  'ocr.gpuEnabled',
+  'ocr.levelGateEnabled',
   'lastSelectedChampionId',
   'itemSets.autoApplyAram',
   'championInsight.showDetails',
@@ -61,7 +63,9 @@ export function registerPreferencesIpcHandlers(): void {
 
   ipcMain.handle('store-set', (_event, key: unknown, value: unknown) => {
     assertRendererStoreKey(key)
+    if (key === 'ocr.gpuEnabled' && typeof value !== 'boolean') throw new Error('GPU setting must be boolean')
     store.set(key, value)
+    if (key === 'ocr.gpuEnabled') void import('../image-analyzer.ts').then(module => module.warmupImageAnalyzer())
     if (key.startsWith('championInsight.')) {
       applyPopupWindowPreferences()
     }

@@ -22,6 +22,7 @@ let lastProcessDiscoveryQueryAt: number | null = null
 let lastProcessDiscoveryQueryDurationMs = 0
 let lastProcessDiscoveryAttemptDurationsMs: number[] = []
 let lastProcessDiscoveryRecordCount = 0
+let lastClientDirectories: string[] = []
 let cachedLcuAuthResult: TokenLoadResult | null = null
 let cachedLcuAuthAt = 0
 
@@ -30,6 +31,20 @@ export type Win32ProcessRecord = {
   ProcessId?: number
   CommandLine?: string | null
   ExecutablePath?: string | null
+}
+
+export function getLeagueDirectoriesFromProcessRecords(records: Win32ProcessRecord[]): string[] {
+  return [...new Set(records.flatMap(record => {
+    const executable = record.ExecutablePath
+    if (!executable || !path.win32.isAbsolute(executable) ||
+      !/^LeagueClient(?:Ux)?\.exe$/i.test(path.win32.basename(executable))) return []
+    return [path.win32.dirname(executable)]
+  }))]
+}
+
+// Cached metadata only: reading UI status never queries processes or exposes command lines.
+export function getClientDiscoverySnapshot() {
+  return { processCount: lastProcessDiscoveryRecordCount, directories: [...lastClientDirectories], checkedAt: lastProcessDiscoveryQueryAt }
 }
 
 type LogCandidate = {
@@ -471,6 +486,7 @@ async function queryLeagueClientProcesses(): Promise<ProcessQueryResult> {
   lastProcessDiscoveryQueryDurationMs = durationMs
   lastProcessDiscoveryAttemptDurationsMs = result.attempts.map(attempt => attempt.durationMs)
   lastProcessDiscoveryRecordCount = result.records.length
+  lastClientDirectories = getLeagueDirectoriesFromProcessRecords(result.records)
   const fallbackAttempt = result.attempts.find((attempt) => attempt.strategy === 'get-process')
   const now = Date.now()
 

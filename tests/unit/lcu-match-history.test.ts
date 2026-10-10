@@ -89,3 +89,26 @@ describe('LCU match-history reads', () => {
     expect(axios.get).not.toHaveBeenCalled()
   })
 })
+
+describe('Tencent authorization region and verified phase', () => {
+  it('reads the current region without returning authorization identity', async () => {
+    vi.mocked(getLcuToken).mockResolvedValue(['fixture-secret', '57195', 'https://127.0.0.1:57195'])
+    vi.mocked(axios.get).mockResolvedValueOnce({ status: 200 }).mockResolvedValueOnce({ status: 200, data: { currentPlatformId: 'HN1', accountId: 'fixture-private', accessToken: 'fixture-secret' } })
+    const service = new LCUService({ failCooldown: 0 })
+    expect(await service.getCurrentPlatformId()).toBe('HN1')
+    expect(JSON.stringify(service.getConnectionStatus())).not.toContain('fixture')
+  })
+  it('does not verify a 403 response or keep a stale success after timeout', async () => {
+    vi.mocked(getLcuToken).mockResolvedValue(['fixture-secret', '57195', 'https://127.0.0.1:57195'])
+    vi.mocked(axios.get).mockResolvedValueOnce({ status: 200 }).mockResolvedValueOnce({ status: 403, data: {} })
+    const service = new LCUService({ failCooldown: 0 })
+    expect(await service.getGameflowPhase()).toBeNull()
+    expect(service.getConnectionStatus().error).toBe('HTTP 403')
+    vi.mocked(axios.get).mockResolvedValueOnce({ status: 200, data: 'None' })
+    expect(await service.getGameflowPhase()).toBe('None')
+    expect(service.getConnectionStatus().verifiedAt).toBeTypeOf('number')
+    vi.mocked(axios.get).mockRejectedValueOnce(new Error('timeout'))
+    expect(await service.getGameflowPhase()).toBeNull()
+    expect(service.getConnectionStatus().error).toBe('request-failed')
+  })
+})

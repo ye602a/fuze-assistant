@@ -11,7 +11,7 @@ describe('augment match prefilter', () => {
       DEFAULT_DATA_LOCALE: 'zh-CN',
       SUPPORTED_DATA_LOCALES: [{ code: 'zh-CN' }],
       getDataLocale: () => 'zh-CN',
-      loadAugmentBaseForOcrLocale: vi.fn(),
+      loadRecognitionBaseForOcrLocale: vi.fn(),
       tryNormalizeDataLocale: () => null,
     }))
     vi.doMock('../../src/main/services/lcu/process-auth-discovery.ts', () => ({

@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { getAppUpdateState, FUZE_RELEASE_URL } from './app-update-service.ts'
 import { getActiveDataStatus, loadDataApiConfig } from './data-loader.ts'
 import { getChangelogEntries } from './changelog.ts'
 import logger from './modules/logger.ts'
@@ -96,7 +97,8 @@ export async function getVersionInfo() {
     getActiveDataStatus(),
   ])
   const currentVersion = app.getVersion()
-  const clientConfig = config?.client || config?.electron || {}
+  const updates = getAppUpdateState()
+  const clientConfig = { latestVersion: updates.latestVersion || '', minimumVersion: '', downloadUrl: FUZE_RELEASE_URL, autoUpdateEnabled: false, updateFeedUrl: '' }
   const latestVersion = clientConfig.latestVersion || ''
   const minimumVersion = clientConfig.minimumVersion || ''
   const comparison = compareVersion(currentVersion, latestVersion)
@@ -123,7 +125,7 @@ export async function getVersionInfo() {
     isNewer: comparison.isNewer,
     isBelowMinimumVersion,
     statusText: getSeverityText(comparison.severity),
-    changelog: getChangelogEntries(config, clientConfig),
+    changelog: getChangelogEntries({}, {}),
   }
 }
 

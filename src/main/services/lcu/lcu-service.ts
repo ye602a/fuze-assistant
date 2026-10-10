@@ -557,6 +557,12 @@ export interface GameflowPhaseSubscriptionOptions {
  * 统一的 LCU 服务类
  */
 export class LCUService {
+  private verifiedAt: number | null = null
+  private verifiedPhase: GameflowPhase | null = null
+  private phaseError: string | null = null
+  getConnectionStatus() {
+    return { discovered: this.active, verifiedAt: this.verifiedAt, phase: this.verifiedPhase, error: this.phaseError }
+  }
   private active: boolean = false
   private url: string | null = null
   private token: string | null = null
@@ -679,6 +685,8 @@ export class LCUService {
     applyCooldown: boolean = true
   ): string | null {
     const previousPort = this.port
+    this.verifiedAt = null
+    this.verifiedPhase = null
     this.setVars(null, null, null)
     this.lastTokenFetchTime = 0
     this.lastFailTime = applyCooldown ? Date.now() : 0
@@ -1225,6 +1233,16 @@ export class LCUService {
    * 获取当前游戏阶段
    * 返回值例如: "ChampSelect", "GameStart", "InProgress", "EndOfGame" 等
    */
+  async getCurrentPlatformId(): Promise<string | null> {
+    if (!this.active || !this.url || !this.auth) await this.getAuthToken()
+    if (!this.url || !this.auth) return null
+    try {
+      const response = await axios.get(`${this.url}/lol-rso-auth/v1/authorization`, { ...this.auth, httpsAgent: this.httpsAgent, timeout: 5000, proxy: false, validateStatus: () => true })
+      const value = response.status === 200 ? response.data?.currentPlatformId : null
+      return typeof value === 'string' && /^[A-Z0-9-]{2,24}$/i.test(value) ? value.toUpperCase() : null
+    } catch { return null }
+  }
+
   async getGameflowPhase(): Promise<GameflowPhase | null> {
     // 如果连接不活跃，尝试重新连接
     if (!this.active || !this.url) {
@@ -1232,6 +1250,7 @@ export class LCUService {
     }
 
     if (!this.active || !this.urls || !this.auth) {
+      this.phaseError = 'unavailable'
       return null
     }
 
@@ -1243,6 +1262,7 @@ export class LCUService {
         timeout: 5000, // 添加超时
       })
 
+      if (res.status !== 200 || typeof res.data !== 'string') this.phaseError = `HTTP ${res.status}`
       if (res.status === 404 || res.status === 401) {
         // 重新获取 token
         logger.warn('LCU 认证失效，尝试重新连接...')
@@ -1251,9 +1271,14 @@ export class LCUService {
         return null
       }
 
+      if (res.status !== 200 || typeof res.data !== 'string') return null
+      this.verifiedAt = Date.now()
+      this.verifiedPhase = res.data
+      this.phaseError = null
       logger.debug('Current gameflow phase:', res.data)
       return res.data
     } catch (error) {
+      this.phaseError = 'request-failed'
       if (!await this.recoverFromConnectionFailure('gameflow-phase', error)) {
         const err = error as Error
         logger.warn('获取游戏阶段失败:', err.message)
@@ -1498,6 +1523,9 @@ export class LCUService {
       token: this.token,
       port: this.port,
       onGameflowPhase: async (phase, event) => {
+        this.verifiedAt = Date.now()
+        this.verifiedPhase = phase as GameflowPhase
+        this.phaseError = null
         await callback(phase as GameflowPhase, event as LcuJsonApiEvent<GameflowPhase>)
       },
       onOpen: options.onOpen,

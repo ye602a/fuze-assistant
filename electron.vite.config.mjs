@@ -56,12 +56,12 @@ export default defineConfig({
       target: 'node24',
       sourcemap: false,
       lib: {
-        entry: 'src/main/main.ts',
+        entry: { main: 'src/main/main.ts', 'ocr-worker': 'src/main/ocr-worker.ts' },
         formats: ['es']
       },
       rollupOptions: {
         output: {
-          entryFileNames: 'main.js'
+          entryFileNames: '[name].js'
         },
         external: ['electron', 'electron-store', 'axios', 'fs', 'path', 'https']
       },

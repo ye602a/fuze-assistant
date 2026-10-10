@@ -9,6 +9,8 @@ import {
   resolveTrustedClientDataUrl,
 } from '../shared/client-data-security.ts'
 import { rankAugmentRecommendations } from '../shared/augment-ranking.ts'
+import { mergeRecognitionCatalog, classifyStatistics, selectCoherentStatistics } from '../shared/recognition-catalog.ts'
+import { loadRecognitionCatalogLocal, getRecognitionCatalog, getRecognitionDataStatus } from './services/recognition-data-service.ts'
 
 declare const fetch: any
 
@@ -1975,6 +1977,9 @@ function mapPublicAugmentRecommendation(
     num_games: games,
     num_win_games: toNullableNumber(stats.num_win_games),
     recommendScore: getLegacyAugmentRecommendScore(stats),
+    statistics: { source: 'ARAMGG', region: augment?.stats?.region || 'unknown',
+      patch: stats.gamePatch, date: stats.date, samples: games,
+      status: classifyStatistics(stats.gamePatch, getRecognitionDataStatus().referencePatch, winRate !== null) },
   }
 }
 
@@ -2430,6 +2435,18 @@ export async function loadAugmentBaseForOcrLocale(locale: unknown): Promise<OcrA
   }
 }
 
+// Recognition stays available when the statistics service is offline or behind a patch.
+export async function loadRecognitionBaseForOcrLocale(locale: unknown): Promise<OcrAugmentLocaleData> {
+  if (process.env.ARAMGG_OCR_LOCALE || process.env.FUZE_PIPELINE_FIXTURES) return loadAugmentBaseForOcrLocale(locale)
+  const requestedLocale = normalizeDataLocale(locale)
+  await loadRecognitionCatalogLocal()
+  const catalog = getRecognitionCatalog()
+  const cached = await loadCachedOcrAugmentLocaleData(requestedLocale)
+  if (!catalog) return cached || loadAugmentBaseForOcrLocale(locale)
+  return { locale: requestedLocale, dataVersion: catalog.patch, source: 'cache',
+    augments: mergeRecognitionCatalog(cached?.augments || [], catalog, requestedLocale) }
+}
+
 export async function loadAugmentDetail(locale: SupportedDataLocale = activeDataLocale): Promise<Record<string, any>> {
   const dataSet = await getActiveDataSet(normalizeDataLocale(locale))
   const cacheKey = `${dataSet.locale}:${dataSet.dataVersion}:augment-detail`
@@ -2607,7 +2624,7 @@ export async function getChampionAugmentStats(
 ): Promise<any[]> {
   const dataSet = await getActiveDataSet(normalizeDataLocale(requestedLocale))
   const normalizedChampionId = String(championId)
-  const cacheKey = `${dataSet.locale}:${dataSet.dataVersion}:champion-augment-stats:${normalizedChampionId}`
+  const cacheKey = `${dataSet.locale}:${dataSet.dataVersion}:champion-augment-stats:${normalizedChampionId}:${getRecognitionDataStatus().referencePatch}`
   const cached = championAugmentStatsCache.get(cacheKey)
   if (cached) {
     return cached
@@ -2626,9 +2643,9 @@ export async function getChampionAugmentStats(
     const augments = Array.isArray(detail?.augments) ? detail.augments : []
 
     const result = rankAugmentRecommendations(
-      augments
+      selectCoherentStatistics(augments
         .filter((augment: any) => augment?.id != null)
-        .map((augment: any) => mapPublicAugmentRecommendation(augment, augmentBaseById))
+        .map((augment: any) => mapPublicAugmentRecommendation(augment, augmentBaseById)), getRecognitionDataStatus().referencePatch)
     )
 
     championAugmentStatsCache.set(cacheKey, result)

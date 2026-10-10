@@ -25,7 +25,7 @@ try {
     APPDATA: path.join(temporary, 'app-data') }
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(executable, ['--release-smoke-test', `--user-data-dir=${userData}`], {
-    cwd: temporary, env, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: temporary, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.on('data', (data) => { stdout += data })
   child.stderr.on('data', (data) => { stderr += data })

@@ -262,6 +262,6 @@ export class SgpMatchHistoryService {
     }
 
     const requestError = lastError as SgpRequestError
-    throw new Error(`SGP match-history request failed${requestError?.response?.status ? ` (${requestError.response.status})` : ''}`)
+    throw new Error(`区服已识别（${normalizePlatformId(platformId)}），但战绩服务暂不可用${requestError?.response?.status ? `（HTTP ${requestError.response.status}）` : ''}，请稍后重试`)
   }
 }

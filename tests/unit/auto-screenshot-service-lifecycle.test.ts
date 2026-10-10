@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   },
 }))
 
+vi.mock('../../src/main/live-level-reader.ts', () => ({ LiveLevelReader: class { poll = vi.fn(async () => null); reset = vi.fn() } }))
+
 vi.mock('../../src/main/screenshot.ts', () => ({
   CAPTURE_THUMBNAIL_SIZE: { width: 1280, height: 720 },
   captureScreenshot: mocks.captureScreenshot,
@@ -104,6 +106,20 @@ describe.sequential('automatic screenshot service lifecycle', () => {
   afterEach(() => {
     autoScreenshotService.reset()
     vi.restoreAllMocks()
+  })
+
+  it('skips the actual screenshot call in level saving mode, but captures a deferred offer', async () => {
+    const service = createRunningIdleService()
+    const now = Date.now()
+    service.levelReader.poll.mockResolvedValue({ level: 4, checkedAt: now })
+    service.levelGate.completed.add(3)
+    service.levelGate.decide(now)
+    expect(await service._captureScreenshot(service.runId)).toMatchObject({ error: 'level-gate-idle' })
+    expect(mocks.captureScreenshot).not.toHaveBeenCalled()
+    service.levelReader.poll.mockResolvedValue({ level: 8, checkedAt: now })
+    mocks.captureScreenshot.mockResolvedValue({ success: false, error: 'fixture-no-frame' })
+    await service._captureScreenshot(service.runId)
+    expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1)
   })
 
   it('delivers the first detection only after the on-demand renderer is ready', async () => {
@@ -236,6 +252,41 @@ describe.sequential('automatic screenshot service lifecycle', () => {
     expect(service.candidateStreak).toBe(0)
     expect(queueAnalysis).toHaveBeenCalledWith(imageBuffer)
     expectNextCaptureToUseGate(service)
+  })
+
+  it('upgrades the same raw gate frame into OCR without a second screenshot', async () => {
+    const service = createRunningIdleService()
+    service.pendingFullCapture = false
+    service.candidateStreak = 1
+    const raw = { buffer: Buffer.alloc(16, 255), width: 2, height: 2, channels: 4 }
+    mocks.captureScreenshot.mockResolvedValue({ success: true, buffer: raw })
+    mocks.analyzeScreenshotGate.mockResolvedValue({ success: true, likely: true, rerollVisible: true })
+    const queue = vi.spyOn(service, '_queueAnalysis').mockImplementation(() => {})
+    await service._captureScreenshot(service.runId)
+    expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1)
+    expect(mocks.analyzeScreenshotGate).toHaveBeenCalledWith(raw)
+    expect(queue).toHaveBeenCalledExactlyOnceWith(raw)
+    expect(service.pendingFullCapture).toBe(false)
+  })
+
+  it('confirms stationary cards using the previous raw frame, then skips duplicates', async () => {
+    const service = createRunningIdleService()
+    service.pendingFullCapture = false
+    service.candidateStreak = 0
+    const raw = { buffer: Buffer.alloc(16, 255), width: 2, height: 2, channels: 4 }
+    mocks.captureScreenshot.mockResolvedValueOnce({ success: true, buffer: raw })
+      .mockResolvedValue({ success: false, unchanged: true, error: 'unchanged-frame' })
+    mocks.analyzeScreenshotGate.mockResolvedValue({ success: true, likely: true, rerollVisible: true })
+    const queue = vi.spyOn(service, '_queueAnalysis').mockImplementation(() => {})
+    await service._captureScreenshot(service.runId)
+    expect(queue).not.toHaveBeenCalled()
+    await service._captureScreenshot(service.runId)
+    expect(queue).toHaveBeenCalledExactlyOnceWith(raw)
+    await service._captureScreenshot(service.runId)
+    expect(mocks.analyzeScreenshotGate).toHaveBeenCalledTimes(2)
+    expect(queue).toHaveBeenCalledTimes(1)
+    service.stop('gameflow')
+    expect(service.lastRawCapture).toBeNull()
   })
 
   it('returns to gate backoff when full OCR reports failure', async () => {

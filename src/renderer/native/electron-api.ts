@@ -29,10 +29,13 @@ export const electronAPI: ElectronAPI = {
     restart: (...args) => requireElectronAPI().windows.restart(...args),
   },
   appInfo: {
+    setAutomatic: (enabled) => requireElectronAPI().appInfo.setAutomatic(enabled),
+    getRuntimeStatus: () => requireElectronAPI().appInfo.getRuntimeStatus(),
     getVersionInfo: (...args) => requireElectronAPI().appInfo.getVersionInfo(...args),
     openLogDirectory: (...args) => requireElectronAPI().appInfo.openLogDirectory(...args),
   },
   appUpdate: {
+    setCredential: (...args) => requireElectronAPI().appUpdate.setCredential(...args),
     getState: (...args) => requireElectronAPI().appUpdate.getState(...args),
     check: (...args) => requireElectronAPI().appUpdate.check(...args),
     download: (...args) => requireElectronAPI().appUpdate.download(...args),

@@ -4,6 +4,7 @@ import {
   downloadAppUpdate,
   getAppUpdateState,
   installDownloadedAppUpdate,
+  setAppUpdateCredential,
 } from '../app-update-service.ts'
 import autoScreenshotService from '../auto-screenshot-service.ts'
 import {
@@ -19,6 +20,11 @@ import {
     toggleMainWindow,
 } from '../modules/window-manager.ts'
 import { trustedIpcMain as ipcMain } from '../security/trusted-ipc.ts'
+
+import store from '../modules/app-store.ts'
+import { connectionIsVerified } from '../../shared/runtime-status.ts'
+import { GAMEFLOW_ACTIVE_CAPTURE_INTERVAL_MS, GAMEFLOW_IDLE_CAPTURE_INTERVAL_MS, GAMEFLOW_CAPTURE_THUMBNAIL_SIZE } from '../auto-screenshot-policy.ts'
+import { getRuntimeStatus } from '../modules/runtime-status.ts'
 
 let quitRequested = false
 
@@ -72,6 +78,19 @@ function assertSafeExternalUrl(url: unknown): string {
 }
 
 export function registerSystemIpcHandlers(): void {
+  ipcMain.handle('get-runtime-status', () => getRuntimeStatus())
+  ipcMain.handle('set-automatic-recognition', async (_event, enabled: unknown) => {
+    if (typeof enabled !== 'boolean') return { success: false, error: 'Expected boolean' }
+    const connection = getRuntimeStatus().connection
+    store.set('autoScreenshotGameflowControl', enabled)
+    if (!enabled) autoScreenshotService.stop('user paused automatic recognition')
+    else if (connectionIsVerified(connection) && connection.phase === 'InProgress') {
+      autoScreenshotService.setConfig({ interval: GAMEFLOW_ACTIVE_CAPTURE_INTERVAL_MS, idleInterval: GAMEFLOW_IDLE_CAPTURE_INTERVAL_MS, automaticThumbnailSize: GAMEFLOW_CAPTURE_THUMBNAIL_SIZE })
+      const success = await autoScreenshotService.start(GAMEFLOW_ACTIVE_CAPTURE_INTERVAL_MS, 'gameflow')
+      return { success }
+    }
+    return { success: true }
+  })
   ipcMain.on('toggle-main-window', () => {
     toggleMainWindow()
   })
@@ -101,6 +120,7 @@ export function registerSystemIpcHandlers(): void {
     data: getAppUpdateState(),
   }))
   ipcMain.handle('app-update-check', async () => checkForAppUpdate('manual'))
+  ipcMain.handle('app-update-set-credential', (_event, token: unknown) => setAppUpdateCredential(token))
   ipcMain.handle('app-update-download', async () => downloadAppUpdate())
   ipcMain.handle('app-update-install', async () => installDownloadedAppUpdate())
 

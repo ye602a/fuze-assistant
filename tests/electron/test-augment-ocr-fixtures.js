@@ -10,11 +10,11 @@ const __dirname = path.dirname(__filename)
 const fixturesDir = path.resolve(__dirname, '../fixtures/augment-ocr')
 const manifestPath = path.join(fixturesDir, 'manifest.json')
 const originalCwd = process.cwd()
-const originalHome = process.env.HOME
-const originalUserProfile = process.env.USERPROFILE
+const originalHomedir = os.homedir
 const originalOcrLocale = process.env.ARAMGG_OCR_LOCALE
 let testRoot = null
 let shutdownImageAnalyzer = null
+const benchmarkRecords = []
 
 async function writeJson(filePath, payload) {
     await fs.mkdir(path.dirname(filePath), { recursive: true })
@@ -69,7 +69,11 @@ function enginesOf(slotDiagnostics = []) {
 }
 
 async function assertFixtureResult(analyzeScreenshot, input, sample, variant) {
+    const startedAt = performance.now()
+    const cpuStarted = process.cpuUsage()
     const result = await analyzeScreenshot(input)
+    const cpu = process.cpuUsage(cpuStarted)
+    benchmarkRecords.push({ file: sample.file, variant, wallMs: performance.now() - startedAt, cpuMs: (cpu.user + cpu.system) / 1000 })
 
     assert.equal(result.success, true, `${sample.file} (${variant}): analysis should succeed`)
     assert.equal(
@@ -130,8 +134,8 @@ async function assertGateResult(analyzeScreenshotGate, input, sample, variant) {
 async function main() {
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
     testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aramgg-augment-ocr-'))
-    process.env.HOME = testRoot
-    process.env.USERPROFILE = testRoot
+    // Keep app data isolated without redirecting the native GPU driver's user profile.
+    os.homedir = () => testRoot
     process.env.ARAMGG_OCR_LOCALE = 'zh-CN'
     process.chdir(testRoot)
     await seedFixtureData(manifest)
@@ -141,7 +145,9 @@ async function main() {
     const analyzeScreenshotGate = imageAnalyzer.analyzeScreenshotGate
     shutdownImageAnalyzer = imageAnalyzer.shutdownImageAnalyzer
 
-    for (const sample of manifest) {
+    const rounds = Math.max(1, Math.min(30, Number(process.env.ARAMGG_OCR_BENCHMARK_ROUNDS) || 1))
+    for (let round = 0; round < rounds; round++) {
+      for (const sample of manifest) {
         const imagePath = path.join(fixturesDir, sample.file)
         await assertFixtureResult(analyzeScreenshot, imagePath, sample, '1280x720')
         if (sample.expectedCardCount > 0) {
@@ -156,6 +162,16 @@ async function main() {
             .png()
             .toBuffer()
         await assertFixtureResult(analyzeScreenshot, automaticCaptureBuffer, sample, '1024x576')
+        if (rounds === 1) {
+            const { data, info } = await sharp(automaticCaptureBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+            const rawFrame = { buffer: data, width: info.width, height: info.height, channels: 4 }
+            await assertFixtureResult(analyzeScreenshot, rawFrame, sample, 'raw1024x576')
+            if (sample.expectedCardCount > 0) await assertGateResult(analyzeScreenshotGate, rawFrame, sample, 'raw-gate')
+        }
+      }
+    }
+    if (process.env.ARAMGG_OCR_BENCHMARK_OUTPUT) {
+        await fs.writeFile(path.resolve(originalCwd, process.env.ARAMGG_OCR_BENCHMARK_OUTPUT), JSON.stringify({ rounds, records: benchmarkRecords }, null, 2))
     }
 }
 
@@ -169,16 +185,7 @@ main()
             await shutdownImageAnalyzer()
         }
         process.chdir(originalCwd)
-        if (originalHome == null) {
-            delete process.env.HOME
-        } else {
-            process.env.HOME = originalHome
-        }
-        if (originalUserProfile == null) {
-            delete process.env.USERPROFILE
-        } else {
-            process.env.USERPROFILE = originalUserProfile
-        }
+        os.homedir = originalHomedir
         if (originalOcrLocale == null) {
             delete process.env.ARAMGG_OCR_LOCALE
         } else {
