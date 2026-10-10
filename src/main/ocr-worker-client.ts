@@ -78,7 +78,9 @@ async function initialize() {
       status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-initialization-failed' }
       logger.warn('GPU OCR initialization failed; falling back to CPU')
       spawnWorker()
+      const fallbackGeneration = generation
       await request({ action: 'init', backend: 'cpu', options: settings }, 10000)
+      if (fallbackGeneration !== generation) throw new Error('OCR initialization cancelled', { cause: error })
       status = { ...status, backend: 'cpu', warming: false }
     }
   })()
@@ -107,7 +109,8 @@ export async function createOcrWorkerService(options: unknown) {
         status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-inference-failed' }
         logger.warn('GPU OCR inference failed; retrying current frame on CPU')
         await initialize()
-        return await request({ action: 'recognize', input }, 6000)
+        try { return await request({ action: 'recognize', input }, 6000) }
+        catch (fallbackError) { stopOcrWorker(); throw fallbackError }
       }
     }),
     destroy: async () => stopOcrWorker(),

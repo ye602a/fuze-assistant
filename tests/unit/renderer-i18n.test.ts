@@ -7,6 +7,7 @@ import {
   translate,
 } from '../../src/renderer/i18n/index.ts'
 import { messages } from '../../src/renderer/i18n/messages.ts'
+import { updateMessages } from '../../src/renderer/i18n/update.ts'
 import {
   formatAugmentWinRate,
   formatDataSource,
@@ -40,6 +41,12 @@ describe('renderer i18n', () => {
 
     expect(collectLeafKeys(messages['en-US'])).toEqual(expectedKeys)
     expect(collectLeafKeys(messages['zh-TW'])).toEqual(expectedKeys)
+    expect(collectLeafKeys(updateMessages['en-US'])).toEqual(collectLeafKeys(updateMessages['zh-CN']))
+    expect(collectLeafKeys(updateMessages['zh-TW'])).toEqual(collectLeafKeys(updateMessages['zh-CN']))
+    for (const locale of SUPPORTED_APP_LOCALES) {
+      expect(messages[locale].workbench.levelGateOption).toBeTruthy()
+      expect(messages[locale].workbench.levelGateOptionHint).toBeTruthy()
+    }
   })
 
   it('switches interface text and data-derived labels together', () => {

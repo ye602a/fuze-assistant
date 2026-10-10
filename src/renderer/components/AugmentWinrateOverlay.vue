@@ -175,11 +175,12 @@
                     @focus="showAugmentTooltip($event, augment)"
                     @blur="hideAugmentTooltip"
                   >
-                    <img
+                    <GameIcon
                       v-if="augment.iconPath"
                       :src="getAugmentIconUrl(augment.iconPath)"
                       :alt="augment.name"
                       class="augment-icon"
+                      :fallback="String(index + 1).padStart(2, '0')"
                     />
                     <span v-else>{{ index + 1 }}</span>
                   </div>
@@ -511,6 +512,7 @@ import {
 } from '../service/overlay-formatters.ts'
 import { useAugmentTooltip } from '../composables/use-augment-tooltip.ts'
 import AramBenchRecommendation from './AramBenchRecommendation.vue'
+import GameIcon from './GameIcon.vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({

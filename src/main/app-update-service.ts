@@ -161,6 +161,9 @@ export async function installDownloadedAppUpdate(_reason = 'manual-install'): Pr
   installing = true
   publish({ phase: 'installing', error: '' })
   try {
+    const { getLolGameStatus } = await import('./screenshot.ts')
+    const game = await getLolGameStatus()
+    if (game.processRunning !== false || gameBlocked()) throw new Error('game-status-unavailable')
     await cleanup?.()
     if (gameBlocked()) throw new Error('game-active')
     allowMainWindowClose()

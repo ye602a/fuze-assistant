@@ -43,6 +43,7 @@ export function createReleaseSmoke() {
             window.focus = () => {}
         }
         const contents = window.webContents
+        contents.setBackgroundThrottling(false) // Hidden acceptance windows still need animation frames.
         contents.on('preload-error', (_event, preload, error) => fail(`Preload ${preload}: ${error.message}`))
         contents.on('render-process-gone', (_event, details) => fail(`Renderer crashed: ${details.reason}`))
         contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
@@ -124,6 +125,8 @@ export function createReleaseSmoke() {
                             if (route === '/floating-overlay' && !snapshot.text.includes('Smoke augment')) {
                                 throw new Error('Floating window did not render the diagnostic payload')
                             }
+                            await window.webContents.capturePage()
+                            await new Promise(resolve => setTimeout(resolve, 350))
                             const screenshot = await window.webContents.capturePage()
                             if (screenshot.isEmpty()) throw new Error(`Empty screenshot: ${route}`)
                             await fs.writeFile(path.join(outputDir, `${route.slice(1)}.png`), screenshot.toPNG())

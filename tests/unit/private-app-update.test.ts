@@ -14,6 +14,7 @@ vi.mock('electron-updater', () => ({ default: {
 } }))
 vi.mock('../../src/main/modules/app-store.ts', () => ({ default: { get: (k: string) => mock.values.get(k), set: (k: string, v: unknown) => mock.values.set(k, v), delete: (k: string) => mock.values.delete(k) } }))
 vi.mock('../../src/main/modules/window-manager.ts', () => ({ allowMainWindowClose: vi.fn() }))
+vi.mock('../../src/main/screenshot.ts', () => ({ getLolGameStatus: async () => ({ processRunning: false }) }))
 beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); mock.values.clear(); mock.events.clear(); mock.encryption = true; delete process.env.FUZE_GITHUB_TOKEN; delete process.env.FUZE_PORTABLE })
 async function setup() { const service = await import('../../src/main/app-update-service.ts'); service.initializeAppUpdateService({ isDev: false }); return service }
 describe('private Fuze update channel', () => {

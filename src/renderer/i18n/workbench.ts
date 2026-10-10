@@ -1,5 +1,7 @@
 export const workbenchMessages = {
   "zh-CN": {
+    "levelGateOption": "按强化等级节省识别开销",
+    "levelGateOptionHint": "远离强化等级时低频检查；临近等级、等待领取或重选时持续识别。等级读取失败会恢复兼容检测。",
     "levelScheduling": "等级调度",
     "levelMode_fallback": "等级不可用，兼容检测",
     "levelMode_selection": "三卡显示，持续检测",
@@ -112,7 +114,7 @@ export const workbenchMessages = {
     "logs": "打开本地日志",
     "preview": "预览推荐浮窗",
     "previewHint": "会显示测试推荐窗口；测试内容不代表本局识别结果。",
-    "build": "本地开发版",
+    "build": "私有测试版",
     "version": "软件版本",
     "dataVersion": "数据版本",
     "dataPatch": "推荐数据补丁",
@@ -136,6 +138,8 @@ export const workbenchMessages = {
     "clearPath": "清除备用目录"
   },
   "en-US": {
+    "levelGateOption": "Save work between augment levels",
+    "levelGateOptionHint": "Check less often between augment levels. Stay active near a choice or reroll; fall back to normal detection if level data is unavailable.",
     "levelScheduling": "Level scheduling",
     "levelMode_fallback": "Level unavailable; fallback detection",
     "levelMode_selection": "Choices visible; detection active",
@@ -248,7 +252,7 @@ export const workbenchMessages = {
     "logs": "Open local logs",
     "preview": "Preview recommendation overlay",
     "previewHint": "Opens a test overlay. Test data is not a recognition result from this match.",
-    "build": "Local development build",
+    "build": "Private preview",
     "version": "Application version",
     "dataVersion": "Data version",
     "dataPatch": "Recommendation data patch",
@@ -272,6 +276,8 @@ export const workbenchMessages = {
     "clearPath": "Clear fallback"
   },
   "zh-TW": {
+    "levelGateOption": "依強化等級節省辨識開銷",
+    "levelGateOptionHint": "遠離強化等級時低頻檢查；臨近等級、等待領取或重選時持續辨識。等級讀取失敗會恢復相容偵測。",
     "levelScheduling": "等級排程",
     "levelMode_fallback": "等級不可用，相容偵測",
     "levelMode_selection": "三卡顯示，持續偵測",
@@ -384,7 +390,7 @@ export const workbenchMessages = {
     "logs": "打開本機日誌",
     "preview": "预览推薦浮窗",
     "previewHint": "会顯示测试推薦視窗；测试内容不代表本局辨識结果。",
-    "build": "本機開發版",
+    "build": "私人測試版",
     "version": "軟體版本",
     "dataVersion": "資料版本",
     "dataPatch": "推薦資料版本",

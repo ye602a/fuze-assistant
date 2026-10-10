@@ -48,11 +48,16 @@ async function atomicJson(name: string, value: unknown) {
 
 export function loadRecognitionCatalogLocal(): Promise<void> {
   if (!initialized) initialized = (async () => {
-    const bundled = process.resourcesPath
-      ? path.join(process.resourcesPath, 'recognition-catalog.json')
-      : fileURLToPath(new URL('../../../resources/recognition-catalog.json', import.meta.url))
+    const bundledCandidates = [
+      ...(process.resourcesPath ? [path.join(process.resourcesPath, 'recognition-catalog.json')] : []),
+      // electron-vite bundles this module into dist-electron/main.js in development.
+      ...(!process.versions.electron || process.defaultApp ? [
+        fileURLToPath(new URL('../../../resources/recognition-catalog.json', import.meta.url)),
+        path.resolve('resources/recognition-catalog.json'),
+      ] : []),
+    ]
     // Raw public payloads are validated identically on disk and on the network.
-    for (const file of [bundled, path.join(root(), 'catalog.json')]) {
+    for (const file of [...new Set(bundledCandidates), path.join(root(), 'catalog.json')]) {
       try {
         const envelope = JSON.parse(await readFile(file, 'utf8'))
         const candidate = parseMayhemCatalog(envelope.payload ?? envelope, Number(envelope.retrievedAt) || 0)

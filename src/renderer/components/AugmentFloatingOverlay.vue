@@ -25,7 +25,7 @@
           </div>
 
           <div class="slot-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="augment-icon-frame">
-            <img
+            <GameIcon
               v-if="!augment.missing && augment.iconPath"
               :src="getAugmentIconUrl(augment.iconPath)"
               :alt="augment.name"
@@ -69,6 +69,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { X } from 'lucide-vue-next'
+import GameIcon from './GameIcon.vue'
 import { electronAPI } from '../native/electron-api.ts'
 import { sortAugmentsByDetectedOrder } from '../service/augment-order.js'
 import {

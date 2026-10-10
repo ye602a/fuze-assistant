@@ -184,7 +184,7 @@ async function removeFileIfExists(filePath) {
 
 async function cleanRootPackageArtifacts(version) {
   const outputDir = path.join(process.cwd(), 'build')
-  const artifactBaseName = `Fuze Setup ${version}`
+  const artifactBaseName = `Fuze-Setup-${version}`
   const artifactPaths = [
     path.join(outputDir, `${artifactBaseName}.exe`),
     path.join(outputDir, `${artifactBaseName}.exe.blockmap`),
@@ -214,7 +214,7 @@ async function mirrorFallbackOutput(fallbackOutput, version) {
   const rootOutput = path.join(process.cwd(), 'build')
   const fallbackUnpacked = path.join(fallbackRoot, 'win-unpacked')
   const rootUnpacked = path.join(rootOutput, 'win-unpacked')
-  const artifactBaseName = `Fuze Setup ${version}`
+  const artifactBaseName = `Fuze-Setup-${version}`
 
   await rm(rootUnpacked, { recursive: true, force: true })
   await cp(fallbackUnpacked, rootUnpacked, { recursive: true })

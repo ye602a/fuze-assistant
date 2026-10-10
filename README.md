@@ -11,7 +11,7 @@
 
 ## 安装与更新
 
-从本仓库 Releases 下载 `Fuze Setup <version>.exe`。首次安装需要手动运行安装包；早期 ARAMGG 或 Fuze 本地包不会自动切换到这个频道。
+从本仓库 Releases 下载 `Fuze-Setup-<version>.exe`。首次安装需要手动运行安装包；早期 ARAMGG 或 Fuze 本地包不会自动切换到这个频道。
 
 设置页的“软件更新”支持私有 GitHub Releases：检查版本 → 手动下载 → SHA-512 校验 → 确认安装。选人、载入和对局阶段暂停下载、禁止安装，退出应用不会自动安装。当前没有 Windows 发布者签名，完整性校验不等于发布者签名；不启用静默自动更新。
 
