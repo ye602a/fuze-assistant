@@ -25,7 +25,9 @@ try {
     APPDATA: path.join(temporary, 'app-data') }
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(executable, ['--release-smoke-test', `--user-data-dir=${userData}`], {
-    cwd: temporary, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    // SW_HIDE also hides a GUI child's initial window on Windows. Only request
+    // it in explicitly hidden mode; the visible smoke checks real visibility.
+    cwd: temporary, env, windowsHide: env.ARAMGG_RELEASE_SMOKE_HIDDEN === '1', stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.on('data', (data) => { stdout += data })
   child.stderr.on('data', (data) => { stderr += data })
