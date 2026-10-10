@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="520" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
+  <title id="title">符择 Fuze — 让每一次强化，都有依据</title>
+  <desc id="desc">深蓝与古金色的海克斯风格横幅，右侧三张抽象强化卡片，中间推荐卡以青蓝色核心与金边突出。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#07111d"/><stop offset="1" stop-color="#122e40"/></linearGradient>
+    <linearGradient id="gold" x2=".9" y2="1"><stop stop-color="#e7d39c"/><stop offset=".5" stop-color="#b99753"/><stop offset="1" stop-color="#665333"/></linearGradient>
+    <linearGradient id="card" x2=".3" y2="1"><stop stop-color="#1c3647"/><stop offset="1" stop-color="#0b1926"/></linearGradient>
+    <linearGradient id="energy" x2="1" y2="1"><stop stop-color="#b4fff3"/><stop offset=".5" stop-color="#40bdce"/><stop offset="1" stop-color="#076b91"/></linearGradient>
+    <radialGradient id="halo"><stop stop-color="#167d94" stop-opacity=".35"/><stop offset="1" stop-color="#102736" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse"><path d="M52 0H0V52" fill="none" stroke="#88c7cf" stroke-opacity=".045"/></pattern>
+  </defs>
+  <rect width="1600" height="520" fill="url(#bg)"/>
+  <rect width="1600" height="520" fill="url(#grid)"/>
+  <ellipse cx="1180" cy="230" rx="450" ry="330" fill="url(#halo)"/>
+  <path d="M28 88V28H245M1355 28H1572V88M28 432V492H245M1355 492H1572V432" fill="none" stroke="url(#gold)" stroke-width="2"/>
+  <path d="M770 0 520 520M826 0 576 520" stroke="#9bb9c9" stroke-opacity=".035" stroke-width="40"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+    <g transform="translate(84 74)">
+      <path d="m20 0 20 22-20 22L0 22Z" fill="none" stroke="#c8aa6e" stroke-width="2"/>
+      <path d="m10 23 7 7 15-17" fill="none" stroke="#67d4d3" stroke-width="3"/>
+      <text x="58" y="27" fill="#c8aa6e" font-size="17" letter-spacing="5">FUZE / ARAM COMPANION</text>
+    </g>
+    <text x="80" y="233" fill="#f0e6d2" font-size="104" font-weight="700" letter-spacing="9">符择</text>
+    <text x="337" y="231" fill="#c8aa6e" font-size="69" font-weight="300" letter-spacing="3">Fuze</text>
+    <text x="84" y="296" fill="#c8d7dc" font-size="29" letter-spacing="2">让每一次强化，都有依据。</text>
+    <path d="M84 331H619" stroke="#a58c57" stroke-opacity=".45"/>
+    <g font-size="17" fill="#a9c2ce">
+      <text x="84" y="374">本地优先</text><text x="206" y="374" fill="#695e46">/</text>
+      <text x="240" y="374">GPU OCR</text><text x="370" y="374" fill="#695e46">/</text>
+      <text x="404" y="374">对局推荐</text>
+    </g>
+    <text x="84" y="443" fill="#687f8d" font-size="13" letter-spacing="2.5">WINDOWS · BUILT FOR YOUR NEXT CHOICE</text>
+  </g>
+  <g fill="none" stroke="#5ac9d0" stroke-opacity=".16">
+    <path d="m1171 58 214 202-214 202-214-202Z"/>
+    <path d="M846 260H1512M1171 34V483" stroke-dasharray="3 12"/>
+    <circle cx="1171" cy="260" r="188"/>
+  </g>
+  <g transform="translate(877 143) rotate(-9 96 136)">
+    <path d="M0 16 16 0H176L192 16V256L176 272H16L0 256Z" fill="url(#card)" stroke="#527485" stroke-width="2"/>
+    <path d="M12 34V14H38M154 14H180V34" stroke="#82959d" stroke-width="2" fill="none"/>
+    <path d="m96 58 42 42-42 42-42-42Z" fill="#152c3c" stroke="#799caf" stroke-width="2"/>
+    <path d="m75 102 21-24 21 24-21 21Z" fill="none" stroke="#a2c2ce" stroke-width="3"/>
+    <path d="M33 178H159M49 194H143" stroke="#527485" stroke-width="4"/>
+    <path d="M29 227H164" stroke="#030d17" stroke-width="10"/><path d="M29 227H103" stroke="#618b9e" stroke-width="6"/>
+  </g>
+  <g transform="translate(1305 149) rotate(9 96 136)">
+    <path d="M0 16 16 0H176L192 16V256L176 272H16L0 256Z" fill="url(#card)" stroke="#527485" stroke-width="2"/>
+    <path d="M12 34V14H38M154 14H180V34" stroke="#82959d" stroke-width="2" fill="none"/>
+    <path d="m96 58 42 42-42 42-42-42Z" fill="#152c3c" stroke="#799caf" stroke-width="2"/>
+    <path d="M76 115 96 79l20 36Z" fill="none" stroke="#a2c2ce" stroke-width="3"/>
+    <path d="M33 178H159M49 194H143" stroke="#527485" stroke-width="4"/>
+    <path d="M29 227H164" stroke="#030d17" stroke-width="10"/><path d="M29 227H82" stroke="#618b9e" stroke-width="6"/>
+  </g>
+  <g transform="translate(1055 93)">
+    <path d="M0 22 22 0H218L240 22V315L218 337H22L0 315Z" fill="#06131e" stroke="url(#gold)" stroke-width="3"/>
+    <path d="m10 27 17-17H213L230 27V310L213 327H27L10 310Z" fill="url(#card)" stroke="#685a3d"/>
+    <path d="M67 0H173" stroke="#f0d99c" stroke-width="4"/>
+    <path d="m120 48 62 62-62 62-62-62Z" fill="#09232f" stroke="#c8aa6e" stroke-width="2"/>
+    <path d="m124 65-34 53 29-5-5 43 36-57-29 5Z" fill="url(#energy)"/>
+    <path d="M30 110H48M192 110H210M120 27V38M120 182V192" stroke="#aa935e"/>
+    <text x="120" y="228" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, sans-serif" font-size="23" font-weight="600" letter-spacing="4" fill="#f0e6d2">优先推荐</text>
+    <path d="M44 251H196" stroke="#688995" stroke-width="3"/>
+    <rect x="30" y="277" width="180" height="12" fill="#030b12" stroke="#867045"/>
+    <rect x="33" y="280" width="145" height="6" fill="url(#gold)"/>
+    <path d="m114 312 6-6 6 6-6 6Z" fill="#c8aa6e"/>
+  </g>
+</svg>

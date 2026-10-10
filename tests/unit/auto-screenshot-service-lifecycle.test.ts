@@ -97,6 +97,18 @@ const expectNextCaptureToUseGate = (service) => {
 }
 
 describe.sequential('automatic screenshot service lifecycle', () => {
+  it('coalesces repeated gameflow and level prewarming with a bounded retry interval', async () => {
+    const service = createRunningIdleService()
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    await Promise.all(Array.from({ length: 30 }, () => service._warmupAnalyzer()))
+    expect(mocks.warmupImageAnalyzer).toHaveBeenCalledOnce()
+    await service._warmupAnalyzer()
+    expect(mocks.warmupImageAnalyzer).toHaveBeenCalledOnce()
+    vi.mocked(Date.now).mockReturnValue(now + 30001)
+    await service._warmupAnalyzer()
+    expect(mocks.warmupImageAnalyzer).toHaveBeenCalledTimes(2)
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.windows.length = 0

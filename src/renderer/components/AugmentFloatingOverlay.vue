@@ -1,7 +1,7 @@
 <template>
   <transition name="float-fade">
     <div v-if="visible" class="floating-overlay">
-      <div class="floating-header"><span class="floating-title">FUZE <small>{{ t('augment.recommendation') }}</small></span><span class="order-hint">01 / 02 / 03</span><button class="close-btn" type="button" @click="closeOverlay('manual')" :title="t('common.close')" :aria-label="t('common.close')">
+      <div class="floating-header"><span class="floating-title">FUZE <small>{{ t('augment.recommendation') }}</small></span><button class="close-btn" type="button" @click="closeOverlay('manual')" :title="t('common.close')" :aria-label="t('common.close')">
         <X class="close-icon" />
       </button></div>
 
@@ -24,18 +24,17 @@
             {{ t('augment.priority') }}
           </div>
 
-          <div class="slot-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="augment-icon-frame">
+          <div class="augment-icon-frame">
             <GameIcon
-              v-if="!augment.missing && augment.iconPath"
-              :src="getAugmentIconUrl(augment.iconPath)"
+              v-if="!augment.missing"
+              :src="augment.iconPath ? getAugmentIconUrl(augment.iconPath) : ''"
               :alt="augment.name"
               class="augment-icon"
             />
-            <span v-else-if="!augment.missing">{{ String(index + 1).padStart(2, '0') }}</span>
           </div>
 
           <div class="content">
-            <h3 class="name">{{ augment.missing ? t('workbench.missing') : augment.name }}</h3>
+            <h3 class="name" :title="augment.missing ? '' : augment.name">{{ augment.missing ? t('workbench.missing') : augment.name }}</h3>
             <div v-if="!augment.missing" class="stats-lines">
               <div class="stat-line">
                 <span>{{ t('augment.pickRateShort') }}</span>
@@ -43,17 +42,16 @@
               </div>
               <div class="stat-line">
                 <span>{{ t('augment.winRate') }}</span>
-                <strong>{{ formatAugmentWinRate(augment.winRate) }}</strong>
+                <strong :title="formatAugmentWinRate(augment.winRate)">{{ augment.winRate == null || augment.winRate === '' ? '—' : formatAugmentWinRate(augment.winRate) }}</strong>
               </div>
             </div>
-            <span v-if="!augment.missing" class="recommend-label" :class="getBadgeClass(augment.recommendScore)">
-              <template v-if="augment.statistics">{{ t('workbench.stats_' + augment.statistics.status) }} {{ augment.statistics.patch || '' }}</template>
-              <template v-else>{{ getRecommendText(augment.recommendScore) }} · {{ formatScore(augment.recommendScore) }}</template>
-            </span>
           </div>
 
-          <div v-if="!augment.missing" class="score-track">
-            <div class="score-fill" :style="{ width: getScoreWidth(augment.recommendScore) }"></div>
+          <div v-if="!augment.missing" class="recommendation">
+            <div class="recommend-label"><span>{{ t('augment.recommendation') }}</span><strong>{{ getRecommendText(augment.recommendScore) }} · {{ formatScore(augment.recommendScore) }}</strong></div>
+            <div class="score-track" role="meter" :aria-label="t('augment.recommendation')" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="augment.recommendScore == null ? undefined : Math.min(100, Math.max(0, Math.round(augment.recommendScore * 100)))" :aria-valuetext="getRecommendText(augment.recommendScore)">
+              <div class="score-fill" :style="{ width: getScoreWidth(augment.recommendScore) }"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -119,18 +117,6 @@ const getRecommendText = (score) => {
   if (score >= 0.4) return t('augment.scoreRecommended')
   if (score >= 0.3) return t('augment.scoreOptional')
   return t('augment.scoreNiche')
-}
-
-/**
- * 获取徽章样式
- */
-const getBadgeClass = (score) => {
-  if (score == null || isNaN(score)) return 'unknown'
-  if (score >= 0.6) return 'must'
-  if (score >= 0.5) return 'strong'
-  if (score >= 0.4) return 'good'
-  if (score >= 0.3) return 'ok'
-  return 'cold'
 }
 
 const logFloatingInfo = (message, details = {}) => {
@@ -443,9 +429,61 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-
-.floating-overlay{position:fixed;inset:0;width:100%;height:100%;box-sizing:border-box;padding:8px 10px 10px;background:#101c2af5;border:1px solid #395064;border-radius:12px;color:#e5edf8;font-family:'Segoe UI','Microsoft YaHei',sans-serif;overflow:hidden}
-.floating-overlay *{box-sizing:border-box}.floating-header{height:24px;display:flex;align-items:center;gap:12px;margin-bottom:7px}.floating-title{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#87e5d2}.floating-title small{font-size:10px;font-weight:400;letter-spacing:0;color:#a9bace;margin-left:9px}.order-hint{margin-left:auto;font-size:10px;letter-spacing:2px;color:#7790aa}.close-btn{width:25px;height:23px;padding:4px;border:0;border-radius:5px;color:#b7c8de;background:#27374c;cursor:pointer}.close-btn:hover{background:#59303e}.close-icon{width:15px;height:15px}.close-btn:focus-visible{outline:2px solid #7bdcc8}
-.augments-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;height:calc(100% - 31px)}.augment-item{position:relative;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:start;gap:9px;padding:23px 10px 12px;border:1px solid #304458;border-radius:8px;background:#1a293a;min-width:0}.augment-item.top-pick{border-color:#78ddc7;background:#193632}.slot-number{position:absolute;top:5px;left:10px;font-size:10px;letter-spacing:1.6px;color:#819cb9}.top-pick-badge{position:absolute;right:8px;top:4px;display:flex;gap:4px;color:#91f1d9;font-size:10px}.augment-icon-frame{height:38px;width:38px;display:grid;place-items:center;background:#26394c;border:1px solid #496479;border-radius:9px;color:#87a5c4;font-size:12px;overflow:hidden}.augment-icon{width:100%;height:100%;object-fit:cover}.content{display:flex;flex-direction:column;gap:5px;min-width:0}.name{margin:0;font-size:15px;font-weight:650;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e7eff8}.stats-lines{display:flex;gap:12px}.stat-line{display:flex;flex-direction:column;gap:2px}.stat-line span{font-size:10px;color:#9eb2ca}.stat-line strong{font-size:13px;color:#d7e5f5;font-variant-numeric:tabular-nums}.top-pick .stat-line strong{color:#9aefda}.recommend-label{font-size:9px;color:#a4bbcd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.score-track{position:absolute;bottom:5px;left:10px;right:10px;height:2px;background:#314356;border-radius:3px;overflow:hidden}.score-fill{height:100%;background:#73d9c2}.empty-slot{border-style:dashed;background:#152334}.empty-slot .name{color:#7d96ae;font-size:12px;font-weight:400}.loading,.error{height:100%;display:flex;justify-content:center;align-items:center;gap:12px;font-size:12px;color:#a4bbcd}.error{color:#f3acaf}.spinner{width:18px;height:18px;border:2px solid #355168;border-top-color:#7adeca;border-radius:50%;animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.float-fade-enter-active,.float-fade-leave-active{transition:opacity .12s}.float-fade-enter-from,.float-fade-leave-to{opacity:0}
-@media(min-width:950px){.augment-item{grid-template-columns:44px minmax(0,1fr);padding-top:25px}.augment-icon-frame{width:44px;height:44px}.name{font-size:17px}.stat-line strong{font-size:14px}.recommend-label{font-size:10px}}
+.floating-overlay {
+  position: fixed; inset: 0; box-sizing: border-box; padding: 5px 8px 8px;
+  color: #f0e6d2; background: #09131ef7; border: 1px solid #665638;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; overflow: hidden;
+}
+.floating-overlay * { box-sizing: border-box; }
+.floating-header { height: 23px; display: flex; align-items: center; margin-bottom: 5px; }
+.floating-title { color: #c8aa6e; font-size: 11px; font-weight: 700; letter-spacing: 2px; }
+.floating-title small { margin-left: 9px; color: #a09b8c; font-size: 10px; font-weight: 400; letter-spacing: 1px; }
+.close-btn { margin-left: auto; display: grid; place-items: center; width: 26px; height: 23px; padding: 3px; border: 1px solid transparent; background: transparent; color: #cdbe91; cursor: pointer; }
+.close-btn:hover { background: #302a22; border-color: #785a28; }
+.close-btn:focus-visible { outline: 2px solid #0ac8b9; }
+.close-icon { width: 15px; height: 15px; }
+.augments-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; height: calc(100% - 28px); }
+.augment-item {
+  position: relative; display: grid; grid-template-columns: 66px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 30px; gap: 6px 10px; min-width: 0; padding: 10px 9px 8px;
+  background: linear-gradient(125deg, #142b3c, #0a1623 75%); border: 1px solid #4c5360;
+  box-shadow: inset 0 0 0 2px #07111b;
+}
+.augment-item::before { content: ''; position: absolute; top: -1px; left: -1px; width: 16px; height: 3px; background: #8e9caa; }
+.augment-item.top-pick { border-color: #c8aa6e; background: linear-gradient(125deg, #29302f, #101d28 75%); }
+.top-pick::before { background: #f0d89d; width: 34px; }
+.top-pick-badge { position: absolute; right: 7px; top: -8px; padding: 0 5px; background: #17222a; color: #f0d89d; font-size: 10px; line-height: 15px; }
+.top-pick-badge span { margin-right: 3px; }
+.augment-icon-frame { align-self: center; width: 66px; height: 66px; padding: 3px; border: 1px solid #887044; background: #030b13; box-shadow: inset 0 0 0 2px #172e40; color: #c8aa6e; font-size: 30px; }
+.augment-icon { width: 100%; height: 100%; font-size: 28px; }
+.content { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; }
+.name { margin: 0; color: #f0e6d2; font-size: 15px; font-weight: 650; line-height: 19px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stats-lines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.stat-line { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.stat-line span { color: #a8b6bd; font-size: 10px; line-height: 14px; }
+.stat-line strong { font-family: 'Bahnschrift', 'Segoe UI', sans-serif; font-size: 21px; line-height: 25px; font-weight: 600; color: #edf5f7; font-variant-numeric: tabular-nums; letter-spacing: -.6px; white-space: nowrap; }
+.top-pick .stat-line strong { color: #f0d89d; }
+.recommendation { grid-column: 1 / -1; min-width: 0; }
+.recommend-label { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 4px; color: #9badb7; font-size: 10px; line-height: 13px; }
+.recommend-label strong { font-weight: 500; color: #c5d5d9; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.score-track { height: 9px; padding: 1px; background: #020b13; border: 1px solid #365668; }
+.score-fill { height: 100%; background: linear-gradient(90deg, #087888, #61d4df); }
+.top-pick .score-track { border-color: #806c43; }
+.top-pick .score-fill { background: linear-gradient(90deg, #956a2e, #e6c582); }
+.empty-slot { border-color: #2e4050; }
+.empty-slot .name { font-size: 12px; color: #8998a4; }
+.empty-slot .augment-icon-frame { opacity: .3; }
+.loading, .error { height: calc(100% - 28px); display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 12px; color: #cdbe91; }
+.error { color: #efb7ad; }
+.spinner { width: 18px; height: 18px; border: 2px solid #365668; border-top-color: #c8aa6e; border-radius: 50%; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.float-fade-enter-active, .float-fade-leave-active { transition: opacity .12s; }
+.float-fade-enter-from, .float-fade-leave-to { opacity: 0; }
+@media (min-width: 950px) {
+  .augment-item { grid-template-columns: 76px minmax(0, 1fr); }
+  .augment-icon-frame { width: 76px; height: 76px; }
+  .name { font-size: 17px; }
+  .stat-line strong { font-size: 25px; line-height: 29px; }
+  .stat-line span, .recommend-label { font-size: 11px; }
+}
 </style>

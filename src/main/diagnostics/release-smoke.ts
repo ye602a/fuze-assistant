@@ -131,6 +131,28 @@ export function createReleaseSmoke() {
                             if (screenshot.isEmpty()) throw new Error(`Empty screenshot: ${route}`)
                             await fs.writeFile(path.join(outputDir, `${route.slice(1)}.png`), screenshot.toPNG())
                             snapshots.push(snapshot)
+                            if (route === '/floating-overlay') {
+                                // Visual-only fixtures: bundled rune art stands in for augment art offline.
+                                // No network, game input, or real player data is used here.
+                                await window.webContents.executeJavaScript(`(() => {
+                                    const names = ['测试：超长海克斯中文标题', '测试：推荐卡片', '测试：普通卡片'];
+                                    document.querySelectorAll('.augment-item').forEach((card, i) => {
+                                        card.querySelector('.name').textContent = names[i];
+                                        const icon = document.createElement('img');
+                                        icon.src = new URL('./runes/' + [8005, 8112, 8229][i] + '.png', location.href).href;
+                                        icon.style.cssText = 'width:100%;height:100%;object-fit:contain';
+                                        card.querySelector('.augment-icon-frame').replaceChildren(icon);
+                                    });
+                                })()`)
+                                await new Promise(resolve => setTimeout(resolve, 250))
+                                for (const width of [760, 1000]) {
+                                    window.setSize(width, 170)
+                                    await window.webContents.capturePage()
+                                    await new Promise(resolve => setTimeout(resolve, 150))
+                                    await fs.writeFile(path.join(outputDir, `floating-chinese-${width}.png`), (await window.webContents.capturePage()).toPNG())
+                                }
+                                window.setSize(760, 170)
+                            }
                         }
                         // Exercise the isolated app's own settings without OS input or game access.
                         await main.webContents.executeJavaScript(`document.querySelectorAll('.rail nav button')[2].click()`)

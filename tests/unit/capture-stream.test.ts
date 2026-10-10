@@ -29,12 +29,13 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 describe('persistent capture lifecycle', () => {
-  it('enumerates once, deduplicates pixels and releases the hidden capture window', async () => {
+  it('enumerates once, accepts worker-side duplicate filtering and releases the capture window', async () => {
     const capture = await import('../../src/main/capture-stream.ts')
     expect(await capture.readCaptureStream()).toMatchObject({ width: 2, height: 2 })
+    state.windows[0].webContents.executeJavaScript.mockResolvedValueOnce({ unchanged: true, duplicateBytes: 16 })
     expect(await capture.readCaptureStream()).toBe('unchanged')
     expect(state.enumerate).toHaveBeenCalledTimes(1)
-    expect(capture.getCaptureStreamStatus()).toMatchObject({ frames: 1, duplicates: 1 })
+    expect(capture.getCaptureStreamStatus()).toMatchObject({ frames: 1, duplicates: 1, avoidedTransferBytes: 16 })
     capture.stopCaptureStream()
     expect(state.windows[0].destroyed).toBe(true)
     expect(capture.getCaptureStreamStatus().backend).toBe('idle')

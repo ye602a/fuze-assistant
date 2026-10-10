@@ -1,0 +1,52 @@
+{
+  "scope": "Synthetic RGBA buffer comparison and structuredClone, not actual IPC, game FPS, or whole-app CPU",
+  "width": 1024,
+  "height": 576,
+  "results": [
+    {
+      "scenario": "static",
+      "frames": 120,
+      "before": {
+        "elapsedMs": 352.33,
+        "transferredBytes": 283115520,
+        "accepted": 1
+      },
+      "after": {
+        "elapsedMs": 121.43,
+        "transferredBytes": 2359296,
+        "accepted": 1
+      },
+      "avoidedPayloadPercent": 99.2
+    },
+    {
+      "scenario": "ten-percent-changing",
+      "frames": 120,
+      "before": {
+        "elapsedMs": 309.76,
+        "transferredBytes": 283115520,
+        "accepted": 12
+      },
+      "after": {
+        "elapsedMs": 132.92,
+        "transferredBytes": 28311552,
+        "accepted": 12
+      },
+      "avoidedPayloadPercent": 90
+    },
+    {
+      "scenario": "all-changing",
+      "frames": 120,
+      "before": {
+        "elapsedMs": 302,
+        "transferredBytes": 283115520,
+        "accepted": 120
+      },
+      "after": {
+        "elapsedMs": 187.78,
+        "transferredBytes": 283115520,
+        "accepted": 120
+      },
+      "avoidedPayloadPercent": 0
+    }
+  ]
+}

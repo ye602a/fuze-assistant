@@ -1,7 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, screen } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { createHash } from 'node:crypto'
 import { isRawFrame, type RawFrame } from '../shared/raw-frame.ts'
 import logger from './modules/logger.ts'
 
@@ -9,14 +8,14 @@ let window: BrowserWindow | null = null
 let opening: Promise<void> | null = null
 let generation = 0
 let failedUntil = 0
-let fingerprint = ''
+let avoidedTransferBytes = 0
 let duplicates = 0
 let frames = 0
 let lastError: string | null = null
 let quitHook = false
 
 export function getCaptureStreamStatus() {
-  return { backend: window ? 'stream' : failedUntil > Date.now() ? 'bitmap-fallback' : 'idle', frames, duplicates, error: lastError }
+  return { backend: window ? 'stream' : failedUntil > Date.now() ? 'bitmap-fallback' : 'idle', frames, duplicates, avoidedTransferBytes, error: lastError }
 }
 
 function deadline<T>(task: Promise<T>, ms: number): Promise<T> {
@@ -29,7 +28,6 @@ export function stopCaptureStream() {
   const previous = window
   window = null
   opening = null
-  fingerprint = ''
   if (previous && !previous.isDestroyed()) previous.destroy()
 }
 
@@ -77,7 +75,11 @@ export async function readCaptureStream(): Promise<RawFrame | 'unchanged' | null
     if (!owner || owner.isDestroyed()) throw new Error('Capture surface unavailable')
     const result = await deadline(owner.webContents.executeJavaScript('globalThis.fuzeCapture.read()'), 2000)
     if (run !== generation) return 'unchanged'
-    if (result.pending || result.unchanged) { duplicates++; return 'unchanged' }
+    if (result.pending || result.unchanged) {
+      duplicates++
+      avoidedTransferBytes += Math.max(0, Number(result.duplicateBytes) || 0)
+      return 'unchanged'
+    }
     const frame = { buffer: Buffer.from(result.pixels), width: result.width, height: result.height, channels: 4 as const }
     if (!isRawFrame(frame)) throw new Error('Invalid stream frame')
     let visible = false
@@ -85,9 +87,6 @@ export async function readCaptureStream(): Promise<RawFrame | 'unchanged' | null
       if (frame.buffer[offset]! + frame.buffer[offset + 1]! + frame.buffer[offset + 2]! > 24) { visible = true; break }
     }
     if (!visible) throw new Error('Capture stream returned a black frame')
-    const next = createHash('sha1').update(frame.buffer).digest('hex')
-    if (next === fingerprint) { duplicates++; return 'unchanged' }
-    fingerprint = next
     frames++
     return frame
   } catch (error) {

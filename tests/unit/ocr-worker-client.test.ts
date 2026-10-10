@@ -24,6 +24,22 @@ vi.mock('../../src/main/modules/logger.ts', () => ({ default: { info: vi.fn(), w
 beforeEach(() => { vi.resetModules(); harness.gpu = true; harness.failure = ''; harness.children = [] })
 afterEach(() => vi.useRealTimers())
 describe('isolated OCR recovery', () => {
+  it('releases idle models after two minutes and reinitializes on the next request', async () => {
+    vi.useFakeTimers()
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    const service = await client.createOcrWorkerService({})
+    await vi.advanceTimersByTimeAsync(119000)
+    expect(harness.children[0].kill).not.toHaveBeenCalled()
+    await service.recognize({})
+    await vi.advanceTimersByTimeAsync(119000)
+    expect(client.getOcrWorkerStatus().backend).toBe('webgpu')
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(harness.children[0].kill).toHaveBeenCalledOnce()
+    expect(client.getOcrWorkerStatus().backend).toBe('idle')
+    expect(await service.recognize({})).toEqual(['text'])
+    expect(harness.children).toHaveLength(2)
+    await service.destroy()
+  })
   it('prewarms GPU once and keeps serialized requests on the same process', async () => {
     const client = await import('../../src/main/ocr-worker-client.ts')
     const service = await client.createOcrWorkerService({})

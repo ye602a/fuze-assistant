@@ -5,9 +5,12 @@
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d', { willReadFrequently: true })
   let stream, frame = 0, readFrame = -1, lastFrameAt = 0
+  let previousPixels = null, previousWidth = 0, previousHeight = 0
   const onFrame = () => { frame++; lastFrameAt = performance.now(); video.requestVideoFrameCallback(onFrame) }
   globalThis.fuzeCapture = {
     async start() {
+      previousPixels = null
+      frame = 0; readFrame = -1
       stream = await navigator.mediaDevices.getDisplayMedia({
         audio: false, video: { width: { ideal: 1024, max: 1024 }, height: { ideal: 576, max: 576 }, frameRate: { ideal: 2, max: 2 } },
       })
@@ -28,8 +31,21 @@
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height }
       context.drawImage(video, 0, 0, width, height)
       readFrame = frame
-      return { width, height, channels: 4, pixels: context.getImageData(0, 0, width, height).data.buffer }
+      const pixels = context.getImageData(0, 0, width, height).data
+      const words = new Uint32Array(pixels.buffer, pixels.byteOffset, pixels.byteLength / 4)
+      // Exact comparison before IPC: never send identical megabyte-sized pixel buffers.
+      // Check every pixel, including small rerolls; a sampled hash could miss title changes.
+      let same = previousWidth === width && previousHeight === height && previousPixels?.length === words.length
+      if (same) {
+        for (let i = 0; i < words.length; i++) {
+          if (words[i] !== previousPixels[i]) { same = false; break }
+        }
+      }
+      if (same) return { unchanged: true, duplicateBytes: pixels.byteLength }
+      previousPixels = words
+      previousWidth = width; previousHeight = height
+      return { width, height, channels: 4, pixels: pixels.buffer }
     },
-    stop() { stream?.getTracks().forEach(track => track.stop()); video.srcObject = null },
+    stop() { stream?.getTracks().forEach(track => track.stop()); video.srcObject = null; previousPixels = null },
   }
 })()

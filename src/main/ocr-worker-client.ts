@@ -11,11 +11,16 @@ let gpuFailed = false
 let generation = 0
 let mode = 'auto'
 let queue: Promise<unknown> = Promise.resolve()
+let queuedTasks = 0
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+const IDLE_RELEASE_MS = 120000
 let status = { backend: 'idle', warming: false, fallback: false, reason: '' }
 let pending: { id: number; resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } | null = null
 
 export function getOcrWorkerStatus() { return { ...status } }
 export function stopOcrWorker() {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
   generation++
   ready = null
   const previous = worker
@@ -88,7 +93,19 @@ async function initialize() {
   try { await initialization; ready = initialization } catch (error) { stopOcrWorker(); throw error }
 }
 function serialize<T>(task: () => Promise<T>): Promise<T> {
-  const next = queue.catch(() => undefined).then(task)
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+  queuedTasks++
+  const next = queue.catch(() => undefined).then(task).finally(() => {
+    queuedTasks--
+    if (!queuedTasks && worker) {
+      idleTimer = setTimeout(() => {
+        idleTimer = null
+        if (!queuedTasks && !pending) { stopOcrWorker(); logger.info('Idle OCR worker released') }
+      }, IDLE_RELEASE_MS)
+      idleTimer.unref()
+    }
+  })
   queue = next
   return next
 }

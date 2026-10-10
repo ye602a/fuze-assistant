@@ -125,6 +125,11 @@ async function createPackEnv() {
     )
   }
 
+  // @electron/get 5 uses fetch; opt into its standard proxy handling for this
+  // build child only. Keep NO_PROXY and never modify machine/user proxy settings.
+  if (env.ELECTRON_GET_USE_PROXY == null && (env.HTTPS_PROXY || env.HTTP_PROXY || env.https_proxy || env.http_proxy)) {
+    env.ELECTRON_GET_USE_PROXY = '1'
+  }
   return env
 }
 

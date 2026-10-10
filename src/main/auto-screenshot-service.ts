@@ -192,6 +192,22 @@ function isKnownSubsetOfPrevious(currentIds = [], previousIds = []) {
 
 class AutoScreenshotService {
     levelGateStatus: ReturnType<AugmentLevelGate['decide']> | null = null
+    warmupTask: Promise<unknown> | null = null
+    lastWarmupAt = -Infinity
+    lastWarmupKey = ''
+
+    _warmupAnalyzer() {
+        const key = String(store.get('ocr.gpuEnabled') !== false)
+        if (this.warmupTask) return this.warmupTask
+        if (key === this.lastWarmupKey && Date.now() - this.lastWarmupAt < 30000) return Promise.resolve()
+        this.lastWarmupKey = key
+        this.lastWarmupAt = Date.now()
+        const task = Promise.resolve().then(() => warmupImageAnalyzer()).catch(() => false).finally(() => {
+            if (this.warmupTask === task) this.warmupTask = null
+        })
+        this.warmupTask = task
+        return task
+    }
     constructor() {
         this.levelGate = new AugmentLevelGate()
         this.levelReader = new LiveLevelReader()
@@ -330,7 +346,7 @@ class AutoScreenshotService {
             thumbnailSize: this._getCurrentThumbnailSize(),
             owner,
         })
-        void warmupImageAnalyzer()
+        void this._warmupAnalyzer()
 
         this._scheduleNextCapture(0, this.runId)
 
@@ -382,7 +398,7 @@ class AutoScreenshotService {
             this.levelGateStatus = null
         }
         this.gameflowPhase = phase || null
-        if (store.get('autoScreenshotGameflowControl') !== false && (phase === 'ChampSelect' || phase === 'GameStart')) void warmupImageAnalyzer()
+        if (store.get('autoScreenshotGameflowControl') !== false && (phase === 'ChampSelect' || phase === 'GameStart')) void this._warmupAnalyzer()
 
         if (phase && phase !== 'InProgress' && phase !== 'None') {
             this.pendingAnalysisBuffer = null
@@ -554,7 +570,7 @@ class AutoScreenshotService {
             if (value) this.levelGate.updateLevel(value.level, value.checkedAt)
             else this.levelGate.checkedAt = 0
             this.levelGateStatus = this.levelGate.decide(Date.now())
-            if (this.levelGateStatus.prepare) void warmupImageAnalyzer()
+            if (this.levelGateStatus.prepare) void this._warmupAnalyzer()
             if (this.levelGateStatus.mode === 'saving') stopCaptureStream()
             if (!this.levelGateStatus.capture) return { success: false, error: 'level-gate-idle' }
         } else this.levelGateStatus = null
@@ -1823,6 +1839,8 @@ class AutoScreenshotService {
      */
     reset() {
         this.stop()
+        this.lastWarmupAt = -Infinity
+        this.lastWarmupKey = ''
         this.screenshotCount = 0
         this.analysisCount = 0
         this.detectionCount = 0
