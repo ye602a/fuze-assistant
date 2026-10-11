@@ -16,6 +16,7 @@
 
 import https from 'https'
 import axios from 'axios'
+import { resolveHistoryPlatform } from '../match-history/platform-resolver.ts'
 import logger from '../../modules/logger.ts'
 import { getLcuToken } from './token-loader.ts'
 import { LcuJsonApiEvent, LcuWampSocket } from './lcu-wamp-socket.ts'
@@ -1234,13 +1235,7 @@ export class LCUService {
    * 返回值例如: "ChampSelect", "GameStart", "InProgress", "EndOfGame" 等
    */
   async getCurrentPlatformId(): Promise<string | null> {
-    if (!this.active || !this.url || !this.auth) await this.getAuthToken()
-    if (!this.url || !this.auth) return null
-    try {
-      const response = await axios.get(`${this.url}/lol-rso-auth/v1/authorization`, { ...this.auth, httpsAgent: this.httpsAgent, timeout: 5000, proxy: false, validateStatus: () => true })
-      const value = response.status === 200 ? response.data?.currentPlatformId : null
-      return typeof value === 'string' && /^[A-Z0-9-]{2,24}$/i.test(value) ? value.toUpperCase() : null
-    } catch { return null }
+    return resolveHistoryPlatform((endpoint) => this.getReadOnlyJsonEndpoint(endpoint))
   }
 
   async getGameflowPhase(): Promise<GameflowPhase | null> {
@@ -1430,6 +1425,7 @@ export class LCUService {
         httpsAgent: this.httpsAgent,
         validateStatus: (status) => status < 500,
         timeout: 2500,
+        proxy: false,
       })
 
       return {

@@ -3,7 +3,7 @@
     <header class="match-history-header">
       <div>
         <p class="section-kicker">{{ t('matchHistory.title') }}</p>
-        <p class="match-history-description">{{ t('matchHistory.description') }}</p>
+        <p class="match-history-description">{{ t('matchHistory.connection.description') }}</p>
       </div>
       <button
         class="match-history-refresh"
@@ -22,13 +22,20 @@
     </p>
 
     <div v-if="page" class="match-history-overview">
+      <div class="history-source" role="status">
+        <span>{{ t(`matchHistory.connection.sources.${page.source || 'sgp'}`) }}</span>
+        <small v-if="loading">{{ t('matchHistory.connection.syncing') }}</small>
+      </div>
+      <p v-if="page.offline" class="history-notice">{{ t('matchHistory.connection.offline') }}</p>
+      <p v-if="page.warning" class="history-notice">{{ t(`matchHistory.connection.issues.${page.warning}`) }}</p>
       <strong>{{ page.playerName || t('matchHistory.currentPlayerFallback') }}</strong>
       <div class="match-history-meta">
         <span>{{ t('matchHistory.platform', { platform: page.platformId }) }}</span>
         <span>{{ t('matchHistory.currentPageMatches', { count: page.returnedCount }) }}</span>
         <span>{{ t('matchHistory.hextechOnly') }}</span>
       </div>
-      <small>{{ t('matchHistory.queriedAt', { time: formatTime(page.queriedAt) }) }}</small>
+      <small>{{ t('matchHistory.updatedAt', { time: formatTime(page.queriedAt) }) }}</small>
+      <small v-if="page.limited">{{ t('matchHistory.connection.limited') }}</small>
     </div>
 
     <div v-if="loading && !page" class="match-history-loading" role="status">
@@ -142,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
 import type {
@@ -155,7 +162,10 @@ import { electronAPI, hasElectronAPI } from '../native/electron-api.ts'
 
 const PAGE_SIZE = 10
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+let revision = 0
+let mounted = true
+let unsubscribeHistory: (() => void) | undefined
 const page = ref<HextechAramMatchHistoryPage | null>(null)
 const loading = ref(false)
 const status = ref('')
@@ -196,40 +206,56 @@ function resultLabel(result: HextechAramMatchResult): string {
   return t('matchHistory.defeat')
 }
 
-async function queryPage(startIndex: number): Promise<void> {
-  if (loading.value) return
+async function queryPage(startIndex: number, cacheOnly = false): Promise<void> {
   if (!hasElectronAPI()) {
     status.value = t('matchHistory.apiUnavailable')
     return
   }
-
+  const request = ++revision
   loading.value = true
   status.value = ''
+  const current = () => mounted && request === revision
   try {
-    const result = await electronAPI.matchHistory.queryCurrent({
-      startIndex,
-      count: PAGE_SIZE,
-    })
+    const range = { startIndex, count: PAGE_SIZE }
+    const cached = await electronAPI.matchHistory.getCachedCurrent(range)
+    if (!current()) return
+    page.value = cached.data || null
+    if (cacheOnly || cached.data?.offline) {
+      if (cached.issue) status.value = t(`matchHistory.connection.issues.${cached.issue}`)
+      return
+    }
+    const result = await electronAPI.matchHistory.queryCurrent(range)
+    if (!current()) return
     if (!result.success || !result.data) {
-      status.value = t('matchHistory.queryFailed', { error: result.error || '' })
+      if (['account-changed', 'login-required', 'platform-unknown'].includes(result.issue || '')) page.value = null
+      status.value = t(`matchHistory.connection.issues.${result.issue || 'service-unavailable'}`)
       return
     }
     page.value = result.data
-  } catch (error) {
-    status.value = t('matchHistory.queryFailed', {
-      error: error instanceof Error ? error.message : String(error),
-    })
+  } catch {
+    if (current()) status.value = t('matchHistory.connection.issues.service-unavailable')
   } finally {
-    loading.value = false
+    if (current()) loading.value = false
   }
 }
 
+// Re-label saved IDs on locale changes without another remote history request.
+watch(locale, () => { void queryPage(page.value?.startIndex || 0, true) })
+onUnmounted(() => { mounted = false; revision += 1; unsubscribeHistory?.() })
+
 onMounted(() => {
+  if (hasElectronAPI()) unsubscribeHistory = electronAPI.events.on('match-history-updated', () => {
+    if (!loading.value) void queryPage(page.value?.startIndex || 0, true)
+  })
   void queryPage(0)
 })
 </script>
 
 <style scoped>
+.history-source { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.history-source > span { color: var(--lol-gold, #c8aa6e); border: 1px solid var(--lol-border-soft); padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+.history-notice { margin: 4px 0; color: #d8c9ae; font-size: 12px; line-height: 1.6; }
+
 .match-history-panel {
   margin-top: 12px;
   border: 1px solid var(--lol-border-soft);
@@ -259,7 +285,7 @@ onMounted(() => {
 .match-asset-group small {
   margin: 5px 0 0;
   color: #859491;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.45;
 }
@@ -310,7 +336,7 @@ onMounted(() => {
   border: 1px solid rgba(255, 180, 171, 0.28);
   border-radius: 4px;
   color: #ffb4ab;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1.4;
 }
@@ -327,10 +353,17 @@ onMounted(() => {
   display: block;
   overflow: hidden;
   color: #d7e4f1;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.match-history-overview > small {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
 }
 
 .match-history-meta {
@@ -345,7 +378,7 @@ onMounted(() => {
   border-radius: 3px;
   background: rgba(194, 156, 109, 0.1);
   color: #bacac6;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -383,7 +416,7 @@ onMounted(() => {
   width: 28px;
   flex: 0 0 auto;
   color: #ffb4ab;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 950;
   text-align: center;
 }
@@ -422,7 +455,7 @@ onMounted(() => {
 .recent-match-copy strong,
 .recent-match-kda strong {
   color: #d7e4f1;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 850;
 }
 
@@ -430,7 +463,7 @@ onMounted(() => {
 .recent-match-kda small {
   margin-top: 2px;
   color: #859491;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -441,7 +474,7 @@ onMounted(() => {
 
 .match-assets {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 7px;
   margin-top: 8px;
   padding-top: 7px;
@@ -454,7 +487,7 @@ onMounted(() => {
 
 .match-asset-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   align-items: start;
   gap: 8px 4px;
   min-width: 0;
@@ -501,7 +534,7 @@ onMounted(() => {
   width: 100%;
   margin-top: 4px;
   color: #aebdc5;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
   overflow-wrap: anywhere;
@@ -529,7 +562,7 @@ onMounted(() => {
   border: 0;
   background: transparent;
   color: #e2c08f;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 850;
   cursor: pointer;
   transition: color 140ms ease-out, transform 140ms ease-out;
@@ -546,7 +579,7 @@ onMounted(() => {
 
 .match-history-pagination > span {
   color: #859491;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
 }
 

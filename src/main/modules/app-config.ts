@@ -20,6 +20,8 @@ import {
 } from './window-manager.ts'
 import autoScreenshotService from '../auto-screenshot-service.ts'
 import { getLCUServiceInstance } from '../services/lcu/lcu-service.ts'
+import { getHextechAramQueryService, setHistoryGamePhase } from '../services/match-history/hextech-aram-query-service.ts'
+import { PostGameHistorySync } from '../services/match-history/post-game-sync.ts'
 import {
     stopLocalMatchHistoryBackgroundSync,
 } from '../services/match-history/background-sync.ts'
@@ -70,6 +72,10 @@ import {
 } from '../auto-screenshot-policy.ts'
 
 const __dirname = import.meta.dirname
+const personalHistorySync = new PostGameHistorySync(async () => {
+    const page = await getHextechAramQueryService(getLCUServiceInstance()).queryCurrent({ count: 10 })
+    notifyAllWindows('match-history-updated', { updatedAt: page.queriedAt })
+})
 
 // 全局游戏流程监控状态
 let lcuPollingTimer = null
@@ -198,7 +204,7 @@ export async function init({ startBackgroundServices = true } = {}) {
         })
     }, 1000)
 
-    // History is queried only when requested; no startup sync/upload or telemetry.
+    // History refreshes on demand or once after a game; no startup scan or uploads.
 
     // 初始化游戏流程监控（延迟初始化，避免阻塞应用启动）
     logger.info('将在后台初始化游戏流程监控...')
@@ -1178,7 +1184,9 @@ async function initGameFlowMonitor() {
         let pollInFlight = false
 
         const handleGameflowPhase = async (phase, source) => {
+            setHistoryGamePhase(phase || null)
             if (!phase) {
+                personalHistorySync.onPhase(null)
                 // A disappearing client must not leave capture running after the game exits.
                 if (autoScreenshotService.isRunning) {
                     const game = await getLolGameStatus()
@@ -1193,6 +1201,7 @@ async function initGameFlowMonitor() {
 
             const transition = gameSessionCoordinator.transition(phase, source)
             if (transition.changed) {
+                personalHistorySync.onPhase(phase)
                 applyPopupWindowPreferences(phase)
                 const prevPhase = transition.previous.phase
                 const currentPhase = transition.current.phase
@@ -1412,6 +1421,7 @@ async function runQuitCleanup(reason = 'app quit') {
     logger.info('App is quitting, cleaning up...', { reason })
     markAnalyticsAppCleanExit()
     stopPerformanceMonitor(reason)
+    personalHistorySync.stop()
 
     stopGameflowMonitorRuntime('app will quit')
     stopLocalMatchHistoryBackgroundSync()
