@@ -141,6 +141,7 @@
             <div class="tab-content">
               <!-- 海克斯 Tab -->
               <div v-if="activeTab === 'augments'" class="tab-panel">
+                <StageStatisticsPanel v-if="!isSidePanel && championId" :key="championId" :champion-id="championId" :augments="augmentBase.length ? augmentBase : displayAugments" />
                 <div class="section-title-row">
                   <h3>{{ t('augment.coreAugments') }}</h3>
                   <span>{{ t('augment.itemCount', { count: filteredAugments.length }) }}</span>
@@ -513,6 +514,7 @@ import {
 import { useAugmentTooltip } from '../composables/use-augment-tooltip.ts'
 import AramBenchRecommendation from './AramBenchRecommendation.vue'
 import GameIcon from './GameIcon.vue'
+import StageStatisticsPanel from './StageStatisticsPanel.vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({

@@ -46,6 +46,7 @@ import { getAramBenchRecommendation } from '../services/aram/bench-recommendatio
 import { registerPreferencesIpcHandlers } from '../ipc/preferences-handlers.ts'
 import { registerSystemIpcHandlers } from '../ipc/system-handlers.ts'
 import { registerStorageIpcHandlers } from '../ipc/storage-handlers.ts'
+import { registerStageStatisticsHandlers } from '../ipc/stage-statistics-handlers.ts'
 import { registerFeedbackIpcHandlers } from '../ipc/feedback-handlers.ts'
 import { trustedIpcMain as ipcMain } from '../security/trusted-ipc.ts'
 import { shouldRaiseOverlayWindow } from './overlay-window-state.ts'
@@ -361,6 +362,7 @@ export function registerIpcHandlers(isDev: boolean): void {
     registerPreferencesIpcHandlers()
     registerSystemIpcHandlers()
     registerStorageIpcHandlers()
+    registerStageStatisticsHandlers()
     registerFeedbackIpcHandlers()
 
     ipcMain.on('renderer-ready', (event) => markRendererReady(event.sender))

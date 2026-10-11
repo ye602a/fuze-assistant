@@ -117,6 +117,9 @@ const electronAPI: ElectronAPI = {
     getAramStatus: () => ipcRenderer.invoke('item-sets-get-aram-status'),
     installAramChampion: (payload) => ipcRenderer.invoke('item-sets-install-aram-champion', payload),
   },
+  stageStatistics: {
+    get: (championId, refresh = false) => ipcRenderer.invoke('stage-statistics-get', championId, refresh),
+  },
   storage: {
     preview: () => ipcRenderer.invoke('storage-preview'),
     clean: (previewId) => ipcRenderer.invoke('storage-clean', previewId),

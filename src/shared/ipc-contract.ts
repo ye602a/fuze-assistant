@@ -482,6 +482,9 @@ export interface ElectronAPI {
     getAramStatus(): Promise<OperationResult>
     installAramChampion(payload: LooseRecord): Promise<OperationResult>
   }
+  stageStatistics: {
+    get(championId: number, refresh?: boolean): Promise<import('./stage-statistics.ts').StageResult>
+  }
   storage: {
     preview(): Promise<StorageResult>
     clean(previewId: string): Promise<StorageResult>
