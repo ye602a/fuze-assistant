@@ -43,6 +43,14 @@ yarn-error.log*
 /config.json
 *.pfx
 *.p12
+*.key
+*.pem
+*.keystore
+.netrc
+id_rsa
+id_ed25519
+personal-history-v1.json
+augment-journal-v1.json
 
 # Editor directories and files
 .idea
