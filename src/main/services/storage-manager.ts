@@ -28,7 +28,8 @@ const signature = (candidates: Candidate[]) => JSON.stringify(candidates)
 export class StorageManager {
   private snapshot: Snapshot | null = null
   private running = false
-  constructor(private readonly root: string, private readonly verifyIdle: () => Promise<boolean>,
+  private rootResolved = false
+  constructor(private root: string, private readonly verifyIdle: () => Promise<boolean>,
     private readonly busy: () => boolean = () => false) {}
 
   private assertIdle() { if (this.busy()) throw new StorageIssue('game-active') }
@@ -48,6 +49,14 @@ export class StorageManager {
   }
 
   private async scan(): Promise<Snapshot> {
+    if (!this.rootResolved) {
+      // Windows TEMP/user paths may use short names or an aliased ancestor.
+      // Pin the trusted root's physical path once; never follow links beneath it.
+      const info = await lstat(this.root)
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new StorageIssue('changed')
+      this.root = await realpath(this.root)
+      this.rootResolved = true
+    }
     const rootInfo = await this.safeStat('')
     if (!rootInfo.isDirectory()) throw new StorageIssue('scan-failed')
     const entries = new Map<string, Entry>()

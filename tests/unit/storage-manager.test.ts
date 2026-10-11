@@ -32,7 +32,7 @@ async function version(name: string, locale = 'zh-CN') {
 }
 async function preview(): Promise<StoragePreview> {
   const result = await manager.preview()
-  expect(result.success).toBe(true)
+  expect(result).toMatchObject({ success: true })
   return (result as { success: true; preview: StoragePreview }).preview
 }
 beforeEach(async () => {
@@ -45,6 +45,14 @@ beforeEach(async () => {
 afterEach(async () => { vi.useRealTimers(); await rm(root, { recursive: true, force: true }) })
 
 describe('storage retention and cleanup', () => {
+  it('canonicalizes a trusted root with an aliased ancestor while still rejecting a linked root', async () => {
+    await mkdir(path.join(root, 'physical/inner'), { recursive: true })
+    await symlink(path.join(root, 'physical'), path.join(root, 'alias'), 'junction')
+    const aliased = new StorageManager(path.join(root, 'alias/inner'), idle)
+    expect(await aliased.preview()).toMatchObject({ success: true })
+    const linked = new StorageManager(path.join(root, 'alias'), idle)
+    expect(await linked.preview()).toMatchObject({ success: false, issue: 'changed' })
+  })
   it('previews without deleting; removes only old versions and preserves current, fallback and personal files', async () => {
     for (const file of ['match-history/personal-history-v1.json', 'match-history/augment-journal-v1.json', 'logs/test.log', 'config.json', 'ocr-partial-screenshots/test.png']) await put(file, 'protected')
     const plan = await preview()
