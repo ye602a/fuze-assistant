@@ -99,7 +99,8 @@ export function summarizeStageProbe(responses: ProbeResponse[], checkedAt: numbe
 export class StageSignalProbe {
   private pending: Promise<StageSignalResult> | null = null
   private lastAttempt = -Infinity
-  constructor(private readonly read: Reader = readStageProbe, private readonly now = Date.now) {}
+  constructor(private readonly read: Reader = readStageProbe, private readonly now = Date.now,
+    private readonly context: () => { revision: number; usable: boolean } = () => ({ revision: 0, usable: false })) {}
   inspect(): Promise<StageSignalResult> {
     if (this.pending) return this.pending
     const retryAfterMs = Math.max(0, 30000 - (this.now() - this.lastAttempt))
@@ -109,10 +110,16 @@ export class StageSignalProbe {
     return this.pending
   }
   private async run(): Promise<StageSignalResult> {
+    const before = this.context()
     const responses: ProbeResponse[] = []
     for (const path of PROBE_PATHS) {
       try { responses.push(await this.read(path)) } catch { responses.push({ status: 'unavailable' }) }
     }
-    return { report: summarizeStageProbe(responses, this.now()), retryAfterMs: Math.max(0, 30000 - (this.now() - this.lastAttempt)) }
+    const after = this.context()
+    const report = summarizeStageProbe(responses, this.now())
+    report.context = { revision: after.revision, status: before.revision !== after.revision ? 'changed' : before.usable && after.usable ? 'stable' : 'unavailable' }
+    // A report spanning a disconnect or phase change must not retain a previous session's clues.
+    if (report.context.status === 'changed') { report.playerFields = []; report.schemaFields = []; report.level = null; report.augmentEventCount = 0 }
+    return { report, retryAfterMs: Math.max(0, 30000 - (this.now() - this.lastAttempt)) }
   }
 }
