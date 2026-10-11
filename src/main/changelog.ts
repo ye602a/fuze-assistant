@@ -13,7 +13,7 @@ const SUMMARY_TEXT_LIMIT = 220
 
 export const LOCAL_CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
-    version: '0.6.0', date: '2026-10-11', title: '增量更新与选人窗口修复',
+    version: '0.6.1', date: '2026-10-11', title: '增量更新与选人窗口修复',
     summary: '私有频道优先差分下载，修复备选英雄列表迟到刷新，选人时默认置顶英雄详情。',
     changes: [
       '有可用旧安装包缓存时只下载变化数据；差分不可用时回退经过校验的完整安装包。',

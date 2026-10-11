@@ -10,6 +10,7 @@ import { FuzeNsisUpdater } from '../../src/main/update/private-nsis-updater.ts'
 import { FuzePrivateProvider } from '../../src/main/update/private-provider.ts'
 import { RELEASE_API } from '../../src/main/update/request-policy.ts'
 import { session } from 'electron'
+import fs from 'node:fs/promises'
 
 async function main() {
 const old = Buffer.alloc(512 * 1024, 65), next = Buffer.from(old)
@@ -24,6 +25,27 @@ const manifest = { version:'0.6.0', files:[{url:'Fuze-Setup-0.6.0.exe',sha512:di
 const fixtureAccess = 'fixture_access'
 let scenario = '', rangeBytes = 0, fullBytes = 0, maps = 0, releaseCalls = 0, sawCdn = false
 let cancelToken: CancellationToken
+let copyBytesAfterCancel = 0, copyCancelled = false, copyStreams = 0
+const realOpen = fs.open
+// Test only: cancel at an actual COPY read, before and after a network range.
+fs.open = async (...args: Parameters<typeof fs.open>) => {
+  const handle = await realOpen(...args)
+  if (String(args[0]).endsWith('installer.exe')) {
+    copyStreams++
+    handle.once('close', () => copyStreams--)
+    const read = handle.read.bind(handle)
+    handle.read = (async (...readArgs: Parameters<typeof handle.read>) => {
+      const result = await read(...readArgs)
+      if (cancelToken.cancelled) copyBytesAfterCancel += result.bytesRead
+      if (!copyCancelled && (scenario === 'cancel-copy-first' || (scenario === 'cancel-copy-last' && rangeBytes > 0))) {
+        copyCancelled = true
+        cancelToken.cancel()
+      }
+      return result
+    }) as typeof handle.read
+  }
+  return handle
+}
 const root = path.resolve(process.env.FUZE_UPDATE_FIXTURE_ROOT || '')
 if(path.dirname(root)!==path.resolve(tmpdir())||!path.basename(root).startsWith('fuze-update-fixture-'))throw new Error('Unexpected fixture path')
 app.setPath('userData',path.join(root,'electron'))
@@ -67,8 +89,9 @@ await partition.protocol.handle('https', async request => {
   return new Response(scenario==='bad-integrity'?Buffer.alloc(next.length,99):next)
 })
 const results=[]
-for(const kind of ['differential','missing-baseline','missing-map','bad-map','stale-baseline','ignore-range','bad-integrity','bad-redirect','cancel','retry']) {
+for(const kind of ['differential','missing-baseline','missing-map','bad-map','stale-baseline','ignore-range','bad-integrity','bad-redirect','cancel','cancel-copy-first','cancel-copy-last','retry']) {
   scenario=kind;rangeBytes=0;fullBytes=0;maps=0;releaseCalls=0;sawCdn=false;cancelToken=new CancellationToken()
+  copyBytesAfterCancel=0;copyCancelled=false
   const base=path.join(root,kind);await mkdir(base,{recursive:true})
   const config=path.join(base,'app-update.yml');await writeFile(config,JSON.stringify({updaterCacheDirName:'cache'}))
   const cache=path.join(base,'cache');await mkdir(cache,{recursive:true})
@@ -80,13 +103,17 @@ for(const kind of ['differential','missing-baseline','missing-map','bad-map','st
   await updater.checkForUpdates()
   let files:string[]=[];let failed=false
   try{files=await updater.downloadUpdate(cancelToken)}catch{failed=true}
-  if(kind==='cancel'||kind==='bad-integrity'||kind==='bad-redirect') {assert.ok(failed);assert.equal(updater.installerPath,null);if(kind==='cancel')assert.equal(fullBytes,0)}
+  if(kind.startsWith('cancel')||kind==='bad-integrity'||kind==='bad-redirect') {assert.ok(failed);assert.equal(updater.installerPath,null);if(kind.startsWith('cancel'))assert.equal(fullBytes,0)}
   else {assert.equal(failed,false,kind);assert.deepEqual(await readFile(files[0]),next);assert.ok(sawCdn)}
   if(kind==='differential'||kind==='retry'){assert.equal(fullBytes,0);assert.ok(rangeBytes>0&&rangeBytes<next.length)}
   if(kind==='missing-baseline'){assert.equal(maps,0);assert.equal(releaseCalls,0);assert.equal(fullBytes,next.length)}
   if(['missing-map','bad-map','stale-baseline','ignore-range'].includes(kind))assert.ok(fullBytes>=next.length)
   results.push({scenario:kind,passed:true,rangeBytes,fullBytes,maps,releaseCalls})
-  if(kind==='cancel') {
+  if(kind.startsWith('cancel-copy')) {
+    assert.ok(copyCancelled);assert.equal(copyBytesAfterCancel,0);assert.equal(copyStreams,0)
+    if(kind==='cancel-copy-first')assert.equal(rangeBytes,0)
+  }
+  if(kind.startsWith('cancel')) {
     scenario='same-instance-retry';rangeBytes=0;fullBytes=0
     const retry=await updater.downloadUpdate(new CancellationToken())
     assert.deepEqual(await readFile(retry[0]),next);assert.equal(fullBytes,0);assert.ok(rangeBytes>0)

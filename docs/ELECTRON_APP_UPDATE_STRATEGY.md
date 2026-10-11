@@ -15,13 +15,13 @@
 - `src/main/update/private-provider.ts` 通过准确的发布资产名称解析新旧 blockmap 的资产 ID，不对数字 API URL 拼后缀。
 - `private-update-executor.ts` 使用隔离网络会话，在每次重定向时创建新请求。认证仅发往指定仓库的 GitHub API；CDN 请求移除认证、Cookie 和 staging ID。只接受固定 GitHub API 路径与两个资产域名，禁止降级到 HTTP。
 - 同一下载期间复用资产重定向结果，结束或取消后清空。顺序 Range 下载避免多范围兼容问题；响应必须是匹配范围的 206。
-- `private-nsis-updater.ts` 保留上游重建和完整性校验，补充无基线快速回退、取消保护和旧 pending blockmap 清理。不新增运行期整文件哈希扫描。
+- `private-nsis-updater.ts` 处理基线与 blockmap；`private-reconstruction.ts` 复用上游差异块计划和 SHA-512 校验，通过可取消的顺序流重建文件。旧包只打开一次，每次读取最多 64 KB；每次读取前后检查取消，避免上游 COPY 阶段继续读取或异步抛错。不新增运行期整文件哈希扫描。
 - 凭据通过本机 safeStorage 保存；不进入 renderer 状态、日志、下载地址、构建或发行包。自动下载与自动安装保持关闭。
 - 内部扩展基于锁定的 `electron-updater 6.8.9`。升级依赖必须重跑以下回归，不能假定内部接口不变。
 
 ## 验证
 
-`node scripts/test-private-update.mjs` 在隐藏、隔离的 Electron 进程内使用虚构 HTTPS 响应，覆盖差分、无缓存、缺失/损坏 blockmap、旧缓存损坏、Range 被忽略、校验失败、非法重定向、取消和同实例重试。所有安装/重启入口在测试中禁用。
+`node scripts/test-private-update.mjs` 在隐藏、隔离的 Electron 进程内使用虚构 HTTPS 响应，覆盖差分、无缓存、缺失/损坏 blockmap、旧缓存损坏、Range 被忽略、校验失败、非法重定向、网络取消、首段/末段本地复制取消和同实例重试。复制取消测试检查没有继续读取、没有遗留文件句柄，也没有整包回退。所有安装/重启入口在测试中禁用。
 
 `node scripts/test-private-update-live.mjs` 使用有仓库读取权限的临时环境凭据，或本机已有 Git 凭据，下载真实 v0.4.2 基线，以当前实现重建真实 v0.5.0 包；仅下载与校验，不执行安装。测试固定历史版本以免最新发布指针改变测试目标，记录下载字节数和请求数。CI 通过临时 GitHub token 执行，不保存凭据。此下载验证不等同于玩家本机完整安装验收。
 
