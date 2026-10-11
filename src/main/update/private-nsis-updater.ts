@@ -36,6 +36,7 @@ export class FuzeNsisUpdater extends NsisUpdater {
     // Avoid metadata/blockmap requests and a second hash pass when no baseline exists.
     const baselineInfo = baseline && await stat(baseline).catch(() => null)
     if (!baseline || !baselineInfo || !baselineInfo.isFile()) return true
+    let step = 'release-metadata'
     try {
       const urls = await provider.getBlockMapFiles(file.url, this.currentVersion.version, options.updateInfoAndProvider.info.version)
       const load = async (url: URL, size: number) => {
@@ -44,14 +45,24 @@ export class FuzeNsisUpdater extends NsisUpdater {
         })
         return validateBlockmap(JSON.parse(gunzipSync(data, { maxOutputLength: 8 * 1024 * 1024 }).toString()), size)
       }
+      step = 'old-blockmap'
       const oldMap = await load(urls[0], baselineInfo.size)
+      step = 'new-blockmap'
       const newMap = await load(urls[1], file.info.size!)
+      step = 'reconstruction'
       await reconstructPrivateUpdate({ oldMap, newMap, oldFile: baseline, destination, url: file.url,
         sha512: file.info.sha512, size: file.info.size!, executor: this.httpExecutor, headers: options.requestHeaders,
         token: options.cancellationToken, onProgress: progress => this.emit('download-progress', progress) })
       return false
-    } catch {
+    } catch (error) {
       if (options.cancellationToken.cancelled) throw new CancellationError()
+      const message = error instanceof Error ? error.message : ''
+      const reason = /checksum mismatch/i.test(message) ? 'integrity' :
+        /Invalid update blockmap/.test(message) ? 'blockmap' :
+        /Update range size mismatch/.test(message) ? 'range-size' :
+        /Update baseline truncated/.test(message) ? 'baseline-size' : 'unavailable'
+      // Fixed categories only: never expose the SDK's URLs, headers or response bodies.
+      this.emit('private-update-fallback', { step, reason })
       this.httpExecutor.resetRedirects()
       return true
     }
