@@ -72,6 +72,9 @@ jobs:
       - name: OCR fixture regression
         run: npm run test:augment-ocr
 
+      - name: Stage statistics cache regression
+        run: node --experimental-transform-types tests/electron/test-stage-statistics.js
+
       - name: Package Windows installer
         shell: pwsh
         run: |

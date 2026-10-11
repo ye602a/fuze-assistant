@@ -69,6 +69,9 @@ export const electronAPI: ElectronAPI = {
     getAramStatus: (...args) => requireElectronAPI().itemSets.getAramStatus(...args),
     installAramChampion: (...args) => requireElectronAPI().itemSets.installAramChampion(...args),
   },
+  stageStatistics: {
+    get: (...args) => requireElectronAPI().stageStatistics.get(...args),
+  },
   storage: {
     preview: () => requireElectronAPI().storage.preview(),
     clean: (previewId) => requireElectronAPI().storage.clean(previewId),
