@@ -129,12 +129,15 @@ describe('isolated OCR recovery', () => {
     await fresh.destroy()
   })
   it('keeps queued frames usable through an internal GPU fallback', async () => {
+    const { recognitionMeter } = await import('../../src/main/recognition-summary.ts')
+    recognitionMeter.begin()
     harness.failure = 'recognize'
     const client = await import('../../src/main/ocr-worker-client.ts')
     const service = await client.createOcrWorkerService({})
     expect(await Promise.all([service.recognize({}), service.recognize({}), service.warmup()]))
       .toEqual([['text'], ['text'], undefined])
     expect(harness.children).toHaveLength(2)
+    expect(recognitionMeter.finish()).toMatchObject({ counts: { gpuCalls: 1, cpuCalls: 2, fallbacks: 1 }, fallbackReason: 'gpu-inference-failed' })
     await service.destroy()
   })
 })

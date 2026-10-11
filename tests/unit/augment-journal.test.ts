@@ -25,11 +25,11 @@ beforeEach(async () => {
 afterEach(async () => { await journal.stop().catch(() => {}); vi.useRealTimers(); await rm(directory, { recursive: true, force: true }) })
 
 describe('accepted observation journal', () => {
-  it('does no work for inactive/manual observations or empty sessions', async () => {
+  it('ignores inactive observations and saves a zero-observation session recap', async () => {
     journal.observe(cards(1, 2, 3), 3)
     await begin()
     await journal.onPhase('EndOfGame', async () => null)
-    await expect(readFile(filename)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(JSON.parse(await readFile(filename, 'utf8')).sessions[0]).toMatchObject({ events: [], endedAt: expect.any(Number), recognition: { counts: { captures: 0, accepted: 0 } } })
   })
   it('keeps the three slots, including a missing middle card and stale/unknown level', async () => {
     await begin()
@@ -197,7 +197,7 @@ describe('local journal query', () => {
     expect(emptyResult?.sessions[0].finalAugmentIds).toBeUndefined()
     await cache.save(context, [{ gameId: 123, gameCreation: 1000, gameDuration: 600, gameVersion: 'test', championId: 1,
       kills: 1, deaths: 1, assists: 1, result: 'win', augments: [{ id: 2 }], items: [] }], 1000)
-    expect((await service.getSelectionJournal())?.sessions[0].finalAugmentIds).toEqual([2])
+    expect((await service.getSelectionJournal())?.sessions[0]).toMatchObject({ finalAugmentIds: [2], championId: 1, result: 'win' })
   })
   it('does not show the last saved account while login is unresolved', async () => {
     await begin(); journal.observe(cards(1, 2, 3), 3)

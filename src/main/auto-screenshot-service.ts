@@ -14,6 +14,7 @@ import { AugmentLevelGate } from './augment-level-gate.ts'
 import { LiveLevelReader } from './live-level-reader.ts'
 import { isRawFrame } from '../shared/raw-frame.ts'
 import sharp from 'sharp'
+import { recognitionMeter } from './recognition-summary.ts'
 import {
     GATE_CAPTURE_THUMBNAIL_SIZE,
     resolveCandidateStreak,
@@ -552,6 +553,7 @@ class AutoScreenshotService {
      * @private
      */
     async _captureScreenshot(runId = this.runId) {
+        const metricTicket = recognitionMeter.ticket()
         if (this.isCapturing) {
             logger.debug('Auto screenshot capture skipped because previous capture is still running')
             return {
@@ -562,6 +564,7 @@ class AutoScreenshotService {
 
         if (this.enableAnalysis && this.isAnalysisAllowedByGameflow() && this.isAnalyzing) {
             this.analysisBackpressureSkipCount++
+            recognitionMeter.count('backpressure', metricTicket)
             logger.debug('Auto screenshot capture skipped because OCR analysis is still running')
             return {
                 success: false,
@@ -577,7 +580,7 @@ class AutoScreenshotService {
             this.levelGateStatus = this.levelGate.decide(Date.now())
             if (this.levelGateStatus.prepare) void this._warmupAnalyzer()
             if (this.levelGateStatus.mode === 'saving') stopCaptureStream()
-            if (!this.levelGateStatus.capture) return { success: false, error: 'level-gate-idle' }
+            if (!this.levelGateStatus.capture) { recognitionMeter.count('levelWaits', metricTicket); return { success: false, error: 'level-gate-idle' } }
         } else this.levelGateStatus = null
         const startTime = performance.now()
         this.isCapturing = true
@@ -624,6 +627,7 @@ class AutoScreenshotService {
 
             if (result.success) {
                 this.screenshotCount++
+                recognitionMeter.count('captures', metricTicket)
                 this.lastScreenshotTime = Date.now()
                 this.lastCaptureError = null
 
@@ -679,15 +683,17 @@ class AutoScreenshotService {
                 }
             } else {
                 if (result.unchanged) {
+                    recognitionMeter.count('unchanged', metricTicket)
                     if (!this.isAnalyzing && !this.pendingAnalysisBuffer) this.levelGate.observeUnchangedFrame(Date.now())
                     return result
                 }
                 this.lastCaptureError = 'capture-failed'
+                recognitionMeter.fail('capture', metricTicket)
                 logger.error('Auto screenshot failed:', result.error)
                 return result
             }
         } catch (error) {
-            if (runId === this.runId) this.lastCaptureError = 'capture-failed'
+            if (runId === this.runId) { this.lastCaptureError = 'capture-failed'; recognitionMeter.fail('capture', metricTicket) }
             logger.error('Auto screenshot error:', error)
             return {
                 success: false,
@@ -705,6 +711,7 @@ class AutoScreenshotService {
      * @private
      */
     async _analyzeGateScreenshot(imageBuffer, runId = this.runId) {
+        const metricTicket = recognitionMeter.ticket()
         try {
             const gateResult = await analyzeScreenshotGate(imageBuffer)
             if (!this._isCurrentAnalysisRun(runId)) {
@@ -715,6 +722,7 @@ class AutoScreenshotService {
                 return
             }
             if (!gateResult.success) {
+                recognitionMeter.fail('analysis', metricTicket)
                 this.levelGate.observeSelection(true, Date.now(), 'unknown')
                 logger.debug('Augment selection gate analysis failed', {
                     error: gateResult.error,
@@ -751,6 +759,7 @@ class AutoScreenshotService {
                 return
             }
             this.levelGate.observeSelection(true, Date.now(), 'unknown')
+            recognitionMeter.fail('analysis', metricTicket)
             logger.error('Augment selection gate analysis error:', error)
             this.candidateStreak = 0
             this.pendingFullCapture = false
@@ -841,8 +850,10 @@ class AutoScreenshotService {
      * @private
      */
     async _analyzeScreenshot(imageBuffer, runId = this.runId) {
+        const metricTicket = recognitionMeter.ticket()
         try {
             this.analysisCount++
+            recognitionMeter.count('analyses', metricTicket)
             const analysisStart = performance.now()
             const analysisResult = await analyzeScreenshot(imageBuffer)
             const analysisDuration = performance.now() - analysisStart
@@ -855,6 +866,7 @@ class AutoScreenshotService {
             }
 
             if (!analysisResult.success) {
+                recognitionMeter.fail('analysis', metricTicket)
                 this.levelGate.observeSelection(true, Date.now(), 'unknown')
                 this._logAnalysisMiss('analysis-failed', {
                     error: analysisResult.error || 'unknown',
@@ -868,6 +880,7 @@ class AutoScreenshotService {
             const selectionKind = classifySelection(analysisResult.analysis)
             this.levelGate.observeSelection(selectionKind !== 'none', Date.now(), selectionKind)
             if (selectionKind === 'stat-shard') {
+                recognitionMeter.count('shards', metricTicket)
                 if (this.lastDetectedAugmentIds.length) this.clearAugmentState('stat-shard-selection')
                 // Keep watching transitions; unchanged shard titles reuse the OCR cache.
                 this._setCaptureMode('active-selection', 'stat-shard-selection')
@@ -1072,6 +1085,7 @@ class AutoScreenshotService {
                 return
             }
             this.levelGate.observeSelection(true, Date.now(), 'unknown')
+            recognitionMeter.fail('analysis', metricTicket)
             this._returnToGateAfterFullOcrMiss('analysis-error')
             logger.error('Auto screenshot analysis error:', error)
         }
@@ -1333,6 +1347,7 @@ class AutoScreenshotService {
         }
 
         const startedAt = Date.now()
+        const metricTicket = recognitionMeter.ticket()
         try {
             const { getChampionAugmentStats } = await import('./data-loader.ts')
             const augmentStats = await getChampionAugmentStats(championId)
@@ -1360,6 +1375,7 @@ class AutoScreenshotService {
                 }
             })
 
+            if (statById.size > 0) recognitionMeter.count('recommendations', metricTicket)
             logger.debug('Augment winrate enriched in main', {
                 championId,
                 augmentIds,
@@ -1375,6 +1391,7 @@ class AutoScreenshotService {
                 winrateResultCount: statById.size,
             }
         } catch (error) {
+            recognitionMeter.fail('recommendation', metricTicket)
             logger.warn('Failed to enrich augment winrate in main:', error.message)
             return {
                 ...winrateData,
@@ -1386,6 +1403,7 @@ class AutoScreenshotService {
     }
 
     async _sendAugmentDetectedPayload(winrateData, notifyMode = 'detected', expectedRunId = this.runId) {
+        const metricTicket = recognitionMeter.ticket()
         try {
             const expectedSelectionRevision = winrateData.selectionRevision ?? this.selectionRevision
             if (!this._isCurrentAnalysisRun(expectedRunId) || !this._isCurrentAugmentPayload(winrateData)) return
@@ -1443,6 +1461,7 @@ class AutoScreenshotService {
                 })
             }
 
+            if (sentToOverlay) recognitionMeter.count('notifications', metricTicket)
             logger.debug('Augment detection notification sent', {
                 championId: winrateData.championId || null,
                 augmentIds: winrateData.augments.map(augment => augment.id),
@@ -1457,6 +1476,7 @@ class AutoScreenshotService {
                 sinceLastCaptureMs: this.lastScreenshotTime ? Date.now() - this.lastScreenshotTime : 0,
             })
         } catch (error) {
+            if (this._isCurrentAnalysisRun(expectedRunId)) recognitionMeter.fail('window', metricTicket)
             logger.error('Failed to notify windows:', error)
         }
     }
@@ -1466,6 +1486,7 @@ class AutoScreenshotService {
      * @private
      */
     async _notifyAugmentDetected(analysisResult, runId = this.runId) {
+        const metricTicket = recognitionMeter.ticket()
         try {
             if (!this._isCurrentAnalysisRun(runId)) {
                 return
@@ -1474,6 +1495,7 @@ class AutoScreenshotService {
             const selectionRevision = ++this.selectionRevision
             if (this.controlOwner === 'gameflow' && this.gameflowPhase === 'InProgress') {
                 const level = Date.now() - this.levelGate.checkedAt <= 10000 ? this.levelGate.level : null
+                recognitionMeter.count('accepted', metricTicket)
                 recordAugmentObservation(analysisResult.analysis.augments, level, analysisResult.analysis.partialUpdate === true)
             }
             this.latestRecommendation = null
@@ -1555,6 +1577,7 @@ class AutoScreenshotService {
                 }
             })
         } catch (error) {
+            if (this._isCurrentAnalysisRun(runId)) recognitionMeter.fail('window', metricTicket)
             logger.error('Failed to notify windows:', error)
         }
     }

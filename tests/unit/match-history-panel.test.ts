@@ -21,6 +21,21 @@ afterEach(() => vi.resetAllMocks())
 const start = () => mount(MatchHistoryPanel, { global: { stubs: { AugmentJournalPanel: true }, plugins: [createI18n({ legacy: false, locale: 'zh-CN', messages })] } })
 
 describe('history cache-first interface', () => {
+  it('filters saved history without online requests and ignores an earlier online reply', async () => {
+    mocks.cached.mockResolvedValue({ success: true, data: page })
+    let finish!: (value: HextechAramMatchHistoryQueryResult) => void
+    mocks.query.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = start(); await flushPromises()
+    mocks.cached.mockResolvedValue({ success: true, data: { ...page, savedCount: 32, matchedCount: 11, reviewChampions: [{ id: 103, name: 'Fixture' }] } })
+    await wrapper.find('input[type="checkbox"]').setValue(true); await flushPromises()
+    await wrapper.findAll('select')[0].setValue('103'); await flushPromises()
+    await wrapper.findAll('select')[1].setValue('win'); await flushPromises()
+    expect(mocks.cached).toHaveBeenLastCalledWith({ startIndex: 0, count: 10, reviewOnly: true, championId: 103, result: 'win' })
+    expect(mocks.query).toHaveBeenCalledOnce()
+    finish({ success: true, data: { ...page, playerName: 'Stale response' } }); await flushPromises()
+    expect(wrapper.text()).not.toContain('Stale response'); expect(wrapper.text()).toContain('符合条件 11 场')
+    wrapper.unmount()
+  })
   it('refreshes saved records after a post-game event without another online query', async () => {
     mocks.cached.mockResolvedValue({ success: true, data: { ...page, offline: true } })
     const unsubscribe = vi.fn()

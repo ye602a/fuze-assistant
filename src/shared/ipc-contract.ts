@@ -149,9 +149,15 @@ export interface HextechAramMatchHistoryPage extends LooseRecord {
   offline?: boolean
   limited?: boolean
   warning?: MatchHistoryIssue
+  reviewChampions?: HextechAramMatchHistoryAsset[]
+  savedCount?: number
+  matchedCount?: number
 }
 
 export interface HextechAramMatchHistoryQuery extends LooseRecord {
+  reviewOnly?: boolean
+  championId?: number
+  result?: HextechAramMatchResult
   startIndex?: number
   count?: number
 }
@@ -169,6 +175,17 @@ export interface AugmentJournalEvent {
   cards: Array<HextechAramMatchHistoryAsset | null>
 }
 
+export type RecognitionCounter = 'captures' | 'analyses' | 'accepted' | 'levelWaits' | 'unchanged' | 'backpressure' | 'shards' | 'cpuCalls' | 'gpuCalls' | 'fallbacks' | 'recommendations' | 'notifications'
+export type RecognitionFailure = 'capture' | 'analysis' | 'recommendation' | 'window' | 'ocr'
+export interface RecognitionSummary {
+  startedAt: number
+  updatedAt: number
+  counts: Record<RecognitionCounter, number>
+  lastFailure: { stage: RecognitionFailure; at: number } | null
+  lastBackend: 'cpu' | 'webgpu' | null
+  fallbackReason: 'gpu-initialization-failed' | 'gpu-inference-failed' | 'gpu-worker-exited' | null
+}
+
 export interface AugmentJournalSession {
   gameId: number
   startedAt: number
@@ -177,6 +194,10 @@ export interface AugmentJournalSession {
   capped: boolean
   events: AugmentJournalEvent[]
   finalAugmentIds?: number[]
+  recognition?: RecognitionSummary
+  championId?: number
+  championName?: string
+  result?: HextechAramMatchResult
 }
 
 export interface AugmentJournalResult extends OperationResult {

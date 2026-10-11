@@ -1,5 +1,7 @@
+import { recapMessages } from './recap-messages.ts'
 export const journalMessages = {
   'zh-CN': {
+    recap: recapMessages['zh-CN'],
     title: '本地选择记录', description: '回看当时识别到的左右三卡。记录变化可能来自重选或识别修正，不等于实际重选次数。',
     empty: '暂无记录。此功能只保存运行期间识别到的海克斯选项，不补录以前的对局。',
     loading: '正在读取本地记录…', refresh: '刷新本地记录',
@@ -14,6 +16,7 @@ export const journalMessages = {
     failed: '本地选择记录暂时无法读取或保存，已有文件已保留。',
   },
   'en-US': {
+    recap: recapMessages['en-US'],
     title: 'Local choice journal', description: 'Review the three slots as recognized. Changes may be rerolls or recognition corrections, not an actual reroll count.',
     empty: 'No records yet. Only offers recognized while this version is running are saved; older matches cannot be reconstructed.',
     loading: 'Reading local records…', refresh: 'Refresh local records', offline: 'Client disconnected; showing the last recorded account',
@@ -27,6 +30,7 @@ export const journalMessages = {
     failed: 'Local choice records cannot be read or saved. The existing file is preserved.',
   },
   'zh-TW': {
+    recap: recapMessages['zh-TW'],
     title: '本機選擇記錄', description: '回看當時辨識到的左右三卡。記錄變化可能來自重選或辨識修正，不等於實際重選次數。',
     empty: '暫無記錄。此功能只儲存執行期間辨識到的海克斯選項，不補錄以前的對局。',
     loading: '正在讀取本機記錄…', refresh: '重新整理本機記錄', offline: '客戶端未連線，以下是上次記錄的帳號',

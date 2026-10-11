@@ -1,5 +1,6 @@
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import path from 'node:path'
+import { recognitionMeter } from './recognition-summary.ts'
 import store from './modules/app-store.ts'
 import logger from './modules/logger.ts'
 
@@ -62,6 +63,7 @@ function spawnWorker() {
     if (status.backend === 'webgpu') {
       gpuFailed = true
       status = { ...status, fallback: true, reason: 'gpu-worker-exited' }
+      recognitionMeter.fallback('gpu-worker-exited', recognitionMeter.ticket())
     }
     worker = null
     ready = null
@@ -70,6 +72,7 @@ function spawnWorker() {
   })
 }
 async function initialize() {
+  const metricTicket = recognitionMeter.ticket()
   const selected = store.get('ocr.gpuEnabled') === false ? 'cpu' : 'auto'
   if (mode !== selected) { releaseWorker(); gpuFailed = false; mode = selected; status.fallback = false; status.reason = '' }
   if (ready) return ready
@@ -88,6 +91,7 @@ async function initialize() {
       gpuFailed = true
       releaseWorker()
       status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-initialization-failed' }
+      recognitionMeter.fallback('gpu-initialization-failed', metricTicket)
       logger.warn('GPU OCR initialization failed; falling back to CPU')
       spawnWorker()
       const fallbackGeneration = generation
@@ -130,24 +134,30 @@ export async function createOcrWorkerService(options: unknown) {
   }
   return {
     warmup: () => submit(initialize),
-    recognize: (input: unknown) => submit(async assertActive => {
-      await initialize()
-      assertActive()
-      const backend = status.backend
-      const run = generation
-      try { return await request({ action: 'recognize', input }, 6000) } catch (error) {
-        if (run !== generation) throw error
-        if (backend !== 'webgpu') { releaseWorker(); throw error }
-        gpuFailed = true
-        releaseWorker()
-        status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-inference-failed' }
-        logger.warn('GPU OCR inference failed; retrying current frame on CPU')
+    recognize: (input: unknown) => {
+      const metricTicket = recognitionMeter.ticket()
+      return submit(async assertActive => {
         await initialize()
         assertActive()
-        try { return await request({ action: 'recognize', input }, 6000) }
-        catch (fallbackError) { releaseWorker(); throw fallbackError }
-      }
-    }),
+        const backend = status.backend
+        const run = generation
+        recognitionMeter.inference(backend, metricTicket)
+        try { return await request({ action: 'recognize', input }, 6000) } catch (error) {
+          if (run !== generation) throw error
+          if (backend !== 'webgpu') { recognitionMeter.fail('ocr', metricTicket); releaseWorker(); throw error }
+          gpuFailed = true
+          releaseWorker()
+          status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-inference-failed' }
+          recognitionMeter.fallback('gpu-inference-failed', metricTicket)
+          logger.warn('GPU OCR inference failed; retrying current frame on CPU')
+          await initialize()
+          assertActive()
+          recognitionMeter.inference('cpu', metricTicket)
+          try { return await request({ action: 'recognize', input }, 6000) }
+          catch (fallbackError) { recognitionMeter.fail('ocr', metricTicket); releaseWorker(); throw fallbackError }
+        }
+      })
+    },
     destroy: async () => { if (!destroyed) { destroyed = true; stopOcrWorker() } },
   }
 }
