@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, stat } from 'fs/promises'
 import { BoundedCache } from './bounded-cache.ts'
 import { writeTextFileAtomic } from './atomic-data-write.ts'
+import { protectDataVersion } from './data-maintenance.ts'
 import path from 'path'
 import logger from './modules/logger.ts'
 import { getAppDataDir } from './modules/app-paths.ts'
@@ -475,6 +476,7 @@ async function getVersionDir(
   dataVersion: string,
   locale: SupportedDataLocale = activeDataLocale
 ): Promise<string> {
+  await protectDataVersion(normalizeDataLocale(locale), sanitizePathPart(dataVersion))
   const dataRootDir = await getDataRootDir()
   const normalizedLocale = normalizeDataLocale(locale)
   const versionDir = normalizedLocale === DEFAULT_DATA_LOCALE
@@ -489,6 +491,7 @@ async function getDataFileCandidatePaths(
   dataPath: string,
   locale: SupportedDataLocale = activeDataLocale
 ): Promise<string[]> {
+  await protectDataVersion(normalizeDataLocale(locale), sanitizePathPart(dataVersion))
   const dataRootDir = await getDataRootDir()
   const normalizedPath = normalizeDataPath(dataPath)
   const normalizedLocale = normalizeDataLocale(locale)

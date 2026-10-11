@@ -461,6 +461,10 @@ export interface ElectronAPI {
     getAramStatus(): Promise<OperationResult>
     installAramChampion(payload: LooseRecord): Promise<OperationResult>
   }
+  storage: {
+    preview(): Promise<StorageResult>
+    clean(previewId: string): Promise<StorageResult>
+  }
   matchHistory: {
     getLocalSummary(): Promise<LocalMatchHistorySummaryResult>
     getCachedCurrent(payload?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryQueryResult>
@@ -516,3 +520,16 @@ export interface ElectronAPI {
     ): Unsubscribe
   }
 }
+export type StorageCategory = 'recommendations' | 'recognition' | 'history' | 'screenshots' | 'logs' | 'browser'
+export interface StoragePreview {
+  id: string
+  checkedAt: number
+  expiresAt: number
+  categories: Array<{ kind: StorageCategory; bytes: number; files: number }>
+  candidates: Array<{ label: string; kind: 'version' | 'temporary'; bytes: number; files: number }>
+  reclaimableBytes: number
+  skipped: number
+  protectionUnknown: boolean
+}
+export type StorageResult = { success: true; preview?: StoragePreview; removedBytes?: number; removedFiles?: number }
+  | { success: false; issue: 'busy' | 'game-active' | 'scan-failed' | 'expired' | 'changed' | 'cleanup-failed'; removedBytes?: number; removedFiles?: number }

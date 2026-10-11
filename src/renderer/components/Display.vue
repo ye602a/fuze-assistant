@@ -34,6 +34,7 @@
         <MatchHistoryPanel v-else-if="tab === 'history'" />
         <template v-else>
           <UpdatePanel />
+          <StoragePanel />
           <section class="panel settings-panel"><div class="setting-row"><div><strong>{{ w('automatic') }}</strong><p>{{ w('automaticHint') }}</p></div><button class="switch" role="switch" :aria-label="w('automatic')" :aria-checked="!!status?.automatic" :class="{on: status?.automatic}" :disabled="busy || !status" @click="toggleAutomatic"><span/></button></div><div v-for="pref in preferenceDefinitions" :key="pref.key" class="setting-row"><div><strong>{{ w(pref.label) }}</strong><p>{{ w(pref.label + 'Hint') }}</p></div><button class="switch" role="switch" :aria-label="w(pref.label)" :aria-checked="preferences[pref.key]" :class="{on: preferences[pref.key]}" :disabled="busy" @click="togglePreference(pref.key)"><span/></button></div><div class="setting-row"><div><strong>{{ w('language') }}</strong></div><select :value="locale" :disabled="busy" :aria-label="w('language')" @change="changeLocale"><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option></select></div></section>
           <div class="tip"><Monitor :size="20"/><div><strong>{{ w('fullscreen') }}</strong><p>{{ w('fullscreenHint') }}</p></div></div>
           <section class="panel"><h2>{{ w('advanced') }}</h2>
@@ -56,6 +57,7 @@ import { useI18n } from 'vue-i18n'
 import { LayoutDashboard, History, Settings2, Minus, X, Play, Pause, PlugZap, ScanLine, Languages, Database, Monitor, FolderOpen, PanelsTopLeft } from 'lucide-vue-next'
 import { electronAPI } from '../native/electron-api.ts'
 import UpdatePanel from './UpdatePanel.vue'
+import StoragePanel from './StoragePanel.vue'
 import { setAppLocale } from '../i18n/index.ts'
 import { connectionIsVerified, runtimeState, type RuntimeStatus } from '../../shared/runtime-status.ts'
 import type { AppStoreKey, SupportedDataLocale } from '../../shared/ipc-contract.ts'

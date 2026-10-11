@@ -7,6 +7,7 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
+    "security:check": "node scripts/check-secrets.mjs",
     "dev": "node scripts/dev-electron.mjs",
     "prepare:client-data": "node scripts/fetch-client-data.mjs",
     "build": "electron-vite build",

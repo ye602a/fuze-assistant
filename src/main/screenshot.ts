@@ -75,7 +75,7 @@ const findGameWindow = (sources: DesktopCapturerSource[]): DesktopCapturerSource
     return candidates[0]?.score > 0 ? candidates[0].source : null
 }
 
-const isLolGameProcessRunning = (): Promise<boolean | null> => {
+export const isLolGameProcessRunning = (): Promise<boolean | null> => {
     if (process.platform !== 'win32') {
         return Promise.resolve(null)
     }

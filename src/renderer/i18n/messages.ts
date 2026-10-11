@@ -1,10 +1,12 @@
 import { historyStatusMessages } from './history-status.ts'
 import { journalMessages } from './journal-messages.ts'
+import { storageMessages } from './storage-messages.ts'
 import { workbenchMessages } from './workbench.ts'
 import type { SupportedDataLocale } from '../../shared/ipc-contract.ts'
 
 export const messages = {
   'zh-CN': {
+    storage: storageMessages['zh-CN'],
     workbench: workbenchMessages['zh-CN'],
     common: {
       cancel: '取消',
@@ -368,6 +370,7 @@ export const messages = {
     },
   },
   'en-US': {
+    storage: storageMessages['en-US'],
     workbench: workbenchMessages['en-US'],
     common: {
       cancel: 'Cancel', close: 'Close', current: 'Current', exit: 'Exit', hide: 'Hide', loading: 'Loading...', minimize: 'Minimize', refresh: 'Refresh', unknown: 'Unknown', unknownError: 'Unknown error',
@@ -412,6 +415,7 @@ export const messages = {
     },
   },
   'zh-TW': {
+    storage: storageMessages['zh-TW'],
     workbench: workbenchMessages['zh-TW'],
     common: {
       cancel: '取消', close: '關閉', current: '目前', exit: '退出', hide: '隱藏', loading: '載入中...', minimize: '最小化', refresh: '重新整理', unknown: '未知', unknownError: '未知錯誤',
