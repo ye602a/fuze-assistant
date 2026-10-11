@@ -63,6 +63,28 @@ async function setup() {
 }
 
 describe('champion window preferences', () => {
+  it('pins only during champion select by default, including before window creation', async () => {
+    const manager = await import('../../src/main/modules/window-manager.ts')
+    manager.applyPopupWindowPreferences('ChampSelect')
+    const { popup } = await setup()
+    popup.show()
+    expect(popup.setAlwaysOnTop).toHaveBeenLastCalledWith(true, expect.any(String))
+    manager.applyPopupWindowPreferences('Lobby')
+    expect(popup.setAlwaysOnTop).toHaveBeenLastCalledWith(false, expect.any(String))
+  })
+
+  it('honors the selection-only toggle through IPC without changing global pinning', async () => {
+    const { manager, popup } = await setup()
+    manager.applyPopupWindowPreferences('ChampSelect')
+    const set = mocks.handlers.get('store-set')!
+    set({}, 'championInsight.pinDuringChampSelect', false)
+    expect(popup.setAlwaysOnTop).toHaveBeenLastCalledWith(false, expect.any(String))
+    set({}, 'championInsight.pinDuringChampSelect', true)
+    expect(popup.setAlwaysOnTop).toHaveBeenLastCalledWith(true, expect.any(String))
+    manager.applyPopupWindowPreferences('InProgress')
+    expect(popup.setAlwaysOnTop).toHaveBeenLastCalledWith(false, expect.any(String))
+    expect(() => set({}, 'championInsight.pinDuringChampSelect', 'false')).toThrow('Setting must be boolean')
+  })
   it('creates an unpinned window by default and applies saved pinning on each show', async () => {
     const { popup } = await setup()
     expect((popup as any).options.alwaysOnTop).toBe(false)

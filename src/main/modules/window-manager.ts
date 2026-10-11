@@ -26,6 +26,7 @@ import { waitForRendererReady } from './renderer-ready.ts'
 import {
     shouldHideChampionInsightOnGameStart,
     shouldKeepChampionInsightOnTop,
+    shouldPinChampionInsightDuringChampSelect,
     shouldShowChampionDetails,
     shouldShowAugmentSidePanel,
     shouldShowAugmentTopOverlay,
@@ -197,7 +198,9 @@ export function applyPopupWindowPreferences(phase: GameflowPhase | null = popupG
         return
     }
 
-    setOverlayAlwaysOnTop(popupWindow, shouldKeepChampionInsightOnTop(), 'popup')
+    const pinned = shouldKeepChampionInsightOnTop() ||
+        (phase === 'ChampSelect' && shouldPinChampionInsightDuringChampSelect())
+    setOverlayAlwaysOnTop(popupWindow, pinned, 'popup')
     const inGame = phase === 'GameStart' || phase === 'InProgress'
     if ((!shouldShowChampionDetails() || (inGame && shouldHideChampionInsightOnGameStart())) &&
         popupWindow.isVisible()) {
