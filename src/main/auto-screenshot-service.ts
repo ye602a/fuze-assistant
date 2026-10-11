@@ -26,6 +26,7 @@ import {
     shouldActivateSelectionCapture,
 } from './auto-screenshot-policy.ts'
 import { analyzeScreenshot, analyzeScreenshotGate, warmupImageAnalyzer } from './image-analyzer.ts'
+import { classifySelection } from './selection-kind.ts'
 import { BrowserWindow } from 'electron'
 import fs from 'fs-extra'
 import path from 'path'
@@ -191,6 +192,7 @@ function isKnownSubsetOfPrevious(currentIds = [], previousIds = []) {
 }
 
 class AutoScreenshotService {
+    selectionRevision = 0
     levelGateStatus: ReturnType<AugmentLevelGate['decide']> | null = null
     warmupTask: Promise<unknown> | null = null
     lastWarmupAt = -Infinity
@@ -424,6 +426,7 @@ class AutoScreenshotService {
     }
 
     clearAugmentState(reason = 'gameflow-cleared') {
+        this.selectionRevision++
         const previousIds = this.lastDetectedAugmentIds
         const ageMs = this.lastDetectedAugmentAt ? Date.now() - this.lastDetectedAugmentAt : null
         this.lastDetectedAugmentIds = []
@@ -673,7 +676,10 @@ class AutoScreenshotService {
                     stage,
                 }
             } else {
-                if (result.unchanged) return result
+                if (result.unchanged) {
+                    if (!this.isAnalyzing && !this.pendingAnalysisBuffer) this.levelGate.observeUnchangedFrame(Date.now())
+                    return result
+                }
                 this.lastCaptureError = 'capture-failed'
                 logger.error('Auto screenshot failed:', result.error)
                 return result
@@ -707,6 +713,7 @@ class AutoScreenshotService {
                 return
             }
             if (!gateResult.success) {
+                this.levelGate.observeSelection(true, Date.now(), 'unknown')
                 logger.debug('Augment selection gate analysis failed', {
                     error: gateResult.error,
                 })
@@ -741,6 +748,7 @@ class AutoScreenshotService {
             if (!this._isCurrentAnalysisRun(runId)) {
                 return
             }
+            this.levelGate.observeSelection(true, Date.now(), 'unknown')
             logger.error('Augment selection gate analysis error:', error)
             this.candidateStreak = 0
             this.pendingFullCapture = false
@@ -845,6 +853,7 @@ class AutoScreenshotService {
             }
 
             if (!analysisResult.success) {
+                this.levelGate.observeSelection(true, Date.now(), 'unknown')
                 this._logAnalysisMiss('analysis-failed', {
                     error: analysisResult.error || 'unknown',
                     durationMs: analysisDuration,
@@ -854,7 +863,14 @@ class AutoScreenshotService {
             }
 
             const { cardCount, confidence, isAugmentPhase, augments } = analysisResult.analysis
-            this.levelGate.observeSelection(isConfirmedAugmentSelectionUi(analysisResult.analysis) || cardCount > 0, Date.now())
+            const selectionKind = classifySelection(analysisResult.analysis)
+            this.levelGate.observeSelection(selectionKind !== 'none', Date.now(), selectionKind)
+            if (selectionKind === 'stat-shard') {
+                if (this.lastDetectedAugmentIds.length) this.clearAugmentState('stat-shard-selection')
+                // Keep watching transitions; unchanged shard titles reuse the OCR cache.
+                this._setCaptureMode('active-selection', 'stat-shard-selection')
+                return
+            }
             const hasVisibleAugments = this.lastDetectedAugmentIds.length > 0
             const confirmedSelectionUi = shouldActivateSelectionCapture({
                 confirmedSelectionUi: isConfirmedAugmentSelectionUi(analysisResult.analysis),
@@ -1022,7 +1038,8 @@ class AutoScreenshotService {
                         })
                         this.lastDetectedAugmentIds = []
                         this.lastDetectedAugments = []
-        this.latestRecommendation = null
+                        this.selectionRevision++
+                        this.latestRecommendation = null
                         this.lastDetectedAugmentSlotFingerprints = []
                         this.lastDetectedAugmentAt = 0
                         this.visibleAugmentMissCount = 0
@@ -1052,6 +1069,7 @@ class AutoScreenshotService {
             if (!this._isCurrentAnalysisRun(runId)) {
                 return
             }
+            this.levelGate.observeSelection(true, Date.now(), 'unknown')
             this._returnToGateAfterFullOcrMiss('analysis-error')
             logger.error('Auto screenshot analysis error:', error)
         }
@@ -1255,6 +1273,7 @@ class AutoScreenshotService {
     }
 
     _isCurrentAugmentPayload(winrateData) {
+        if (winrateData?.selectionRevision != null && winrateData.selectionRevision !== this.selectionRevision) return false
         const payloadIds = getPayloadAugmentIds(winrateData?.augments).map(String)
         return payloadIds.join(',') === this.lastDetectedAugmentIds.join(',')
     }
@@ -1366,10 +1385,11 @@ class AutoScreenshotService {
 
     async _sendAugmentDetectedPayload(winrateData, notifyMode = 'detected', expectedRunId = this.runId) {
         try {
-            if (!this.isRunning || expectedRunId !== this.runId || !this._isCurrentAugmentPayload(winrateData)) return
-            this.latestRecommendation = winrateData
+            const expectedSelectionRevision = winrateData.selectionRevision ?? this.selectionRevision
+            if (!this._isCurrentAnalysisRun(expectedRunId) || !this._isCurrentAugmentPayload(winrateData)) return
             await ensureAugmentOverlayWindows()
-            if (!this.isRunning || expectedRunId !== this.runId || !this._isCurrentAugmentPayload(winrateData)) return
+            if (!this._isCurrentAnalysisRun(expectedRunId) || expectedSelectionRevision !== this.selectionRevision || !this._isCurrentAugmentPayload(winrateData)) return
+            this.latestRecommendation = winrateData
             if (this._isManualHiddenAugmentSuppressed(winrateData)) {
                 return
             }
@@ -1449,6 +1469,8 @@ class AutoScreenshotService {
                 return
             }
             // 从store中获取缓存的英雄ID
+            const selectionRevision = ++this.selectionRevision
+            this.latestRecommendation = null
             const championId = store.get('lastSelectedChampionId')
 
             if (!championId) {
@@ -1458,6 +1480,7 @@ class AutoScreenshotService {
             }
 
             const baseWinrateData = {
+                selectionRevision,
                 success: true,
                 gamePhase: 'augment-select',
                 championId: championId || null, // 添加英雄ID

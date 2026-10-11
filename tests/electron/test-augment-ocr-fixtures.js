@@ -166,6 +166,15 @@ async function main() {
             const { data, info } = await sharp(automaticCaptureBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
             const rawFrame = { buffer: data, width: info.width, height: info.height, channels: 4 }
             await assertFixtureResult(analyzeScreenshot, rawFrame, sample, 'raw1024x576')
+            if (sample.expectedCardCount === 3) {
+                // Changing the background must not force unchanged titles through OCR again.
+                await analyzeScreenshot(rawFrame)
+                const hitsBefore = imageAnalyzer.getTitleCacheStatus().hits
+                const changedBackground = { ...rawFrame, buffer: Buffer.from(data) }
+                changedBackground.buffer[0] ^= 1
+                await assertFixtureResult(analyzeScreenshot, changedBackground, sample, 'title-cache-background-change')
+                assert.ok(imageAnalyzer.getTitleCacheStatus().hits > hitsBefore, 'unchanged titles must reuse OCR after background changes')
+            }
             if (sample.expectedCardCount > 0) await assertGateResult(analyzeScreenshotGate, rawFrame, sample, 'raw-gate')
         }
       }

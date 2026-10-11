@@ -97,6 +97,38 @@ const expectNextCaptureToUseGate = (service) => {
 }
 
 describe.sequential('automatic screenshot service lifecycle', () => {
+  it('drops old window readiness when an identical selection reappears after clear', async () => {
+    const service = createRunningIdleService()
+    service.lastDetectedAugmentIds = ['1', '2', '3']
+    let ready!: () => void
+    mocks.prepareWindows.mockReturnValue(new Promise<void>(resolve => { ready = resolve }))
+    const send = vi.fn()
+    mocks.windows.push({ isDestroyed: () => false, webContents: { getURL: () => '', send } })
+    const payload = { selectionRevision: service.selectionRevision, augments: [{ id: 1 }, { id: 2 }, { id: 3 }] }
+    const pending = service._sendAugmentDetectedPayload(payload)
+    service.clearAugmentState('stat-shard-selection')
+    service.lastDetectedAugmentIds = ['1', '2', '3']
+    ready(); await pending
+    expect(send).not.toHaveBeenCalledWith('augment-detected', expect.anything())
+    expect(service.latestRecommendation).toBeNull()
+    expect(service._isCurrentAugmentPayload(payload)).toBe(false)
+  })
+  it('does not send an overlay during a disallowed game phase even if IDs remain', async () => {
+    const service = createRunningIdleService()
+    service.lastDetectedAugmentIds = ['1', '2', '3']
+    service.gameflowPhase = 'EndOfGame'
+    await service._sendAugmentDetectedPayload({ augments: [{ id: 1 }, { id: 2 }, { id: 3 }] })
+    expect(mocks.prepareWindows).not.toHaveBeenCalled()
+  })
+  it('does not complete a pending offer after an OCR exception', async () => {
+    const service = createRunningIdleService(); const now = Date.now()
+    service.levelGate.updateLevel(11, now)
+    service.levelGate.observeSelection(true, now, 'augment')
+    mocks.analyzeScreenshot.mockRejectedValueOnce(new Error('OCR failure'))
+    await service._analyzeScreenshot(Buffer.from('frame'))
+    for (const time of [now + 1000, now + 4000, now + 7000]) service.levelGate.observeSelection(false, time)
+    expect(service.levelGate.completed.size).toBe(0)
+  })
   it('coalesces repeated gameflow and level prewarming with a bounded retry interval', async () => {
     const service = createRunningIdleService()
     const now = Date.now()

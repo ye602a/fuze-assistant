@@ -9,6 +9,7 @@ import {
   resolveTrustedClientDataUrl,
 } from '../shared/client-data-security.ts'
 import { rankAugmentRecommendations } from '../shared/augment-ranking.ts'
+import { augmentStatisticsProvenance } from '../shared/augment-statistics-provenance.ts'
 import { mergeRecognitionCatalog, classifyStatistics, selectCoherentStatistics } from '../shared/recognition-catalog.ts'
 import { loadRecognitionCatalogLocal, getRecognitionCatalog, getRecognitionDataStatus } from './services/recognition-data-service.ts'
 
@@ -1962,6 +1963,7 @@ function mapPublicAugmentRecommendation(
   const winRate = toNullableNumber(stats.win_rate)
   const pickRate = toNullableNumber(stats.pick_rate)
   const games = toNullableNumber(stats.num_games)
+  const provenance = augmentStatisticsProvenance(augment?.stats || augment || {})
 
   return {
     ...augmentBase,
@@ -1977,9 +1979,9 @@ function mapPublicAugmentRecommendation(
     num_games: games,
     num_win_games: toNullableNumber(stats.num_win_games),
     recommendScore: getLegacyAugmentRecommendScore(stats),
-    statistics: { source: 'ARAMGG', region: augment?.stats?.region || 'unknown',
-      patch: stats.gamePatch, date: stats.date, samples: games,
-      status: classifyStatistics(stats.gamePatch, getRecognitionDataStatus().referencePatch, winRate !== null) },
+    statistics: { ...provenance, samples: games,
+      status: classifyStatistics(provenance.patch,
+        getRecognitionDataStatus().referencePatch, winRate !== null) },
   }
 }
 

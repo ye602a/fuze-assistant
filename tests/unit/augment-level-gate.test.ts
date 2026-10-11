@@ -18,7 +18,7 @@ describe('level scheduling without losing deferred offers', () => {
   })
   it('does not mistake short rerolls for a completed choice', () => {
     const gate = new AugmentLevelGate()
-    gate.updateLevel(3, 10000); gate.observeSelection(true, 10000)
+    gate.updateLevel(3, 10000); gate.observeSelection(true, 10000, 'augment')
     for (const time of [10500, 11000, 12000]) gate.observeSelection(false, time)
     expect(gate.visible).toBe(true)
     expect(gate.completed.size).toBe(0)
@@ -27,7 +27,7 @@ describe('level scheduling without losing deferred offers', () => {
   })
   it('sleeps after a confirmed disappearance but preserves an 8 second watchdog', () => {
     const gate = new AugmentLevelGate()
-    gate.updateLevel(4, 10000); gate.observeSelection(true, 10000)
+    gate.updateLevel(4, 10000); gate.observeSelection(true, 10000, 'augment')
     for (const time of [11000, 14000, 17000]) gate.observeSelection(false, time)
     expect(gate.completed.has(3)).toBe(true)
     expect(gate.decide(17000)).toMatchObject({ mode: 'saving', capture: true })
@@ -38,6 +38,27 @@ describe('level scheduling without losing deferred offers', () => {
     gate.observeSelection(true, 25000)
     expect(gate.decide(25100).mode).toBe('selection')
   })
+  it('never consumes a level for shards or unidentified UI, even after a long gap', () => {
+    for (const kind of ['stat-shard', 'unknown', undefined] as const) {
+      const gate = new AugmentLevelGate()
+      gate.completed.add(3); gate.completed.add(7); gate.updateLevel(11, 10000)
+      gate.observeSelection(true, 10000, kind)
+      for (const time of [11000, 14000, 17000]) gate.observeSelection(false, time)
+      gate.updateLevel(11, 17000)
+      expect(gate.completed.has(11)).toBe(false)
+      expect(gate.decide(17000)).toMatchObject({ mode: 'pending', capture: true, nextLevel: 11 })
+      gate.observeSelection(true, 18000, 'augment')
+      for (const time of [19000, 22000, 25000]) gate.observeSelection(false, time)
+      expect(gate.completed.has(11)).toBe(true)
+    }
+  })
+  it('does not carry completion evidence through an unknown or shard chain', () => {
+    const gate = new AugmentLevelGate(); gate.updateLevel(11, 10000)
+    gate.observeSelection(true, 10000, 'augment')
+    gate.observeSelection(true, 11000, 'stat-shard')
+    for (const time of [12000, 15000, 18000]) gate.observeSelection(false, time)
+    expect(gate.completed.size).toBe(0)
+  })
   it('prepares at level 6 and keeps the final pending choice active above level 15', () => {
     const gate = new AugmentLevelGate()
     gate.completed.add(3); gate.updateLevel(6, 10000)
@@ -45,9 +66,18 @@ describe('level scheduling without losing deferred offers', () => {
     gate.completed.add(7); gate.completed.add(11); gate.updateLevel(18, 12000)
     expect(gate.decide(12000)).toMatchObject({ mode: 'pending', nextLevel: 15 })
   })
+  it('advances disappearance without repeating image analysis on identical frames', () => {
+    const gate = new AugmentLevelGate(); gate.updateLevel(3, 10000)
+    gate.observeSelection(true, 10000, 'augment')
+    gate.observeUnchangedFrame(15000)
+    expect(gate.completed.size).toBe(0)
+    gate.observeSelection(false, 16000)
+    gate.observeUnchangedFrame(19000); gate.observeUnchangedFrame(22000)
+    expect(gate.completed.has(3)).toBe(true)
+  })
   it('resets per match and never infers several picks from a level jump', () => {
     const gate = new AugmentLevelGate()
-    gate.updateLevel(15, 10000); gate.observeSelection(true, 10000)
+    gate.updateLevel(15, 10000); gate.observeSelection(true, 10000, 'augment')
     for (const time of [11000, 14000, 17000]) gate.observeSelection(false, time)
     expect([...gate.completed]).toEqual([3])
     gate.updateLevel(3, 20000)

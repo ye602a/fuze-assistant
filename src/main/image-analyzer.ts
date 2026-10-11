@@ -34,6 +34,11 @@ import { getRecognitionRevision } from './services/recognition-data-service.ts'
 import { ensureOnnxruntimeNativeDllPath } from './modules/onnxruntime-native-path.ts'
 import { discoverLcuAuthFromProcess } from './services/lcu/process-auth-discovery.ts'
 import { isRawFrame } from '../shared/raw-frame.ts'
+import { TitleResultCache } from './title-result-cache.ts'
+import { classifySelection } from './selection-kind.ts'
+
+const titleResultCache = new TitleResultCache()
+export const getTitleCacheStatus = () => ({ hits: titleResultCache.hits })
 
 sharp.concurrency(Number(process.env.ARAMGG_SHARP_CONCURRENCY) || 2)
 
@@ -1422,7 +1427,7 @@ async function preparePaddleOcrStackedTitleRegion(imageBuffer, imageWidth, image
             .map(region => prepareRawOcrRegion(imageBuffer, region, imageWidth, imageHeight))
     )
 
-    return await composeStackedTitleRows(preparedRows, 24)
+    return preparedRows
 }
 
 function getPaddleOcrItemCenterY(item) {
@@ -1526,7 +1531,11 @@ export function isLikelyTitleSlotText(rawText, match) {
 async function readPaddleOcrTitleAugments(imageBuffer, groupRegion, imageWidth, imageHeight) {
     const startedAt = performance.now()
     const prepareStartedAt = performance.now()
-    const prepared = await preparePaddleOcrStackedTitleRegion(imageBuffer, imageWidth, imageHeight)
+    const rows = await preparePaddleOcrStackedTitleRegion(imageBuffer, imageWidth, imageHeight)
+    const context = `${imageWidth}:${imageHeight}:${getDataLocale()}:${getRecognitionRevision()}:${[...loadedCatalogRevisions].join('|')}`
+    const cached = titleResultCache.get(rows, context, Date.now())
+    if (cached) return cached
+    const prepared = await composeStackedTitleRows(rows, 24)
     const { rect, rowBounds, rowFingerprints } = prepared
     const prepareMs = performance.now() - prepareStartedAt
     logger.debug(`PaddleOCR ordered title stack: x=${rect.left}, y=${rect.top}, width=${rect.width}, height=${rect.height}`)
@@ -1544,6 +1553,8 @@ async function readPaddleOcrTitleAugments(imageBuffer, groupRegion, imageWidth, 
 
     const matchStartedAt = performance.now()
     const result = await buildOrderedTitleAugmentResult(slotTexts, rowFingerprints, groupRegion, 'paddleocr')
+    const kind = classifySelection({ cardCount: result.augments.length, slotDiagnostics: result.slotDiagnostics })
+    titleResultCache.set(rows, context, Date.now(), kind === 'stat-shard' ? 10000 : result.augments.length === 3 ? 3000 : 1000, result)
     const matchMs = performance.now() - matchStartedAt
     const totalMs = performance.now() - startedAt
 
@@ -1835,6 +1846,7 @@ async function recognizeAugmentsFromImage(imageBuffer) {
         }
 
         if (!titleActivity.likely) {
+            titleResultCache.clear()
             logger.debug('OCR augment recognition skipped: no likely augment title card activity')
             return {
                 augments: [],
@@ -1850,6 +1862,7 @@ async function recognizeAugmentsFromImage(imageBuffer) {
         const rerollButtons = await detectAugmentRerollButtons(rawImage, width, height)
         gate.rerollButtons = rerollButtons
         if (!rerollButtons.visible) {
+            titleResultCache.clear()
             logger.debug('OCR augment recognition skipped: no visible augment reroll buttons')
             return {
                 augments: [],
@@ -2453,6 +2466,7 @@ export const getConfidence = (analysisResult) => {
 }
 
 export const shutdownImageAnalyzer = async () => {
+    titleResultCache.clear()
     await resetPaddleOcrService()
     AUGMENT_DATABASE = null
     AUGMENT_MATCH_ENTRIES = null
