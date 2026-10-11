@@ -78,6 +78,14 @@ jobs:
       - name: Stage signal privacy and transport regression
         run: node --experimental-transform-types tests/electron/test-stage-signal.js
 
+      - name: Private differential update regression
+        run: node scripts/test-private-update.mjs
+
+      - name: Verify private release differential download
+        env:
+          FUZE_UPDATE_TEST_ACCESS: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/test-private-update-live.mjs
+
       - name: Package Windows installer
         shell: pwsh
         run: |

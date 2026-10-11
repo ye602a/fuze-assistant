@@ -63,7 +63,7 @@ export default defineConfig({
         output: {
           entryFileNames: '[name].js'
         },
-        external: ['electron', 'electron-store', 'axios', 'fs', 'path', 'https']
+        external: ['electron', 'electron-store', 'axios', 'fs', 'path', 'https', 'builder-util-runtime', /^electron-updater\//]
       },
       outDir: 'dist-electron',
       emptyOutDir: true

@@ -1,10 +1,13 @@
 import { app, BrowserWindow, safeStorage } from 'electron'
 import electronUpdater from 'electron-updater'
+import { FuzeNsisUpdater } from './update/private-nsis-updater.ts'
+import { FuzePrivateProvider } from './update/private-provider.ts'
 import store from './modules/app-store.ts'
 import { allowMainWindowClose } from './modules/window-manager.ts'
 import type { AppUpdateState } from '../shared/ipc-contract.ts'
 
-const { autoUpdater, CancellationToken } = electronUpdater
+const { CancellationToken } = electronUpdater
+const autoUpdater = new FuzeNsisUpdater()
 export const FUZE_RELEASE_URL = 'https://github.com/ye602a/fuze-assistant/releases'
 const CREDENTIAL_KEY = 'privateUpdateCredential'
 const BLOCKED_PHASES = new Set(['ChampSelect', 'GameStart', 'InProgress', 'Reconnect'])
@@ -104,7 +107,7 @@ export async function checkForAppUpdate(_reason = 'manual'): Promise<Result> {
   if (!enabled || downloadPromise || installing || state.downloaded) return result(false, 'unavailable')
   const token = readCredential()
   if (!token) { publish({ phase: 'auth-required' }); return result(false, 'auth-required') }
-  autoUpdater.setFeedURL({ provider: 'github', owner: 'ye602a', repo: 'fuze-assistant', private: true, token })
+  autoUpdater.setFeedURL({ provider: 'custom', updateProvider: FuzePrivateProvider, token })
   publish({ phase: 'checking', error: '', available: false, latestVersion: '', progress: null })
   checkPromise = (async () => {
     try {

@@ -1,31 +1,30 @@
-# Fuze 应用更新与增量下载
+# Fuze 私有频道增量更新
 
-## 当前渠道
+应用更新来自私有仓库 `ye602a/fuze-assistant`，与推荐数据更新分离。检查、下载和安装均由玩家主动发起；退出软件不会自动安装。选人、加载、对局及重连期间禁止下载和安装，阶段切换会取消下载。
 
-Fuze 使用私有仓库 `ye602a/fuze-assistant` 的 GitHub Releases，与原项目的数据 API 分离。入口为 `src/main/app-update-service.ts`。更新凭据仅在本机使用，通过 Electron safeStorage 加密保存，不随源码或发行文件分发。
+## 下载方式
 
-自动下载和退出时自动安装均关闭。用户主动检查、下载、重启安装；选人、加载、对局和重连阶段阻止更新下载及安装，进入相关阶段取消已有下载。NSIS 发行文件包括完整 `.exe`、`.exe.blockmap`、`latest.yml` 和 `SHA256SUMS.txt`。
+从包含此实现的版本开始，更新优先使用旧安装包缓存与新旧 blockmap，只请求变化的数据块，重建完整 NSIS 安装包后由 updater 执行 SHA-512 校验。它节省的是下载量，安装时仍需退出符择；不会对局中热替换代码。
 
-PR 和手动 CI 的 Actions 测试产物不是正式发布。正式版本通过版本脚本创建提交和标签，经过检查、打包、扫描、实际窗口就绪验证后发布。见 [贡献约定](../AGENTS.md) 和 [窗口验收](RELEASE_WINDOW_SMOKE.md)。
+没有旧安装包缓存时直接完整下载，跳过差分元数据请求。blockmap 缺失、损坏、缓存不匹配或服务器不支持正确 Range 响应时回退整包；完整包仍必须通过校验。取消下载不会触发整包回退，下一次下载需玩家主动点击。
 
-## 增量下载现状
+**从 v0.5.0 或更早版本升级到首个增量版本，仍可能完整下载。** 执行下载的是旧版本更新器，新能力不能在安装前生效。增量大小依版本内容、打包结果和缓存情况而变，不承诺固定节省比例。
 
-NSIS 框架支持通过 blockmap 复用旧安装包数据块，只下载变化部分，然后组合并校验完整安装包。这减少网络下载量，仍需安装并重启，不是对局中热替换代码。
+## 实现边界
 
-项目锁定 `electron-updater 6.8.9`，本次源码检查不能证明私有频道增量下载正常工作：
+- `src/main/update/private-provider.ts` 通过准确的发布资产名称解析新旧 blockmap 的资产 ID，不对数字 API URL 拼后缀。
+- `private-update-executor.ts` 使用隔离网络会话，在每次重定向时创建新请求。认证仅发往指定仓库的 GitHub API；CDN 请求移除认证、Cookie 和 staging ID。只接受固定 GitHub API 路径与两个资产域名，禁止降级到 HTTP。
+- 同一下载期间复用资产重定向结果，结束或取消后清空。顺序 Range 下载避免多范围兼容问题；响应必须是匹配范围的 206。
+- `private-nsis-updater.ts` 保留上游重建和完整性校验，补充无基线快速回退、取消保护和旧 pending blockmap 清理。不新增运行期整文件哈希扫描。
+- 凭据通过本机 safeStorage 保存；不进入 renderer 状态、日志、下载地址、构建或发行包。自动下载与自动安装保持关闭。
+- 内部扩展基于锁定的 `electron-updater 6.8.9`。升级依赖必须重跑以下回归，不能假定内部接口不变。
 
-- `PrivateGitHubProvider.resolveFiles` 返回带数字资产 ID 的 GitHub API 地址。
-- 该 provider 未覆盖 `getBlockMapFiles`；继承实现对文件 URL 拼接 `.blockmap` 并替换版本号。
-- 数字资产地址不能如此转换为对应 blockmap 资产地址。库的差分失败路径会回退完整下载。
+## 验证
 
-因此有 blockmap 只是准备条件，当前仍应按可能完整下载理解。本次未进行两套正式安装包的升级实测，也未修改依赖 provider。
+`node scripts/test-private-update.mjs` 在隐藏、隔离的 Electron 进程内使用虚构 HTTPS 响应，覆盖差分、无缓存、缺失/损坏 blockmap、旧缓存损坏、Range 被忽略、校验失败、非法重定向、取消和同实例重试。所有安装/重启入口在测试中禁用。
 
-## 后续实施与验收
+`node scripts/test-private-update-live.mjs` 使用有仓库读取权限的临时环境凭据，或本机已有 Git 凭据，下载真实 v0.4.2 基线，以当前实现重建真实 v0.5.0 包；仅下载与校验，不执行安装。测试固定历史版本以免最新发布指针改变测试目标，记录下载字节数和请求数。CI 通过临时 GitHub token 执行，不保存凭据。此下载验证不等同于玩家本机完整安装验收。
 
-独立 PR 应解析新旧发布中的 blockmap 资产 ID，验证带认证的 Range 下载和重定向边界。旧安装包缓存缺失、blockmap 缺失或损坏时回退完整下载。复用 updater 原有完整性校验，避免叠加重复的全文件哈希遍历。
+PR、正式标签的 Windows CI 均运行上述验证，以及源码/安装包凭据扫描和实际打包窗口检查。正式版本还需完整发布 `.exe`、`.exe.blockmap`、`latest.yml`、`SHA256SUMS.txt` 和发行说明，核对 latest 指针。清理时保留历史正式发布和 blockmap。
 
-必须用真实旧版到新版升级验证实际下载字节数、最终校验、对局阶段取消与恢复行为；同时覆盖令牌失效和网络中断，保证不泄漏认证信息。不能用单元测试推算节省比例。
-
-清理时保留历史正式 Releases、标签和 blockmap。重复 Actions 测试产物不承担更新分发，可以清理。
-
-参考：[electron-builder 自动更新文档](https://www.electron.build/v26/docs/features/auto-update/)。以锁定版本和实际升级验证为准。
+参考：[GitHub 资产 API](https://docs.github.com/en/rest/releases/assets)、[electron-builder 更新文档](https://www.electron.build/v26/docs/features/auto-update/)。

@@ -1,0 +1,102 @@
+import { app } from 'electron'
+import assert from 'node:assert/strict'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
+import { CancellationToken } from 'builder-util-runtime'
+import { FuzeNsisUpdater } from '../../src/main/update/private-nsis-updater.ts'
+import { FuzePrivateProvider } from '../../src/main/update/private-provider.ts'
+import { RELEASE_API } from '../../src/main/update/request-policy.ts'
+import { session } from 'electron'
+
+async function main() {
+const old = Buffer.alloc(512 * 1024, 65), next = Buffer.from(old)
+next.fill(66, 128 * 1024, 192 * 1024)
+const blockmap = (data: Buffer) => ({ version: '2', files: [{ name: 'file', offset: 0,
+  sizes: Array.from({length: 8}, () => 65536), checksums: Array.from({length:8}, (_,i) => createHash('sha256').update(data.subarray(i*65536,(i+1)*65536)).digest('base64')) }] })
+const hashes = { old: gzipSync(JSON.stringify(blockmap(old))), next: gzipSync(JSON.stringify(blockmap(next))) }
+const digest = createHash('sha512').update(next).digest('base64')
+const asset = (id: number, name: string) => ({ url: `${RELEASE_API}/assets/${id}`, name })
+const assets = [asset(1,'latest.yml'),asset(2,'Fuze-Setup-0.6.0.exe'),asset(3,'Fuze-Setup-0.6.0.exe.blockmap')]
+const manifest = { version:'0.6.0', files:[{url:'Fuze-Setup-0.6.0.exe',sha512:digest,size:next.length}],path:'Fuze-Setup-0.6.0.exe',sha512:digest }
+const fixtureAccess = 'fixture_access'
+let scenario = '', rangeBytes = 0, fullBytes = 0, maps = 0, releaseCalls = 0, sawCdn = false
+let cancelToken: CancellationToken
+const root = path.resolve(process.env.FUZE_UPDATE_FIXTURE_ROOT || '')
+if(path.dirname(root)!==path.resolve(tmpdir())||!path.basename(root).startsWith('fuze-update-fixture-'))throw new Error('Unexpected fixture path')
+app.setPath('userData',path.join(root,'electron'))
+app.disableHardwareAcceleration()
+await app.whenReady()
+const partition = session.fromPartition('fuze-private-updater',{cache:false})
+await partition.protocol.handle('https', async request => {
+  const url = new URL(request.url)
+  if (url.hostname === 'api.github.com') {
+    assert.equal(request.headers.get('authorization'), `token ${fixtureAccess}`)
+    assert.equal(request.headers.has('x-user-staging-id'), false)
+    if (url.pathname.endsWith('/assets/2')&&scenario==='bad-redirect')return new Response(null,{status:302,headers:{location:'https://untrusted.invalid/file'}})
+    if (url.pathname.endsWith('/latest')) return Response.json({assets})
+    if (url.pathname.endsWith('/tags/v0.5.0')) {releaseCalls++;return Response.json({tag_name:'v0.5.0',assets:[asset(4,'Fuze-Setup-0.5.0.exe.blockmap')]})}
+    assert.equal(request.headers.get('accept'), 'application/octet-stream')
+    return new Response(null,{status:302,headers:{location:`https://release-assets.githubusercontent.com/${url.pathname.split('/').pop()}`}})
+  }
+  assert.equal(url.hostname,'release-assets.githubusercontent.com')
+  assert.equal(request.headers.has('authorization'),false)
+  assert.equal(request.headers.has('cookie'),false)
+  sawCdn = true
+  const id=url.pathname.slice(1)
+  if(id==='1')return Response.json(manifest)
+  if(id==='3'||id==='4') {
+    maps++
+    if(scenario==='bad-map'&&id==='3')return new Response('invalid gzip')
+    if(scenario==='missing-map'&&id==='3')return new Response('missing',{status:404})
+    return new Response(id==='3'?hashes.next:hashes.old)
+  }
+  assert.equal(id,'2')
+  const range=request.headers.get('range')
+  if(range) {
+    const match=/^bytes=(\d+)-(\d+)$/.exec(range)!;assert.ok(match)
+    const start=Number(match[1]),end=Number(match[2]);rangeBytes+=end-start+1
+    if(scenario==='cancel') {cancelToken.cancel();return new Response('cancelled',{status:503})}
+    if(scenario==='ignore-range') {fullBytes+=next.length;return new Response(next)}
+    const content=Buffer.from(next.subarray(start,end+1));if(scenario==='bad-integrity')content.fill(99)
+    return new Response(content,{status:206,headers:{'content-range':`bytes ${start}-${end}/${next.length}`}})
+  }
+  fullBytes+=next.length
+  return new Response(scenario==='bad-integrity'?Buffer.alloc(next.length,99):next)
+})
+const results=[]
+for(const kind of ['differential','missing-baseline','missing-map','bad-map','stale-baseline','ignore-range','bad-integrity','bad-redirect','cancel','retry']) {
+  scenario=kind;rangeBytes=0;fullBytes=0;maps=0;releaseCalls=0;sawCdn=false;cancelToken=new CancellationToken()
+  const base=path.join(root,kind);await mkdir(base,{recursive:true})
+  const config=path.join(base,'app-update.yml');await writeFile(config,JSON.stringify({updaterCacheDirName:'cache'}))
+  const cache=path.join(base,'cache');await mkdir(cache,{recursive:true})
+  if(kind!=='missing-baseline')await writeFile(path.join(cache,'installer.exe'),kind==='stale-baseline'?Buffer.alloc(old.length,90):old)
+  const updater=new FuzeNsisUpdater({version:'0.5.0',name:'fixture',isPackaged:true,appUpdateConfigPath:config,userDataPath:base,baseCachePath:base,
+    whenReady:async()=>{},relaunch(){throw new Error('Must not relaunch')},quit(){throw new Error('Must not install')},onQuit(){}})
+  updater.logger=null;updater.autoDownload=false;updater.autoInstallOnAppQuit=false;updater.on('error',()=>{});updater.on('download-progress',()=>{})
+  updater.setFeedURL({provider:'custom',updateProvider:FuzePrivateProvider,token:fixtureAccess})
+  await updater.checkForUpdates()
+  let files:string[]=[];let failed=false
+  try{files=await updater.downloadUpdate(cancelToken)}catch{failed=true}
+  if(kind==='cancel'||kind==='bad-integrity'||kind==='bad-redirect') {assert.ok(failed);assert.equal(updater.installerPath,null);if(kind==='cancel')assert.equal(fullBytes,0)}
+  else {assert.equal(failed,false,kind);assert.deepEqual(await readFile(files[0]),next);assert.ok(sawCdn)}
+  if(kind==='differential'||kind==='retry'){assert.equal(fullBytes,0);assert.ok(rangeBytes>0&&rangeBytes<next.length)}
+  if(kind==='missing-baseline'){assert.equal(maps,0);assert.equal(releaseCalls,0);assert.equal(fullBytes,next.length)}
+  if(['missing-map','bad-map','stale-baseline','ignore-range'].includes(kind))assert.ok(fullBytes>=next.length)
+  results.push({scenario:kind,passed:true,rangeBytes,fullBytes,maps,releaseCalls})
+  if(kind==='cancel') {
+    scenario='same-instance-retry';rangeBytes=0;fullBytes=0
+    const retry=await updater.downloadUpdate(new CancellationToken())
+    assert.deepEqual(await readFile(retry[0]),next);assert.equal(fullBytes,0);assert.ok(rangeBytes>0)
+    results.push({scenario,passed:true,rangeBytes,fullBytes,maps,releaseCalls})
+  }
+}
+await writeFile(path.join(process.cwd(),'build/private-update-fixture-result.json'),JSON.stringify(results,null,2))
+console.log(JSON.stringify({privateUpdateFixture:results}))
+if(path.dirname(root)!==path.resolve(tmpdir())||!path.basename(root).startsWith('fuze-update-fixture-'))throw new Error('Unexpected fixture path')
+app.exit(0)
+
+}
+main().catch(error => { console.error(error); app.exit(1) })

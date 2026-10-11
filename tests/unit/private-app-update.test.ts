@@ -12,6 +12,7 @@ vi.mock('electron-updater', () => ({ default: {
   autoUpdater: { on: (key: string, cb: (...args: any[]) => void) => mock.events.set(key, cb), setFeedURL: mock.feed, checkForUpdates: mock.check, downloadUpdate: mock.download, quitAndInstall: mock.install },
   CancellationToken: class { cancelled = false; cancel() { this.cancelled = true } },
 } }))
+vi.mock('../../src/main/update/private-nsis-updater.ts', () => ({ FuzeNsisUpdater: class { on = (key: string, cb: (...args: any[]) => void) => mock.events.set(key, cb); setFeedURL = mock.feed; checkForUpdates = mock.check; downloadUpdate = mock.download; quitAndInstall = mock.install } }))
 vi.mock('../../src/main/modules/app-store.ts', () => ({ default: { get: (k: string) => mock.values.get(k), set: (k: string, v: unknown) => mock.values.set(k, v), delete: (k: string) => mock.values.delete(k) } }))
 vi.mock('../../src/main/modules/window-manager.ts', () => ({ allowMainWindowClose: vi.fn() }))
 vi.mock('../../src/main/screenshot.ts', () => ({ getLolGameStatus: async () => ({ processRunning: false }) }))
@@ -29,7 +30,7 @@ describe('private Fuze update channel', () => {
     expect(mock.encrypt).toHaveBeenCalledWith(secret)
     mock.check.mockResolvedValue({ updateInfo: { version: '0.4.1' } })
     await s.checkForAppUpdate()
-    expect(mock.feed).toHaveBeenCalledWith({ provider: 'github', owner: 'ye602a', repo: 'fuze-assistant', private: true, token: secret })
+    expect(mock.feed).toHaveBeenCalledWith({ provider: 'custom', updateProvider: expect.any(Function), token: secret })
     expect(s.getAppUpdateState()).toMatchObject({ phase: 'available', canCheck: true, canDownload: true, autoUpdateEnabled: false })
     expect(JSON.stringify(mock.send.mock.calls)).not.toContain(secret)
     expect(mock.download).not.toHaveBeenCalled()
