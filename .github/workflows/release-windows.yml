@@ -1,6 +1,9 @@
 name: Build Windows Release
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
     tags:
       - 'v*'
@@ -61,6 +64,9 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: OCR fixture regression
+        run: npm run test:augment-ocr
 
       - name: Package Windows installer
         shell: pwsh
