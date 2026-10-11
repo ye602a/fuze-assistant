@@ -185,6 +185,7 @@ export class HextechAramQueryService {
       return [Number(id), { name: asString(augment.name), iconUrl: asString(augment.iconUrl) }]
     }))
     if (owner) await this.assertOwner(owner)
+    else if (this.lcuService.getConnectionStatus().discovered) throw new HistoryError('account-changed')
     const finalMatches = new Map(history?.matches.map(match => [match.gameId, match]))
     return { playerName: saved.owner.playerName, platformId: saved.owner.platformId, offline: !owner,
       sessions: saved.sessions.map(session => ({ ...session,

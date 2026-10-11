@@ -199,6 +199,12 @@ describe('local journal query', () => {
       kills: 1, deaths: 1, assists: 1, result: 'win', augments: [{ id: 2 }], items: [] }], 1000)
     expect((await service.getSelectionJournal())?.sessions[0]).toMatchObject({ finalAugmentIds: [2], championId: 1, result: 'win' })
   })
+  it('does not return the previous offline account if the client connects during local reading', async () => {
+    await begin(); journal.observe(cards(1, 2, 3), 3); await journal.onPhase('EndOfGame', async () => null)
+    const client = { getCurrentSummoner: vi.fn().mockResolvedValue(null), getConnectionStatus: vi.fn().mockReturnValueOnce({ discovered: false }).mockReturnValue({ discovered: true }) }
+    const service = new HextechAramQueryService(client as unknown as LCUService, new PersonalHistoryCache(path.join(directory, 'history.json')), () => journal)
+    await expect(service.getSelectionJournal()).rejects.toMatchObject({ issue: 'account-changed' })
+  })
   it('does not show the last saved account while login is unresolved', async () => {
     await begin(); journal.observe(cards(1, 2, 3), 3)
     const client = { getCurrentSummoner: vi.fn().mockResolvedValue(null), getConnectionStatus: vi.fn().mockReturnValue({ discovered: true }) }
