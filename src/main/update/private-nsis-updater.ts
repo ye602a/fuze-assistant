@@ -1,0 +1,42 @@
+import { stat, unlink } from 'node:fs/promises'
+import path from 'node:path'
+import { CancellationError, type CancellationToken } from 'builder-util-runtime'
+import { NsisUpdater } from 'electron-updater'
+import type { DownloadUpdateOptions } from 'electron-updater/out/AppUpdater.js'
+import type { AppAdapter } from 'electron-updater/out/AppAdapter.js'
+import type { ResolvedUpdateFileInfo } from 'electron-updater/out/types.js'
+import type { Provider } from 'electron-updater/out/providers/Provider.js'
+import { PrivateUpdateExecutor } from './private-update-executor.ts'
+
+// electron-updater 6.8.9 exposes this runtime field but omits it from its generated declarations.
+export class FuzeNsisUpdater extends NsisUpdater {
+  httpExecutor: PrivateUpdateExecutor
+  constructor(adapter?: AppAdapter) {
+    super(null, adapter)
+    this.httpExecutor = new PrivateUpdateExecutor()
+    this.disableWebInstaller = true
+  }
+  override async downloadUpdate(token?: CancellationToken): Promise<string[]> {
+    if (!token) throw new Error('Explicit update cancellation token required')
+    this.httpExecutor.beginDownload(token)
+    try { return await super.downloadUpdate(token) }
+    finally { this.httpExecutor.endDownload() }
+  }
+  protected override async differentialDownloadInstaller(file: ResolvedUpdateFileInfo, options: DownloadUpdateOptions,
+    destination: string, provider: Provider<any>, oldName: string): Promise<boolean> {
+    if (options.cancellationToken.cancelled) throw new CancellationError()
+    const baseline = this.downloadedUpdateHelper && path.join(this.downloadedUpdateHelper.cacheDir, oldName)
+    if (this.downloadedUpdateHelper) {
+      await unlink(path.join(this.downloadedUpdateHelper.cacheDirForPendingUpdate, 'current.blockmap')).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw new Error('Update cache unavailable')
+      })
+    }
+    // Avoid metadata/blockmap requests and a second hash pass when no baseline exists.
+    if (!baseline || !(await stat(baseline).catch(() => null))?.isFile()) return true
+    const full = await super.differentialDownloadInstaller(file, options, destination, provider, oldName)
+    // Upstream treats cancellation like a differential failure. Never fall through to a full download.
+    if (options.cancellationToken.cancelled) throw new CancellationError()
+    if (full) this.httpExecutor.resetRedirects()
+    return full
+  }
+}
