@@ -62,7 +62,7 @@ export class FuzeNsisUpdater extends NsisUpdater {
         /Update range size mismatch/.test(message) ? 'range-size' :
         /Update baseline truncated/.test(message) ? 'baseline-size' : 'unavailable'
       // Fixed categories only: never expose the SDK's URLs, headers or response bodies.
-      this.emit('private-update-fallback', { step, reason })
+      this._logger.warn(`Private update fallback: ${step}/${reason}`)
       this.httpExecutor.resetRedirects()
       return true
     }

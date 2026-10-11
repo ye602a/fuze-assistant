@@ -26,7 +26,7 @@ async function main() {
   const updater = new FuzeNsisUpdater({version:'0.4.2',name:'fixture',isPackaged:true,appUpdateConfigPath:config,userDataPath:base,baseCachePath:base,
     whenReady:async()=>{},relaunch(){throw new Error('Must not relaunch')},quit(){throw new Error('Must not install')},onQuit(){}})
   updater.logger=null;updater.autoDownload=false;updater.autoInstallOnAppQuit=false;updater.on('error',()=>{});updater.on('download-progress',()=>{})
-  updater.on('private-update-fallback', result => console.log(JSON.stringify({privateUpdateFallback:result})))
+  updater.logger={info(){},error(){},warn(message){if(/^Private update fallback: [a-z-]+\/[a-z-]+$/.test(message))console.log(message)}}
   let bytes=0,requests=0
   const create=updater.httpExecutor.createRequest.bind(updater.httpExecutor)
   updater.httpExecutor.createRequest=(options,cb)=>{requests++;return create(options,response=>{response.on('data',(chunk:Buffer)=>{bytes+=chunk.length});cb(response)})}

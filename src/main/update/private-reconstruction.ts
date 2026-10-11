@@ -29,10 +29,10 @@ export async function reconstructPrivateUpdate(options: {
   check()
   const tasks = computeOperations(options.oldMap, options.newMap, { info() {}, warn() {}, error() {} })
   const total = tasks.filter(t => t.kind === OperationKind.DOWNLOAD).reduce((sum, t) => sum + t.end - t.start, 0)
-  let active: Readable | undefined, transferred = 0, lastTransferred = 0, lastReport = Date.now(), written = 0
+  let transferred = 0, lastTransferred = 0, lastReport = Date.now(), written = 0
   const start = lastReport
   const controller = new AbortController()
-  const cancel = () => { active?.destroy(); controller.abort() }
+  const cancel = () => controller.abort()
   const baseline = await open(options.oldFile, 'r')
   token.once('cancel', cancel)
   if (token.cancelled) cancel()
@@ -52,44 +52,41 @@ export async function reconstructPrivateUpdate(options: {
           yield buffer.subarray(0, bytesRead)
         }
         continue
-      } else {
-        const requestOptions: RequestOptions = { headers: { ...options.headers, range: `bytes=${task.start}-${task.end - 1}` } }
+      }
+      // Electron responses are event emitters, not pausable Node streams. Bound each range instead.
+      while (received < length) {
+        check()
+        const count = Math.min(1024 * 1024, length - received)
+        const from = task.start + received
+        const requestOptions: RequestOptions = { headers: { ...options.headers, range: `bytes=${from}-${from + count - 1}` } }
         configureRequestUrl(options.url, requestOptions)
-        active = await new Promise<Readable>((resolve, reject) => {
-          let incoming: Readable | undefined
+        const buffer = await new Promise<Buffer>((resolve, reject) => {
+          const data = Buffer.allocUnsafe(count)
+          let offset = 0
           const request = executor.createRequest(requestOptions, response => {
-            // Electron's declaration omits its Node readable stream methods.
-            const stream = new Readable().wrap(response as unknown as NodeJS.ReadableStream)
-            incoming = stream
-            response.once('aborted', () => stream.destroy(new Error('Update response interrupted')))
-            stream.once('close', () => { if (!stream.readableEnded) request.abort() })
-            resolve(stream)
+            response.once('end', () => offset === count ? resolve(data) : reject(new Error('Update range size mismatch')))
+            response.once('aborted', () => reject(new Error('Update response interrupted')))
+            response.once('error', () => reject(new Error('Update response failed')))
+            response.on('data', (chunk: Buffer) => {
+              if (token.cancelled || offset + chunk.length > count) {
+                reject(new Error('Update range size mismatch')); request.abort(); return
+              }
+              chunk.copy(data, offset); offset += chunk.length
+            })
           })
-          request.on('error', error => { incoming?.destroy(error); reject(error) })
+          request.on('error', reject)
           request.end()
         })
-      }
-      try {
         check()
-        for await (const data of active) {
-          check()
-          const chunk = data as Buffer
-          received += chunk.length
-          if (received > length) throw new Error('Update range size mismatch')
-          if (task.kind === OperationKind.DOWNLOAD) {
-            transferred += chunk.length
-            const now = Date.now()
-            if (now - lastReport >= 1000 || transferred === total) {
-              options.onProgress({ total, transferred, delta: transferred - lastTransferred,
-                percent: total ? transferred / total * 100 : 100, bytesPerSecond: transferred / Math.max(1, (now - start) / 1000) })
-              lastReport = now; lastTransferred = transferred
-            }
-          }
-          yield chunk
+        received += count; transferred += count
+        const now = Date.now()
+        if (now - lastReport >= 1000 || transferred === total) {
+          options.onProgress({ total, transferred, delta: transferred - lastTransferred,
+            percent: total ? transferred / total * 100 : 100, bytesPerSecond: transferred / Math.max(1, (now - start) / 1000) })
+          lastReport = now; lastTransferred = transferred
         }
-        check()
-        if (received !== length) throw new Error('Update range size mismatch')
-      } finally { active.destroy(); active = undefined }
+        yield buffer
+      }
     }
   }
   const limit = new Transform({ transform(chunk: Buffer, _encoding, callback) {
@@ -103,7 +100,6 @@ export async function reconstructPrivateUpdate(options: {
     if (written !== options.size) throw new Error('Update size mismatch')
   } finally {
     token.removeListener('cancel', cancel)
-    active?.destroy()
     await baseline.close()
   }
 }
