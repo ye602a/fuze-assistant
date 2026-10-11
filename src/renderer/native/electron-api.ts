@@ -104,6 +104,7 @@ export const electronAPI: ElectronAPI = {
     clearManualLeaguePath: (...args) => requireElectronAPI().lcu.clearManualLeaguePath(...args),
   },
   diagnostics: {
+    inspectStageSignal: () => requireElectronAPI().diagnostics.inspectStageSignal(),
     testShowFloating: (...args) => requireElectronAPI().diagnostics.testShowFloating(...args),
     testShowRandomFloating: (...args) =>
       requireElectronAPI().diagnostics.testShowRandomFloating(...args),

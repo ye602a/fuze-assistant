@@ -1,3 +1,4 @@
+import { stageSignalMessages } from './stage-signal-messages.ts'
 import { historyStatusMessages } from './history-status.ts'
 import { journalMessages } from './journal-messages.ts'
 import { storageMessages } from './storage-messages.ts'
@@ -9,6 +10,7 @@ export const messages = {
   'zh-CN': {
     storage: storageMessages['zh-CN'],
     stageStats: stageMessages['zh-CN'],
+    stageSignal: stageSignalMessages['zh-CN'],
     workbench: workbenchMessages['zh-CN'],
     common: {
       cancel: '取消',
@@ -374,6 +376,7 @@ export const messages = {
   'en-US': {
     storage: storageMessages['en-US'],
     stageStats: stageMessages['en-US'],
+    stageSignal: stageSignalMessages['en-US'],
     workbench: workbenchMessages['en-US'],
     common: {
       cancel: 'Cancel', close: 'Close', current: 'Current', exit: 'Exit', hide: 'Hide', loading: 'Loading...', minimize: 'Minimize', refresh: 'Refresh', unknown: 'Unknown', unknownError: 'Unknown error',
@@ -420,6 +423,7 @@ export const messages = {
   'zh-TW': {
     storage: storageMessages['zh-TW'],
     stageStats: stageMessages['zh-TW'],
+    stageSignal: stageSignalMessages['zh-TW'],
     workbench: workbenchMessages['zh-TW'],
     common: {
       cancel: '取消', close: '關閉', current: '目前', exit: '退出', hide: '隱藏', loading: '載入中...', minimize: '最小化', refresh: '重新整理', unknown: '未知', unknownError: '未知錯誤',

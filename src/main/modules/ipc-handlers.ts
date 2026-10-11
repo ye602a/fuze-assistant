@@ -47,6 +47,7 @@ import { registerPreferencesIpcHandlers } from '../ipc/preferences-handlers.ts'
 import { registerSystemIpcHandlers } from '../ipc/system-handlers.ts'
 import { registerStorageIpcHandlers } from '../ipc/storage-handlers.ts'
 import { registerStageStatisticsHandlers } from '../ipc/stage-statistics-handlers.ts'
+import { registerStageSignalHandlers } from '../ipc/stage-signal-handlers.ts'
 import { registerFeedbackIpcHandlers } from '../ipc/feedback-handlers.ts'
 import { trustedIpcMain as ipcMain } from '../security/trusted-ipc.ts'
 import { shouldRaiseOverlayWindow } from './overlay-window-state.ts'
@@ -363,6 +364,7 @@ export function registerIpcHandlers(isDev: boolean): void {
     registerSystemIpcHandlers()
     registerStorageIpcHandlers()
     registerStageStatisticsHandlers()
+    registerStageSignalHandlers()
     registerFeedbackIpcHandlers()
 
     ipcMain.on('renderer-ready', (event) => markRendererReady(event.sender))
