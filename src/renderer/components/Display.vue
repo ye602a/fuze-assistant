@@ -42,7 +42,7 @@
             <p class="footnote">{{ w(status?.clientDiscovery?.processCount ? 'processFound' : 'processWaiting') }} · {{ w('timestamp') }} {{ formatTime(status?.clientDiscovery?.checkedAt) }}</p>
             <p v-for="directory in status?.clientDiscovery?.directories || []" :key="directory" class="detected-directory">{{ w('detectedDirectory') }}：{{ directory }}</p>
             <details class="manual-fallback"><summary>{{ w('manualFallback') }}</summary><label class="path-label" for="league-path">{{ w('path') }}</label><p class="muted">{{ w('pathHint') }}</p><div class="path-control"><input id="league-path" v-model="leaguePath" spellcheck="false"/><button class="secondary" :disabled="busy || !leaguePath.trim()" @click="savePath">{{ w('save') }}</button><button class="secondary" :disabled="busy || !leaguePath.trim()" @click="clearPath">{{ w('clearPath') }}</button></div></details>
-            <div class="diagnostic-actions"><button class="secondary" @click="openLogs"><FolderOpen :size="16"/>{{ w('logs') }}</button><button class="secondary" :disabled="busy" @click="preview"><PanelsTopLeft :size="16"/>{{ w('preview') }}</button></div><p class="footnote">{{ w('previewHint') }}</p></section>
+            <div class="diagnostic-actions"><button class="secondary" @click="openLogs"><FolderOpen :size="16"/>{{ w('logs') }}</button><button class="secondary" :disabled="busy" @click="preview"><PanelsTopLeft :size="16"/>{{ w('preview') }}</button></div><p class="footnote">{{ w('previewHint') }}</p><StageSignalDiagnostic /></section>
         </template>
         <footer>{{ w('timestamp') }} · {{ status ? formatTime(status.sampledAt) : '—' }} <span>{{ w('brand') }} · {{ w('version') }} {{ status?.version || '—' }}</span></footer>
       </main>
@@ -58,6 +58,7 @@ import { LayoutDashboard, History, Settings2, Minus, X, Play, Pause, PlugZap, Sc
 import { electronAPI } from '../native/electron-api.ts'
 import UpdatePanel from './UpdatePanel.vue'
 import StoragePanel from './StoragePanel.vue'
+import StageSignalDiagnostic from './StageSignalDiagnostic.vue'
 import { setAppLocale } from '../i18n/index.ts'
 import { connectionIsVerified, runtimeState, type RuntimeStatus } from '../../shared/runtime-status.ts'
 import type { AppStoreKey, SupportedDataLocale } from '../../shared/ipc-contract.ts'

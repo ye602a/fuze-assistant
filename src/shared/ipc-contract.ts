@@ -515,6 +515,7 @@ export interface ElectronAPI {
     clearManualLeaguePath(): Promise<LooseRecord>
   }
   diagnostics: {
+    inspectStageSignal(): Promise<import('./stage-signal.ts').StageSignalResult>
     testShowFloating(data: LooseRecord): Promise<OperationResult>
     testShowRandomFloating(): Promise<OperationResult>
     testShowRandomPopup(): Promise<OperationResult>

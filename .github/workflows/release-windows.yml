@@ -75,6 +75,9 @@ jobs:
       - name: Stage statistics cache regression
         run: node --experimental-transform-types tests/electron/test-stage-statistics.js
 
+      - name: Stage signal privacy and transport regression
+        run: node --experimental-transform-types tests/electron/test-stage-signal.js
+
       - name: Package Windows installer
         shell: pwsh
         run: |

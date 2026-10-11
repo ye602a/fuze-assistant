@@ -150,6 +150,7 @@ const electronAPI: ElectronAPI = {
     clearManualLeaguePath: () => ipcRenderer.invoke('lcu-clear-manual-league-path'),
   },
   diagnostics: {
+    inspectStageSignal: () => ipcRenderer.invoke('diagnostics-stage-signal'),
     testShowFloating: (data) => ipcRenderer.invoke('test-show-floating', data),
     testShowRandomFloating: () => ipcRenderer.invoke('test-show-random-floating'),
     testShowRandomPopup: () => ipcRenderer.invoke('test-show-random-popup'),
