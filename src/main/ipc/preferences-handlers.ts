@@ -22,6 +22,7 @@ const RENDERER_STORE_KEYS = new Set<AppStoreKey>([
   'championInsight.showDetails',
   'championInsight.hideOnGameStart',
   'championInsight.alwaysOnTop',
+  'championInsight.pinDuringChampSelect',
   'augments.showTopOverlay',
   'augments.showSidePanel',
   'postGameShare.autoShow',
@@ -63,7 +64,7 @@ export function registerPreferencesIpcHandlers(): void {
 
   ipcMain.handle('store-set', (_event, key: unknown, value: unknown) => {
     assertRendererStoreKey(key)
-    if (key === 'ocr.gpuEnabled' && typeof value !== 'boolean') throw new Error('GPU setting must be boolean')
+    if ((key === 'ocr.gpuEnabled' || key === 'championInsight.pinDuringChampSelect') && typeof value !== 'boolean') throw new Error('Setting must be boolean')
     store.set(key, value)
     if (key === 'ocr.gpuEnabled') void import('../image-analyzer.ts').then(module => module.warmupImageAnalyzer())
     if (key.startsWith('championInsight.')) {

@@ -73,7 +73,7 @@ const busy = ref(false)
 const notice = ref('')
 const quitOpen = ref(false)
 const leaguePath = ref('')
-const preferenceDefinitions: { key: AppStoreKey; label: string }[] = [{ key: 'ocr.levelGateEnabled', label: 'levelGateOption' }, { key: 'ocr.gpuEnabled', label: 'gpuMode' }, { key: 'augments.showTopOverlay', label: 'top' }, { key: 'augments.showSidePanel', label: 'side' }, { key: 'championInsight.showDetails', label: 'champion' }]
+const preferenceDefinitions: { key: AppStoreKey; label: string }[] = [{ key: 'ocr.levelGateEnabled', label: 'levelGateOption' }, { key: 'ocr.gpuEnabled', label: 'gpuMode' }, { key: 'augments.showTopOverlay', label: 'top' }, { key: 'augments.showSidePanel', label: 'side' }, { key: 'championInsight.showDetails', label: 'champion' }, { key: 'championInsight.pinDuringChampSelect', label: 'pinChampSelect' }]
 const preferences = reactive<Record<string, boolean>>({})
 const state = computed(() => status.value ? runtimeState(status.value, status.value.sampledAt) : 'waiting')
 const connected = computed(() => !!status.value && connectionIsVerified(status.value.connection, status.value.sampledAt))

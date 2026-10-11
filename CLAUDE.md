@@ -98,7 +98,7 @@ node tests/electron/test-augment-ocr-fixtures.js
 
 ## 文档指针
 
-- 架构总览：`COMPLETE_ARCHITECTURE.md`
+- 架构总览：`docs/development/ARCHITECTURE.md`
 - Electron 迁移和安全状态：`docs/ELECTRON_VITE_MIGRATION_PROGRESS.md`
 - ARAM LCU 只读推荐：`docs/ARAM_LCU_READONLY_RECOMMENDATION_PROGRESS.md`
 - LCU 排障：`docs/LCU_TROUBLESHOOTING.md`

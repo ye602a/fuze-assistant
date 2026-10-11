@@ -1,5 +1,7 @@
 export const workbenchMessages = {
   "zh-CN": {
+    "pinChampSelect": "选人时置顶英雄详情",
+    "pinChampSelectHint": "选人阶段保持在普通窗口上方；进入游戏后按原设置隐藏。不会循环抢焦点。",
     "levelGateOption": "按强化等级节省识别开销",
     "levelGateOptionHint": "远离强化等级时低频检查；临近等级、等待领取或重选时持续识别。等级读取失败会恢复兼容检测。",
     "levelScheduling": "等级调度",
@@ -138,6 +140,8 @@ export const workbenchMessages = {
     "clearPath": "清除备用目录"
   },
   "en-US": {
+    "pinChampSelect": "Keep champion details on top during selection",
+    "pinChampSelectHint": "Stay above normal windows in champion select; hide on game start as configured. No repeated focus stealing.",
     "levelGateOption": "Save work between augment levels",
     "levelGateOptionHint": "Check less often between augment levels. Stay active near a choice or reroll; fall back to normal detection if level data is unavailable.",
     "levelScheduling": "Level scheduling",
@@ -276,6 +280,8 @@ export const workbenchMessages = {
     "clearPath": "Clear fallback"
   },
   "zh-TW": {
+    "pinChampSelect": "選角時置頂英雄詳情",
+    "pinChampSelectHint": "選角階段保持在一般視窗上方；進入遊戲後按原設定隱藏。不會循環搶焦點。",
     "levelGateOption": "依強化等級節省辨識開銷",
     "levelGateOptionHint": "遠離強化等級時低頻檢查；臨近等級、等待領取或重選時持續辨識。等級讀取失敗會恢復相容偵測。",
     "levelScheduling": "等級排程",

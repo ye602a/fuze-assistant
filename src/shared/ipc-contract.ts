@@ -8,6 +8,7 @@ export type AppStoreKey =
   | 'championInsight.showDetails'
   | 'championInsight.hideOnGameStart'
   | 'championInsight.alwaysOnTop'
+  | 'championInsight.pinDuringChampSelect'
   | 'augments.showTopOverlay'
   | 'augments.showSidePanel'
   | 'postGameShare.autoShow'

@@ -1,6 +1,6 @@
 # LOL Tips Client 需求规格文档
 
-维护状态：本文保留产品需求和识别算法背景，部分 UI 与流程描述早于席位推荐并入英雄详情顶部、electron-vite 目录迁移和自动截图策略调整。LCU 凭据发现当前为进程优先，主界面「游戏目录」仅为高级兜底。实现细节以 `README.md`、`COMPLETE_ARCHITECTURE.md`、`docs/GAMEFLOW_DETECTION_GUIDE.md`、`docs/USER_GUIDE_AUTO_AUGMENT.md` 和源码为准。
+维护状态：本文保留产品需求和识别算法背景，部分 UI 与流程描述早于席位推荐并入英雄详情顶部、electron-vite 目录迁移和自动截图策略调整。LCU 凭据发现当前为进程优先，主界面「游戏目录」仅为高级兜底。实现细节以 `README.md`、`docs/development/ARCHITECTURE.md`、`docs/GAMEFLOW_DETECTION_GUIDE.md`、`docs/USER_GUIDE_AUTO_AUGMENT.md` 和源码为准。
 
 ## 1. 概述
 
