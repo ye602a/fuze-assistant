@@ -8,6 +8,7 @@ import logger from '../../modules/logger.ts'
 import { trustedIpcMain as ipcMain } from '../../security/trusted-ipc.ts'
 import { getHextechAramQueryService } from './hextech-aram-query-service.ts'
 import { getLocalMatchHistoryService } from './local-match-history-service.ts'
+import { historyIssue } from './history-error.ts'
 
 function getService() {
   return getLocalMatchHistoryService(getLCUServiceInstance())
@@ -27,6 +28,14 @@ async function getSummaryFailure(error: unknown): Promise<LocalMatchHistorySumma
 }
 
 export function registerMatchHistoryIpcHandlers(): void {
+  ipcMain.handle('match-history-get-cached-current', async (_event, query?: HextechAramMatchHistoryQuery) => {
+    try {
+      const data = await getHextechAramQueryService(getLCUServiceInstance()).getCachedCurrent(query)
+      return { success: true, ...(data ? { data } : {}) } satisfies HextechAramMatchHistoryQueryResult
+    } catch (error) {
+      return { success: false, issue: historyIssue(error) } satisfies HextechAramMatchHistoryQueryResult
+    }
+  })
   ipcMain.handle('match-history-get-local-summary', async () => {
     try {
       return {
@@ -47,12 +56,12 @@ export function registerMatchHistoryIpcHandlers(): void {
       } satisfies HextechAramMatchHistoryQueryResult
     } catch (error) {
       logger.warn('[match-history] current player query failed:', {
-        error: getErrorMessage(error),
+        issue: historyIssue(error),
         sensitiveValuesLogged: false,
       })
       return {
         success: false,
-        error: getErrorMessage(error),
+        issue: historyIssue(error),
       } satisfies HextechAramMatchHistoryQueryResult
     }
   })

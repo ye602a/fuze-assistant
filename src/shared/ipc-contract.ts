@@ -115,6 +115,10 @@ export interface HextechAramMatchHistoryAsset extends LooseRecord {
 
 export type HextechAramMatchResult = 'win' | 'loss' | 'remake'
 
+export type MatchHistoryIssue = 'login-required' | 'platform-unknown' | 'unauthorized' | 'forbidden'
+  | 'rate-limited' | 'service-unavailable' | 'invalid-response' | 'account-changed'
+  | 'game-busy' | 'cache-unavailable' | 'cache-write-failed'
+
 export interface HextechAramMatchHistoryMatch extends LooseRecord {
   gameId: number
   gameCreation: number
@@ -141,6 +145,10 @@ export interface HextechAramMatchHistoryPage extends LooseRecord {
   hasPrevious: boolean
   hasMore: boolean
   matches: HextechAramMatchHistoryMatch[]
+  source?: 'sgp' | 'lcu' | 'cache'
+  offline?: boolean
+  limited?: boolean
+  warning?: MatchHistoryIssue
 }
 
 export interface HextechAramMatchHistoryQuery extends LooseRecord {
@@ -150,6 +158,7 @@ export interface HextechAramMatchHistoryQuery extends LooseRecord {
 
 export interface HextechAramMatchHistoryQueryResult extends OperationResult {
   data?: HextechAramMatchHistoryPage
+  issue?: MatchHistoryIssue
 }
 
 export interface ClientVersionInfo extends LooseRecord {
@@ -431,6 +440,7 @@ export interface ElectronAPI {
   }
   matchHistory: {
     getLocalSummary(): Promise<LocalMatchHistorySummaryResult>
+    getCachedCurrent(payload?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryQueryResult>
     queryCurrent(payload?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryQueryResult>
   }
   feedback: {

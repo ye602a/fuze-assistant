@@ -2,6 +2,7 @@ import axios from 'axios'
 import logger from '../../modules/logger.ts'
 import type LCUService from '../lcu/lcu-service.ts'
 import { logMatchHistoryDev } from './dev-diagnostics.ts'
+import { HistoryError, httpHistoryError } from './history-error.ts'
 
 export const HEXTECH_ARAM_QUEUE_ID = 2400
 export const HEXTECH_ARAM_QUEUE_TAG = `q_${HEXTECH_ARAM_QUEUE_ID}`
@@ -52,7 +53,7 @@ function isRecord(value: unknown): value is AnyRecord {
 }
 
 function isValidPuuid(value: string): boolean {
-  return /^[a-zA-Z0-9-]{8,128}$/.test(value)
+  return /^[a-zA-Z0-9_-]{8,128}$/.test(value)
 }
 
 function normalizePlatformId(value: string): string {
@@ -136,15 +137,17 @@ function compactSummary(value: AnyRecord): AnyRecord {
 
 function getSummaryGames(payload: unknown): AnyRecord[] {
   if (!isRecord(payload) || !Array.isArray(payload.games)) {
-    throw new Error('SGP match-history response did not contain a games array')
+    throw new HistoryError('invalid-response')
   }
 
-  return payload.games.flatMap((entry) => {
+  const games = payload.games.flatMap((entry) => {
     if (!isRecord(entry) || !isRecord(entry.json)) {
       return []
     }
     return [compactSummary(entry.json)]
   })
+  if (payload.games.length && !games.length) throw new HistoryError('invalid-response')
+  return games
 }
 
 export function getSgpMatchHistoryOrigin(platformId: string): string | null {
@@ -160,7 +163,8 @@ export class SgpMatchHistoryInterruptedError extends Error {
 }
 
 export class SgpMatchHistoryService {
-  constructor(private readonly lcuService: LCUService) {}
+  private cooldown: { platform: string; until: number; error: HistoryError } | null = null
+  constructor(private readonly lcuService: LCUService, private readonly foreground = false) {}
 
   async getHextechAramSummaries(
     puuid: string,
@@ -177,6 +181,7 @@ export class SgpMatchHistoryService {
     if (!origin) {
       throw new Error(`SGP match history is not configured for platform ${normalizePlatformId(platformId)}`)
     }
+    if (this.cooldown?.platform === platformId && this.cooldown.until > Date.now()) throw this.cooldown.error
 
     const normalizedStartIndex = Number.isInteger(startIndex) && startIndex >= 0 ? startIndex : 0
     const normalizedCount = Number.isInteger(count)
@@ -185,7 +190,8 @@ export class SgpMatchHistoryService {
     const endpoint = `${origin}/match-history-query/v1/products/lol/player/${encodeURIComponent(puuid)}/SUMMARY`
 
     let lastError: unknown = null
-    for (let attempt = 0; attempt < SGP_MAX_ATTEMPTS; attempt += 1) {
+    const maxAttempts = this.foreground ? 2 : SGP_MAX_ATTEMPTS
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (shouldContinue && !await shouldContinue()) {
         throw new SgpMatchHistoryInterruptedError()
       }
@@ -194,7 +200,7 @@ export class SgpMatchHistoryService {
       const accessToken = await this.lcuService.getEntitlementsAccessToken()
       const tokenDurationMs = Math.round((performance.now() - tokenStartedAt) * 10) / 10
       if (!accessToken) {
-        throw new Error('League Client did not provide an entitlements access token')
+        throw new HistoryError('unauthorized')
       }
 
       const requestStartedAt = performance.now()
@@ -216,7 +222,8 @@ export class SgpMatchHistoryService {
             tagsQueryType: 'AND',
           },
           proxy: false,
-          timeout: SGP_MATCH_HISTORY_TIMEOUT_MS,
+          timeout: this.foreground ? 5000 : SGP_MATCH_HISTORY_TIMEOUT_MS,
+          maxRedirects: 0,
         })
         if (shouldContinue && !await shouldContinue()) {
           throw new SgpMatchHistoryInterruptedError()
@@ -237,6 +244,7 @@ export class SgpMatchHistoryService {
         if (error instanceof SgpMatchHistoryInterruptedError) {
           throw error
         }
+        if (error instanceof HistoryError) throw error
         lastError = error
         const requestError = error as SgpRequestError
         logMatchHistoryDev('SGP summary request failed', {
@@ -247,7 +255,8 @@ export class SgpMatchHistoryService {
           durationMs: Math.round((performance.now() - requestStartedAt) * 10) / 10,
           attempt: attempt + 1,
         })
-        if (attempt >= SGP_MAX_ATTEMPTS - 1 || !shouldRetry(requestError)) {
+        const refreshAuth = requestError.response?.status === 401 && attempt === 0
+        if (attempt >= maxAttempts - 1 || (!refreshAuth && (this.foreground || !shouldRetry(requestError)))) {
           break
         }
 
@@ -257,11 +266,20 @@ export class SgpMatchHistoryService {
           attempt: attempt + 1,
           sensitiveValuesLogged: false,
         })
-        await delay(getRetryDelayMs(requestError, attempt))
+        if (!refreshAuth) await delay(getRetryDelayMs(requestError, attempt))
       }
     }
 
     const requestError = lastError as SgpRequestError
-    throw new Error(`区服已识别（${normalizePlatformId(platformId)}），但战绩服务暂不可用${requestError?.response?.status ? `（HTTP ${requestError.response.status}）` : ''}，请稍后重试`)
+    const failure = httpHistoryError(requestError?.response?.status)
+    if (['rate-limited', 'service-unavailable', 'forbidden'].includes(failure.issue)) {
+      const retryAfter = requestError.response?.headers?.['retry-after']
+      const retrySeconds = Number(retryAfter)
+      const retryDate = typeof retryAfter === 'string' ? Date.parse(retryAfter) : NaN
+      const retryMs = Number.isFinite(retrySeconds) ? retrySeconds * 1000 : retryDate - Date.now()
+      const delayMs = failure.issue === 'rate-limited' ? Math.max(60_000, Number.isFinite(retryMs) ? retryMs : 0) : 15_000
+      this.cooldown = { platform: platformId, until: Date.now() + delayMs, error: failure }
+    }
+    throw failure
   }
 }

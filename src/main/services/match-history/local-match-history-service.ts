@@ -655,12 +655,11 @@ export class LocalMatchHistoryService {
         ? currentSummoner.platformId ?? currentSummoner.currentPlatformId
         : undefined,
     )
-    const knownCurrentPlayer = Object.values(data.players).find(
-      (player) => player.puuid === currentPuuid && player.isCurrentUser && player.platformId !== 'UNKNOWN',
-    )
-    let platformId = reportedPlatformId === 'UNKNOWN'
-      ? knownCurrentPlayer?.platformId || reportedPlatformId
-      : reportedPlatformId
+    // Saved region hints may belong to an earlier login on another server.
+    let platformId = reportedPlatformId
+    if (platformId === 'UNKNOWN') {
+      platformId = normalizePlatformId(await this.lcuService.getCurrentPlatformId())
+    }
     if (platformId === 'UNKNOWN') {
       // SGP routing needs the platform once. This one-item LCU index request is
       // only a bootstrap; all match payload collection below uses SGP SUMMARY.

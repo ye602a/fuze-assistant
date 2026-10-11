@@ -3,6 +3,7 @@ import type {
   HextechAramMatchHistoryMatch,
   HextechAramMatchHistoryPage,
   HextechAramMatchHistoryQuery,
+  MatchHistoryIssue,
 } from '../../../shared/ipc-contract.ts'
 import { loadAugmentDetail, loadChampionRoster, loadItems } from '../../data-loader.ts'
 import logger from '../../modules/logger.ts'
@@ -10,11 +11,16 @@ import type LCUService from '../lcu/lcu-service.ts'
 import { normalizeGame } from './local-match-history-service.ts'
 import { isHextechAramGame } from './statistics.ts'
 import { SgpMatchHistoryService } from './sgp-match-history-service.ts'
+import { HistoryError, historyIssue, httpHistoryError } from './history-error.ts'
+import { PersonalHistoryCache, validHistoryPuuid, type HistoryOwner, type PersonalHistory } from './personal-history-cache.ts'
+import { historyPlatformFromPayload } from './platform-resolver.ts'
 import type { StoredMatchHistoryGame } from './types.ts'
 
 export const DEFAULT_HEXTECH_ARAM_QUERY_COUNT = 10
 export const MAX_HEXTECH_ARAM_QUERY_COUNT = 20
 export const MAX_HEXTECH_ARAM_QUERY_START_INDEX = 1_000
+let observedHistoryPhase: string | null | undefined
+export function setHistoryGamePhase(phase: string | null): void { observedHistoryPhase = phase }
 
 type AnyRecord = Record<string, unknown>
 
@@ -49,15 +55,6 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function isValidPuuid(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value)
-}
-
-function normalizePlatformId(value: unknown): string {
-  const platformId = asString(value).toUpperCase()
-  return /^[A-Z0-9-]{2,24}$/.test(platformId) ? platformId : ''
-}
-
 function formatPlayerName(gameName: string, tagLine: string): string {
   if (!gameName) return ''
   return tagLine ? `${gameName}#${tagLine}` : gameName
@@ -68,33 +65,6 @@ function getPlayerName(currentSummoner: AnyRecord): string {
     asString(currentSummoner.gameName) || asString(currentSummoner.displayName),
     asString(currentSummoner.tagLine),
   )
-}
-
-function getBootstrapPlatformId(payload: unknown): string {
-  if (!isRecord(payload)) return ''
-
-  const direct = normalizePlatformId(payload.platformId)
-  if (direct) return direct
-
-  const gamesContainer = isRecord(payload.games) ? payload.games : null
-  const firstGame = gamesContainer && Array.isArray(gamesContainer.games)
-    ? gamesContainer.games.find(isRecord)
-    : null
-  if (!firstGame) return ''
-
-  const fromGame = normalizePlatformId(firstGame.platformId)
-  if (fromGame) return fromGame
-
-  const identities = Array.isArray(firstGame.participantIdentities)
-    ? firstGame.participantIdentities
-    : []
-  for (const identity of identities) {
-    if (!isRecord(identity) || !isRecord(identity.player)) continue
-    const fromPlayer = normalizePlatformId(identity.player.platformId ?? identity.player.currentPlatformId)
-    if (fromPlayer) return fromPlayer
-  }
-
-  return ''
 }
 
 function toAsset(id: number, labels?: ReadonlyMap<number, AssetLabel>): HextechAramMatchHistoryAsset {
@@ -185,56 +155,162 @@ export function buildHextechAramMatchHistoryPage(
 
 export class HextechAramQueryService {
   private readonly sgpMatchHistoryService: SgpMatchHistoryService
+  private inFlight: { key: string; promise: Promise<HextechAramMatchHistoryPage> } | null = null
+  private nativeSnapshot: { key: string; until: number; games: StoredMatchHistoryGame[] } | null = null
 
-  constructor(private readonly lcuService: LCUService) {
-    this.sgpMatchHistoryService = new SgpMatchHistoryService(lcuService)
+  constructor(private readonly lcuService: LCUService, private readonly cache = new PersonalHistoryCache()) {
+    this.sgpMatchHistoryService = new SgpMatchHistoryService(lcuService, true)
   }
 
-  async queryCurrent(
-    query?: HextechAramMatchHistoryQuery,
-  ): Promise<HextechAramMatchHistoryPage> {
+  private async owner(): Promise<HistoryOwner | null> {
+    const summoner = await this.lcuService.getCurrentSummoner()
+    if (!isRecord(summoner) || !validHistoryPuuid(summoner.puuid)) return null
+    const platformId = historyPlatformFromPayload(summoner) || await this.lcuService.getCurrentPlatformId()
+    return { puuid: summoner.puuid, platformId: platformId || '', playerName: getPlayerName(summoner) }
+  }
+
+  async getCachedCurrent(query?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryPage | null> {
+    const owner = await this.owner()
+    if (owner && !owner.platformId) throw new HistoryError('platform-unknown')
+    if (!owner && this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')
+    const cached = await this.cache.get(owner || undefined)
+    return cached ? this.cachedPage(cached, query, !owner) : null
+  }
+
+  private async cachedPage(cached: PersonalHistory, query?: HextechAramMatchHistoryQuery, offline = false,
+    warning?: MatchHistoryIssue): Promise<HextechAramMatchHistoryPage> {
     const range = normalizeHextechAramQuery(query)
-    const currentSummoner = await this.lcuService.getCurrentSummoner()
-    if (!isRecord(currentSummoner) || !isValidPuuid(currentSummoner.puuid)) {
-      throw new Error('请先登录英雄联盟客户端')
-    }
-
-    const currentPuuid = currentSummoner.puuid
-    let platformId = normalizePlatformId(currentSummoner.platformId ?? currentSummoner.currentPlatformId)
-    if (!platformId) platformId = normalizePlatformId(await this.lcuService.getCurrentPlatformId())
-    if (!platformId) {
-      platformId = getBootstrapPlatformId(
-        await this.lcuService.getCurrentSummonerMatchHistory(0, 0),
-      )
-    }
-    if (!platformId) {
-      throw new Error('无法识别当前账号所在区服')
-    }
-
-    const rawGames = await this.sgpMatchHistoryService.getHextechAramSummaries(
-      currentPuuid,
-      platformId,
-      range.startIndex,
-      range.count,
-    )
-    const queriedAt = Date.now()
-    const normalizedGames = rawGames.flatMap((game) => {
-      const normalized = normalizeGame(game, platformId, queriedAt)
-      return normalized ? [normalized] : []
-    })
     const labels = await this.loadLabels()
+    const matches = cached.matches.slice(range.startIndex, range.startIndex + range.count).map((match) => ({
+      ...match,
+      championName: labels.champions?.get(match.championId)?.name,
+      championIconUrl: labels.champions?.get(match.championId)?.iconUrl,
+      augments: match.augments.map(({ id }) => toAsset(id, labels.augments)),
+      items: match.items.map(({ id }) => toAsset(id, labels.items)),
+    }))
+    return { playerName: cached.playerName, platformId: cached.platformId, queriedAt: cached.updatedAt,
+      ...range, matches, returnedCount: matches.length, hasPrevious: range.startIndex > 0,
+      hasMore: range.startIndex + range.count < cached.matches.length,
+      source: 'cache', offline, limited: true, warning }
+  }
 
-    return buildHextechAramMatchHistoryPage({
-      games: normalizedGames,
-      currentPuuid,
-      playerName: getPlayerName(currentSummoner),
-      platformId,
-      startIndex: range.startIndex,
-      count: range.count,
-      scannedCount: rawGames.length,
-      queriedAt,
-      labels,
+  queryCurrent(query?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryPage> {
+    const range = normalizeHextechAramQuery(query)
+    const key = `${range.startIndex}:${range.count}`
+    if (this.inFlight) return this.inFlight.key === key ? this.inFlight.promise : Promise.reject(new HistoryError('rate-limited'))
+    const promise = this.refresh(range).finally(() => { this.inFlight = null })
+    this.inFlight = { key, promise }
+    return promise
+  }
+
+  private async nativeGames(owner: HistoryOwner): Promise<StoredMatchHistoryGame[]> {
+    const key = `${owner.platformId}:${owner.puuid}`
+    if (this.nativeSnapshot?.key === key && this.nativeSnapshot.until > Date.now()) return this.nativeSnapshot.games
+    if (!this.canFetch()) throw new HistoryError('game-busy')
+    const response = await this.lcuService.getReadOnlyJsonEndpoint(
+      '/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=49',
+    )
+    if (response?.status !== 200) throw httpHistoryError(response?.status)
+    const payload = isRecord(response.data) ? response.data : {}
+    const container = isRecord(payload.games) ? payload.games : {}
+    if (!Array.isArray(container.games)) throw new HistoryError('invalid-response')
+    // A current-account response can bootstrap routing without guessing another player's platform.
+    const reported = historyPlatformFromPayload(payload)
+    if (owner.platformId && reported && owner.platformId !== reported) throw new HistoryError('account-changed')
+    if (!owner.platformId) owner.platformId = reported || ''
+    let ownedRecords = 0
+    const games = container.games.flatMap((game) => {
+      const normalized = normalizeGame(game, owner.platformId, Date.now())
+      if (!normalized || !normalized.participants.some((p) => p.puuid === owner.puuid)) return []
+      ownedRecords += 1
+      if (!owner.platformId) owner.platformId = historyPlatformFromPayload(normalized) || ''
+      return normalized.platformId === owner.platformId && isHextechAramGame(normalized) ? [normalized] : []
+    }).sort((a, b) => b.gameCreation - a.gameCreation)
+    if (container.games.length && !ownedRecords) throw new HistoryError('invalid-response')
+    this.nativeSnapshot = { key: `${owner.platformId}:${owner.puuid}`, until: Date.now() + 30_000, games }
+    return games
+  }
+
+  private async refresh(query: Required<HextechAramMatchHistoryQuery>): Promise<HextechAramMatchHistoryPage> {
+    const owner = await this.owner()
+    if (!owner) {
+      if (this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')
+      const cached = await this.cache.get()
+      if (cached) return this.cachedPage(cached, query, true, 'login-required')
+      throw new HistoryError('login-required')
+    }
+    const phase = await this.lcuService.getGameflowPhase()
+    if (!['None', 'Lobby', 'EndOfGame', 'PreEndOfGame', 'WaitingForStats'].includes(phase || '')) {
+      const cached = owner.platformId ? await this.cache.get(owner) : null
+      if (cached) return this.cachedPage(cached, query, false, 'game-busy')
+      throw new HistoryError('game-busy')
+    }
+    let source: 'sgp' | 'lcu' = 'sgp'
+    let warning: MatchHistoryIssue | undefined
+    let allGames: StoredMatchHistoryGame[] = []
+    let scannedCount = 0
+    try {
+      if (!owner.platformId) {
+        allGames = await this.nativeGames(owner)
+        if (!owner.platformId) throw new HistoryError('platform-unknown')
+        source = 'lcu'
+      } else {
+        try {
+          const raw = await this.sgpMatchHistoryService.getHextechAramSummaries(
+            owner.puuid, owner.platformId, query.startIndex, query.count, async () => this.canFetch(),
+          )
+          scannedCount = raw.length
+          allGames = raw.flatMap((game) => {
+            const normalized = normalizeGame(game, owner.platformId, Date.now())
+            return normalized && normalized.platformId === owner.platformId
+              && normalized.participants.some((p) => p.puuid === owner.puuid) && isHextechAramGame(normalized) ? [normalized] : []
+          })
+          if (raw.length && !allGames.length) throw new HistoryError('invalid-response')
+        } catch (error) {
+          warning = historyIssue(error)
+          if (!this.canFetch()) throw new HistoryError('game-busy')
+          source = 'lcu'
+          allGames = await this.nativeGames(owner)
+        }
+      }
+    } catch (error) {
+      if (historyIssue(error) === 'account-changed') throw error
+      await this.assertOwner(owner)
+      const cached = owner.platformId ? await this.cache.get(owner).catch(() => null) : null
+      const issue = historyIssue(error) === 'game-busy' ? 'game-busy' : warning || historyIssue(error)
+      if (cached) return this.cachedPage(cached, query, false, issue)
+      throw new HistoryError(issue)
+    }
+    await this.assertOwner(owner)
+    const now = Date.now()
+    const fullPage = buildHextechAramMatchHistoryPage({ games: allGames, currentPuuid: owner.puuid,
+      playerName: owner.playerName, platformId: owner.platformId, ...query, scannedCount, queriedAt: now })
+    try { await this.cache.save(owner, fullPage.matches, now) }
+    catch { warning = 'cache-write-failed' }
+    if (source === 'lcu' && warning !== 'cache-write-failed') {
+      const merged = await this.cache.get(owner)
+      if (merged) return { ...await this.cachedPage(merged, query, false, warning), source: 'lcu' }
+    }
+    const page = buildHextechAramMatchHistoryPage({
+      games: source === 'lcu' ? allGames.slice(query.startIndex, query.startIndex + query.count) : allGames,
+      currentPuuid: owner.puuid, playerName: owner.playerName, platformId: owner.platformId,
+      ...query, scannedCount, queriedAt: now, labels: await this.loadLabels(),
     })
+    if (source === 'lcu') page.hasMore = query.startIndex + query.count < allGames.length
+    return { ...page, source, offline: false, limited: source === 'lcu', warning }
+  }
+
+  private canFetch(): boolean {
+    const phase = observedHistoryPhase === undefined ? this.lcuService.getConnectionStatus().phase : observedHistoryPhase
+    return !!phase && ['None', 'Lobby', 'EndOfGame', 'PreEndOfGame', 'WaitingForStats'].includes(phase)
+  }
+
+  private async assertOwner(expected: HistoryOwner): Promise<void> {
+    const current = await this.owner()
+    if (!current || current.puuid !== expected.puuid || (current.platformId && current.platformId !== expected.platformId)) {
+      this.nativeSnapshot = null
+      throw new HistoryError('account-changed')
+    }
   }
 
   private async loadLabels(): Promise<HextechAramQueryLabels> {
