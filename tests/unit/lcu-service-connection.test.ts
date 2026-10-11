@@ -43,6 +43,23 @@ afterEach(() => {
 })
 
 describe('LCU connection verification and recovery', () => {
+  it('invalidates diagnostic continuity on phase/auth changes without exposing identity', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(10000)
+    vi.mocked(getLcuToken).mockResolvedValue(['fixture-auth', '12345', 'https://127.0.0.1:12345'])
+    vi.mocked(axios.get).mockImplementation(async url => ({ status: 200, data: String(url).endsWith('/gameflow-phase') ? 'InProgress' : {} }))
+    const service = new LCUService({ failCooldown: 0 })
+    expect(service.getStageDiagnosticContext().usable).toBe(false)
+    await service.getGameflowPhase()
+    const before = service.getStageDiagnosticContext()
+    expect(before.usable).toBe(true)
+    await service.getGameflowPhase()
+    expect(service.getStageDiagnosticContext().revision).toBe(before.revision)
+    vi.mocked(axios.get).mockResolvedValue({ status: 200, data: 'EndOfGame' })
+    await service.getGameflowPhase()
+    expect(service.getStageDiagnosticContext().usable).toBe(false)
+    expect(service.getStageDiagnosticContext().revision).toBeGreaterThan(before.revision)
+    expect(Object.keys(service.getStageDiagnosticContext()).sort()).toEqual(['revision', 'usable'])
+  })
   it('rejects discovered credentials when their endpoint is unreachable', async () => {
     vi.mocked(getLcuToken).mockResolvedValue([
       'stale-private-token',

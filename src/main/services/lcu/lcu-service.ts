@@ -558,6 +558,11 @@ export interface GameflowPhaseSubscriptionOptions {
  * 统一的 LCU 服务类
  */
 export class LCUService {
+  private diagnosticRevision = 0
+  getStageDiagnosticContext() {
+    return { revision: this.diagnosticRevision, usable: this.active && this.verifiedPhase === 'InProgress' &&
+      !this.phaseError && this.verifiedAt !== null && Date.now() - this.verifiedAt <= 20000 }
+  }
   private verifiedAt: number | null = null
   private verifiedPhase: GameflowPhase | null = null
   private phaseError: string | null = null
@@ -604,6 +609,7 @@ export class LCUService {
   private setVars(token: string | null, port: string | null, url: string | null): void {
     this.active = !!token
     this.url = url
+    if (this.token !== token || this.port !== port) this.diagnosticRevision++
     this.token = token
     this.port = port
 
@@ -686,6 +692,7 @@ export class LCUService {
     applyCooldown: boolean = true
   ): string | null {
     const previousPort = this.port
+    this.diagnosticRevision++
     this.verifiedAt = null
     this.verifiedPhase = null
     this.setVars(null, null, null)
@@ -1268,6 +1275,7 @@ export class LCUService {
 
       if (res.status !== 200 || typeof res.data !== 'string') return null
       this.verifiedAt = Date.now()
+      if (this.verifiedPhase !== res.data) this.diagnosticRevision++
       this.verifiedPhase = res.data
       this.phaseError = null
       logger.debug('Current gameflow phase:', res.data)
@@ -1520,12 +1528,13 @@ export class LCUService {
       port: this.port,
       onGameflowPhase: async (phase, event) => {
         this.verifiedAt = Date.now()
+        if (this.verifiedPhase !== phase) this.diagnosticRevision++
         this.verifiedPhase = phase as GameflowPhase
         this.phaseError = null
         await callback(phase as GameflowPhase, event as LcuJsonApiEvent<GameflowPhase>)
       },
       onOpen: options.onOpen,
-      onClose: options.onClose,
+      onClose: reason => { this.diagnosticRevision++; options.onClose?.(reason) },
       onError: options.onError,
     })
 

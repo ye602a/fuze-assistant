@@ -11,6 +11,28 @@ let wrapper: VueWrapper
 const start = () => { wrapper = mount(Panel, { global: { plugins: [createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': { stageSignal: stageSignalMessages['zh-CN'] } } })] } }) }
 afterEach(() => { wrapper?.unmount(); vi.resetAllMocks() })
 describe('manual stage inspection UI', () => {
+  it('compares observations without promoting a stage and clears on scenario changes', async () => {
+    const stable = { ...report, checkedAt: Date.now(), context: { revision: 1, status: 'stable' }, endpoints: ['schema', 'player', 'events'].map(endpoint => ({ endpoint, status: 'ok' })) }
+    api.inspectStageSignal.mockResolvedValueOnce({ report: stable }).mockResolvedValue({ report: { ...stable, checkedAt: Date.now(), augmentEventCount: 1 } }); start()
+    await wrapper.find('button').trigger('click'); await flushPromises()
+    await wrapper.find('.compare-actions button').trigger('click')
+    await wrapper.find('button').trigger('click'); await flushPromises()
+    expect(wrapper.find('.comparison').exists()).toBe(true)
+    expect(wrapper.text()).toContain('尚未确认')
+    await wrapper.find('select').setValue('anvil')
+    expect(wrapper.find('.comparison').exists()).toBe(false)
+    expect(wrapper.find('.probe-result').exists()).toBe(false)
+  })
+  it('does not restore a pending observation after clearing it', async () => {
+    let finish!: (value: unknown) => void
+    api.inspectStageSignal.mockResolvedValueOnce({ report }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve })); start()
+    await wrapper.find('button').trigger('click'); await flushPromises()
+    await wrapper.find('button').trigger('click')
+    await wrapper.findAll('.compare-actions button')[1].trigger('click')
+    finish({ report }); await flushPromises()
+    expect(wrapper.find('.probe-result').exists()).toBe(false)
+    expect(wrapper.find('button').attributes('disabled')).toBeUndefined()
+  })
   it('does not read on mount and keeps unknown even after HTTP success', async () => {
     api.inspectStageSignal.mockResolvedValue({ report, retryAfterMs: 29000 }); start()
     expect(api.inspectStageSignal).not.toHaveBeenCalled()
