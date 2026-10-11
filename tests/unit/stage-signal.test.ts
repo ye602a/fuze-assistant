@@ -23,7 +23,7 @@ describe('stage signal inspection', () => {
     const report = summarizeStageProbe([
       ok({ components: { schemas: { Player: { properties: { augmentStage: { type: 'integer' }, [secret]: {} } } } }, examples: { properties: { augmentSlots: {} } } }),
       ok({ level: 11, summonerName: secret, puuid: secret, augmentStage: 2, augmentIds: [1001, 1002], selectedAugments: [{ id: 1001, name: secret }], augments: secret, nested: { augmentCount: 4 } }),
-      ok({ Events: [{ EventName: 'AugmentSelected', SummonerName: secret }, { EventName: secret }] }),
+      ok({ Events: [{ EventName: 'AugmentSelected', SummonerName: secret }, { EventName: secret }, { EventName: { toString: secret } }] }),
     ], 123)
     expect(report.actualStage).toBeNull()
     expect(report.schemaFields).toEqual(['augmentStage'])

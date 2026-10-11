@@ -88,7 +88,8 @@ export function summarizeStageProbe(responses: ProbeResponse[], checkedAt: numbe
     report.truncated ||= events.Events.length > 2048
     for (const event of events.Events.slice(0, 2048)) {
       // Counts are only leads; these names have not been validated on the CN client.
-      if (isRecord(event) && ['AugmentSelected', 'AugmentChosen', 'AugmentGranted'].includes(String(event.EventName))) report.augmentEventCount++
+      if (isRecord(event) && typeof event.EventName === 'string'
+        && ['AugmentSelected', 'AugmentChosen', 'AugmentGranted'].includes(event.EventName)) report.augmentEventCount++
     }
   }
   return report
