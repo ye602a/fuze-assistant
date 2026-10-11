@@ -38,4 +38,9 @@ describe('stage reference UI', () => {
     expect(mocks.get).toHaveBeenLastCalledWith(1, true)
     expect(wrapper.text()).toContain('52.0%'); expect(wrapper.find('[role="alert"]').text()).toContain('暂不可用')
   })
+  it('normalizes Tencent and dataset patch formats before warning', async () => {
+    mocks.get.mockResolvedValue({ snapshot, referencePatch: '26.20.123.456' }); start(); await toggle(true)
+    expect(wrapper.text()).not.toContain('版本不同')
+    expect(wrapper.text()).toContain('52.0%')
+  })
 })

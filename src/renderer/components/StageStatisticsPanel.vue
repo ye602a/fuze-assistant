@@ -9,7 +9,7 @@
       <template v-if="snapshot">
         <div class="provenance"><strong>{{ t('stageStats.source') }}</strong><span>{{ t('stageStats.metadata', { patch: snapshot.patch, date: snapshot.dataDate }) }}</span><span v-if="result?.cached">{{ t('stageStats.cached') }}</span></div>
         <p v-if="result?.stale" class="notice">{{ t('stageStats.stale') }}</p>
-        <p v-if="result?.referencePatch && result.referencePatch !== snapshot.patch" class="notice">{{ t('stageStats.mismatch') }}</p>
+        <p v-if="patchMismatch" class="notice">{{ t('stageStats.mismatch') }}</p>
         <p class="hint">{{ t('stageStats.unknownPatch') }}</p>
         <div class="stages" role="group" :aria-label="t('stageStats.title')"><button v-for="key in AUGMENT_STAGES" :key="key" type="button" :aria-pressed="stage === key" @click="selectStage(key)">{{ key === 'all' ? t('stageStats.all') : t('stageStats.stage', { stage: key }) }}</button></div>
         <div v-if="rows.length" class="table-scroll"><table><thead><tr><th>{{ t('stageStats.augment') }}</th><th>{{ t('stageStats.win') }}</th><th>{{ t('stageStats.pick') }}</th><th>{{ t('stageStats.sample') }}</th></tr></thead><tbody><tr v-for="row in rows.slice(0, limit)" :key="row.id"><td>{{ names.get(row.id) || t('stageStats.fallbackName', { id: row.id }) }}</td><td class="win">{{ percent(row.winRate) }}</td><td>{{ percent(row.pickRate) }}</td><td>{{ number.format(row.samples) }}</td></tr></tbody></table></div>
@@ -27,12 +27,17 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AUGMENT_STAGES, visibleStageRows, type AugmentStage, type StageResult } from '../../shared/stage-statistics.ts'
 import { electronAPI } from '../native/electron-api.ts'
+import { patchKey } from '../../shared/recognition-catalog.ts'
 const props = defineProps<{ championId: number | string; augments: Array<{ id?: number | string; augmentId?: number | string; name?: string }> }>()
 const { t, locale } = useI18n()
 const open = ref(false), loading = ref(false), stage = ref<AugmentStage>('all'), limit = ref(25)
 const result = ref<StageResult>()
 let revision = 0
 const snapshot = computed(() => result.value?.snapshot)
+const patchMismatch = computed(() => {
+  const reference = patchKey(result.value?.referencePatch), dataset = patchKey(snapshot.value?.patch)
+  return reference !== null && dataset !== null && reference !== dataset
+})
 const rows = computed(() => snapshot.value ? visibleStageRows(snapshot.value, stage.value) : [])
 const names = computed(() => new Map(props.augments.map(row => [Number(row.augmentId ?? row.id), row.name])))
 const number = computed(() => new Intl.NumberFormat(locale.value))
