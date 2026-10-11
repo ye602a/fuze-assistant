@@ -24,6 +24,30 @@ vi.mock('../../src/main/modules/logger.ts', () => ({ default: { info: vi.fn(), w
 beforeEach(() => { vi.resetModules(); harness.gpu = true; harness.failure = ''; harness.children = [] })
 afterEach(() => vi.useRealTimers())
 describe('isolated OCR recovery', () => {
+  it('does not accept new warmup after the app has begun quitting', async () => {
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    const { app } = await import('electron')
+    const service = await client.createOcrWorkerService({})
+    const callback = vi.mocked(app.once).mock.calls.findLast(call => call[0] === 'will-quit')![1]
+    callback({} as never)
+    await expect(service.warmup()).rejects.toThrow('stopped')
+    await expect(client.createOcrWorkerService({})).rejects.toThrow('stopped')
+    expect(harness.children).toHaveLength(1)
+    expect(client.getOcrWorkerStatus().backend).toBe('idle')
+  })
+  it('releases every worker and idle timer over one hundred service lifetimes', async () => {
+    vi.useFakeTimers()
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    for (let i = 0; i < 100; i++) {
+      const service = await client.createOcrWorkerService({})
+      await service.recognize({})
+      await service.destroy()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(client.getOcrWorkerStatus().backend).toBe('idle')
+    }
+    expect(harness.children).toHaveLength(100)
+    expect(harness.children.every(child => child.kill.mock.calls.length === 1)).toBe(true)
+  })
   it('releases idle models after two minutes and reinitializes on the next request', async () => {
     vi.useFakeTimers()
     const client = await import('../../src/main/ocr-worker-client.ts')
@@ -88,5 +112,29 @@ describe('isolated OCR recovery', () => {
     await rejected
     expect(harness.children).toHaveLength(1)
     expect(client.getOcrWorkerStatus().backend).toBe('idle')
+  })
+  it('cancels queued frames and warmup on destroy, and permits a fresh service', async () => {
+    harness.failure = 'timeout'
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    const service = await client.createOcrWorkerService({})
+    const results = Promise.allSettled([service.recognize({}), service.recognize({}), service.warmup()])
+    await new Promise(resolve => setTimeout(resolve, 10))
+    await service.destroy()
+    harness.failure = ''
+    expect((await results).map(result => result.status)).toEqual(['rejected', 'rejected', 'rejected'])
+    expect(harness.children).toHaveLength(1)
+    await expect(service.recognize({})).rejects.toThrow('stopped')
+    const fresh = await client.createOcrWorkerService({})
+    expect(await fresh.recognize({})).toEqual(['text'])
+    await fresh.destroy()
+  })
+  it('keeps queued frames usable through an internal GPU fallback', async () => {
+    harness.failure = 'recognize'
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    const service = await client.createOcrWorkerService({})
+    expect(await Promise.all([service.recognize({}), service.recognize({}), service.warmup()]))
+      .toEqual([['text'], ['text'], undefined])
+    expect(harness.children).toHaveLength(2)
+    await service.destroy()
   })
 })

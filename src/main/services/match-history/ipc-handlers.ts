@@ -2,6 +2,7 @@ import type {
   HextechAramMatchHistoryQuery,
   HextechAramMatchHistoryQueryResult,
   LocalMatchHistorySummaryResult,
+  AugmentJournalResult,
 } from '../../../shared/ipc-contract.ts'
 import { getLCUServiceInstance } from '../lcu/lcu-service.ts'
 import logger from '../../modules/logger.ts'
@@ -28,6 +29,13 @@ async function getSummaryFailure(error: unknown): Promise<LocalMatchHistorySumma
 }
 
 export function registerMatchHistoryIpcHandlers(): void {
+  ipcMain.handle('match-history-selection-journal', async () => {
+    try {
+      return { success: true, data: await getHextechAramQueryService(getLCUServiceInstance()).getSelectionJournal() } satisfies AugmentJournalResult
+    } catch (error) {
+      return { success: false, issue: historyIssue(error) } satisfies AugmentJournalResult
+    }
+  })
   ipcMain.handle('match-history-get-cached-current', async (_event, query?: HextechAramMatchHistoryQuery) => {
     try {
       const data = await getHextechAramQueryService(getLCUServiceInstance()).getCachedCurrent(query)

@@ -118,6 +118,7 @@ const electronAPI: ElectronAPI = {
     installAramChampion: (payload) => ipcRenderer.invoke('item-sets-install-aram-champion', payload),
   },
   matchHistory: {
+    getSelectionJournal: () => ipcRenderer.invoke('match-history-selection-journal'),
     getCachedCurrent: (payload) => ipcRenderer.invoke('match-history-get-cached-current', payload),
     getLocalSummary: () => ipcRenderer.invoke('match-history-get-local-summary'),
     queryCurrent: (payload) => ipcRenderer.invoke('match-history-query-current', payload),

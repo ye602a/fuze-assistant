@@ -70,6 +70,7 @@ export const electronAPI: ElectronAPI = {
     installAramChampion: (...args) => requireElectronAPI().itemSets.installAramChampion(...args),
   },
   matchHistory: {
+    getSelectionJournal: () => requireElectronAPI().matchHistory.getSelectionJournal(),
     getCachedCurrent: (...args) => requireElectronAPI().matchHistory.getCachedCurrent(...args),
     getLocalSummary: (...args) => requireElectronAPI().matchHistory.getLocalSummary(...args),
     queryCurrent: (...args) => requireElectronAPI().matchHistory.queryCurrent(...args),

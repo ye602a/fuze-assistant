@@ -97,6 +97,29 @@ const expectNextCaptureToUseGate = (service) => {
 }
 
 describe.sequential('automatic screenshot service lifecycle', () => {
+  it('releases per-game buffers, selection and timers across one hundred stop/start cycles', () => {
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 100; i++) {
+        const service = createRunningIdleService()
+        service.lastDetectedAugmentIds = ['1', '2', '3']
+        service.lastDetectedAugments = [{ id: 1 }]
+        service.latestRecommendation = { augments: [{ id: 1 }] }
+        service.lastRawCapture = { buffer: Buffer.alloc(64), width: 4, height: 4, channels: 4 }
+        service.pendingAnalysisBuffer = Buffer.alloc(64)
+        service._scheduleNextCapture(1000, service.runId)
+        expect(vi.getTimerCount()).toBe(1)
+        service.stop('gameflow')
+        expect(vi.getTimerCount()).toBe(0)
+        expect(service.lastRawCapture).toBeNull()
+        expect(service.pendingAnalysisBuffer).toBeNull()
+        expect(service.latestRecommendation).toBeNull()
+        expect(service.lastDetectedAugments).toEqual([])
+        expect(service.lastDetectedAugmentIds).toEqual([])
+        expect(service.pendingFullCapture).toBe(false)
+      }
+    } finally { vi.useRealTimers() }
+  })
   it('drops old window readiness when an identical selection reappears after clear', async () => {
     const service = createRunningIdleService()
     service.lastDetectedAugmentIds = ['1', '2', '3']
@@ -198,7 +221,8 @@ describe.sequential('automatic screenshot service lifecycle', () => {
     service.stop('gameflow')
     ready()
     await pending
-    expect(send).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalledWith('augment-detected', expect.anything())
+    expect(send).toHaveBeenCalledWith('augment-cleared', expect.anything())
   })
 
   it('does not deliver a stale detection into a restarted run with matching ids', async () => {

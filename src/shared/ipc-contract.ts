@@ -161,6 +161,29 @@ export interface HextechAramMatchHistoryQueryResult extends OperationResult {
   issue?: MatchHistoryIssue
 }
 
+export interface AugmentJournalEvent {
+  observedAt: number
+  level: number | null
+  kind: 'first' | 'changed' | 'reappeared'
+  partial: boolean
+  cards: Array<HextechAramMatchHistoryAsset | null>
+}
+
+export interface AugmentJournalSession {
+  gameId: number
+  startedAt: number
+  endedAt: number | null
+  interrupted: boolean
+  capped: boolean
+  events: AugmentJournalEvent[]
+  finalAugmentIds?: number[]
+}
+
+export interface AugmentJournalResult extends OperationResult {
+  data?: { playerName: string; platformId: string; offline: boolean; sessions: AugmentJournalSession[] }
+  issue?: MatchHistoryIssue
+}
+
 export interface ClientVersionInfo extends LooseRecord {
   currentVersion?: string
   latestVersion?: string
@@ -441,6 +464,7 @@ export interface ElectronAPI {
   matchHistory: {
     getLocalSummary(): Promise<LocalMatchHistorySummaryResult>
     getCachedCurrent(payload?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryQueryResult>
+    getSelectionJournal(): Promise<AugmentJournalResult>
     queryCurrent(payload?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryQueryResult>
   }
   feedback: {

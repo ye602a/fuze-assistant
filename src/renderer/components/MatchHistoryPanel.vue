@@ -17,6 +17,8 @@
       </button>
     </header>
 
+    <AugmentJournalPanel />
+
     <p v-if="status" class="match-history-status error" role="alert">
       {{ status }}
     </p>
@@ -152,6 +154,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import AugmentJournalPanel from './AugmentJournalPanel.vue'
 import type {
   HextechAramMatchHistoryAsset,
   HextechAramMatchHistoryMatch,

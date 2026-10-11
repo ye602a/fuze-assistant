@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import axios from 'axios'
@@ -220,6 +220,19 @@ describe('personal history fallback', () => {
 })
 
 describe('bounded local storage', () => {
+  it('bounds account rotation and repeated reloads without accumulating temporary files', async () => {
+    const filename = path.join(directory, 'history.json')
+    for (let i = 0; i < 12; i++) {
+      await cache.save({ ...owner, puuid: `fixture-player-${i}` }, Array.from({ length: 600 }, (_, index) =>
+        ({ ...savedMatch, gameId: index + 1, gameCreation: index + 1 })), i)
+      cache = new PersonalHistoryCache(filename)
+    }
+    const stored = JSON.parse(await readFile(filename, 'utf8'))
+    expect(stored.accounts).toHaveLength(5)
+    expect(stored.accounts.every((account: any) => account.matches.length === 500)).toBe(true)
+    expect((await cache.get())?.puuid).toBe('fixture-player-11')
+    expect(await readdir(directory)).toEqual(['history.json'])
+  })
   it('merges by match ID, isolates regions, strips labels and bounds history', async () => {
     await cache.save(owner, Array.from({ length: 520 }, (_, i) => ({ ...savedMatch, gameId: i + 1, gameCreation: i + 1 })), 100)
     await cache.save(owner, [{ ...savedMatch, gameId: 520, gameCreation: 520, kills: 99, championName: 'untrusted-label' }], 200)
@@ -240,6 +253,22 @@ describe('bounded local storage', () => {
 })
 
 describe('post-game incremental capture', () => {
+  it('leaves no timers across one hundred games and rejects late callbacks after stop', async () => {
+    vi.useFakeTimers()
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const sync = new PostGameHistorySync(refresh)
+    for (let i = 0; i < 100; i++) {
+      sync.onPhase('InProgress'); sync.onPhase('EndOfGame'); sync.onPhase('Lobby')
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(vi.getTimerCount()).toBe(0)
+    }
+    expect(refresh).toHaveBeenCalledTimes(100)
+    sync.stop()
+    sync.onPhase('InProgress'); sync.onPhase('EndOfGame')
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(refresh).toHaveBeenCalledTimes(100)
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it('runs once after a game, coalesces result/lobby changes and never repeats while idle', async () => {
     vi.useFakeTimers()
     const refresh = vi.fn().mockResolvedValue(undefined)

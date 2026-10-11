@@ -22,6 +22,8 @@ import autoScreenshotService from '../auto-screenshot-service.ts'
 import { getLCUServiceInstance } from '../services/lcu/lcu-service.ts'
 import { getHextechAramQueryService, setHistoryGamePhase } from '../services/match-history/hextech-aram-query-service.ts'
 import { PostGameHistorySync } from '../services/match-history/post-game-sync.ts'
+import { getAugmentJournal } from '../services/match-history/augment-journal.ts'
+import { readJournalContext } from '../services/match-history/journal-context.ts'
 import {
     stopLocalMatchHistoryBackgroundSync,
 } from '../services/match-history/background-sync.ts'
@@ -1185,6 +1187,9 @@ async function initGameFlowMonitor() {
 
         const handleGameflowPhase = async (phase, source) => {
             setHistoryGamePhase(phase || null)
+            void getAugmentJournal().onPhase(phase || null, () => readJournalContext(lcuService)).catch(() => {
+                logger.warn('[augment-journal] local recording unavailable; existing file preserved')
+            })
             if (!phase) {
                 personalHistorySync.onPhase(null)
                 // A disappearing client must not leave capture running after the game exits.
@@ -1430,6 +1435,8 @@ async function runQuitCleanup(reason = 'app quit') {
         autoScreenshotService.stop()
         logger.info('自动截图服务已停止')
     }
+
+    await getAugmentJournal().stop().catch(() => logger.warn('[augment-journal] final local save failed'))
 
     // Preserve existing logs in this local diagnostic fork.
 }

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   store: new Map<string, unknown>(),
   write: vi.fn(),
   phase: vi.fn(),
+  journalPhase: vi.fn(async () => {}),
   captureRunning: false,
   stopCapture: vi.fn(),
   snapshot: vi.fn(),
@@ -57,6 +58,9 @@ vi.mock('../../src/main/services/lcu/lcu-service.ts', () => ({ getLCUServiceInst
 }) }))
 vi.mock('../../src/main/services/match-history/background-sync.ts', () => ({
   requestLocalMatchHistoryBackgroundSync: vi.fn(), startLocalMatchHistoryBackgroundSync: vi.fn(), stopLocalMatchHistoryBackgroundSync: vi.fn(),
+}))
+vi.mock('../../src/main/services/match-history/augment-journal.ts', () => ({
+  getAugmentJournal: () => ({ onPhase: mocks.journalPhase, stop: vi.fn(async () => {}) }),
 }))
 vi.mock('../../src/main/version-checker.ts', () => ({ checkForClientUpdate: vi.fn(async () => {}) }))
 vi.mock('../../src/main/app-update-service.ts', () => ({
@@ -120,6 +124,7 @@ describe('main-process monitoring ownership', () => {
     expect(mocks.applyPopupPreferences).toHaveBeenLastCalledWith('GameStart')
     await phaseChanged('InProgress')
     expect(mocks.applyPopupPreferences).toHaveBeenLastCalledWith('InProgress')
+    expect(mocks.journalPhase).toHaveBeenLastCalledWith('InProgress', expect.any(Function))
     expect(mocks.popup.show).not.toHaveBeenCalled()
   })
 
@@ -169,6 +174,7 @@ describe('main-process monitoring ownership', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.stopCapture).toHaveBeenCalledWith('gameflow')
     expect(mocks.captureRunning).toBe(false)
+    expect(mocks.journalPhase).toHaveBeenLastCalledWith(null, expect.any(Function))
   })
 
   it('does not overlap slow gameflow polling requests', async () => {

@@ -18,7 +18,7 @@ const page: HextechAramMatchHistoryPage = {
     kills: 1, deaths: 2, assists: 3, result: 'win', augments: [], items: [] }],
 }
 afterEach(() => vi.resetAllMocks())
-const start = () => mount(MatchHistoryPanel, { global: { plugins: [createI18n({ legacy: false, locale: 'zh-CN', messages })] } })
+const start = () => mount(MatchHistoryPanel, { global: { stubs: { AugmentJournalPanel: true }, plugins: [createI18n({ legacy: false, locale: 'zh-CN', messages })] } })
 
 describe('history cache-first interface', () => {
   it('refreshes saved records after a post-game event without another online query', async () => {

@@ -27,6 +27,7 @@ import {
 } from './auto-screenshot-policy.ts'
 import { analyzeScreenshot, analyzeScreenshotGate, warmupImageAnalyzer } from './image-analyzer.ts'
 import { classifySelection } from './selection-kind.ts'
+import { recordAugmentObservation, clearJournalOffer } from './services/match-history/augment-journal.ts'
 import { BrowserWindow } from 'electron'
 import fs from 'fs-extra'
 import path from 'path'
@@ -386,6 +387,7 @@ class AutoScreenshotService {
         this.isAnalyzing = false
 
         const runDurationMs = this.startedAt ? Date.now() - this.startedAt : 0
+        this.clearAugmentState(`capture-stopped-${owner}`)
         logger.info(`Auto screenshot service stopped by ${owner}. screenshots=${this.screenshotCount}, analyses=${this.analysisCount}, detections=${this.detectionCount}, replacedPendingAnalyses=${this.droppedAnalysisCount}, backpressureSkippedCaptures=${this.analysisBackpressureSkipCount}, duration=${runDurationMs}ms`)
         return true
     }
@@ -1470,6 +1472,10 @@ class AutoScreenshotService {
             }
             // 从store中获取缓存的英雄ID
             const selectionRevision = ++this.selectionRevision
+            if (this.controlOwner === 'gameflow' && this.gameflowPhase === 'InProgress') {
+                const level = Date.now() - this.levelGate.checkedAt <= 10000 ? this.levelGate.level : null
+                recordAugmentObservation(analysisResult.analysis.augments, level, analysisResult.analysis.partialUpdate === true)
+            }
             this.latestRecommendation = null
             const championId = store.get('lastSelectedChampionId')
 
@@ -1558,6 +1564,7 @@ class AutoScreenshotService {
      * @private
      */
     _notifyAugmentCleared(reason = 'unknown') {
+        clearJournalOffer()
         try {
             const windows = BrowserWindow.getAllWindows()
             const payload = {
