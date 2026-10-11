@@ -143,6 +143,8 @@ const canScrollRight = ref(false)
 const unsubscribeEvents = []
 const BENCH_REFRESH_TIMEOUT_MS = 8 * 1000
 let mounted = false
+let revision = 0
+let refreshQueued = false
 let candidateResizeObserver = null
 
 const isChampSelect = computed(() => recommendation.value?.gameflowPhase === 'ChampSelect')
@@ -195,12 +197,14 @@ const applyPreviewRecommendation = (data) => {
         return
     }
 
+    revision += 1
     previewMode.value = data.refreshable !== true
     recommendation.value = data
     error.value = ''
     loading.value = false
 
     if (data.refreshable === true && mounted) {
+        refreshQueued = requestInFlight.value
         refresh(false)
     }
 }
@@ -223,6 +227,7 @@ const refresh = async (showLoading = true) => {
         return
     }
 
+    const requestRevision = revision
     requestInFlight.value = true
     if (showLoading) {
         loading.value = true
@@ -235,7 +240,7 @@ const refresh = async (showLoading = true) => {
             BENCH_REFRESH_TIMEOUT_MS,
             t('bench.timeout', { seconds: BENCH_REFRESH_TIMEOUT_MS / 1000 })
         )
-        if (previewMode.value) {
+        if (!mounted || previewMode.value || revision !== requestRevision) {
             return
         }
 
@@ -245,7 +250,7 @@ const refresh = async (showLoading = true) => {
             error.value = result?.error || t('bench.loadFailed')
         }
     } catch (err) {
-        if (previewMode.value) {
+        if (!mounted || previewMode.value || revision !== requestRevision) {
             return
         }
 
@@ -253,6 +258,10 @@ const refresh = async (showLoading = true) => {
     } finally {
         requestInFlight.value = false
         loading.value = false
+        if (refreshQueued && mounted && !previewMode.value) {
+            refreshQueued = false
+            void refresh(false)
+        }
     }
 }
 
@@ -326,13 +335,13 @@ watch(
             return
         }
 
-        if (previewMode.value) {
-            previewMode.value = false
-            recommendation.value = null
-            error.value = ''
-            if (mounted) {
-                refresh(false)
-            }
+        revision += 1
+        previewMode.value = false
+        recommendation.value = null
+        error.value = ''
+        if (mounted) {
+            refreshQueued = requestInFlight.value
+            refresh(false)
         }
     },
     { immediate: true }
@@ -368,7 +377,14 @@ onMounted(() => {
             applyPreviewRecommendation(data)
         }))
 
-        unsubscribeEvents.push(electronAPI.events.on('game-phase-changed', () => refresh(false)))
+        unsubscribeEvents.push(electronAPI.events.on('game-phase-changed', () => {
+            revision += 1
+            previewMode.value = false
+            recommendation.value = null
+            error.value = ''
+            refreshQueued = requestInFlight.value
+            void refresh(false)
+        }))
     }
 
     if (!previewMode.value) {
@@ -389,6 +405,8 @@ onBeforeUnmount(() => {
     candidateResizeObserver?.disconnect()
     candidateResizeObserver = null
     mounted = false
+    revision += 1
+    refreshQueued = false
 })
 </script>
 
