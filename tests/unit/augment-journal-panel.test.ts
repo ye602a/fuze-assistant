@@ -25,6 +25,25 @@ async function toggle(wrapper: VueWrapper, open: boolean) {
 }
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.resetAllMocks() })
 describe('choice journal interface', () => {
+  it('shows zero-detection recap without claiming a fault and filters unknown post-game data', async () => {
+    const { RecognitionMeter } = await import('../../src/main/recognition-summary.ts')
+    const meter = new RecognitionMeter(); meter.begin(); meter.count('levelWaits')
+    mocks.read.mockResolvedValue({ success: true, data: { ...saved.data, sessions: [
+      { ...saved.data.sessions[0], events: [], recognition: meter.finish() },
+      { ...saved.data.sessions[0], gameId: 456, championId: 103, championName: 'Fixture hero', result: 'win' },
+    ] } })
+    const wrapper = start(); await toggle(wrapper, true)
+    const session = wrapper.find('.journal-session'); (session.element as HTMLDetailsElement).open = true; await session.trigger('toggle')
+    expect(session.text()).toContain('不能仅凭零次判为故障')
+    expect(session.text()).toContain('等级等待跳过')
+    await wrapper.findAll('select')[1].setValue('unknown')
+    expect(wrapper.findAll('.journal-session')).toHaveLength(1)
+    await wrapper.findAll('select')[0].setValue('103')
+    expect(wrapper.findAll('.journal-session')).toHaveLength(0)
+    expect(wrapper.text()).toContain('没有符合条件')
+    expect(mocks.read).toHaveBeenCalledOnce()
+  })
+
   it('does not query until expanded and preserves the unread middle slot', async () => {
     mocks.read.mockResolvedValue(saved)
     const wrapper = start()

@@ -12,13 +12,21 @@
         <p v-if="data.offline" class="notice">{{ t('matchHistory.journal.offline') }}</p>
         <p v-if="data.playerName" class="journal-account">{{ data.playerName }} · {{ data.platformId }}</p>
         <p v-if="!data.sessions.length">{{ t('matchHistory.journal.empty') }}</p>
-        <details v-for="session in data.sessions" :key="session.gameId" class="journal-session" @toggle="toggleSession($event, session.gameId)">
+        <div v-if="data.sessions.length" class="review-filters">
+          <label>{{ t('matchHistory.journal.recap.champion') }}<select v-model="championFilter"><option value="">{{ t('matchHistory.journal.recap.allChampions') }}</option><option v-for="champion in champions" :key="champion.id" :value="String(champion.id)">{{ champion.name }}</option></select></label>
+          <label>{{ t('matchHistory.journal.recap.result') }}<select v-model="resultFilter"><option value="">{{ t('matchHistory.journal.recap.allResults') }}</option><option v-for="result in ['win', 'loss', 'remake', 'unknown']" :key="result" :value="result">{{ t(`matchHistory.journal.recap.${result}`) }}</option></select></label>
+          <p>{{ t('matchHistory.journal.recap.journalScope') }}</p>
+        </div>
+        <p v-if="data.sessions.length && !filteredSessions.length">{{ t('matchHistory.journal.recap.noMatches') }}</p>
+        <details v-for="session in filteredSessions" :key="session.gameId" class="journal-session" @toggle="toggleSession($event, session.gameId)">
           <summary>
             <span>{{ formatTime(session.startedAt) }}</span>
+            <span>{{ session.championId ? session.championName || t('matchHistory.championFallback', { id: session.championId }) : t('matchHistory.journal.recap.unknown') }}<template v-if="session.result"> · {{ t(`matchHistory.journal.recap.${session.result}`) }}</template></span>
             <span>{{ t('matchHistory.journal.entries', { count: session.events.length }) }}</span>
             <small>{{ t(`matchHistory.journal.${session.interrupted ? 'incomplete' : session.endedAt ? 'finished' : 'active'}`) }}</small>
           </summary>
           <template v-if="expanded.has(session.gameId)">
+          <RecognitionRecap :summary="session.recognition" />
           <p class="notice">{{ t(`matchHistory.journal.${session.finalAugmentIds?.length ? 'finalHint' : 'pending'}`) }}</p>
           <p v-if="session.capped" class="notice">{{ t('matchHistory.journal.capped') }}</p>
           <ol class="journal-events">
@@ -47,7 +55,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import RecognitionRecap from './RecognitionRecap.vue'
 import { useI18n } from 'vue-i18n'
 import type { AugmentJournalResult } from '../../shared/ipc-contract.ts'
 import { electronAPI, hasElectronAPI } from '../native/electron-api.ts'
@@ -58,6 +67,10 @@ const loading = ref(false)
 const error = ref('')
 const data = ref<AugmentJournalResult['data']>()
 const expanded = ref(new Set<number>())
+const championFilter = ref('')
+const resultFilter = ref('')
+const champions = computed(() => [...new Map((data.value?.sessions || []).filter(s => s.championId).map(s => [s.championId!, { id: s.championId!, name: s.championName || t('matchHistory.championFallback', { id: s.championId }) }])).values()])
+const filteredSessions = computed(() => (data.value?.sessions || []).filter(s => (!championFilter.value || String(s.championId) === championFilter.value) && (!resultFilter.value || (s.result || 'unknown') === resultFilter.value)))
 let revision = 0
 let unsubscribe: (() => void) | undefined
 const formatTime = (value: number) => new Intl.DateTimeFormat(locale.value, {
@@ -69,6 +82,7 @@ async function refresh() {
   loading.value = true
   error.value = ''
   data.value = undefined
+  championFilter.value = ''; resultFilter.value = ''
   expanded.value.clear()
   try {
     const result = await electronAPI.matchHistory.getSelectionJournal()
@@ -103,6 +117,10 @@ onUnmounted(() => { revision++; unsubscribe?.() })
 </script>
 
 <style scoped>
+.review-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 12px 0; }
+.review-filters label { display: flex; flex: 1 1 160px; flex-direction: column; gap: 5px; font-size: 12px; }
+.review-filters select { min-width: 0; padding: 9px; border: 1px solid #58615a; border-radius: 4px; background: #14232d; color: #dce7ed; }
+.review-filters p { flex-basis: 100%; margin: 0; color: #a3b1b9; }
 .journal { margin-top: 12px; border: 1px solid #40505a; border-radius: 6px; background: #0a1720; color: #c6d0d5; }
 summary { padding: 12px; cursor: pointer; color: #dbc38f; font-size: 14px; font-weight: 650; }
 summary:focus-visible, button:focus-visible { outline: 2px solid #c8aa6e; outline-offset: 2px; }
@@ -115,7 +133,7 @@ button:disabled { opacity: .5; cursor: default; }
 .journal-account { color: #dce7ed; overflow-wrap: anywhere; }
 .journal-session { margin-top: 10px; border: 1px solid #293d49; border-radius: 4px; }
 .journal-session summary span, .journal-session summary small { margin-right: 14px; }
-.journal-session summary small { color: #a3b1b9; }
+.journal-session summary small { color: #a3b1b9; white-space: nowrap; display: inline-block; }
 .notice { color: #d4bd8d; padding: 0 10px; }
 .journal-events { list-style: none; padding: 0 10px 10px; margin: 0; }
 .journal-event { padding: 12px 0; border-top: 1px solid #273b45; }

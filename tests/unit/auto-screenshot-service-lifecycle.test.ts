@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { recognitionMeter } from '../../src/main/recognition-summary.ts'
 import { resolveCaptureStage } from '../../src/main/auto-screenshot-policy.ts'
 
 const mocks = vi.hoisted(() => ({
@@ -144,11 +145,13 @@ describe.sequential('automatic screenshot service lifecycle', () => {
     expect(mocks.prepareWindows).not.toHaveBeenCalled()
   })
   it('does not complete a pending offer after an OCR exception', async () => {
+    recognitionMeter.begin()
     const service = createRunningIdleService(); const now = Date.now()
     service.levelGate.updateLevel(11, now)
     service.levelGate.observeSelection(true, now, 'augment')
     mocks.analyzeScreenshot.mockRejectedValueOnce(new Error('OCR failure'))
     await service._analyzeScreenshot(Buffer.from('frame'))
+    expect(recognitionMeter.finish()).toMatchObject({ counts: { analyses: 1 }, lastFailure: { stage: 'analysis' } })
     for (const time of [now + 1000, now + 4000, now + 7000]) service.levelGate.observeSelection(false, time)
     expect(service.levelGate.completed.size).toBe(0)
   })
@@ -176,6 +179,7 @@ describe.sequential('automatic screenshot service lifecycle', () => {
   })
 
   it('skips the actual screenshot call in level saving mode, but captures a deferred offer', async () => {
+    recognitionMeter.begin()
     const service = createRunningIdleService()
     const now = Date.now()
     service.levelReader.poll.mockResolvedValue({ level: 4, checkedAt: now })
@@ -187,6 +191,7 @@ describe.sequential('automatic screenshot service lifecycle', () => {
     mocks.captureScreenshot.mockResolvedValue({ success: false, error: 'fixture-no-frame' })
     await service._captureScreenshot(service.runId)
     expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1)
+    expect(recognitionMeter.finish()).toMatchObject({ counts: { levelWaits: 1, captures: 0 }, lastFailure: { stage: 'capture' } })
   })
 
   it('delivers the first detection only after the on-demand renderer is ready', async () => {

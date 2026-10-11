@@ -18,6 +18,14 @@
     </header>
 
     <AugmentJournalPanel />
+    <div class="review-filters">
+      <label class="review-mode"><input v-model="reviewOnly" type="checkbox" />{{ t('matchHistory.journal.recap.review') }}</label>
+      <template v-if="reviewOnly">
+        <label>{{ t('matchHistory.journal.recap.champion') }}<select v-model="championFilter"><option value="">{{ t('matchHistory.journal.recap.allChampions') }}</option><option v-for="champion in reviewChampions" :key="champion.id" :value="String(champion.id)">{{ champion.name || t('matchHistory.championFallback', { id: champion.id }) }}</option></select></label>
+        <label>{{ t('matchHistory.journal.recap.result') }}<select v-model="resultFilter"><option value="">{{ t('matchHistory.journal.recap.allResults') }}</option><option v-for="result in ['win', 'loss', 'remake']" :key="result" :value="result">{{ t(`matchHistory.journal.recap.${result}`) }}</option></select></label>
+        <p v-if="page?.savedCount !== undefined">{{ t('matchHistory.journal.recap.savedScope', { total: page.savedCount, matched: page.matchedCount }) }}</p>
+      </template>
+    </div>
 
     <p v-if="status" class="match-history-status error" role="alert">
       {{ status }}
@@ -124,8 +132,8 @@
       </article>
     </div>
 
-    <p v-else-if="page && !loading" class="match-history-empty">
-      {{ t('matchHistory.noMatches') }}
+    <p v-else-if="(page || reviewOnly) && !loading" class="match-history-empty">
+      {{ t(reviewOnly ? 'matchHistory.journal.recap.noMatches' : 'matchHistory.noMatches') }}
     </p>
 
     <footer v-if="page" class="match-history-pagination">
@@ -172,6 +180,10 @@ let unsubscribeHistory: (() => void) | undefined
 const page = ref<HextechAramMatchHistoryPage | null>(null)
 const loading = ref(false)
 const status = ref('')
+const reviewOnly = ref(false)
+const championFilter = ref('')
+const resultFilter = ref('')
+const reviewChampions = ref<HextechAramMatchHistoryAsset[]>([])
 
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -219,11 +231,12 @@ async function queryPage(startIndex: number, cacheOnly = false): Promise<void> {
   status.value = ''
   const current = () => mounted && request === revision
   try {
-    const range = { startIndex, count: PAGE_SIZE }
+    const range = { startIndex, count: PAGE_SIZE, ...(reviewOnly.value ? { reviewOnly: true, championId: Number(championFilter.value) || undefined, result: resultFilter.value as HextechAramMatchResult || undefined } : {}) }
     const cached = await electronAPI.matchHistory.getCachedCurrent(range)
     if (!current()) return
     page.value = cached.data || null
-    if (cacheOnly || cached.data?.offline) {
+    reviewChampions.value = cached.data?.reviewChampions || []
+    if (reviewOnly.value || cacheOnly || cached.data?.offline) {
       if (cached.issue) status.value = t(`matchHistory.connection.issues.${cached.issue}`)
       return
     }
@@ -242,6 +255,8 @@ async function queryPage(startIndex: number, cacheOnly = false): Promise<void> {
   }
 }
 
+watch([reviewOnly, championFilter, resultFilter], () => { void queryPage(0) })
+
 // Re-label saved IDs on locale changes without another remote history request.
 watch(locale, () => { void queryPage(page.value?.startIndex || 0, true) })
 onUnmounted(() => { mounted = false; revision += 1; unsubscribeHistory?.() })
@@ -255,6 +270,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.review-filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; color: #bdc9ca; font-size: 12px; }
+.review-filters label { display: flex; align-items: center; gap: 8px; }
+.review-filters .review-mode, .review-filters p { flex-basis: 100%; }
+.review-filters p { margin: 0; line-height: 1.6; }
+.review-filters select { max-width: 100%; min-height: 36px; padding: 6px; color: #e1d5b5; background: #14232d; border: 1px solid #59645d; border-radius: 4px; }
 .history-source { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .history-source > span { color: var(--lol-gold, #c8aa6e); border: 1px solid var(--lol-border-soft); padding: 3px 8px; border-radius: 4px; font-size: 12px; }
 .history-notice { margin: 4px 0; color: #d8c9ae; font-size: 12px; line-height: 1.6; }

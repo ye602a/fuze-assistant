@@ -115,7 +115,7 @@ function getLocalizedItemName(item: AnyRecord): string {
 
 export function normalizeHextechAramQuery(
   query: HextechAramMatchHistoryQuery | null | undefined,
-): Required<HextechAramMatchHistoryQuery> {
+): Required<Pick<HextechAramMatchHistoryQuery, 'startIndex' | 'count'>> {
   const requestedStartIndex = Number(query?.startIndex)
   const requestedCount = Number(query?.count)
   const startIndex = Number.isInteger(requestedStartIndex) && requestedStartIndex >= 0
@@ -178,15 +178,20 @@ export class HextechAramQueryService {
     if (!owner && this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')
     const saved = await this.journal().read(owner || undefined)
     if (!saved) return { playerName: owner?.playerName || '', platformId: owner?.platformId || '', offline: !owner, sessions: [] }
-    const [augmentDetails, history] = await Promise.all([loadAugmentDetail().catch(() => ({})), this.cache.get(saved.owner).catch(() => null)])
+    const [augmentDetails, history, roster] = await Promise.all([loadAugmentDetail().catch(() => ({})), this.cache.get(saved.owner).catch(() => null), loadChampionRoster().catch(() => [])])
+    const championNames = new Map(roster.map((champion: AnyRecord) => [Number(champion.championId ?? champion.id), asString(champion.nameCN) || asString(champion.nameEN)]))
     const labels = new Map(Object.entries(augmentDetails).map(([id, value]) => {
       const augment = isRecord(value) ? value : {}
       return [Number(id), { name: asString(augment.name), iconUrl: asString(augment.iconUrl) }]
     }))
     if (owner) await this.assertOwner(owner)
+    else if (this.lcuService.getConnectionStatus().discovered) throw new HistoryError('account-changed')
     const finalMatches = new Map(history?.matches.map(match => [match.gameId, match]))
     return { playerName: saved.owner.playerName, platformId: saved.owner.platformId, offline: !owner,
       sessions: saved.sessions.map(session => ({ ...session,
+        championId: finalMatches.get(session.gameId)?.championId,
+        championName: championNames.get(finalMatches.get(session.gameId)?.championId || 0),
+        result: finalMatches.get(session.gameId)?.result,
         finalAugmentIds: finalMatches.get(session.gameId)?.augments.map(augment => augment.id),
         events: session.events.map(event => ({ ...event, cards: event.cards.map(card => card ? toAsset(card.id, labels) : null) })),
       })) }
@@ -197,14 +202,20 @@ export class HextechAramQueryService {
     if (owner && !owner.platformId) throw new HistoryError('platform-unknown')
     if (!owner && this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')
     const cached = await this.cache.get(owner || undefined)
-    return cached ? this.cachedPage(cached, query, !owner) : null
+    const page = cached ? await this.cachedPage(cached, query, !owner) : null
+    if (owner) await this.assertOwner(owner)
+    else if (this.lcuService.getConnectionStatus().discovered) throw new HistoryError('account-changed')
+    return page
   }
 
   private async cachedPage(cached: PersonalHistory, query?: HextechAramMatchHistoryQuery, offline = false,
     warning?: MatchHistoryIssue): Promise<HextechAramMatchHistoryPage> {
     const range = normalizeHextechAramQuery(query)
     const labels = await this.loadLabels()
-    const matches = cached.matches.slice(range.startIndex, range.startIndex + range.count).map((match) => ({
+    const championId = Number.isSafeInteger(query?.championId) && query!.championId! > 0 ? query!.championId : undefined
+    const result = ['win', 'loss', 'remake'].includes(query?.result || '') ? query!.result : undefined
+    const filtered = query?.reviewOnly === true ? cached.matches.filter(match => (!championId || match.championId === championId) && (!result || match.result === result)) : cached.matches
+    const matches = filtered.slice(range.startIndex, range.startIndex + range.count).map((match) => ({
       ...match,
       championName: labels.champions?.get(match.championId)?.name,
       championIconUrl: labels.champions?.get(match.championId)?.iconUrl,
@@ -212,12 +223,17 @@ export class HextechAramQueryService {
       items: match.items.map(({ id }) => toAsset(id, labels.items)),
     }))
     return { playerName: cached.playerName, platformId: cached.platformId, queriedAt: cached.updatedAt,
-      ...range, matches, returnedCount: matches.length, hasPrevious: range.startIndex > 0,
-      hasMore: range.startIndex + range.count < cached.matches.length,
+      ...range, ...(query?.reviewOnly === true ? { savedCount: cached.matches.length, matchedCount: filtered.length,
+        reviewChampions: [...new Set(cached.matches.map(match => match.championId))].map(id => ({ id, name: labels.champions?.get(id)?.name })) } : {}), matches, returnedCount: matches.length, hasPrevious: range.startIndex > 0,
+      hasMore: range.startIndex + range.count < filtered.length,
       source: 'cache', offline, limited: true, warning }
   }
 
   queryCurrent(query?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryPage> {
+    if (query?.reviewOnly === true) return this.getCachedCurrent(query).then(page => {
+      if (!page) throw new HistoryError('cache-unavailable')
+      return page
+    })
     const range = normalizeHextechAramQuery(query)
     const key = `${range.startIndex}:${range.count}`
     if (this.inFlight) return this.inFlight.key === key ? this.inFlight.promise : Promise.reject(new HistoryError('rate-limited'))
@@ -254,7 +270,7 @@ export class HextechAramQueryService {
     return games
   }
 
-  private async refresh(query: Required<HextechAramMatchHistoryQuery>): Promise<HextechAramMatchHistoryPage> {
+  private async refresh(query: Required<Pick<HextechAramMatchHistoryQuery, 'startIndex' | 'count'>>): Promise<HextechAramMatchHistoryPage> {
     const owner = await this.owner()
     if (!owner) {
       if (this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')

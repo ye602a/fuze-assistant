@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { RecognitionMeter, cleanRecognitionSummary, recognitionMeter } from '../../recognition-summary.ts'
 import type { AugmentJournalEvent, AugmentJournalSession } from '../../../shared/ipc-contract.ts'
 import { getMatchHistoryDataDir } from '../../modules/app-paths.ts'
 import { HistoryError } from './history-error.ts'
@@ -28,6 +29,7 @@ function cleanSession(value: SavedJournal): SavedJournal {
       cards: event.cards.map(card => card ? { id: card.id } : null) }
   })
   return { gameId: value.gameId, startedAt: value.startedAt, endedAt: value.endedAt,
+    recognition: cleanRecognitionSummary(value.recognition),
     interrupted: value.interrupted === true, capped: value.capped === true, events,
     owner: { puuid: value.owner.puuid, platformId: value.owner.platformId, playerName: value.owner.playerName.slice(0, 128) } }
 }
@@ -45,7 +47,7 @@ export class AugmentJournal {
   private writes: Promise<void> = Promise.resolve()
   private writeFailed = false
   private stopped = false
-  constructor(private readonly filename = path.join(getMatchHistoryDataDir(), 'augment-journal-v1.json')) {}
+  constructor(private readonly filename = path.join(getMatchHistoryDataDir(), 'augment-journal-v1.json'), private readonly meter = new RecognitionMeter()) {}
 
   private load(): Promise<void> {
     this.loaded ??= (async () => {
@@ -67,7 +69,9 @@ export class AugmentJournal {
     if (this.stopped || this.phase === phase) return
     this.phase = phase
     const generation = ++this.generation
-    if (this.active?.events.length) {
+    if (this.active) {
+      this.active.recognition = this.meter.finish()
+      this.retainActive()
       this.active.endedAt = Date.now()
       this.active.interrupted ||= !['WaitingForStats', 'PreEndOfGame', 'EndOfGame'].includes(phase || '')
       this.markDirty()
@@ -83,7 +87,8 @@ export class AugmentJournal {
     this.active = existing || { owner: { puuid: owner.puuid, platformId: owner.platformId, playerName: owner.playerName },
       gameId: owner.gameId, startedAt: Date.now(), endedAt: null, interrupted: false, capped: false, events: [] }
     if (existing) { existing.endedAt = null; existing.interrupted = true }
-    // Empty sessions do not cause a write or displace older useful records.
+    this.meter.begin(this.active.recognition)
+    // Empty observations still retain a summary at phase end to diagnose no-detection games.
   }
 
   observe(cards: CardInput[], level: number | null, partial = false, observedAt = Date.now()): void {
@@ -105,10 +110,13 @@ export class AugmentJournal {
     this.active.events.push({ observedAt, level: Number.isInteger(level) && level! >= 1 && level! <= 30 ? level : null,
       kind: !last ? 'first' : this.visible ? 'changed' : 'reappeared', partial: partial || slots.some(card => !card), cards: slots })
     this.visible = true
-    this.records = [this.active, ...this.records.filter(record => record !== this.active)].slice(0, JOURNAL_MAX_SESSIONS)
+    this.retainActive()
     this.markDirty()
   }
 
+  private retainActive(): void {
+    if (this.active) this.records = [this.active, ...this.records.filter(record => record !== this.active)].slice(0, JOURNAL_MAX_SESSIONS)
+  }
   hide(): void { this.visible = false }
   private markDirty(): void {
     this.dirty = true
@@ -124,6 +132,7 @@ export class AugmentJournal {
     this.timer = null
     const pending = this.writes.catch(() => {}).then(async () => {
       if (!this.dirty) return
+      if (this.active) this.active.recognition = this.meter.snapshot()
       const body = JSON.stringify({ version: 1, sessions: this.records })
       this.dirty = false
       try {
@@ -140,9 +149,10 @@ export class AugmentJournal {
   async read(owner?: HistoryOwner): Promise<{ owner: HistoryOwner; sessions: AugmentJournalSession[] } | null> {
     await this.load()
     if (this.writeFailed) throw new HistoryError('cache-write-failed')
-    const target = owner || this.records[0]?.owner
+    const records = this.active ? [{ ...this.active, recognition: this.meter.snapshot() }, ...this.records.filter(record => record !== this.active)] : this.records
+    const target = owner || records[0]?.owner
     if (!target) return null
-    return { owner: { ...target }, sessions: this.records.filter(record => sameOwner(record.owner, target)).slice(0, 20)
+    return { owner: { ...target }, sessions: records.filter(record => sameOwner(record.owner, target)).slice(0, 20)
       .map(({ owner: _owner, ...record }) => structuredClone(record)) }
   }
 
@@ -150,14 +160,14 @@ export class AugmentJournal {
     this.stopped = true
     this.generation++
     this.phase = null
-    if (this.active?.events.length) { this.active.interrupted = true; this.markDirty() }
+    if (this.active) { this.active.recognition = this.meter.finish(); this.active.interrupted = true; this.retainActive(); this.markDirty() }
     this.active = null
     await this.flush()
   }
 }
 
 let shared: AugmentJournal | undefined
-export function getAugmentJournal(): AugmentJournal { return shared ??= new AugmentJournal() }
+export function getAugmentJournal(): AugmentJournal { return shared ??= new AugmentJournal(undefined, recognitionMeter) }
 export function recordAugmentObservation(cards: CardInput[], level: number | null, partial: boolean): void {
   shared?.observe(cards, level, partial)
 }

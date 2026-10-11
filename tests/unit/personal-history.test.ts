@@ -295,3 +295,23 @@ describe('post-game incremental capture', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 })
+
+
+describe('saved match review filters', () => {
+  it('filters all saved matches before paging and never requests online history', async () => {
+    const client = lcu(); const service = serviceFor(client)
+    await cache.save(owner, Array.from({ length: 32 }, (_, i) => ({ ...savedMatch, gameId: i + 1, gameCreation: (i + 1) * 1000, championId: i % 2 ? 103 : 1, result: i % 3 ? 'win' as const : 'loss' as const })), 1000)
+    const page = await service.queryCurrent({ reviewOnly: true, championId: 103, result: 'win', count: 3, startIndex: 3 })
+    expect(page).toMatchObject({ savedCount: 32, matchedCount: 11, returnedCount: 3, hasMore: true, startIndex: 3, source: 'cache' })
+    expect(page.matches.every(match => match.championId === 103 && match.result === 'win')).toBe(true)
+    expect(page.reviewChampions?.map(c => c.id).sort()).toEqual([1, 103])
+    expect(client.getReadOnlyJsonEndpoint).not.toHaveBeenCalled(); expect(client.getEntitlementsAccessToken).not.toHaveBeenCalled(); expect(axios.get).not.toHaveBeenCalled()
+    const empty = await service.getCachedCurrent({ reviewOnly: true, championId: 999 })
+    expect(empty).toMatchObject({ matchedCount: 0, returnedCount: 0, hasMore: false })
+  })
+  it('rejects an account change while reading cached review data', async () => {
+    const client = lcu(); await cache.save(owner, [savedMatch], 1000)
+    client.getCurrentSummoner.mockResolvedValueOnce({ ...owner, gameName: 'Fixture' }).mockResolvedValue({ ...owner, puuid: 'other-fixture-player' })
+    await expect(serviceFor(client).getCachedCurrent({ reviewOnly: true })).rejects.toMatchObject({ issue: 'account-changed' })
+  })
+})
