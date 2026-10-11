@@ -4,6 +4,7 @@ import type {
   HextechAramMatchHistoryPage,
   HextechAramMatchHistoryQuery,
   MatchHistoryIssue,
+  AugmentJournalResult,
 } from '../../../shared/ipc-contract.ts'
 import { loadAugmentDetail, loadChampionRoster, loadItems } from '../../data-loader.ts'
 import logger from '../../modules/logger.ts'
@@ -15,6 +16,7 @@ import { HistoryError, historyIssue, httpHistoryError } from './history-error.ts
 import { PersonalHistoryCache, validHistoryPuuid, type HistoryOwner, type PersonalHistory } from './personal-history-cache.ts'
 import { historyPlatformFromPayload } from './platform-resolver.ts'
 import type { StoredMatchHistoryGame } from './types.ts'
+import { getAugmentJournal, type AugmentJournal } from './augment-journal.ts'
 
 export const DEFAULT_HEXTECH_ARAM_QUERY_COUNT = 10
 export const MAX_HEXTECH_ARAM_QUERY_COUNT = 20
@@ -158,7 +160,8 @@ export class HextechAramQueryService {
   private inFlight: { key: string; promise: Promise<HextechAramMatchHistoryPage> } | null = null
   private nativeSnapshot: { key: string; until: number; games: StoredMatchHistoryGame[] } | null = null
 
-  constructor(private readonly lcuService: LCUService, private readonly cache = new PersonalHistoryCache()) {
+  constructor(private readonly lcuService: LCUService, private readonly cache = new PersonalHistoryCache(),
+    private readonly journal: () => AugmentJournal = getAugmentJournal) {
     this.sgpMatchHistoryService = new SgpMatchHistoryService(lcuService, true)
   }
 
@@ -167,6 +170,26 @@ export class HextechAramQueryService {
     if (!isRecord(summoner) || !validHistoryPuuid(summoner.puuid)) return null
     const platformId = historyPlatformFromPayload(summoner) || await this.lcuService.getCurrentPlatformId()
     return { puuid: summoner.puuid, platformId: platformId || '', playerName: getPlayerName(summoner) }
+  }
+
+  async getSelectionJournal(): Promise<AugmentJournalResult['data']> {
+    const owner = await this.owner()
+    if (owner && !owner.platformId) throw new HistoryError('platform-unknown')
+    if (!owner && this.lcuService.getConnectionStatus().discovered) throw new HistoryError('login-required')
+    const saved = await this.journal().read(owner || undefined)
+    if (!saved) return { playerName: owner?.playerName || '', platformId: owner?.platformId || '', offline: !owner, sessions: [] }
+    const [augmentDetails, history] = await Promise.all([loadAugmentDetail().catch(() => ({})), this.cache.get(saved.owner).catch(() => null)])
+    const labels = new Map(Object.entries(augmentDetails).map(([id, value]) => {
+      const augment = isRecord(value) ? value : {}
+      return [Number(id), { name: asString(augment.name), iconUrl: asString(augment.iconUrl) }]
+    }))
+    if (owner) await this.assertOwner(owner)
+    const finalMatches = new Map(history?.matches.map(match => [match.gameId, match]))
+    return { playerName: saved.owner.playerName, platformId: saved.owner.platformId, offline: !owner,
+      sessions: saved.sessions.map(session => ({ ...session,
+        finalAugmentIds: finalMatches.get(session.gameId)?.augments.map(augment => augment.id),
+        events: session.events.map(event => ({ ...event, cards: event.cards.map(card => card ? toAsset(card.id, labels) : null) })),
+      })) }
   }
 
   async getCachedCurrent(query?: HextechAramMatchHistoryQuery): Promise<HextechAramMatchHistoryPage | null> {

@@ -1,4 +1,5 @@
 import { historyStatusMessages } from './history-status.ts'
+import { journalMessages } from './journal-messages.ts'
 import { workbenchMessages } from './workbench.ts'
 import type { SupportedDataLocale } from '../../shared/ipc-contract.ts'
 
@@ -148,6 +149,7 @@ export const messages = {
     },
     matchHistory: {
       connection: historyStatusMessages['zh-CN'],
+      journal: journalMessages['zh-CN'],
       title: '海克斯大乱斗战绩 (beta)',
       description: '查询当前登录账号的海克斯大乱斗战绩；数据来自游戏客户端授权的 SGP 只读接口。',
       refresh: '刷新当前页',
@@ -387,6 +389,7 @@ export const messages = {
     },
     matchHistory: {
       connection: historyStatusMessages['en-US'],
+      journal: journalMessages['en-US'],
       title: 'ARAM: MAYHEM MATCH HISTORY (BETA)', description: 'Query ARAM: Mayhem matches for the account currently signed in to League through its authorized read-only SGP API.', refresh: 'Refresh this page', currentPlayerFallback: 'Current signed-in account', currentPageMatches: '{count} on this page', hextechOnly: 'ARAM: Mayhem only', queriedAt: 'Queried {time}', querying: 'Querying ARAM: Mayhem match history...', augments: 'Match augments', items: 'Final items', noAugments: 'No augment data', noItems: 'No item data', noMatches: 'No ARAM: Mayhem matches are available on this page', previousPage: 'Previous', nextPage: 'Next', pageNumber: 'Page {page}', remake: 'REMAKE', apiUnavailable: 'Electron match-history API is unavailable', queryFailed: 'Failed to query match history: {error}', games: '{count} matches', players: '{count} players', hextechAramGames: 'ARAM: Mayhem {count}', pendingPlayers: '{count} matched players ready', platform: 'Platform {platform}', pendingUploads: '{count} matches queued to upload', currentPlayer: 'Current player: {name}', noCurrentPlayer: 'Waiting for automatic current-player collection', recentMatches: 'CURRENT PLAYER RECENT MATCHES', noRecentMatches: 'No local match history to display', hextechAramAugments: 'ARAM: MAYHEM · CHAMPION AUGMENTS', hextechAramAugmentsHint: 'Only KIWI / ARAM: Mayhem matches are included, grouped by champion + one augment.', hextechAramItems: 'ARAM: MAYHEM · CHAMPION FINAL ITEMS', hextechAramItemsHint: 'Only KIWI matches are included, grouped by champion + final inventory item; this is not purchase order.', noHextechAramAugmentStats: 'No ARAM: Mayhem augment samples collected yet', noHextechAramItemStats: 'No ARAM: Mayhem item samples collected yet', championFallback: 'Champion #{id}', augmentFallback: 'Augment #{id}', itemFallback: 'Item #{id}', winRate: 'Win {value}', samples: '{count} samples', victory: 'WIN', defeat: 'LOSS', placement: 'Place {placement}', updatedAt: 'Local update {time}', localLoadFailed: 'Failed to read local history: {error}',
     },
     itemSets: {
@@ -430,6 +433,7 @@ export const messages = {
     },
     matchHistory: {
       connection: historyStatusMessages['zh-TW'],
+      journal: journalMessages['zh-TW'],
       title: '海克斯大亂鬥戰績 (beta)', description: '查詢目前登入帳號的海克斯大亂鬥戰績；資料來自遊戲客戶端授權的 SGP 唯讀介面。', refresh: '重新整理目前頁面', currentPlayerFallback: '目前登入帳號', currentPageMatches: '本頁 {count} 場', hextechOnly: '僅海克斯大亂鬥', queriedAt: '查詢於 {time}', querying: '正在查詢海克斯大亂鬥戰績...', augments: '本場增幅裝置', items: '終局裝備', noAugments: '無增幅裝置記錄', noItems: '無裝備記錄', noMatches: '此頁沒有可顯示的海克斯大亂鬥戰績', previousPage: '上一頁', nextPage: '下一頁', pageNumber: '第 {page} 頁', remake: '重開', apiUnavailable: 'Electron 戰績查詢介面無法使用', queryFailed: '查詢戰績失敗：{error}', games: '{count} 場', players: '{count} 名玩家', hextechAramGames: '海克斯大亂鬥 {count} 場', pendingPlayers: '{count} 名同場玩家待蒐集', platform: '區服 {platform}', pendingUploads: '{count} 場待上傳', currentPlayer: '目前玩家：{name}', noCurrentPlayer: '等待背景自動蒐集目前玩家戰績', recentMatches: '目前玩家最近戰績', noRecentMatches: '暫無可展示的本機戰績', hextechAramAugments: '海克斯大亂鬥 · 英雄增幅裝置', hextechAramAugmentsHint: '只統計 KIWI（海克斯大亂鬥）對局中的英雄 + 單個增幅裝置勝率。', hextechAramItems: '海克斯大亂鬥 · 英雄終局裝備', hextechAramItemsHint: '只統計 KIWI 對局；依英雄 + 終局裝備格統計，不代表購買順序。', noHextechAramAugmentStats: '尚未蒐集到海克斯大亂鬥增幅裝置樣本', noHextechAramItemStats: '尚未蒐集到海克斯大亂鬥裝備樣本', championFallback: '英雄 #{id}', augmentFallback: '增幅裝置 #{id}', itemFallback: '裝備 #{id}', winRate: '勝率 {value}', samples: '{count} 樣本', victory: '勝', defeat: '負', placement: '第 {placement} 名', updatedAt: '本機更新於 {time}', localLoadFailed: '讀取本機戰績失敗：{error}',
     },
     itemSets: {
