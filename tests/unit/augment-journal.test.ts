@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -116,10 +116,15 @@ describe('accepted observation journal', () => {
     expect(await readFile(filename, 'utf8')).toBe('{corrupt')
   })
   it('bounds stored sessions and only returns the latest twenty for the account', async () => {
+    vi.useFakeTimers()
     for (let gameId = 1; gameId <= 102; gameId++) {
       await begin({ ...context, gameId }); journal.observe(cards(1, 2, 3), 3)
       await journal.onPhase('EndOfGame', async () => null)
+      expect(vi.getTimerCount()).toBe(0)
+      // A fresh instance models loading the persisted data on another app run.
+      if (gameId % 10 === 0) { await journal.stop(); journal = new AugmentJournal(filename) }
     }
+    expect(await readdir(directory)).toEqual(['journal.json'])
     const stored = JSON.parse(await readFile(filename, 'utf8'))
     expect(stored.sessions).toHaveLength(100)
     expect(stored.sessions.at(-1).gameId).toBe(3)

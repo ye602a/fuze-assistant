@@ -387,6 +387,7 @@ class AutoScreenshotService {
         this.isAnalyzing = false
 
         const runDurationMs = this.startedAt ? Date.now() - this.startedAt : 0
+        this.clearAugmentState(`capture-stopped-${owner}`)
         logger.info(`Auto screenshot service stopped by ${owner}. screenshots=${this.screenshotCount}, analyses=${this.analysisCount}, detections=${this.detectionCount}, replacedPendingAnalyses=${this.droppedAnalysisCount}, backpressureSkippedCaptures=${this.analysisBackpressureSkipCount}, duration=${runDurationMs}ms`)
         return true
     }

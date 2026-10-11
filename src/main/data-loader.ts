@@ -1,4 +1,6 @@
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'fs/promises'
+import { mkdir, readFile, readdir, stat } from 'fs/promises'
+import { BoundedCache } from './bounded-cache.ts'
+import { writeTextFileAtomic } from './atomic-data-write.ts'
 import path from 'path'
 import logger from './modules/logger.ts'
 import { getAppDataDir } from './modules/app-paths.ts'
@@ -138,12 +140,12 @@ const REQUIRED_VERSION_DATA_PATHS = new Set([
   'manifest.json',
   'champion-shards/index.json',
 ])
-const cache = new Map<string, { data: any; createdAt: number }>()
+const cache = new BoundedCache<string, { data: any; createdAt: number }>(256)
 const pendingRequests = new Map<string, Promise<any>>()
 const pendingDataFileRequests = new Map<string, Promise<any>>()
-const detailCache = new Map<string, any>()
-const augmentDetailCache = new Map<string, Record<string, any>>()
-const championAugmentStatsCache = new Map<string, any[]>()
+const detailCache = new BoundedCache<string, any>(256)
+const augmentDetailCache = new BoundedCache<string, Record<string, any>>(12)
+const championAugmentStatsCache = new BoundedCache<string, any[]>(256)
 const championAugmentStatsPending = new Map<string, Promise<any[]>>()
 const activeDataSetPromises = new Map<SupportedDataLocale, Promise<ActiveDataSet>>()
 const activeDataSetCaches = new Map<SupportedDataLocale, { data: ActiveDataSet; createdAt: number }>()
@@ -536,13 +538,6 @@ async function getJsonFileSize(filePath: string): Promise<number | null> {
 
 async function writeJsonFileAtomic(filePath: string, payload: any): Promise<void> {
   await writeTextFileAtomic(filePath, JSON.stringify(payload))
-}
-
-async function writeTextFileAtomic(filePath: string, content: string): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true })
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
-  await writeFile(tempPath, content, 'utf8')
-  await rename(tempPath, filePath)
 }
 
 function getCurrentDataFileNames(locale: SupportedDataLocale): string[] {

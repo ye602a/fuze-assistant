@@ -1,10 +1,12 @@
 /** A single delayed refresh after an observed game; no startup scan or repeating timer. */
 export class PostGameHistorySync {
   private pending = false
+  private stopped = false
   private timer: ReturnType<typeof setTimeout> | null = null
   constructor(private readonly refresh: () => Promise<unknown>) {}
 
   onPhase(phase: string | null): void {
+    if (this.stopped) return
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     if (phase === 'InProgress') { this.pending = true; return }
@@ -19,6 +21,7 @@ export class PostGameHistorySync {
   }
 
   stop(): void {
+    this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     this.pending = false

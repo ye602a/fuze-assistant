@@ -9,6 +9,8 @@ let ready: Promise<void> | null = null
 let settings: unknown
 let gpuFailed = false
 let generation = 0
+let lifecycle = 0
+let quitting = false
 let mode = 'auto'
 let queue: Promise<unknown> = Promise.resolve()
 let queuedTasks = 0
@@ -19,6 +21,11 @@ let pending: { id: number; resolve(value: any): void; reject(error: Error): void
 
 export function getOcrWorkerStatus() { return { ...status } }
 export function stopOcrWorker() {
+  lifecycle++
+  releaseWorker()
+}
+// Backend recovery and idle eviction keep the service usable; explicit stop cancels its queue.
+function releaseWorker() {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
   generation++
@@ -64,7 +71,7 @@ function spawnWorker() {
 }
 async function initialize() {
   const selected = store.get('ocr.gpuEnabled') === false ? 'cpu' : 'auto'
-  if (mode !== selected) { stopOcrWorker(); gpuFailed = false; mode = selected; status.fallback = false; status.reason = '' }
+  if (mode !== selected) { releaseWorker(); gpuFailed = false; mode = selected; status.fallback = false; status.reason = '' }
   if (ready) return ready
   const run = generation
   const initialization = (async () => {
@@ -77,9 +84,9 @@ async function initialize() {
       status = { ...status, backend, warming: false }
       logger.info('OCR worker warmed', { backend, fallback: gpuFailed })
     } catch (error) {
-      if (run !== generation || backend === 'cpu') { stopOcrWorker(); throw error }
+      if (run !== generation || backend === 'cpu') { releaseWorker(); throw error }
       gpuFailed = true
-      stopOcrWorker()
+      releaseWorker()
       status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-initialization-failed' }
       logger.warn('GPU OCR initialization failed; falling back to CPU')
       spawnWorker()
@@ -90,18 +97,22 @@ async function initialize() {
     }
   })()
   ready = initialization
-  try { await initialization; ready = initialization } catch (error) { stopOcrWorker(); throw error }
+  try { await initialization; ready = initialization } catch (error) { releaseWorker(); throw error }
 }
-function serialize<T>(task: () => Promise<T>): Promise<T> {
+function serialize<T>(task: (assertActive: () => void) => Promise<T>): Promise<T> {
+  const run = lifecycle
+  const assertActive = () => {
+    if (quitting || run !== lifecycle) throw new Error('OCR worker stopped')
+  }
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
   queuedTasks++
-  const next = queue.catch(() => undefined).then(task).finally(() => {
+  const next = queue.catch(() => undefined).then(() => { assertActive(); return task(assertActive) }).finally(() => {
     queuedTasks--
     if (!queuedTasks && worker) {
       idleTimer = setTimeout(() => {
         idleTimer = null
-        if (!queuedTasks && !pending) { stopOcrWorker(); logger.info('Idle OCR worker released') }
+        if (!queuedTasks && !pending) { releaseWorker(); logger.info('Idle OCR worker released') }
       }, IDLE_RELEASE_MS)
       idleTimer.unref()
     }
@@ -112,25 +123,32 @@ function serialize<T>(task: () => Promise<T>): Promise<T> {
 export async function createOcrWorkerService(options: unknown) {
   settings = options
   await serialize(initialize)
+  let destroyed = false
+  function submit<T>(task: (assertActive: () => void) => Promise<T>): Promise<T> {
+    if (destroyed) return Promise.reject(new Error('OCR worker stopped'))
+    return serialize(task)
+  }
   return {
-    warmup: () => serialize(initialize),
-    recognize: (input: unknown) => serialize(async () => {
+    warmup: () => submit(initialize),
+    recognize: (input: unknown) => submit(async assertActive => {
       await initialize()
+      assertActive()
       const backend = status.backend
       const run = generation
       try { return await request({ action: 'recognize', input }, 6000) } catch (error) {
         if (run !== generation) throw error
-        if (backend !== 'webgpu') { stopOcrWorker(); throw error }
+        if (backend !== 'webgpu') { releaseWorker(); throw error }
         gpuFailed = true
-        stopOcrWorker()
+        releaseWorker()
         status = { backend: 'idle', warming: true, fallback: true, reason: 'gpu-inference-failed' }
         logger.warn('GPU OCR inference failed; retrying current frame on CPU')
         await initialize()
+        assertActive()
         try { return await request({ action: 'recognize', input }, 6000) }
-        catch (fallbackError) { stopOcrWorker(); throw fallbackError }
+        catch (fallbackError) { releaseWorker(); throw fallbackError }
       }
     }),
-    destroy: async () => stopOcrWorker(),
+    destroy: async () => { if (!destroyed) { destroyed = true; stopOcrWorker() } },
   }
 }
-app.once('will-quit', stopOcrWorker)
+app.once('will-quit', () => { quitting = true; stopOcrWorker() })
