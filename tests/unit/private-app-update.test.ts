@@ -70,7 +70,10 @@ describe('private Fuze update channel', () => {
     mock.download.mockImplementation(token => { active = token; return new Promise((_, fail) => { reject = fail }) })
     const download = s.downloadAppUpdate(); s.setAppUpdateGamePhase('GameStart'); expect(active.cancelled).toBe(true)
     reject(new Error('cancelled')); await download; s.setAppUpdateGamePhase('Lobby')
-    expect(s.getAppUpdateState().canDownload).toBe(true); expect(mock.download).toHaveBeenCalledTimes(1)
+    mock.events.get('download-progress')?.({ percent: 100, bytesPerSecond: 1 })
+    mock.events.get('update-downloaded')?.({ version: '0.4.1' })
+    expect(s.getAppUpdateState()).toMatchObject({ phase: 'available', downloaded: false, canDownload: true })
+    expect(mock.download).toHaveBeenCalledTimes(1)
   })
   it('allows retry after integrity failure and does not install corrupt files', async () => {
     const s = await setup(); s.setAppUpdateCredential('test_token'); mock.check.mockResolvedValue({ updateInfo: { version: '0.4.1' } }); await s.checkForAppUpdate()

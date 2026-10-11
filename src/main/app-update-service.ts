@@ -75,11 +75,17 @@ export function initializeAppUpdateService(options: { isDev: boolean }): void {
     autoUpdater.allowPrerelease = false
     autoUpdater.allowDowngrade = false
     autoUpdater.logger = null
-    autoUpdater.on('download-progress', progress => publish({ phase: 'downloading', progress: {
+    autoUpdater.on('download-progress', progress => {
+      if (!cancellation || cancellation.cancelled) return
+      publish({ phase: 'downloading', progress: {
       percent: Math.min(100, Math.max(0, Number(progress.percent) || 0)), bytesPerSecond: Number(progress.bytesPerSecond) || 0,
-    } }))
-    autoUpdater.on('update-downloaded', event => publish({ phase: 'downloaded', latestVersion: event.version,
-      downloaded: true, available: true, progress: { percent: 100 }, error: '' }))
+    } })
+    })
+    autoUpdater.on('update-downloaded', event => {
+      if (!cancellation || cancellation.cancelled) return
+      publish({ phase: 'downloaded', latestVersion: event.version,
+      downloaded: true, available: true, progress: { percent: 100 }, error: '' })
+    })
     autoUpdater.on('error', () => {})
   }
   publish({ phase: enabled ? (readCredential() ? 'idle' : 'auth-required') : 'disabled' })
