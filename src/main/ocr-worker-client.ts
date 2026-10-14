@@ -17,11 +17,25 @@ let queue: Promise<unknown> = Promise.resolve()
 let queuedTasks = 0
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 const IDLE_RELEASE_MS = 120000
+let matchActive = false
+function scheduleIdleRelease() {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+  if (matchActive || queuedTasks || !worker) return
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (!matchActive && !queuedTasks && !pending) { releaseWorker(); logger.info('Idle OCR worker released') }
+  }, IDLE_RELEASE_MS)
+  idleTimer.unref()
+}
+// Keep a single initialized model during a match; this performs no inference or polling.
+export function setOcrMatchActive(active: boolean) { matchActive = active; scheduleIdleRelease() }
 let status = { backend: 'idle', warming: false, fallback: false, reason: '' }
 let pending: { id: number; resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } | null = null
 
 export function getOcrWorkerStatus() { return { ...status } }
 export function stopOcrWorker() {
+  matchActive = false
   lifecycle++
   releaseWorker()
 }
@@ -113,13 +127,7 @@ function serialize<T>(task: (assertActive: () => void) => Promise<T>): Promise<T
   queuedTasks++
   const next = queue.catch(() => undefined).then(() => { assertActive(); return task(assertActive) }).finally(() => {
     queuedTasks--
-    if (!queuedTasks && worker) {
-      idleTimer = setTimeout(() => {
-        idleTimer = null
-        if (!queuedTasks && !pending) { releaseWorker(); logger.info('Idle OCR worker released') }
-      }, IDLE_RELEASE_MS)
-      idleTimer.unref()
-    }
+    scheduleIdleRelease()
   })
   queue = next
   return next

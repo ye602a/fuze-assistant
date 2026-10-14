@@ -1,9 +1,10 @@
 <template>
   <transition name="float-fade">
     <div v-if="visible" class="floating-overlay">
-      <div class="floating-header"><span class="floating-title">FUZE <small>{{ t('augment.recommendation') }}</small></span><button class="close-btn" type="button" @click="closeOverlay('manual')" :title="t('common.close')" :aria-label="t('common.close')">
+      <div class="floating-header"><span class="floating-title">FUZE <small>{{ t('augment.recommendation') }}</small></span><span class="statistics-basis">{{ t('workbench.overallBasis') }}</span><button class="close-btn" type="button" @click="closeOverlay('manual')" :title="t('common.close')" :aria-label="t('common.close')">
         <X class="close-icon" />
       </button></div>
+
 
       <!-- 加载状态 -->
       <div v-if="loading" class="loading">
@@ -35,6 +36,7 @@
 
           <div class="content">
             <h3 class="name" :title="augment.missing ? '' : augment.name">{{ augment.missing ? t('workbench.missing') : augment.name }}</h3>
+            <p v-if="augment.missing" class="missing-hint">{{ t('workbench.missingHint') }}</p>
             <div v-if="!augment.missing" class="stats-lines">
               <div class="stat-line">
                 <span>{{ t('augment.pickRateShort') }}</span>
@@ -429,6 +431,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.statistics-basis { margin-left: 16px; color: #c8aa6e; font-size: 11px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.missing-hint { color: #cdbe91; font-size: 12px; line-height: 1.6; margin: 0; }
 .floating-overlay {
   position: fixed; inset: 0; box-sizing: border-box; padding: 5px 8px 8px;
   color: #f0e6d2; background: #09131ef7; border: 1px solid #665638;
@@ -442,7 +446,7 @@ onBeforeUnmount(() => {
 .close-btn:hover { background: #302a22; border-color: #785a28; }
 .close-btn:focus-visible { outline: 2px solid #0ac8b9; }
 .close-icon { width: 15px; height: 15px; }
-.augments-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; height: calc(100% - 28px); }
+.augments-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 7px; height: calc(100% - 28px); }
 .augment-item {
   position: relative; display: grid; grid-template-columns: 66px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 30px; gap: 6px 10px; min-width: 0; padding: 10px 9px 8px;
@@ -471,6 +475,7 @@ onBeforeUnmount(() => {
 .top-pick .score-track { border-color: #806c43; }
 .top-pick .score-fill { background: linear-gradient(90deg, #956a2e, #e6c582); }
 .empty-slot { border-color: #2e4050; }
+.empty-slot .content { grid-row: 1 / -1; grid-column: 2; }
 .empty-slot .name { font-size: 12px; color: #8998a4; }
 .empty-slot .augment-icon-frame { opacity: .3; }
 .loading, .error { height: calc(100% - 28px); display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 12px; color: #cdbe91; }

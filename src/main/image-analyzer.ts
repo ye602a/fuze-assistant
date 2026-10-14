@@ -17,8 +17,6 @@
  */
 
 import sharp from 'sharp'
-import https from 'https'
-import axios from 'axios'
 import path from 'path'
 import { readFileSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
@@ -32,11 +30,16 @@ import {
 import logger from './modules/logger.ts'
 import { getRecognitionRevision } from './services/recognition-data-service.ts'
 import { ensureOnnxruntimeNativeDllPath } from './modules/onnxruntime-native-path.ts'
-import { discoverLcuAuthFromProcess } from './services/lcu/process-auth-discovery.ts'
 import { isRawFrame } from '../shared/raw-frame.ts'
 import { TitleResultCache } from './title-result-cache.ts'
 import { classifySelection } from './selection-kind.ts'
 
+let activeOcrMatch = false
+let updateWorkerMatchState = null
+export function setOcrMatchActive(active) {
+    activeOcrMatch = active
+    updateWorkerMatchState?.(active)
+}
 const titleResultCache = new TitleResultCache()
 export const getTitleCacheStatus = () => ({ hits: titleResultCache.hits })
 
@@ -93,8 +96,6 @@ let gameOcrLocaleHintPromise = null
 const GAME_OCR_LOCALE_HINT_TTL_MS = 60 * 1000
 const GAME_OCR_LOCALE_HINT_FAILURE_TTL_MS = 2 * 60 * 1000
 const AUGMENT_LOCALE_RETRY_DELAY_MS = 30 * 1000
-const RIOT_CLIENT_REGION_LOCALE_ENDPOINT = '/riotclient/region-locale'
-const riotClientLocaleHttpsAgent = new https.Agent({ rejectUnauthorized: false })
 const AUGMENT_RARITY_MAP = {
     'kSilver': 'silver',
     'kGold': 'gold',
@@ -133,111 +134,22 @@ function extractRiotLocaleHintDetail(payload) {
     }
 }
 
-function summarizeRiotLocalePayload(payload) {
-    if (!payload || typeof payload !== 'object') {
-        return {
-            type: typeof payload,
-            value: String(payload || '').slice(0, 80),
-        }
-    }
-
-    return {
-        type: Array.isArray(payload) ? 'array' : 'object',
-        keys: Object.keys(payload).slice(0, 20),
-        locale: payload.locale || null,
-        webLanguage: payload.webLanguage || null,
-        language: payload.language || null,
-        gameLocale: payload.gameLocale || null,
-    }
-}
-
-async function resolveGameOcrLocaleHint() {
+function resolveGameOcrLocaleHint() {
     const configuredLocale = tryNormalizeDataLocale(process.env.ARAMGG_OCR_LOCALE)
-    if (configuredLocale) {
-        logger.debug('[augment-ocr] using configured OCR locale hint', {
-            locale: configuredLocale,
-        })
-        return configuredLocale
-    }
-
-    const now = Date.now()
-    if (now < gameOcrLocaleHintExpiresAt) {
-        logger.debug('[augment-ocr] Riot client locale hint cache hit', {
-            locale: cachedGameOcrLocaleHint,
-            ttlMs: gameOcrLocaleHintExpiresAt - now,
-        })
-        return cachedGameOcrLocaleHint
-    }
-
-    if (gameOcrLocaleHintPromise) {
-        logger.debug('[augment-ocr] Riot client locale hint request joined')
-        return gameOcrLocaleHintPromise
-    }
-
-    gameOcrLocaleHintPromise = (async () => {
-        try {
-            const [token, port] = await discoverLcuAuthFromProcess()
-            let locale = null
-            let endpointStatus = null
-            let localeDetail = {
-                locale: null,
-                sourceKey: null,
-                rawValue: null,
-            }
-            let payloadSummary = null
-
-            logger.debug('[augment-ocr] Riot client locale auth discovery', {
-                found: !!(token && port),
-                port: port || null,
-            })
-
-            if (token && port) {
-                const result = await axios.get(`https://127.0.0.1:${port}${RIOT_CLIENT_REGION_LOCALE_ENDPOINT}`, {
-                    auth: {
-                        username: 'riot',
-                        password: token,
-                    },
-                    httpsAgent: riotClientLocaleHttpsAgent,
-                    validateStatus: status => status < 500,
-                    timeout: 1200,
-                })
-                endpointStatus = result?.status || null
-                payloadSummary = summarizeRiotLocalePayload(result?.data)
-                localeDetail = endpointStatus && endpointStatus < 400
-                    ? extractRiotLocaleHintDetail(result.data)
-                    : localeDetail
-                locale = localeDetail.locale
-            }
-
-            cachedGameOcrLocaleHint = locale
-            gameOcrLocaleHintExpiresAt = Date.now() + (locale
-                ? GAME_OCR_LOCALE_HINT_TTL_MS
-                : GAME_OCR_LOCALE_HINT_FAILURE_TTL_MS)
-
-            logger.info('[augment-ocr] Riot client locale hint probe completed', {
-                locale,
-                sourceKey: localeDetail.sourceKey,
-                rawValue: localeDetail.rawValue,
-                endpoint: token && port ? RIOT_CLIENT_REGION_LOCALE_ENDPOINT : null,
-                status: endpointStatus,
-                port: port || null,
-                hasAuth: !!(token && port),
-                payload: payloadSummary,
-                cacheTtlMs: locale ? GAME_OCR_LOCALE_HINT_TTL_MS : GAME_OCR_LOCALE_HINT_FAILURE_TTL_MS,
-            })
-
-            return locale
-        } catch (error) {
+    if (configuredLocale) return configuredLocale
+    if (Date.now() >= gameOcrLocaleHintExpiresAt && !gameOcrLocaleHintPromise) {
+        // Optional hint refresh is never on the recognition critical path.
+        gameOcrLocaleHintPromise = import('./services/lcu/lcu-service.ts')
+            .then(({ getLCUServiceInstance }) => getLCUServiceInstance().readClientLocaleHint()).then(payload => {
+            cachedGameOcrLocaleHint = payload ? extractRiotLocaleHintDetail(payload).locale : null
+            gameOcrLocaleHintExpiresAt = Date.now() + (cachedGameOcrLocaleHint
+                ? GAME_OCR_LOCALE_HINT_TTL_MS : GAME_OCR_LOCALE_HINT_FAILURE_TTL_MS)
+        }).catch(() => {
             cachedGameOcrLocaleHint = null
             gameOcrLocaleHintExpiresAt = Date.now() + GAME_OCR_LOCALE_HINT_FAILURE_TTL_MS
-            logger.debug('[augment-ocr] Riot client locale hint unavailable:', error.message)
-            return null
-        } finally {
-            gameOcrLocaleHintPromise = null
-        }
-    })()
-
-    return gameOcrLocaleHintPromise
+        }).finally(() => { gameOcrLocaleHintPromise = null })
+    }
+    return cachedGameOcrLocaleHint
 }
 
 function buildOcrLocalePriority(localeHint) {
@@ -601,6 +513,8 @@ async function getPaddleOcrService() {
         paddleOcrServicePromise = (async () => {
             if (process.versions.electron && process.type === 'browser') {
                 const client = await import('./ocr-worker-client.ts')
+                updateWorkerMatchState = client.setOcrMatchActive
+                client.setOcrMatchActive(activeOcrMatch)
                 readWorkerStatus = client.getOcrWorkerStatus
                 const service = await client.createOcrWorkerService({
                     detModelPath: modelPaths.detModelPath, recModelPath: modelPaths.recModelPath,
@@ -2128,7 +2042,7 @@ export async function matchAugmentDatabase(recognizedText) {
         return []
     }
 
-    const localeHint = await resolveGameOcrLocaleHint()
+    const localeHint = resolveGameOcrLocaleHint()
     // 确保当前游戏语言优先可用，其他语言不会阻塞本帧 OCR。
     const database = await initAugmentDatabase(localeHint)
     const databaseSize = Object.keys(database).length

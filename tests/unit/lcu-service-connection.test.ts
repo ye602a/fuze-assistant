@@ -43,6 +43,19 @@ afterEach(() => {
 })
 
 describe('LCU connection verification and recovery', () => {
+  it('reads optional locale only through an existing verified connection, with no redirects', async () => {
+    const service = new LCUService({ failCooldown: 0 })
+    expect(await service.readClientLocaleHint()).toBeNull()
+    expect(getLcuToken).not.toHaveBeenCalled()
+    vi.mocked(getLcuToken).mockResolvedValue(['fixture-auth', '12345', 'https://127.0.0.1:12345'])
+    vi.mocked(axios.get).mockResolvedValue({ status: 200, data: 'InProgress' })
+    await service.getGameflowPhase()
+    vi.mocked(getLcuToken).mockClear()
+    vi.mocked(axios.get).mockResolvedValue({ status: 200, data: { locale: 'zh_CN' } })
+    expect(await service.readClientLocaleHint()).toEqual({ locale: 'zh_CN' })
+    expect(getLcuToken).not.toHaveBeenCalled()
+    expect(axios.get).toHaveBeenLastCalledWith('https://127.0.0.1:12345/riotclient/region-locale', expect.objectContaining({ maxRedirects: 0, proxy: false, timeout: 1000 }))
+  })
   it('invalidates diagnostic continuity on phase/auth changes without exposing identity', async () => {
     vi.useFakeTimers(); vi.setSystemTime(10000)
     vi.mocked(getLcuToken).mockResolvedValue(['fixture-auth', '12345', 'https://127.0.0.1:12345'])

@@ -7,6 +7,7 @@ import logger from '../../modules/logger.ts'
 import store from '../../modules/app-store.ts'
 import { discoverLcuAuthFromManualDirectory } from './manual-directory-auth.ts'
 import { discoverLcuAuthFromProcess } from './process-auth-discovery.ts'
+import { discoverLcuAuthFromInstalledDirectory } from './installed-client-discovery.ts'
 import { TokenLoadResult } from './types.ts'
 
 const MANUAL_LEAGUE_PATH_KEY = 'lolPath'
@@ -43,6 +44,9 @@ export async function getLcuToken(
     if (processResult[0] && processResult[1]) {
       return processResult
     }
+
+    const installedResult = await discoverLcuAuthFromInstalledDirectory()
+    if (installedResult[0] && installedResult[1]) return installedResult
 
     const manualLeaguePath = getManualLeaguePath(dirPath)
     if (manualLeaguePath) {

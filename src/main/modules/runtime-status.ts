@@ -8,6 +8,7 @@ import { getActiveDataStatus } from '../data-loader.ts'
 import { getLatestResourceSample } from './performance-monitor.ts'
 import store from './app-store.ts'
 import { getClientDiscoverySnapshot } from '../services/lcu/process-auth-discovery.ts'
+import { getInstalledClientDirectory } from '../services/lcu/installed-client-discovery.ts'
 import { getRecognitionDataStatus } from '../services/recognition-data-service.ts'
 
 let data: RuntimeStatus['data'] = { version: '', patch: '', state: 'loading' }
@@ -24,10 +25,12 @@ export function getRuntimeStatus(): RuntimeStatus {
     }).catch(() => { data = { ...data, state: 'error' } }).finally(() => { dataPending = false })
   }
   const config = autoScreenshotService.getConfig()
+  const discovery = getClientDiscoverySnapshot()
+  const installedDirectory = getInstalledClientDirectory()
   return {
     sampledAt: Date.now(), version: app.getVersion(),
     connection: getLCUServiceInstance().getConnectionStatus(),
-    clientDiscovery: getClientDiscoverySnapshot(),
+    clientDiscovery: { ...discovery, directories: [...new Set([...discovery.directories, ...(installedDirectory ? [installedDirectory] : [])])] },
     recognitionData: getRecognitionDataStatus(),
     levelGate: autoScreenshotService.levelGateStatus,
     automatic: store.get('autoScreenshotGameflowControl') !== false,

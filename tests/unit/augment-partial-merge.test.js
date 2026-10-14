@@ -14,6 +14,17 @@ const augment = (id, detectedSlot) => ({
 })
 
 describe('mergePartialAugments', () => {
+    it('keeps an unread covered slot when the selection UI is independently confirmed', () => {
+        const result = createInitialPartialAugmentSelection({
+            augments: [augment(2102, 0), augment(2132, 2)],
+            confirmedSelectionUi: true,
+            slotDiagnostics: [{ slot: 1, text: '', matchedId: null }],
+        })
+        expect(result?.augments.map(a => a.id)).toEqual([2102, null, 2132])
+        expect(result?.reason).toBe('unreadable-title-slot')
+        expect(createInitialPartialAugmentSelection({ augments: [augment(1, 0), augment(2, 0)], confirmedSelectionUi: true })).toBeNull()
+        expect(createInitialPartialAugmentSelection({ augments: [augment(1, 0)], confirmedSelectionUi: true })).toBeNull()
+    })
     it('measures title fingerprint distance from hex average hashes', () => {
         expect(getFingerprintHammingDistance(
             '00000000000000000000000000000000',

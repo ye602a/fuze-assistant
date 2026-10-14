@@ -19,6 +19,7 @@ type InitialPartialSelectionOptions = {
     augments?: PartialAugment[]
     slotDiagnostics?: AugmentSlotDiagnostic[]
     minimumKnownAugments?: number
+    confirmedSelectionUi?: boolean
 }
 
 type MergePartialAugmentsOptions = {
@@ -81,12 +82,14 @@ export function createInitialPartialAugmentSelection({
     augments = [],
     slotDiagnostics = [],
     minimumKnownAugments = 2,
+    confirmedSelectionUi = false,
 }: InitialPartialSelectionOptions = {}) {
     const knownAugments = augments.filter(augment =>
         augment?.id != null && isValidDetectedSlot(augment.detectedSlot)
     )
 
-    if (knownAugments.length < minimumKnownAugments || knownAugments.length >= 3) {
+    if (knownAugments.length < minimumKnownAugments || knownAugments.length >= 3 ||
+        new Set(knownAugments.map(a => a.detectedSlot)).size !== knownAugments.length) {
         return null
     }
 
@@ -97,7 +100,7 @@ export function createInitialPartialAugmentSelection({
         return diagnostic?.matchedId == null && hasMeaningfulSlotText(diagnostic?.text)
     })
 
-    if (!hasMeaningfulUnmatchedTitle) {
+    if (!hasMeaningfulUnmatchedTitle && !confirmedSelectionUi) {
         return null
     }
 
@@ -111,7 +114,7 @@ export function createInitialPartialAugmentSelection({
 
     return {
         augments: merged,
-        reason: 'unmatched-title-slot',
+        reason: hasMeaningfulUnmatchedTitle ? 'unmatched-title-slot' : 'unreadable-title-slot',
         missingSlots,
     }
 }

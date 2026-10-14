@@ -26,7 +26,7 @@ import {
     shouldQueueFullCapture,
     shouldActivateSelectionCapture,
 } from './auto-screenshot-policy.ts'
-import { analyzeScreenshot, analyzeScreenshotGate, warmupImageAnalyzer } from './image-analyzer.ts'
+import { analyzeScreenshot, analyzeScreenshotGate, warmupImageAnalyzer, setOcrMatchActive } from './image-analyzer.ts'
 import { classifySelection } from './selection-kind.ts'
 import { recordAugmentObservation, clearJournalOffer } from './services/match-history/augment-journal.ts'
 import { BrowserWindow } from 'electron'
@@ -298,6 +298,7 @@ class AutoScreenshotService {
         this.runId++
         this.isRunning = true
         this.controlOwner = owner
+        setOcrMatchActive(owner === 'gameflow')
         this.captureMode = owner === 'gameflow' ? 'idle' : 'manual'
         this.candidateStreak = 0
         this.pendingFullCapture = false
@@ -374,6 +375,7 @@ class AutoScreenshotService {
 
         clearTimeout(this.intervalId)
         this.isRunning = false
+        setOcrMatchActive(false)
         this.runId++
         stopCaptureStream()
         this.levelReader.reset()
@@ -487,6 +489,7 @@ class AutoScreenshotService {
                     fullOcrCooldownUntil: this.fullOcrCooldownUntil,
                     intervalMs: activeInterval,
                     elapsedMs: elapsed,
+                    candidateStreak: this.candidateStreak,
                 })
                 : Math.max(0, activeInterval - elapsed)
             this._scheduleNextCapture(nextDelay, runId)
@@ -573,7 +576,9 @@ class AutoScreenshotService {
         }
 
         if (this.controlOwner === 'gameflow' && this.gameflowPhase === 'InProgress' && store.get('ocr.levelGateEnabled') !== false) {
-            const value = await this.levelReader.poll()
+            const value = this.levelReader.value
+            // Level telemetry is optional scheduling input, never a screenshot barrier.
+            void this.levelReader.poll()
             if (!this._isCurrentAnalysisRun(runId)) return { success: false, error: 'capture-stopped' }
             if (value) this.levelGate.updateLevel(value.level, value.checkedAt)
             else this.levelGate.checkedAt = 0
@@ -987,6 +992,7 @@ class AutoScreenshotService {
                         ? createInitialPartialAugmentSelection({
                             augments,
                             slotDiagnostics: analysisResult.analysis.slotDiagnostics || [],
+                            confirmedSelectionUi: true,
                         })
                         : null
 
@@ -1004,7 +1010,7 @@ class AutoScreenshotService {
                             return
                         }
 
-                        if (!knownSubsetOfPrevious) {
+                        if (!knownSubsetOfPrevious || Date.now() - this.lastDetectedAugmentAt >= VISIBLE_AUGMENT_PARTIAL_GRACE_MS) {
                             this.detectionCount++
                             this.lastDetectedAugments = partialAugments
                             this.lastDetectedAugmentIds = currentIds
