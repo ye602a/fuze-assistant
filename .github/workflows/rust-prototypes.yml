@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host]
     paths:
       - 'rust/**'
       - 'scripts/check-rust-prototypes.mjs'
