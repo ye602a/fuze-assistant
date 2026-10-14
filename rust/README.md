@@ -1,5 +1,7 @@
 # FUZE Rust 原型（不接入稳定版）
 
+完整状态见 [替换进度](../docs/development/rust/PROGRESS.md)。新增 fuze-runtime 为等级/会话/单任务调度核心，尚未接入正式宿主。
+
 最新进度：[M1c 原生标题回读接入 OCR](../docs/development/rust/M1C.md)。GPU atlas 到识别和隐藏浮窗已验证；WGC 的可见自有窗口测试仅在 CI 显式运行，不能当作真实游戏验收。
 
 目标是最终全 Rust 应用，本目录包含 M0、M1a 与 M1b 隔离原型。先读 [迁移清单](../docs/development/rust/PLAN.md)、[接口契约](../docs/development/rust/CONTRACT.md)、[验收标准](../docs/development/rust/ACCEPTANCE.md)、[M0 验证结果](../docs/development/rust/RESULTS.md)、[M1a 后端和原始画面验证](../docs/development/rust/M1A.md) 与 [M1b 显卡、固定尺寸和原生采集](../docs/development/rust/M1B.md)。

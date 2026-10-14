@@ -35,7 +35,7 @@ mod fixture;
 pub use fixture::{GpuFixture, GpuFixtureReader};
 #[path = "stream.rs"]
 mod stream;
-pub use stream::{FrameStatus, OwnedWindowStream};
+pub use stream::{failure_details, FrameStatus, OwnedWindowStream};
 
 struct Apartment(std::marker::PhantomData<std::rc::Rc<()>>);
 impl Apartment {

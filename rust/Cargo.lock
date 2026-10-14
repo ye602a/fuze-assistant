@@ -109,6 +109,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuze-runtime"
+version = "0.1.0"
+dependencies = [
+ "fuze-contract",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "image"
 version = "0.25.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

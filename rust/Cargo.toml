@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fuze-contract", "crates/fuze-ocr", "crates/fuze-native-overlay", "crates/fuze-capture"]
+members = ["crates/fuze-contract", "crates/fuze-ocr", "crates/fuze-native-overlay", "crates/fuze-capture", "crates/fuze-runtime"]
 
 [workspace.package]
 version = "0.1.0"

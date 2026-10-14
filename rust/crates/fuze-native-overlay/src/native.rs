@@ -345,8 +345,12 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
     let mut nonblack = false;
     let mut resized = false;
     let mut failure = None;
+    let mut failure_details = None;
     match OwnedWindowStream::start(hwnd as isize, true) {
-        Err(_) => failure = Some("wgc_start_unavailable"),
+        Err(error) => {
+            failure = Some("wgc_start_unavailable");
+            failure_details = Some(fuze_capture::native::failure_details(&*error));
+        }
         Ok(mut stream) => {
             while started.elapsed() < std::time::Duration::from_secs(4) {
                 let mut message: MSG = zeroed();
@@ -371,8 +375,9 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
                     }
                     Ok(FrameStatus::Resized) => rebuilds += 1,
                     Ok(_) => {}
-                    Err(_) => {
+                    Err(error) => {
                         failure = Some("wgc_frame_failed");
+                        failure_details = Some(fuze_capture::native::failure_details(&*error));
                         break;
                     }
                 }
@@ -385,7 +390,7 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
     let mut handles_after = 0;
     GetProcessHandleCount(GetCurrentProcess(), &mut handles_after);
     serde_json::json!({"frames":frames,"rebuilds":rebuilds,"nonblack":nonblack,
-        "verified":frames>=3&&rebuilds>0&&nonblack&&failure.is_none(),"failure":failure,
+        "verified":frames>=3&&rebuilds>0&&nonblack&&failure.is_none(),"failure":failure,"failure_details":failure_details,
         "elapsed_ms":started.elapsed().as_secs_f64()*1000.,
         "handle_delta":handles_after as i64-handles_before as i64})
 }
@@ -427,10 +432,19 @@ pub fn run() -> Result<()> {
             return Err("register-window".into());
         }
         let hwnd = CreateWindowExW(
-            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            WS_EX_NOACTIVATE
+                | if ci_capture {
+                    WS_EX_APPWINDOW
+                } else {
+                    WS_EX_TOOLWINDOW
+                },
             class.as_ptr(),
             wide("FUZE Rust prototype").as_ptr(),
-            WS_POPUP,
+            if ci_capture {
+                WS_OVERLAPPEDWINDOW
+            } else {
+                WS_POPUP
+            },
             40,
             40,
             760,

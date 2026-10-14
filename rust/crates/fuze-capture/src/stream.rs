@@ -3,6 +3,35 @@ use fuze_contract::titles::{regions, Atlas};
 use std::sync::mpsc::Receiver;
 use windows::Graphics::SizeInt32;
 
+#[derive(Debug)]
+struct OperationError {
+    operation: &'static str,
+    code: u32,
+}
+impl std::fmt::Display for OperationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "capture-operation-failed")
+    }
+}
+impl std::error::Error for OperationError {}
+fn step<T>(operation: &'static str, value: windows::core::Result<T>) -> Result<T> {
+    value.map_err(|e| {
+        Box::new(OperationError {
+            operation,
+            code: e.code().0 as u32,
+        }) as Box<dyn std::error::Error>
+    })
+}
+pub fn failure_details(error: &(dyn std::error::Error + 'static)) -> serde_json::Value {
+    if let Some(e) = error.downcast_ref::<OperationError>() {
+        serde_json::json!({"operation":e.operation,"hresult":format!("0x{:08X}",e.code)})
+    } else if let Some(e) = error.downcast_ref::<windows::core::Error>() {
+        serde_json::json!({"operation":"native_setup","hresult":format!("0x{:08X}",e.code().0 as u32)})
+    } else {
+        serde_json::json!({"operation":"contract_validation"})
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameStatus {
@@ -48,23 +77,29 @@ impl OwnedWindowStream {
                 return Err("window-ownership-or-visibility".into());
             }
         }
-        if !GraphicsCaptureSession::IsSupported()? {
+        if !step("is_supported", GraphicsCaptureSession::IsSupported())? {
             return Err("wgc-unsupported".into());
         }
         let device = Device::new()?;
         let winrt = device.winrt()?;
-        let interop: IGraphicsCaptureItemInterop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-        let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd)? };
-        let size = item.Size()?;
-        regions(size.Width as u32, size.Height as u32)?;
-        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-            &winrt,
-            DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            2,
-            size,
+        let interop: IGraphicsCaptureItemInterop = step(
+            "activation_factory",
+            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>(),
         )?;
-        let session = match pool.CreateCaptureSession(&item) {
+        let item: GraphicsCaptureItem =
+            unsafe { step("create_owned_window_item", interop.CreateForWindow(hwnd))? };
+        let size = step("item_size", item.Size())?;
+        regions(size.Width as u32, size.Height as u32)?;
+        let pool = step(
+            "create_frame_pool",
+            Direct3D11CaptureFramePool::CreateFreeThreaded(
+                &winrt,
+                DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                2,
+                size,
+            ),
+        )?;
+        let session = match step("create_session", pool.CreateCaptureSession(&item)) {
             Ok(s) => s,
             Err(e) => {
                 let _ = pool.Close();
@@ -76,7 +111,10 @@ impl OwnedWindowStream {
             session,
             token: None,
         };
-        capture.session.SetIsCursorCaptureEnabled(false)?;
+        step(
+            "disable_cursor",
+            capture.session.SetIsCursorCaptureEnabled(false),
+        )?;
         let (send, receive) = sync_channel(1);
         capture.token = Some(
             capture
@@ -86,7 +124,7 @@ impl OwnedWindowStream {
                     Ok(())
                 }))?,
         );
-        capture.session.StartCapture()?;
+        step("start_capture", capture.session.StartCapture())?;
         Ok(Self {
             capture,
             reader: RoiReader::new(&device),
