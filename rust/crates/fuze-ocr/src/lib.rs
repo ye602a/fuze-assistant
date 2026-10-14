@@ -17,6 +17,34 @@ pub struct FrameResult {
     pub selection_confirmed: bool,
 }
 
+// Trim horizontal background inside an already fixed title ROI. This is not a popup detector.
+// Ignore card-edge bands; retain generous padding and the original vertical geometry.
+fn trim_title_padding(crop: RgbImage) -> RgbImage {
+    let (w, h) = crop.dimensions();
+    let edge = w * 8 / 100;
+    let mut first = w;
+    let mut last = 0;
+    for x in edge..w - edge {
+        let bright = (0..h)
+            .filter(|&y| {
+                let p = crop.get_pixel(x, y);
+                p[0] >= 160 && p[1] >= 160 && p[2] >= 130
+            })
+            .count() as u32;
+        if bright >= 3 && bright < h * 85 / 100 {
+            first = first.min(x);
+            last = last.max(x);
+        }
+    }
+    if first < last && last - first >= 12 {
+        let left = first.saturating_sub(h / 2);
+        let right = (last + 1 + h / 2).min(w);
+        image::imageops::crop_imm(&crop, left, 0, right - left, h).to_image()
+    } else {
+        crop
+    }
+}
+
 pub fn decode_ctc(values: &[f32], classes: usize, dictionary: &[String]) -> Result<(String, f32)> {
     if classes < 2 || classes != dictionary.len() || values.len() % classes != 0 {
         return Err("invalid-output-shape".into());
@@ -103,7 +131,7 @@ impl Recognizer {
             let width = (0.14112 * w as f64).round() as u32;
             let height = (0.03 * h as f64).round().max(1.0) as u32;
             let crop = image::imageops::crop_imm(image, x, y, width, height).to_image();
-            let (name, confidence) = self.recognize_crop(crop)?;
+            let (name, confidence) = self.recognize_crop(trim_title_padding(crop))?;
             let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
             if confidence >= 0.75 {
                 if let Some(&id) = self.catalog.get(&normalized) {
