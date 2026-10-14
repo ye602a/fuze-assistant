@@ -40,11 +40,42 @@ pub use stream::{failure_details, FrameStatus, OwnedWindowStream};
 struct Apartment(std::marker::PhantomData<std::rc::Rc<()>>);
 impl Apartment {
     fn new() -> Result<Self> {
+        pin_capture_runtime()?;
         unsafe {
             RoInitialize(RO_INIT_MULTITHREADED)?;
         }
         Ok(Self(std::marker::PhantomData))
     }
+}
+
+// WGC can retain internal callbacks after Close/RoUninitialize on affected Windows builds.
+// Keep only the system DLL code mapped for this process lifetime; frames/devices still close.
+// Once per process, not a per-session LoadLibrary leak or a timing-dependent shutdown sleep.
+fn pin_capture_runtime() -> Result<()> {
+    use windows::{
+        core::w,
+        Win32::{Foundation::FreeLibrary, System::LibraryLoader::*},
+    };
+    static PIN: std::sync::OnceLock<std::result::Result<(), &'static str>> =
+        std::sync::OnceLock::new();
+    let result = PIN.get_or_init(|| unsafe {
+        let loaded = LoadLibraryExW(
+            w!("GraphicsCapture.dll"),
+            None,
+            LOAD_LIBRARY_SEARCH_SYSTEM32,
+        )
+        .map_err(|_| "capture-runtime-load")?;
+        let mut pinned = HMODULE::default();
+        let result = GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_PIN,
+            w!("GraphicsCapture.dll"),
+            &mut pinned,
+        )
+        .map_err(|_| "capture-runtime-pin");
+        let _ = FreeLibrary(loaded);
+        result
+    });
+    result.map_err(|e| e.into())
 }
 impl Drop for Apartment {
     fn drop(&mut self) {
