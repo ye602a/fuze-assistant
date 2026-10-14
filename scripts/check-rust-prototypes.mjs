@@ -24,15 +24,22 @@ const catalog = Object.fromEntries(manifest.flatMap(row => row.expectedNames.map
 const dictionaryPath = path.join(output, 'dictionary.json'), catalogPath = path.join(output, 'catalog.json')
 await writeFile(dictionaryPath, JSON.stringify(dictionary))
 await writeFile(catalogPath, JSON.stringify(catalog))
-function run(name, args) {
-  const child = spawnSync(path.join(root, 'rust/target/release', name + '.exe'), args, { cwd: root, windowsHide: true, timeout: 120000, encoding: 'utf8' })
+function run(name, args, runtimeDirectory) {
+  // Only the child receives the trusted runtime dependency directory; no global PATH changes.
+  const env = { ...process.env }
+  if (runtimeDirectory) {
+    const key = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'Path'
+    env[key] = runtimeDirectory + path.delimiter + (env[key] || '')
+  }
+  const child = spawnSync(path.join(root, 'rust/target/release', name + '.exe'), args, { cwd: root, env, windowsHide: true, timeout: 120000, encoding: 'utf8' })
   // Native-library diagnostics can contain absolute paths. Do not copy stderr to reports.
   const line = child.stdout?.trim().split(/\r?\n/).findLast(line => line.startsWith('{'))
-  const report = line ? JSON.parse(line) : { error: 'prototype-process-failed' }
-  return { ...report, exit_ok: child.status === 0 }
+  const phase = /fuze-ocr: phase=(\d+)/.exec(child.stderr || '')?.[1]
+  const report = line ? JSON.parse(line) : { error: 'prototype-process-failed', phase: phase ? Number(phase) : null }
+  return { ...report, exit_code: child.status, exit_ok: child.status === 0 }
 }
 const ort = process.env.FUZE_RUST_ORT_DLL || path.join(root, 'node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll')
-const ocr = run('fuze-ocr', [ort, path.join(root, 'resources/paddleocr/rec/inference.onnx'), dictionaryPath, catalogPath, fixtures])
+const ocr = run('fuze-ocr', [ort, path.join(root, 'resources/paddleocr/rec/inference.onnx'), dictionaryPath, catalogPath, fixtures], path.dirname(ort))
 const snapshotPath = path.join(output, 'snapshot.json')
 // Use the real partial-fixture OCR result, preserving the two missing positions.
 const snapshot = ocr.samples?.[1]?.snapshot

@@ -1,7 +1,9 @@
 use fuze_contract::{ActualStage, Slot, Snapshot};
 use fuze_ocr::{Recognizer, Result};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, fs, path::PathBuf, time::Instant};
+static PHASE: AtomicUsize = AtomicUsize::new(0);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Sample {
@@ -16,6 +18,7 @@ fn run() -> Result<()> {
         );
     }
     let dll = fs::canonicalize(&args[0])?;
+    PHASE.store(1, Ordering::Relaxed);
     ort::init_from(dll.to_string_lossy())
         .with_name("fuze-offline-prototype")
         .commit()?;
@@ -31,12 +34,15 @@ fn run() -> Result<()> {
     let dictionary: Vec<String> = serde_json::from_slice(&fs::read(&args[2])?)?;
     let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
     let started = Instant::now();
+    PHASE.store(2, Ordering::Relaxed);
     let mut engine = Recognizer::new(&PathBuf::from(&args[1]), dictionary, catalog)?;
     let init_ms = started.elapsed().as_secs_f64() * 1000.0;
     let warm = Instant::now();
+    PHASE.store(3, Ordering::Relaxed);
     engine.warm_up()?;
     let warm_ms = warm.elapsed().as_secs_f64() * 1000.0;
     let root = fs::canonicalize(&args[4])?;
+    PHASE.store(4, Ordering::Relaxed);
     if fs::metadata(root.join("manifest.json"))?.len() > 64 * 1024 {
         return Err("manifest-too-large".into());
     }
@@ -62,6 +68,7 @@ fn run() -> Result<()> {
         let mut ids = Vec::new();
         let mut snapshot = None;
         for _ in 0..3 {
+            PHASE.store(5, Ordering::Relaxed);
             let result = engine.recognize(&frame)?;
             let current: Vec<Option<u32>> = result
                 .slots
@@ -97,13 +104,14 @@ fn run() -> Result<()> {
         serde_json::json!({"backend":"cpu","init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"passed":passed,"actual_stage":null,"selection_confirmed":false})
     );
     if !passed {
+        PHASE.store(6, Ordering::Relaxed);
         return Err("fixture-mismatch".into());
     }
     Ok(())
 }
 fn main() {
     if run().is_err() {
-        eprintln!("fuze-ocr: offline-validation-failed");
+        eprintln!("fuze-ocr: phase={}", PHASE.load(Ordering::Relaxed));
         std::process::exit(1);
     }
 }
