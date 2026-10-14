@@ -409,7 +409,7 @@ export const workbenchMessages = {
     "build": "私人測試版",
     "version": "軟體版本",
     "dataVersion": "資料版本",
-    "dataPatch": "推薦資料版本",
+    "dataPatch": "推薦資料補丁",
     "hide": "隐藏到托盘",
     "quit": "退出軟體",
     "quitHint": "退出後將停止自動辨識和浮窗更新。",

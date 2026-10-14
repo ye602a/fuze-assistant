@@ -20,7 +20,12 @@
           <button v-if="loadError" class="secondary" @click="refresh">{{ w('retry') }}</button>
           <p class="footnote" role="note">{{ w('overallBasis') }}</p>
           <section class="pipeline" :aria-label="w('live')">
-            <article v-for="item in health.modules" :key="item.key" :class="'tone-' + item.tone"><RuneGlyph :name="item.icon"/><small>{{ w(item.key === 'client' ? 'client' : item.key) }}</small><strong><span class="health-dot"/>{{ w(item.label) }}</strong><span>{{ w(item.hint) }}</span></article>
+            <article v-for="item in health.modules" :key="item.key" :class="'tone-' + item.tone">
+              <RuneGlyph :name="item.icon"/><small>{{ w(item.key === 'client' ? 'client' : item.key) }}</small>
+              <strong><span class="health-dot"/>{{ w(item.label) }}</strong>
+              <span v-if="item.key === 'data'" class="data-version">{{ w('dataVersionLabel') }} {{ status?.data.version || '—' }}<br/>{{ w('dataPatch') }} {{ status?.data.patch || '—' }}</span>
+              <span>{{ w(item.hint) }}</span>
+            </article>
           </section>
           <section class="panel choices-panel"><div class="section-heading"><div><h2>{{ w('recent') }}</h2><p>{{ w('recentHint') }}</p></div><span v-if="status?.recent.detectedAt" class="muted">{{ w('detected', {time: formatTime(status.recent.detectedAt)}) }}</span></div>
             <div class="choices"><article v-for="(card, index) in cards" :key="index" class="choice" :class="{ populated: card && !card.missing }"><div class="choice-index">{{ w('slot', {n: index + 1}) }}</div><RuneGlyph class="rune-mark" name="rune"/><h3>{{ card?.name || w(card ? 'missing' : 'empty') }}</h3><p v-if="card && !card.missing">{{ w('tier') }} <strong>{{ card.tier ? `T${card.tier}` : w('noRating') }}</strong></p><p v-else>{{ w(card?.missing ? 'missingHint' : 'emptyHint') }}</p></article></div>

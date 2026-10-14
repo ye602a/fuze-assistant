@@ -58,7 +58,7 @@ let mainWindowCloseAllowed = false
 let rendererServerPromise: Promise<string> | null = null
 
 const MAIN_WINDOW_SIZE = { width: 1120, height: 840 }
-const POPUP_WINDOW_SIZE = { width: 360, height: 640 }
+const POPUP_WINDOW_SIZE = { width: 420, height: 640 }
 const POPUP_WINDOW_POSITION_KEY = 'windows.championInsightPosition'
 const FLOATING_WINDOW_SIZE = { width: 760, height: 170 }
 const AUGMENT_SIDE_PANEL_WINDOW_SIZE = { width: 360, height: 640 }
