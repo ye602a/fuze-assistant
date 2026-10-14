@@ -74,6 +74,14 @@ Rust / Node CPU 中位数接近，不能凭这组小样本宣称换语言本身�
 - CI 隐藏窗口采集使用明确报告的 WM_PRINTCLIENT 回退，760×170、stride 3040、约 1.85 ms、原始 BGRA 校验通过、编码次数 0。PrintWindow 返回成功但画面验证未过，`print_window_verified=false`；不作为 PrintWindow 游戏兼容证据。
 - CI 自有窗口仍隐藏、无激活、前台焦点未改变；工作集约 8.32 MiB。500 ms 空闲 CPU 时间观测为 0，仅是有限采样。
 
+## 本机工具链补充验证
+
+2026-10-15 后续获得用户授权，将微软官方 [Microsoft.Windows.SDK.CPP.x64 10.0.26100.9169](https://www.nuget.org/packages/Microsoft.Windows.SDK.CPP.x64/10.0.26100.9169) 的 x64 UM/UCRT 链接库解压到 FUZE 工作目录内的隔离工具目录。归档 SHA-512 与 NuGet 官方 catalog 一致；未运行系统安装器，未改用户/系统 PATH 或 SDK 注册项。未安装完整 SDK headers/tools。
+
+源码 `72ebcb3` 已在本机以 Rust 1.90.0、既有 MSVC C++ 工具、隔离 SDK 完成 `cargo test --workspace --locked --offline -j 2`（5 项通过）及 Release 构建（OCR 与原生浮窗）。输出使用独立 target-local 目录，没有覆盖 CI 下载产物或稳定版。
+
+本机新编译的 OCR 可正常加载已有 ONNX 运行库和模型，3 组既有素材共 9 次结果全部正确，初始化约 97.62 ms、预热约 21.76 ms。仅为编译/链接/运行功能验证，未重复 GPU 性能测试，也未运行可见窗口或验证游戏。此前“本机缺 SDK、只能使用 CI 二进制”的限制已对当前 Rust 原型解除。
+
 ## 下一阶段优先级
 
 1. 先核实 DXGI 适配器与硬件执行，比较动态形状、算子分区和输入传输开销，再决定是否保留 DirectML 或评估其他 Windows 后端。没有证据前不把问题归因于玩家的显卡或驱动。
