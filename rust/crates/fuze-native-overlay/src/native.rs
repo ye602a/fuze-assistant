@@ -170,7 +170,7 @@ unsafe extern "system" fn procedure(
             0
         }
         WM_ERASEBKGND => 1,
-        WM_PRINTCLIENT => {
+        WM_PRINT | WM_PRINTCLIENT => {
             let mut bounds: RECT = zeroed();
             GetClientRect(hwnd, &mut bounds);
             draw(wparam as HDC, bounds.right, bounds.bottom);
@@ -297,6 +297,10 @@ unsafe fn capture_own_window(hwnd: HWND) -> Result<serde_json::Value> {
     DeleteObject(bitmap);
     DeleteDC(dc);
     if !printed || !valid {
+        println!(
+            "{}",
+            serde_json::json!({"error":"own-window-capture-invalid","print_succeeded":printed,"pixel_valid":valid})
+        );
         return Err("own-window-capture-invalid".into());
     }
     Ok(
