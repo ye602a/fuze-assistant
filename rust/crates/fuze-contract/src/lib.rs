@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 pub mod frame;
+pub mod titles;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "state", deny_unknown_fields)]

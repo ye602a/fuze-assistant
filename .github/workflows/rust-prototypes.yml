@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture]
     paths:
       - 'rust/**'
       - 'scripts/check-rust-prototypes.mjs'
@@ -10,6 +10,7 @@ on:
       - 'scripts/benchmark-rust-node.mjs'
       - 'scripts/test-rust-host.mjs'
       - 'scripts/check-rust-capture.mjs'
+      - 'scripts/check-rust-pipeline.mjs'
       - 'scripts/compare-rust-shapes.mjs'
       - '!rust/**/*.md'
       - '.github/workflows/rust-prototypes.yml'
@@ -46,6 +47,10 @@ jobs:
         run: node scripts/check-rust-prototypes.mjs
       - name: Native capture boundary and generated GPU ROI readback
         run: node scripts/check-rust-capture.mjs
+      - name: Native atlas to OCR and own-window capture lifecycle
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
+        run: node scripts/check-rust-pipeline.mjs
       - name: Same-input CPU comparison and automatic fallback
         run: |
           node --test scripts/test-rust-host.mjs
@@ -64,6 +69,7 @@ jobs:
             rust/artifacts/native-overlay.png
             rust/artifacts/comparison.json
             rust/artifacts/capture-validation.json
+            rust/artifacts/pipeline-validation.json
           if-no-files-found: ignore
       - name: Prepare isolated prototype executables
         run: |

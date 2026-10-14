@@ -30,13 +30,20 @@ use windows::{
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-struct Apartment;
+#[path = "fixture.rs"]
+mod fixture;
+pub use fixture::{GpuFixture, GpuFixtureReader};
+#[path = "stream.rs"]
+mod stream;
+pub use stream::{FrameStatus, OwnedWindowStream};
+
+struct Apartment(std::marker::PhantomData<std::rc::Rc<()>>);
 impl Apartment {
     fn new() -> Result<Self> {
         unsafe {
             RoInitialize(RO_INIT_MULTITHREADED)?;
         }
-        Ok(Self)
+        Ok(Self(std::marker::PhantomData))
     }
 }
 impl Drop for Apartment {
@@ -82,13 +89,7 @@ impl Device {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Region {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
+pub use fuze_contract::titles::Region;
 fn validate_regions(width: u32, height: u32, regions: &[Region; 3]) -> Result<(u32, u32)> {
     if width == 0 || height == 0 || width > 4096 || height > 2160 {
         return Err("frame-size".into());
@@ -181,8 +182,27 @@ impl RoiReader {
                 x += region.width;
             }
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            self.context
-                .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+            // Submit once, then wait briefly without blocking inside Map or busy-spinning.
+            self.context.Flush();
+            let deadline = Instant::now() + Duration::from_millis(20);
+            loop {
+                match self.context.Map(
+                    staging,
+                    0,
+                    D3D11_MAP_READ,
+                    D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32,
+                    Some(&mut mapped),
+                ) {
+                    Ok(()) => break,
+                    Err(error) if error.code() == DXGI_ERROR_WAS_STILL_DRAWING => {
+                        if Instant::now() >= deadline {
+                            return Err("gpu-readback-busy".into());
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
             // Map success always reaches Unmap, including invalid-stride handling.
             let stride = size.0 as usize * 4;
             let valid = !mapped.pData.is_null() && mapped.RowPitch as usize >= stride;

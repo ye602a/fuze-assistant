@@ -71,6 +71,7 @@ dependencies = [
 name = "fuze-capture"
 version = "0.1.0"
 dependencies = [
+ "fuze-contract",
  "serde",
  "serde_json",
  "windows",

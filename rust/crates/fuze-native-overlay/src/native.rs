@@ -15,7 +15,7 @@ use windows_sys::Win32::{
     System::{
         LibraryLoader::GetModuleHandleW,
         ProcessStatus::*,
-        Threading::{GetCurrentProcess, GetProcessTimes},
+        Threading::{GetCurrentProcess, GetProcessHandleCount, GetProcessTimes},
     },
     UI::{HiDpi::*, WindowsAndMessaging::*},
 };
@@ -335,10 +335,71 @@ unsafe fn cpu_ticks() -> Result<u64> {
     }
     Ok(ticks(kernel) + ticks(user))
 }
+unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
+    use fuze_capture::native::{FrameStatus, OwnedWindowStream};
+    let mut handles_before = 0;
+    GetProcessHandleCount(GetCurrentProcess(), &mut handles_before);
+    let started = std::time::Instant::now();
+    let mut frames = 0u32;
+    let mut rebuilds = 0u32;
+    let mut nonblack = false;
+    let mut resized = false;
+    let mut failure = None;
+    match OwnedWindowStream::start(hwnd as isize, true) {
+        Err(_) => failure = Some("wgc_start_unavailable"),
+        Ok(mut stream) => {
+            while started.elapsed() < std::time::Duration::from_secs(4) {
+                let mut message: MSG = zeroed();
+                while PeekMessageW(&mut message, hwnd, 0, 0, PM_REMOVE) != 0 {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                if frames > 0 && !resized {
+                    SetWindowPos(hwnd, HWND_TOPMOST, 40, 40, 960, 540, SWP_NOACTIVATE);
+                    resized = true;
+                }
+                InvalidateRect(hwnd, null(), 0);
+                UpdateWindow(hwnd);
+                match stream.next(std::time::Duration::from_millis(100)) {
+                    Ok(FrameStatus::Ready) => {
+                        frames += 1;
+                        if let Ok(atlas) = stream.titles() {
+                            if let Ok(pixels) = atlas.rgb_slot(0) {
+                                nonblack |= pixels.iter().any(|v| *v > 0);
+                            }
+                        }
+                    }
+                    Ok(FrameStatus::Resized) => rebuilds += 1,
+                    Ok(_) => {}
+                    Err(_) => {
+                        failure = Some("wgc_frame_failed");
+                        break;
+                    }
+                }
+                if frames >= 3 && rebuilds > 0 {
+                    break;
+                }
+            }
+        }
+    } // Stream/session/frame pool are dropped before checking owned-process handles.
+    let mut handles_after = 0;
+    GetProcessHandleCount(GetCurrentProcess(), &mut handles_after);
+    serde_json::json!({"frames":frames,"rebuilds":rebuilds,"nonblack":nonblack,
+        "verified":frames>=3&&rebuilds>0&&nonblack&&failure.is_none(),"failure":failure,
+        "elapsed_ms":started.elapsed().as_secs_f64()*1000.,
+        "handle_delta":handles_after as i64-handles_before as i64})
+}
 pub fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let smoke = args.first().is_some_and(|v| v == "--smoke");
-    if !(smoke && args.len() == 3 || args.len() == 2 && args[0] == "--show") {
+    let ci_capture = args.first().is_some_and(|v| v == "--wgc-ci");
+    if ci_capture
+        && !(std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+            && std::env::var("FUZE_RUST_CI_VISIBLE").as_deref() == Ok("1"))
+    {
+        return Err("visible-test-ci-only".into());
+    }
+    if !(smoke && args.len() == 3 || args.len() == 2 && (args[0] == "--show" || ci_capture)) {
         return Err("explicit-mode-required".into());
     }
     let snapshot_path = args.last().unwrap();
@@ -392,7 +453,22 @@ pub fn run() -> Result<()> {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
-        if smoke {
+        if ci_capture {
+            SetWindowPos(hwnd, HWND_TOPMOST, 40, 40, 1280, 720, SWP_NOACTIVATE);
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            UpdateWindow(hwnd);
+            let report = visible_capture_probe(hwnd);
+            DestroyWindow(hwnd);
+            UnregisterClassW(class.as_ptr(), instance);
+            let unchanged = foreground == GetForegroundWindow();
+            println!(
+                "{}",
+                serde_json::json!({"wgc_stream":report,"foreground_unchanged":unchanged,"game_access":false,"source":"owned_ci_window"})
+            );
+            if !unchanged {
+                return Err("foreground-changed".into());
+            }
+        } else if smoke {
             let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
             let no_activate = style & WS_EX_NOACTIVATE != 0;
             let tool_window = style & WS_EX_TOOLWINDOW != 0;

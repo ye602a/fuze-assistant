@@ -285,17 +285,11 @@ impl Recognizer {
     }
     pub fn prepare_frame(image: &RgbImage) -> Result<Vec<PreparedTitle>> {
         let (w, h) = image.dimensions();
-        if w < 320 || h < 180 || w > 4096 || h > 2160 {
-            return Err("invalid-frame-size".into());
-        }
-        Ok((0..3)
-            .map(|i| {
-                let x = ((0.2305 + i as f64 * 0.1855 + 0.01344) * w as f64).round() as u32;
-                let y = (0.385 * h as f64).round() as u32;
-                let width = (0.14112 * w as f64).round() as u32;
-                let height = (0.03 * h as f64).round().max(1.0) as u32;
+        Ok(fuze_contract::titles::regions(w, h)?
+            .into_iter()
+            .map(|r| {
                 Self::prepare_crop(trim_title_padding(
-                    image::imageops::crop_imm(image, x, y, width, height).to_image(),
+                    image::imageops::crop_imm(image, r.x, r.y, r.width, r.height).to_image(),
                 ))
             })
             .collect())
@@ -320,25 +314,36 @@ impl Recognizer {
             },
         )
     }
+    pub fn recognize_atlas(
+        &mut self,
+        atlas: &fuze_contract::titles::Atlas<'_>,
+    ) -> Result<FrameResult> {
+        self.recognize_crops(|i| {
+            RgbImage::from_raw(atlas.title_width, atlas.title_height, atlas.rgb_slot(i)?)
+                .ok_or_else(|| "invalid-title-buffer".into())
+        })
+    }
     fn recognize_rois(
         &mut self,
         w: u32,
         h: u32,
         mut crop: impl FnMut(u32, u32, u32, u32) -> Result<RgbImage>,
     ) -> Result<FrameResult> {
-        if w < 320 || h < 180 || w > 4096 || h > 2160 {
-            return Err("invalid-frame-size".into());
-        }
+        let regions = fuze_contract::titles::regions(w, h)?;
+        self.recognize_crops(|i| {
+            let r = regions[i];
+            crop(r.x, r.y, r.width, r.height)
+        })
+    }
+    fn recognize_crops(
+        &mut self,
+        mut crop: impl FnMut(usize) -> Result<RgbImage>,
+    ) -> Result<FrameResult> {
         let started = Instant::now();
         let mut slots = [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable];
         // Prototype fixed single-line title geometry, not a generic text detector.
         for (i, slot) in slots.iter_mut().enumerate() {
-            let x = ((0.2305 + i as f64 * 0.1855 + 0.01344) * w as f64).round() as u32;
-            let y = (0.385 * h as f64).round() as u32;
-            let width = (0.14112 * w as f64).round() as u32;
-            let height = (0.03 * h as f64).round().max(1.0) as u32;
-            let (name, confidence) =
-                self.recognize_crop(trim_title_padding(crop(x, y, width, height)?))?;
+            let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
             let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
             if confidence >= 0.75 {
                 if let Some(&id) = self.catalog.get(&normalized) {

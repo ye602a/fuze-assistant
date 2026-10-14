@@ -64,6 +64,17 @@ fn run() -> Result<()> {
     let mut passed = true;
     let mut tensor_manifest = Vec::new();
     let mut inference = Vec::new();
+    let gpu_atlas = std::env::var("FUZE_RUST_GPU_ATLAS").as_deref() == Ok("1");
+    #[cfg(windows)]
+    let mut readback = if gpu_atlas {
+        Some(fuze_capture::native::GpuFixtureReader::new()?)
+    } else {
+        None
+    };
+    #[cfg(not(windows))]
+    if gpu_atlas {
+        return Err("gpu-atlas-windows-only".into());
+    }
     if let Some(directory) = args.get(6) {
         fs::create_dir_all(directory)?;
     }
@@ -93,8 +104,28 @@ fn run() -> Result<()> {
             frame.height() as usize,
             frame.width() as usize * 4,
         )?;
+        #[cfg(windows)]
+        let uploaded = readback
+            .as_ref()
+            .map(|r| r.upload(&bgra, frame.width(), frame.height()))
+            .transpose()?;
+        let mut capture_ms = Vec::<f64>::new();
+        let mut roi_bytes = 0usize;
         for _ in 0..3 {
             PHASE.store(5, Ordering::Relaxed);
+            #[cfg(windows)]
+            let result = if let (Some(reader), Some(uploaded)) = (&mut readback, &uploaded) {
+                let started = Instant::now();
+                let atlas = reader.read(uploaded)?;
+                capture_ms.push(started.elapsed().as_secs_f64() * 1000.);
+                roi_bytes = atlas.title_width as usize * atlas.title_height as usize * 12;
+                engine.run("gpu_inference_failed", |engine| {
+                    engine.recognize_atlas(&atlas)
+                })?
+            } else {
+                engine.run("gpu_inference_failed", |engine| engine.recognize_bgra(&raw))?
+            };
+            #[cfg(not(windows))]
             let result =
                 engine.run("gpu_inference_failed", |engine| engine.recognize_bgra(&raw))?;
             let current: Vec<Option<u32>> = result
@@ -124,7 +155,7 @@ fn run() -> Result<()> {
                 slots: result.slots,
             });
         }
-        results.push(serde_json::json!({"sample":index,"matched_ids":ids,"runs_ms":runs,"snapshot":snapshot,"matches_expected":ids==(0..3).map(|i|sample.expected_ids.get(i).copied()).collect::<Vec<_>>()}));
+        results.push(serde_json::json!({"sample":index,"matched_ids":ids,"runs_ms":runs,"capture_ms":capture_ms,"roi_bytes":roi_bytes,"snapshot":snapshot,"matches_expected":ids==(0..3).map(|i|sample.expected_ids.get(i).copied()).collect::<Vec<_>>()}));
         if let Some(directory) = args.get(6) {
             for (slot, tensor) in Recognizer::prepare_frame(&frame)?.into_iter().enumerate() {
                 let file = format!("{index}-{slot}.f32le");
@@ -175,7 +206,7 @@ fn run() -> Result<()> {
     });
     println!(
         "{}",
-        serde_json::json!({"backend_status":backend_status,"adapter":adapter,"gpu_shape":gpu_shape,"gpu_graph_cpu_assistance_allowed":backend_status.active==fuze_ocr::backend::Backend::DirectMl,"provider_audit":provider_audit,"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
+        serde_json::json!({"backend_status":backend_status,"adapter":adapter,"gpu_shape":gpu_shape,"fixture_gpu_atlas":gpu_atlas,"gpu_graph_cpu_assistance_allowed":backend_status.active==fuze_ocr::backend::Backend::DirectMl,"provider_audit":provider_audit,"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
     );
     if !passed {
         PHASE.store(6, Ordering::Relaxed);
