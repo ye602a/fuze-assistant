@@ -49,4 +49,33 @@ DirectML 模式允许 CPU 承担模型的少量辅助算子，与整个 GPU 会�
 - 原生界面仍为 Win32/GDI 实验，最终 UI 框架尚未决定。
 - 未验证真实领取信号；`actual_stage` 仍未知，不开启分阶段自动排序。
 
-验证结果在本 PR 的 Windows 检查与后续追加测量记录中列出；未通过的项目不得写成成功。
+## 2026-10-15 验证结果（香港时间）
+
+原型代码 `b3ba9df`：[Windows run 38603775470](https://github.com/ye602a/fuze-assistant/actions/runs/38603775470) 全部通过。5 项 Rust 单测、2 项宿主定向测试、locked 构建、三组既有 OCR fixture、原生隐藏窗口、同输入 CPU 对比与 auto 回退均通过。隐私扫描 689 个文件，零发现。后续报告字段命名调整不改变 Rust 二进制。
+
+本机缺少 Windows SDK，未增装 SDK。下载了上述成功 CI 的两个独立 exe，校验 workflow head SHA、artifact digest 和 exe SHA256 后，仅在本机执行离线 OCR；没有运行可见浮窗或采集本机屏幕。未安装、重启或替换稳定版。
+
+本机对比采用同一已安装 ONNX Runtime DLL、同模型、同输入张量，每个槽位单独预热后测 3 次，共 27 次推理。数据为一次有限微基准，未控制其他应用负载；不能视为游戏中的 CPU 占用率或完整应用性能。
+
+| 本机路径 | 单标题推理中位数 | 27 次推理的进程 CPU 时间合计 | 识别结果 |
+| --- | --- | --- | --- |
+| Rust CPU | 14.36 ms | 500 ms | 全部符合预期 |
+| Node CPU | 15.03 ms | 702 ms | 全部符合预期 |
+| Rust DirectML（含少量 CPU 辅助） | 42.13 ms | 1203.13 ms | 全部符合预期 |
+| Node DirectML（同配置） | 42.06 ms | 1200 ms | 全部符合预期 |
+
+Rust / Node CPU 中位数接近，不能凭这组小样本宣称换语言本身带来显著收益。当前 DirectML 路径反而更慢且进程 CPU 时间更高，**不满足设为默认性能优化的门槛**。保留原型 CPU 默认；auto 目前只是“GPU 优先、故障时 CPU 回退”，不代表按性能自动选优，也未接入稳定版。
+
+- Rust CPU 初始化 103.09 ms、预热 20.95 ms；完整三卡样本的三次全槽处理约 40.19–43.32 ms（含 ROI/推理/匹配，不含截图、文件解码与窗口显示）。
+- 独立 Rust DirectML 初始化 629.06 ms、预热 599.17 ms；auto 首次试跑初始化 723.27 ms、预热 1197.84 ms，第一张三卡样本首轮约 624.35 ms。GPU 冷启动与新形状准备不能隐去。
+- Rust 独立 provider 审计看到 299 个 DML 事件与 2 个 CPU 事件，CPU 辅助事件合计 18 微秒。该审计包含预热，不能与上述热运行逐次计时混算，也不能把事件数当作时间占比。
+- dml-strict 在初始化阶段失败；允许辅助算子后的 dml 与 auto 在本机均正确运行，auto 未触发整体回退。CI 的 auto 则在 GPU 初始化失败后仅回退一次 CPU，结果仍正确。
+- 本机存在 RTX 3060 Ti 与虚拟显示适配器；当前使用默认 DML adapter。未将其 DXGI 索引与物理设备核对，也未采样物理 GPU 利用率。`directMlExecutionVerified` 只证明 DML 执行事件，`physicalAdapterVerified=false`，不冒充已确认指定显卡承担推理。
+- CI 隐藏窗口采集使用明确报告的 WM_PRINTCLIENT 回退，760×170、stride 3040、约 1.85 ms、原始 BGRA 校验通过、编码次数 0。PrintWindow 返回成功但画面验证未过，`print_window_verified=false`；不作为 PrintWindow 游戏兼容证据。
+- CI 自有窗口仍隐藏、无激活、前台焦点未改变；工作集约 8.32 MiB。500 ms 空闲 CPU 时间观测为 0，仅是有限采样。
+
+## 下一阶段优先级
+
+1. 先核实 DXGI 适配器与硬件执行，比较动态形状、算子分区和输入传输开销，再决定是否保留 DirectML 或评估其他 Windows 后端。没有证据前不把问题归因于玩家的显卡或驱动。
+2. 对标题输入形状分桶与提前预热做受控实验，验收识别准确率及首次/稳定帧耗时；减少模型编译和重复传输，不能只看热运行速度。
+3. 实现 Windows Graphics Capture 自有测试窗口原型，再做更多 OCR 布局/遮挡/刷新样本与完整链路对照。继续保留稳定版；实战与物理 GPU 验收仍未完成。

@@ -15,7 +15,7 @@ if (process.env.FUZE_RUST_GPU_TEST === '1' && rustCpu.exit_ok) {
   nodeDml = childReport(process.execPath, [path.join(root, 'scripts/benchmark-rust-node.mjs'), ...args.slice(1,4), tensors, 'dml'])
   strictDml = runOcr(args, 'dml-strict')
 }
-const report = { rustCpu, nodeCpu, automatic, rustDml, nodeDml, strictDml, gpuVerified: !!(rustDml?.exit_ok && rustDml?.passed && rustDml?.provider_audit?.dml_execution_observed), scope: 'same-model-same-tensors-inference-only', liveGameValidated: false }
+const report = { rustCpu, nodeCpu, automatic, rustDml, nodeDml, strictDml, directMlExecutionVerified: !!(rustDml?.exit_ok && rustDml?.passed && rustDml?.provider_audit?.dml_execution_observed), physicalAdapterVerified: false, scope: 'same-model-same-tensors-inference-only', liveGameValidated: false }
 await writeFile(path.join(output, 'comparison.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report))
 if (!rustCpu.exit_ok || !rustCpu.passed || !nodeCpu.exit_ok || !nodeCpu.passed || !automatic.exit_ok || !automatic.passed) process.exitCode = 1
