@@ -106,6 +106,12 @@ impl ResilientRecognizer {
     pub fn status(&self) -> &BackendStatus {
         &self.status
     }
+    #[cfg(windows)]
+    pub fn adapter(&self) -> Option<fuze_capture::adapter::Adapter> {
+        self.engine
+            .as_ref()
+            .and_then(|engine| engine.adapter.clone())
+    }
     pub fn warm_up(&mut self) -> Result<()> {
         self.run_inner("gpu_warmup_failed", false, |engine| engine.warm_up())
     }

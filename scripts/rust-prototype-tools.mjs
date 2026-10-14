@@ -43,8 +43,8 @@ export function childReport(command, args, timeout = 120000) {
   return { ...report, fallback_started: /fuze-ocr: fallback=1/.test(child.stderr || ''), exit_code: child.status, exit_ok: child.status === 0 && !child.error }
 }
 export function run(name, args) {
-  if (!['fuze-ocr', 'fuze-native-overlay'].includes(name)) throw new Error('Invalid prototype')
-  return childReport(path.join(root, 'rust/target/release', name + '.exe'), args)
+  if (!['fuze-ocr', 'fuze-native-overlay', 'fuze-capture'].includes(name)) throw new Error('Invalid prototype')
+  return childReport(path.join(process.env.FUZE_RUST_BIN_DIR || path.join(root, 'rust/target/release'), name + '.exe'), args)
 }
 // Only auto may restart a crashed/timed-out native child once on CPU.
 export function runOcr(args, mode = 'cpu', tensorDirectory) {

@@ -400,6 +400,13 @@ pub fn run() -> Result<()> {
             let topmost = style & WS_EX_TOPMOST != 0;
             let render = save_own_surface(PathBuf::from(&args[1]), 760, 170);
             let capture = capture_own_window(hwnd);
+            let wgc = if std::env::var_os("FUZE_RUST_WGC_TEST").as_deref()
+                == Some(std::ffi::OsStr::new("1"))
+            {
+                Some(fuze_capture::native::probe_hidden_own_window(hwnd as isize))
+            } else {
+                None
+            };
             let cpu_start = cpu_ticks();
             std::thread::sleep(std::time::Duration::from_millis(500));
             let cpu_end = cpu_ticks();
@@ -417,7 +424,7 @@ pub fn run() -> Result<()> {
             }
             println!(
                 "{}",
-                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false,"own_window_capture":capture})
+                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false,"own_window_capture":capture,"wgc":wgc})
             );
             if !hidden || !no_activate || !tool_window || !topmost || !unchanged {
                 return Err("window-invariant".into());

@@ -1,8 +1,9 @@
 # FUZE Rust 原型（不接入稳定版）
 
-目标是最终全 Rust 应用，本目录包含 M0 与独立 M1a 原型。先读 [迁移清单](../docs/development/rust/PLAN.md)、[接口契约](../docs/development/rust/CONTRACT.md)、[验收标准](../docs/development/rust/ACCEPTANCE.md)、[M0 验证结果](../docs/development/rust/RESULTS.md) 与 [M1a 后端和原始画面验证](../docs/development/rust/M1A.md)。
+目标是最终全 Rust 应用，本目录包含 M0、M1a 与 M1b 隔离原型。先读 [迁移清单](../docs/development/rust/PLAN.md)、[接口契约](../docs/development/rust/CONTRACT.md)、[验收标准](../docs/development/rust/ACCEPTANCE.md)、[M0 验证结果](../docs/development/rust/RESULTS.md)、[M1a 后端和原始画面验证](../docs/development/rust/M1A.md) 与 [M1b 显卡、固定尺寸和原生采集](../docs/development/rust/M1B.md)。
 
 - fuze-contract：三槽位、未知轮次、会话/版本/序号接纳规则。
+- fuze-capture：DXGI 适配器映射、生成纹理的三 ROI 回读、受限自有隐藏窗口 WGC 探针；本机 WGC 取帧尚未验证，不是游戏截图服务。
 - fuze-ocr：真实 ONNX CPU / DirectML 标题识别、BGRA ROI、CTC 解码、严格名称匹配和一次性 CPU 回退。固定单行区域限制明确，不是完整截图识别替代品。
 - fuze-native-overlay：纯 Rust Win32/GDI 绘制。默认无可见窗口；隐藏 smoke 只绘制与采集自己创建的窗口，报告 PrintWindow / WM_PRINTCLIENT 的实际结果。--show 由用户主动运行演示，不抢焦点，无常驻刷新计时器。未自动在游戏上方验证。
 

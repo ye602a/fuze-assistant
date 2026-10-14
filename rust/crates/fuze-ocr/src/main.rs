@@ -159,6 +159,15 @@ fn run() -> Result<()> {
         )?;
     }
     let backend_status = engine.status().clone();
+    let gpu_shape = if backend_status.active == fuze_ocr::backend::Backend::Cpu {
+        None
+    } else {
+        Some(std::env::var("FUZE_RUST_DML_SHAPE").unwrap_or_else(|_| "fixed512".into()))
+    };
+    #[cfg(windows)]
+    let adapter = engine.adapter();
+    #[cfg(not(windows))]
+    let adapter: Option<()> = None;
     drop(engine);
     let provider_audit = audit_inputs.map(|(directory, dictionary, catalog)| {
         Recognizer::audit_provider(&PathBuf::from(&args[1]), dictionary, catalog, &directory)
@@ -166,7 +175,7 @@ fn run() -> Result<()> {
     });
     println!(
         "{}",
-        serde_json::json!({"backend_status":backend_status,"gpu_graph_cpu_assistance_allowed":backend_status.active==fuze_ocr::backend::Backend::DirectMl,"provider_audit":provider_audit,"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
+        serde_json::json!({"backend_status":backend_status,"adapter":adapter,"gpu_shape":gpu_shape,"gpu_graph_cpu_assistance_allowed":backend_status.active==fuze_ocr::backend::Backend::DirectMl,"provider_audit":provider_audit,"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
     );
     if !passed {
         PHASE.store(6, Ordering::Relaxed);

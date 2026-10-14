@@ -20,6 +20,10 @@ pub struct Recognizer {
     session: Session,
     dictionary: Vec<String>,
     catalog: HashMap<String, u32>,
+    fixed_width: Option<usize>,
+    warmed: bool,
+    #[cfg(windows)]
+    pub adapter: Option<fuze_capture::adapter::Adapter>,
 }
 #[derive(Serialize)]
 pub struct FrameResult {
@@ -114,12 +118,35 @@ impl Recognizer {
             .with_parallel_execution(false)?
             .with_config_entry("session.intra_op.allow_spinning", "0")?
             .with_config_entry("session.inter_op.allow_spinning", "0")?;
+        // Offline A/B switch; stable application does not import this prototype.
+        let sizing = std::env::var("FUZE_RUST_DML_SHAPE").unwrap_or_else(|_| "fixed512".into());
+        if !["dynamic", "padded512", "fixed512"].contains(&sizing.as_str()) {
+            return Err("invalid-shape-mode".into());
+        }
+        let fixed_width = (backend != Backend::Cpu && sizing != "dynamic").then_some(512);
+        #[cfg(windows)]
+        let adapter = if backend != Backend::Cpu {
+            Some(
+                fuze_capture::adapter::enumerate()?
+                    .into_iter()
+                    .find(|a| a.index == 0 && !a.software)
+                    .ok_or("hardware-adapter-unavailable")?,
+            )
+        } else {
+            None
+        };
         if backend != Backend::Cpu {
             builder = builder
                 .with_memory_pattern(false)?
                 .with_execution_providers([DirectMLExecutionProvider::default()
+                    .with_device_id(0)
                     .build()
                     .error_on_failure()])?;
+            if sizing == "fixed512" {
+                builder = builder
+                    .with_dimension_override("DynamicDimension.0", 1)?
+                    .with_dimension_override("DynamicDimension.1", 512)?;
+            }
         }
         if backend == Backend::DirectMlStrict {
             builder = builder.with_config_entry("session.disable_cpu_ep_fallback", "1")?;
@@ -128,10 +155,24 @@ impl Recognizer {
             builder = builder.with_profiling(file)?;
         }
         let session = builder.commit_from_file(model)?;
+        if backend != Backend::Cpu
+            && sizing == "fixed512"
+            && !session
+                .inputs
+                .first()
+                .and_then(|v| v.input_type.tensor_shape())
+                .is_some_and(|shape| **shape == [1, 3, 48, 512])
+        {
+            return Err("static-input-shape-not-applied".into());
+        }
         Ok(Self {
             session,
             dictionary,
             catalog,
+            fixed_width,
+            warmed: false,
+            #[cfg(windows)]
+            adapter,
         })
     }
     // Explicit offline audit only, separate from all timing sessions. No per-frame profiling.
@@ -172,8 +213,16 @@ impl Recognizer {
         )
     }
     pub fn warm_up(&mut self) -> Result<()> {
-        let tensor = Tensor::from_array(([1usize, 3, 48, 256], vec![0f32; 3 * 48 * 256]))?;
-        self.session.run(ort::inputs![tensor])?;
+        if self.warmed {
+            return Ok(());
+        }
+        let width = self.fixed_width.unwrap_or(256);
+        // The second run also completes deferred GPU preparation before the first real frame.
+        for _ in 0..if self.fixed_width.is_some() { 2 } else { 1 } {
+            let tensor = Tensor::from_array(([1usize, 3, 48, width], vec![0f32; 3 * 48 * width]))?;
+            self.session.run(ort::inputs![tensor])?;
+        }
+        self.warmed = true;
         Ok(())
     }
     fn prepare_crop(crop: RgbImage) -> PreparedTitle {
@@ -198,6 +247,8 @@ impl Recognizer {
     ) -> Result<(Option<u32>, f64, Option<f64>)> {
         let cpu = metrics::cpu_ms();
         let started = Instant::now();
+        let padded = pad_input(input, self.fixed_width)?;
+        let input = padded.as_ref().unwrap_or(input);
         let tensor =
             TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
         let result = self.session.run(ort::inputs![tensor])?;
@@ -221,6 +272,8 @@ impl Recognizer {
     }
     fn recognize_crop(&mut self, crop: RgbImage) -> Result<(String, f32)> {
         let input = Self::prepare_crop(crop);
+        let padded = pad_input(&input, self.fixed_width)?;
+        let input = padded.as_ref().unwrap_or(&input);
         let tensor =
             TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
         let result = self.session.run(ort::inputs![tensor])?;
@@ -304,9 +357,51 @@ impl Recognizer {
         })
     }
 }
+// Preserve glyph aspect ratio and vertical geometry. Never squeeze/crop an oversized title.
+// Auto mode can drop the GPU session and retry on CPU through the existing one-shot fallback.
+fn pad_input(input: &PreparedTitle, fixed: Option<usize>) -> Result<Option<PreparedTitle>> {
+    if !(16..=1024).contains(&input.width) || input.data.len() != 3 * 48 * input.width {
+        return Err("invalid-prepared-input".into());
+    }
+    let Some(width) = fixed else { return Ok(None) };
+    if input.width > width {
+        return Err("title-exceeds-fixed-width".into());
+    }
+    if input.width == width {
+        return Ok(None);
+    }
+    let mut data = vec![0.; 3 * 48 * width];
+    for (src, dst) in input
+        .data
+        .chunks_exact(input.width)
+        .zip(data.chunks_exact_mut(width))
+    {
+        dst[..src.len()].copy_from_slice(src);
+    }
+    Ok(Some(PreparedTitle { width, data }))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn padding_preserves_channels_and_rejects_overflow() {
+        let input = PreparedTitle {
+            width: 32,
+            data: (0..3 * 48 * 32).map(|v| v as f32).collect(),
+        };
+        let padded = pad_input(&input, Some(512)).unwrap().unwrap();
+        for row in 0..3 * 48 {
+            assert_eq!(
+                &padded.data[row * 512..row * 512 + 32],
+                &input.data[row * 32..(row + 1) * 32]
+            );
+            assert!(padded.data[row * 512 + 32..(row + 1) * 512]
+                .iter()
+                .all(|v| *v == 0.));
+        }
+        assert!(pad_input(&input, Some(16)).is_err());
+        assert!(pad_input(&input, None).unwrap().is_none());
+    }
     #[test]
     fn ctc_blank_separates_repeated_characters_and_rejects_bad_shape() {
         let dictionary = vec!["".into(), "甲".into(), "乙".into()];
