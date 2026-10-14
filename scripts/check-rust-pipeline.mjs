@@ -40,4 +40,4 @@ console.log(JSON.stringify({hardware,results:results.map(({mode,ocr,overlay})=>(
   mode,passed:ocr.passed,backend:ocr.backend_status,frames:ocr.samples?.map(s=>({capture_ms:s.capture_ms,ocr_ms:s.runs_ms,roi_bytes:s.roi_bytes})),
   overlayPassed:overlay.exit_ok,error:ocr.error})),wgc}))
 if(!adapters.exit_ok||results.some(r=>!r.ocr.exit_ok||!r.ocr.passed||!r.overlay.exit_ok)||
-  (wgc.exit_ok===false))process.exitCode=1
+  (wgc.exit_ok===false)||wgcAttempts.some(r=>r.wgc_stream?.frames>0&&!r.wgc_stream?.verified))process.exitCode=1
