@@ -14,11 +14,12 @@
       </div>
       <div class="candidate-heading"><h4>{{ t('bench.availableRank') }}</h4><span>{{ t('bench.byWinRate') }}</span></div>
       <p class="bench-note">{{ t('bench.teamReference') }}</p>
-      <div class="candidate-list" role="region" :aria-label="t('bench.candidateList')" tabindex="0">
-        <article v-for="(candidate,index) in topCandidates" :key="candidate.championId" class="candidate-row" :class="{recommended:isRecommended(candidate)}">
-          <span class="rank">{{ index+1 }}</span><div class="champion-mark"><img v-if="candidate.iconUrl" :src="candidate.iconUrl" alt=""/><span v-else>◇</span></div>
-          <div class="candidate-main"><strong>{{ candidate.name }}</strong><small>{{ t('bench.pickRate', {value:formatPercent(candidate.pickRate)}) }}</small></div>
-          <div class="candidate-win"><strong>{{ formatPercent(candidate.winRate) }}</strong><small>{{ t('bench.winRateLabel') }}</small></div>
+      <div class="candidate-grid" role="region" :aria-label="t('bench.candidateList')">
+        <article v-for="candidate in topCandidates" :key="candidate.championId" class="candidate-card" :class="{recommended:isRecommended(candidate)}">
+          <div class="champion-mark"><img v-if="candidate.iconUrl" :src="candidate.iconUrl" alt=""/><span v-else>◇</span></div>
+          <div class="candidate-main"><strong>{{ candidate.name }}</strong></div>
+          <div class="candidate-win"><small>{{ t('bench.winRateLabel') }}</small><strong>{{ formatPercent(candidate.winRate) }}</strong></div>
+          <small class="candidate-pick">{{ t('bench.pickRate', {value:formatPercent(candidate.pickRate)}) }}</small>
         </article>
         <p v-if="!topCandidates.length" class="empty-state">{{ t('bench.noAvailable') }}</p>
       </div>
@@ -245,6 +246,43 @@ onBeforeUnmount(() => {
 })
 </script>
 <style scoped>
-.aram-panel{padding:12px;background:linear-gradient(145deg,#142837,#091723);border:1px solid #635637;color:#f0e6d2;overflow:hidden;font-family:'Segoe UI','Microsoft YaHei',sans-serif}
-.panel-header,.title-lockup,.panel-actions,.candidate-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.panel-header{margin-bottom:12px}.title-lockup{justify-content:flex-start}h3,h4,p{margin:0}h3{font-size:13px}h4{font-size:11px;color:#c8aa6e;font-weight:600}.panel-icon{width:16px;height:16px;flex-shrink:0}.panel-actions{gap:5px}.status-pill{font-size:10px;color:#b0c5cc}.refresh-btn{width:25px;height:25px;display:grid;place-items:center;color:#cdbe91;background:#0a1926;border:1px solid #43525a;cursor:pointer}.refresh-btn:disabled{opacity:.4}.team-line{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:9px 0 15px}.team-member{min-width:0;text-align:center}.team-portrait{width:100%;max-width:48px;aspect-ratio:1;margin:auto;position:relative;display:grid;place-items:center;border:1px solid #435968;background:#07121c;color:#6c8b9a}.team-portrait img,.champion-mark img{width:100%;height:100%;object-fit:cover}.team-portrait small{position:absolute;bottom:0;right:0;font-size:9px;padding:0 3px;color:#06171b;background:#c8aa6e}.team-member.self .team-portrait{border-color:#c8aa6e}.team-member>strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:500;margin:4px 0}.team-member>span{font-size:10px;color:#91bbc9;font-variant-numeric:tabular-nums}.candidate-heading>span,.bench-note{font-size:10px;color:#91a6b1}.bench-note{line-height:1.5;margin:5px 0 8px}.candidate-list{display:flex;flex-direction:column;gap:5px;max-height:218px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#53636c transparent;overscroll-behavior:contain}.candidate-row{display:flex;align-items:center;gap:8px;min-height:55px;flex-shrink:0;padding:7px;border:1px solid #2b414e;background:#0a1925}.candidate-row.recommended{border-color:#89703f;background:#202b2d}.rank{width:12px;flex-shrink:0;font-size:11px;color:#9ab0bb}.champion-mark{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;border:1px solid #5d695c}.candidate-main{flex:1;min-width:0}.candidate-main strong{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.candidate-main small,.candidate-win small{display:block;margin-top:3px;color:#91a6b1;font-size:10px}.candidate-win{text-align:right;flex-shrink:0}.candidate-win strong{font-size:18px;color:#e6cb8d;font-variant-numeric:tabular-nums}.empty-state{display:flex;align-items:center;gap:8px;padding:12px 0;font-size:11px;color:#9fb1bc;line-height:1.6}.error-state{color:#f19b9b}button:focus-visible,.candidate-list:focus-visible{outline:2px solid #69bce6;outline-offset:2px}.spinning{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+
+.aram-panel { padding: 10px; background: linear-gradient(145deg,#142837,#091723); border: 1px solid #635637; color: #f0e6d2; font-family: 'Segoe UI','Microsoft YaHei',sans-serif; }
+.panel-header,.title-lockup,.panel-actions,.candidate-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.panel-header { margin-bottom: 10px; }
+.title-lockup { justify-content: flex-start; }
+h3,h4,p { margin: 0; }
+h3 { font-size: 13px; }
+h4 { font-size: 11px; color: #c8aa6e; font-weight: 600; }
+.panel-icon { width: 16px; height: 16px; flex-shrink: 0; }
+.panel-actions { gap: 5px; }
+.status-pill { font-size: 10px; color: #b0c5cc; }
+.refresh-btn { width: 25px; height: 25px; display: grid; place-items: center; color: #cdbe91; background: #0a1926; border: 1px solid #43525a; cursor: pointer; }
+.refresh-btn:disabled { opacity: .4; }
+.team-line { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; margin: 7px 0 12px; padding: 8px 4px; border: 1px solid #35566a; background: #0b2030; }
+.team-member { min-width: 0; text-align: center; }
+.team-portrait { width: 100%; max-width: 36px; aspect-ratio: 1; margin: auto; position: relative; display: grid; place-items: center; border: 1px solid #547b91; background: #07121c; color: #6c8b9a; }
+.team-portrait img,.champion-mark img { width: 100%; height: 100%; object-fit: cover; }
+.team-portrait small { position: absolute; bottom: 0; right: 0; font-size: 9px; padding: 0 3px; color: #06171b; background: #91cadc; }
+.team-member.self .team-portrait { border-color: #9fe3ed; box-shadow: 0 0 6px #44879755; }
+.team-member>strong { display: block; overflow-wrap: anywhere; font-size: 10px; font-weight: 500; line-height: 1.25; margin: 4px 0; }
+.team-member>span { font-size: 10px; color: #91bbc9; font-variant-numeric: tabular-nums; }
+.candidate-heading>span,.bench-note { font-size: 10px; color: #91a6b1; }
+.bench-note { line-height: 1.4; margin: 5px 0 7px; }
+.candidate-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(78px,1fr)); gap: 5px; }
+.candidate-card { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); align-content: start; align-items: center; gap: 4px; padding: 6px; border: 1px solid #62583e; background: linear-gradient(150deg,#272b27,#142028); }
+.candidate-card.recommended { border-color: #c8aa6e; background: linear-gradient(150deg,#3c3526,#19282d); }
+.champion-mark { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #8b7851; }
+.candidate-main { min-width: 0; }
+.candidate-main strong { display: block; font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; font-weight: 500; }
+.candidate-win { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px; }
+.candidate-win small,.candidate-pick { color: #acb9ba; font-size: 10px; line-height: 1.3; }
+.candidate-win strong { font-size: 17px; color: #f0cf88; font-variant-numeric: tabular-nums; }
+.candidate-pick { grid-column: 1 / -1; }
+.empty-state { display: flex; align-items: center; gap: 8px; padding: 12px 0; font-size: 11px; color: #9fb1bc; line-height: 1.6; }
+.candidate-grid>.empty-state { grid-column: 1 / -1; }
+.error-state { color: #f19b9b; }
+button:focus-visible { outline: 2px solid #69bce6; outline-offset: 2px; }
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

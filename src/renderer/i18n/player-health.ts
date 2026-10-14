@@ -1,5 +1,6 @@
 export const playerHealthMessages = {
   "zh-CN": {
+    "dataVersionLabel": "数据版本",
     "healthRefresh": "正在读取模块状态",
     "healthInGame": "对局阶段已验证",
     "healthAutoConnect": "自动连接中，无需填写端口或密码",
@@ -29,6 +30,7 @@ export const playerHealthMessages = {
     "dataErrorHint": "暂时无法提供胜率，请稍后重试或查看本地日志。"
   },
   "en-US": {
+    "dataVersionLabel": "Data version",
     "healthRefresh": "Reading module status",
     "healthInGame": "Game phase verified",
     "healthAutoConnect": "Connecting automatically; no port or password needed",
@@ -58,6 +60,7 @@ export const playerHealthMessages = {
     "dataErrorHint": "Win rates are temporarily unavailable. Retry later or check local logs."
   },
   "zh-TW": {
+    "dataVersionLabel": "資料版本",
     "healthRefresh": "正在讀取模組狀態",
     "healthInGame": "對局階段已驗證",
     "healthAutoConnect": "自動連線中，無需填寫連接埠或密碼",

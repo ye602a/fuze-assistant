@@ -227,7 +227,7 @@ export const messages = {
       you: "我",
       availableRank: "可选英雄",
       byWinRate: "胜率从高到低",
-      teamReference: "队友英雄仅作阵容参考；下方仅列公共备选池。",
+      teamReference: "上方为已选阵容；下方为公共备选，按胜率排列。",
       winRateLabel: "胜率",
       noAvailable: "备选池暂无英雄",
 
@@ -251,9 +251,7 @@ export const messages = {
       pickRate: '选取 {value}',
       timeout: '席位数据读取超过 {seconds} 秒',
       loadFailed: '推荐读取失败',
-      candidateList: '席位候选列表',
-      scrollLeft: '向左查看更多席位候选',
-      scrollRight: '向右查看更多席位候选',
+      candidateList: '可选英雄一览',
     },
     augment: {
       recommendation: '海克斯推荐',
@@ -419,11 +417,11 @@ export const messages = {
       you: "You",
       availableRank: "Available champions",
       byWinRate: "Highest win rate first",
-      teamReference: "Team picks are reference only; the list shows the shared bench.",
+      teamReference: "Team picks above; shared bench below, ranked by win rate.",
       winRateLabel: "Win rate",
       noAvailable: "No champions on the bench",
 
-      title: 'Champion selection', refreshTitle: 'Refresh recommendations', reading: 'Loading', refreshing: 'Refreshing', readOnly: 'Read-only advice', noBench: 'No bench', noChampion: 'No champion', noCandidates: 'No candidates', waitingSelection: 'Waiting for selection', apiUnavailable: 'Electron API is unavailable', waitingClient: 'Waiting for the client', waitingChampSelect: 'Waiting for champion select', sourceCurrent: 'Current', sourceBench: 'Bench', sourceTeammate: 'Teammate', sourceCandidate: 'Candidate', winRate: 'Win {value}', pickRate: 'Pick {value}', timeout: 'Bench data took longer than {seconds} seconds', loadFailed: 'Failed to load recommendations', candidateList: 'Bench candidate list', scrollLeft: 'See more bench candidates to the left', scrollRight: 'See more bench candidates to the right',
+      title: 'Champion selection', refreshTitle: 'Refresh recommendations', reading: 'Loading', refreshing: 'Refreshing', readOnly: 'Read-only advice', noBench: 'No bench', noChampion: 'No champion', noCandidates: 'No candidates', waitingSelection: 'Waiting for selection', apiUnavailable: 'Electron API is unavailable', waitingClient: 'Waiting for the client', waitingChampSelect: 'Waiting for champion select', sourceCurrent: 'Current', sourceBench: 'Bench', sourceTeammate: 'Teammate', sourceCandidate: 'Candidate', winRate: 'Win {value}', pickRate: 'Pick {value}', timeout: 'Bench data took longer than {seconds} seconds', loadFailed: 'Failed to load recommendations', candidateList: 'Available champion overview',
     },
     augment: {
       recommendation: 'Augment recommendations', championDetails: 'Champion details', loadingChampion: 'Loading champion data...', championFallback: 'Champion {id}', waitingChampion: 'Waiting for champion selection', openGuide: 'Open champion guide', guide: 'Guide', tier: 'Tier {tier}', rank: 'Rank', winRateValue: 'Win rate {value}', winRate: 'Win rate', insufficientGames: 'Insufficient games', pickRate: 'Pick rate', games: 'Games', reading: 'Loading', relatedGuides: 'Related guides', articleCount: '{count} articles', coreAugments: 'Core augments', itemCount: '{count} items', descriptionLabel: '{name} description', noAugments: 'No augment data', buildRoutes: 'Build paths', routeCount: '{count} builds', gameCount: '{count} games', startingItems: 'Starting items', coreItem: 'Core {index}', fullItems: 'Full builds', fullItem: 'Full build {index}', laterItems: 'Later items', alternativeItems: 'Alternative items', summonerSpells: 'Summoner spells', skillOrder: 'Skill order', skillPriority: 'Prioritize {primary} → {secondary} → {tertiary}', recommendationRank: 'Option {index}', summonerSpellFallback: 'Summoner spell {id}', skillLevel: 'Level {level}: {skill}', noBuilds: 'No build data', source: 'Source: {source}', updatedAt: 'Updated {time}', noDescription: 'No description', loadFailed: 'Unable to load data', guideFallback: 'Champion guide', tabs: { augments: 'Augments', builds: 'Builds' }, rarities: { all: 'All', silver: 'Silver', gold: 'Gold', prismatic: 'Prismatic' }, unknownAugment: 'Unknown augment', unavailable: 'Unavailable', itemFallback: 'Item {id}', dataLoadFailed: 'Data loading failed', loadError: 'Failed to load data', priority: 'TOP PICKS', pickRateShort: 'Pick rate', scoreUnknown: 'Unknown', scoreMustPick: 'Must pick', scoreStrong: 'Strong', scoreRecommended: 'Recommended', scoreOptional: 'Optional', scoreNiche: 'Niche', noData: 'No data available',
@@ -475,11 +473,11 @@ export const messages = {
       you: "我",
       availableRank: "可選英雄",
       byWinRate: "勝率由高到低",
-      teamReference: "隊友英雄僅作陣容參考；下方僅列公共備選池。",
+      teamReference: "上方為已選陣容；下方為公共備選，按勝率排列。",
       winRateLabel: "勝率",
       noAvailable: "備選池暫無英雄",
 
-      title: '選角參考', refreshTitle: '重新整理推薦', reading: '讀取中', refreshing: '重新整理中', readOnly: '唯讀建議', noBench: '無席位', noChampion: '未選英雄', noCandidates: '暫無英雄', waitingSelection: '等待選角', apiUnavailable: 'Electron API 無法使用', waitingClient: '等待客戶端連線', waitingChampSelect: '等待進入選角階段', sourceCurrent: '目前', sourceBench: '席位', sourceTeammate: '隊友', sourceCandidate: '候選', winRate: '勝率 {value}', pickRate: '選取 {value}', timeout: '席位資料讀取超過 {seconds} 秒', loadFailed: '推薦讀取失敗', candidateList: '席位候選清單', scrollLeft: '向左查看更多席位候選', scrollRight: '向右查看更多席位候選',
+      title: '選角參考', refreshTitle: '重新整理推薦', reading: '讀取中', refreshing: '重新整理中', readOnly: '唯讀建議', noBench: '無席位', noChampion: '未選英雄', noCandidates: '暫無英雄', waitingSelection: '等待選角', apiUnavailable: 'Electron API 無法使用', waitingClient: '等待客戶端連線', waitingChampSelect: '等待進入選角階段', sourceCurrent: '目前', sourceBench: '席位', sourceTeammate: '隊友', sourceCandidate: '候選', winRate: '勝率 {value}', pickRate: '選取 {value}', timeout: '席位資料讀取超過 {seconds} 秒', loadFailed: '推薦讀取失敗', candidateList: '可選英雄一覽',
     },
     augment: {
       recommendation: '增幅裝置推薦', championDetails: '英雄詳情', loadingChampion: '正在載入英雄資料...', championFallback: '英雄 {id}', waitingChampion: '等待英雄選擇', openGuide: '開啟英雄攻略', guide: '攻略', tier: '梯隊 {tier}', rank: '排名', winRateValue: '勝率 {value}', winRate: '勝率', insufficientGames: '場次不足', pickRate: '選取率', games: '場次', reading: '讀取中', relatedGuides: '相關攻略', articleCount: '{count} 篇', coreAugments: '核心增幅裝置', itemCount: '{count} 項', descriptionLabel: '{name}說明', noAugments: '暫無增幅裝置資料', buildRoutes: '出裝路線', routeCount: '{count} 套', gameCount: '{count} 場', startingItems: '起始裝備', coreItem: '核心 {index}', fullItems: '完整出裝', fullItem: '完整出裝 {index}', laterItems: '後續裝備', alternativeItems: '備選裝備', summonerSpells: '召喚師技能', skillOrder: '技能加點', skillPriority: '優先 {primary} → {secondary} → {tertiary}', recommendationRank: '方案 {index}', summonerSpellFallback: '召喚師技能 {id}', skillLevel: '{level} 級：{skill}', noBuilds: '暫無出裝資料', source: '來源：{source}', updatedAt: '更新於 {time}', noDescription: '暫無說明', loadFailed: '無法載入資料', guideFallback: '英雄攻略', tabs: { augments: '增幅裝置', builds: '出裝' }, rarities: { all: '全部', silver: '白銀', gold: '黃金', prismatic: '稜彩' }, unknownAugment: '未知增幅裝置', unavailable: '無法使用', itemFallback: '裝備 {id}', dataLoadFailed: '資料載入失敗', loadError: '載入資料失敗', priority: '優先推薦', pickRateShort: '選取率', scoreUnknown: '未知', scoreMustPick: '必選', scoreStrong: '強推', scoreRecommended: '推薦', scoreOptional: '可選', scoreNiche: '冷門', noData: '無可用資料',
