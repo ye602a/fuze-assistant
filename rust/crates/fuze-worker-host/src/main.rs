@@ -6,15 +6,24 @@ use fuze_runtime::{
     gate::Selection,
     session::{FrameKey, Phase, Session},
 };
-use fuze_worker_host::Worker;
+use fuze_worker_host::{recovery::Supervisor, Worker};
 use std::{
     fs, io,
+    io::Read,
     path::Path,
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 // Test child modes are explicit and never discover processes, open windows, or load user data.
-fn probe(mode: &str) -> Result<()> {
+fn probe(mode: &str, backend: &str) -> Result<()> {
+    let mut gate = [0u8; 4];
+    io::stdin().lock().read_exact(&mut gate)?;
+    if &gate != b"FZH1" {
+        return Err("probe-gate".into());
+    }
+    if mode == "startup-crash" && backend == "dml" {
+        std::process::exit(23);
+    }
     if mode == "startup-stall" {
         std::thread::sleep(Duration::from_secs(30));
         return Ok(());
@@ -28,7 +37,7 @@ fn probe(mode: &str) -> Result<()> {
         },
     )?;
     let request = Request::read(&mut io::stdin().lock())?.ok_or("probe-input")?;
-    if mode == "crash" {
+    if mode == "crash" || mode == "recover" && backend == "dml" {
         std::process::exit(23);
     }
     if mode == "stall" {
@@ -90,6 +99,63 @@ fn lifecycle() -> Result<()> {
     {
         return Err("startup-deadline-missing".into());
     }
+    #[cfg(windows)]
+    {
+        let mut child = Worker::start(
+            &exe,
+            &["--probe".into(), "stall".into()],
+            Duration::from_secs(5),
+        )?;
+        child.verify_job_close()?;
+    }
+    let request = |sequence| Request {
+        id: Identity {
+            generation: 1,
+            sequence,
+        },
+        width: 1,
+        height: 1,
+        pixels: vec![0; 12],
+    };
+    for mode in ["recover", "crash", "startup-crash"] {
+        let mut supervisor = Supervisor::start(
+            &exe,
+            &["--probe".into(), mode.into(), "auto".into()],
+            Duration::from_secs(5),
+        )?;
+        if mode != "startup-crash"
+            && supervisor.run(request(1), Duration::from_millis(250)).err()
+                != Some("worker-recovered-use-next-frame")
+        {
+            return Err("recovery-not-once".into());
+        }
+        let next = supervisor.run(request(2), Duration::from_millis(250));
+        if (mode == "crash") == next.is_ok() {
+            return Err("recovery-result".into());
+        }
+        if mode == "crash"
+            && supervisor.run(request(3), Duration::from_millis(250)).err()
+                != Some("worker-stopped")
+        {
+            return Err("recovery-loop".into());
+        }
+        supervisor.stop()?;
+        if supervisor.launches() != 2 || !supervisor.reaped() {
+            return Err("recovery-lifecycle".into());
+        }
+        cases.push(serde_json::json!({"case":mode,"passed":true,"launches":supervisor.launches(),"reaped":true}));
+    }
+    let mut explicit = Supervisor::start(
+        &exe,
+        &["--probe".into(), "crash".into(), "dml".into()],
+        Duration::from_secs(5),
+    )?;
+    if explicit.run(request(1), Duration::from_millis(250)).is_ok()
+        || explicit.launches() != 1
+        || !explicit.reaped()
+    {
+        return Err("explicit-mode-restarted".into());
+    }
     println!(
         "{}",
         serde_json::json!({"passed":true,"cases":cases,"startup_deadline":true,"game_access":false})
@@ -119,7 +185,7 @@ fn fixtures(args: &[String]) -> Result<()> {
     let mut session = Session::new("zh-CN@fixture-v1".into())?;
     session.update_phase(Phase::Loading)?;
     let startup = Instant::now();
-    let mut worker = Worker::start(
+    let mut worker = Supervisor::start(
         Path::new(&args[0]),
         &[
             args[1].clone(),
@@ -214,14 +280,16 @@ fn fixtures(args: &[String]) -> Result<()> {
     }
     println!(
         "{}",
-        serde_json::json!({"passed":true,"startup_ms":startup_ms,"backend":worker.backend,"fallback_count":worker.fallback_count,"worker_launches":1,"worker_reaped":worker.stopped(),"frames":reports,"actual_stage":null,"selection_confirmed":false,"game_access":false})
+        serde_json::json!({"passed":true,"startup_ms":startup_ms,"backend":worker.backend(),"fallback_count":u8::from(worker.recovered()),"worker_launches":worker.launches(),"worker_reaped":worker.reaped(),"frames":reports,"actual_stage":null,"selection_confirmed":false,"game_access":false})
     );
     Ok(())
 }
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("--probe") if args.len() == 2 => probe(&args[1]),
+        Some("--probe") if (2..=3).contains(&args.len()) => {
+            probe(&args[1], args.get(2).map(String::as_str).unwrap_or("cpu"))
+        }
         Some("--lifecycle") if args.len() == 1 => lifecycle(),
         #[cfg(windows)]
         Some("--fixtures") => fixtures(&args[1..]),

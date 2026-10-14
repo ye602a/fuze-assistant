@@ -1,6 +1,7 @@
 //! One persistent child and one pipe thread. The caller must not run blocking calls on a UI loop.
 use fuze_contract::wire::{self, ActiveBackend, Reply, Request};
 use std::{
+    io::Write,
     path::Path,
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, SyncSender},
@@ -8,12 +9,17 @@ use std::{
     time::Duration,
 };
 pub type Result<T> = std::result::Result<T, &'static str>;
+#[cfg(windows)]
+mod job;
+pub mod recovery;
 pub struct Worker {
     child: Child,
     send: Option<SyncSender<Request>>,
     receive: Receiver<Result<Reply>>,
     io: Option<JoinHandle<()>>,
     stopped: bool,
+    #[cfg(windows)]
+    job: Option<job::Job>,
     pub backend: ActiveBackend,
     pub fallback_count: u8,
 }
@@ -30,34 +36,60 @@ impl Worker {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
+        #[cfg(windows)]
+        let job = job::Job::new()?;
         let mut child = command.spawn().map_err(|_| "worker-start-failed")?;
+        #[cfg(windows)]
+        if let Err(error) = job.assign(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
         let (send, jobs) = mpsc::sync_channel::<Request>(1);
         let (results, receive) = mpsc::channel();
-        let io = thread::spawn(move || {
-            let ready = wire::read_reply(&mut output).map_err(|_| "worker-handshake-failed");
-            let valid = ready.is_ok();
-            if results.send(ready).is_err() || !valid {
-                return;
-            }
-            while let Ok(job) = jobs.recv() {
-                let reply = job
-                    .write(&mut input)
-                    .and_then(|_| wire::read_reply(&mut output))
-                    .map_err(|_| "worker-pipe-failed");
-                let valid = reply.is_ok();
-                if results.send(reply).is_err() || !valid {
-                    break;
+        let io = thread::Builder::new()
+            .name("fuze-ocr-pipe".into())
+            .spawn(move || {
+                // The worker cannot initialize its model until ownership is established.
+                if input
+                    .write_all(b"FZH1")
+                    .and_then(|_| input.flush())
+                    .is_err()
+                {
+                    let _ = results.send(Err("worker-start-gate"));
+                    return;
                 }
-            }
-        });
+                let ready = wire::read_reply(&mut output).map_err(|_| "worker-handshake-failed");
+                let valid = ready.is_ok();
+                if results.send(ready).is_err() || !valid {
+                    return;
+                }
+                while let Ok(job) = jobs.recv() {
+                    let reply = job
+                        .write(&mut input)
+                        .and_then(|_| wire::read_reply(&mut output))
+                        .map_err(|_| "worker-pipe-failed");
+                    let valid = reply.is_ok();
+                    if results.send(reply).is_err() || !valid {
+                        break;
+                    }
+                }
+            })
+            .map_err(|_| {
+                let _ = child.kill();
+                let _ = child.wait();
+                "worker-thread-start"
+            })?;
         let mut worker = Self {
             child,
             send: Some(send),
             receive,
             io: Some(io),
             stopped: false,
+            #[cfg(windows)]
+            job: Some(job),
             backend: ActiveBackend::Cpu,
             fallback_count: 0,
         };
@@ -123,6 +155,8 @@ impl Worker {
             return Ok(());
         }
         self.send.take();
+        #[cfg(windows)]
+        self.job.take(); // Also terminates any descendants if the owned worker ever creates them.
         if self
             .child
             .try_wait()
@@ -149,6 +183,23 @@ impl Worker {
     }
     pub fn stopped(&self) -> bool {
         self.stopped
+    }
+    #[cfg(windows)]
+    pub fn verify_job_close(&mut self) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        self.job.take();
+        let result = unsafe {
+            windows_sys::Win32::System::Threading::WaitForSingleObject(
+                self.child.as_raw_handle(),
+                2000,
+            )
+        };
+        self.stop()?;
+        if result == 0 {
+            Ok(())
+        } else {
+            Err("worker-job-close-failed")
+        }
     }
 }
 impl Drop for Worker {

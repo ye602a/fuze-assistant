@@ -1,7 +1,12 @@
 use fuze_contract::wire::{self, ActiveBackend, Reply, Request};
 use fuze_ocr::backend::{Backend, Preference, ResilientRecognizer};
-use std::{collections::HashMap, fs, io, path::PathBuf};
+use std::{collections::HashMap, fs, io, io::Read, path::PathBuf};
 fn run() -> fuze_ocr::Result<()> {
+    let mut gate = [0u8; 4];
+    io::stdin().lock().read_exact(&mut gate)?;
+    if &gate != b"FZH1" {
+        return Err("worker-parent-gate".into());
+    }
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 5 {
         return Err("worker-arguments".into());
