@@ -82,6 +82,7 @@ name = "fuze-contract"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -113,6 +114,18 @@ name = "fuze-runtime"
 version = "0.1.0"
 dependencies = [
  "fuze-contract",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fuze-worker-host"
+version = "0.1.0"
+dependencies = [
+ "fuze-capture",
+ "fuze-contract",
+ "fuze-runtime",
+ "image",
  "serde",
  "serde_json",
 ]

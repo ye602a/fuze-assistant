@@ -56,6 +56,9 @@ impl<'a> Atlas<'a> {
             self.title_height as usize,
         )
     }
+    pub fn bytes(&self) -> &[u8] {
+        self.frame.bytes()
+    }
 }
 
 #[cfg(test)]

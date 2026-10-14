@@ -6,6 +6,9 @@ pub struct BgraFrame<'a> {
     stride: usize,
 }
 impl<'a> BgraFrame<'a> {
+    pub fn bytes(&self) -> &[u8] {
+        self.bytes
+    }
     pub fn new(
         bytes: &'a [u8],
         width: usize,

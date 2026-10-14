@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler]
     paths:
       - 'rust/**'
       - 'scripts/check-rust-prototypes.mjs'
@@ -11,6 +11,7 @@ on:
       - 'scripts/test-rust-host.mjs'
       - 'scripts/check-rust-capture.mjs'
       - 'scripts/check-rust-pipeline.mjs'
+      - 'scripts/check-rust-worker.mjs'
       - 'scripts/compare-rust-shapes.mjs'
       - '!rust/**/*.md'
       - '.github/workflows/rust-prototypes.yml'
@@ -57,6 +58,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
+      - name: Persistent worker, raw atlas IPC and bounded lifecycle
+        run: node scripts/check-rust-worker.mjs
       - name: Scan upload content
         run: npm run security:check
       - name: Upload sanitized prototype reports
@@ -70,11 +73,12 @@ jobs:
             rust/artifacts/comparison.json
             rust/artifacts/capture-validation.json
             rust/artifacts/pipeline-validation.json
+            rust/artifacts/worker-validation.json
           if-no-files-found: ignore
       - name: Prepare isolated prototype executables
         run: |
           New-Item -ItemType Directory -Force rust/artifacts/tools | Out-Null
-          Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-native-overlay.exe,rust/target/release/fuze-capture.exe rust/artifacts/tools/
+          Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-ocr-worker.exe,rust/target/release/fuze-worker-host.exe,rust/target/release/fuze-native-overlay.exe,rust/target/release/fuze-capture.exe rust/artifacts/tools/
           Get-ChildItem rust/artifacts/tools/*.exe | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -Encoding ascii rust/artifacts/tools/SHA256SUMS.txt
       - name: Upload isolated test tools (not a release installer)
         uses: actions/upload-artifact@v4

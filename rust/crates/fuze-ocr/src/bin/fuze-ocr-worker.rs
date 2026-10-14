@@ -1,0 +1,84 @@
+use fuze_contract::wire::{self, ActiveBackend, Reply, Request};
+use fuze_ocr::backend::{Backend, Preference, ResilientRecognizer};
+use std::{collections::HashMap, fs, io, path::PathBuf};
+fn run() -> fuze_ocr::Result<()> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.len() != 5 {
+        return Err("worker-arguments".into());
+    }
+    // Only public model/catalog paths and backend are arguments. No credentials or account data.
+    for (file, limit) in [
+        (&args[1], 64 * 1024 * 1024),
+        (&args[2], 2 * 1024 * 1024),
+        (&args[3], 2 * 1024 * 1024),
+    ] {
+        if fs::metadata(file)?.len() > limit {
+            return Err("worker-input-limit".into());
+        }
+    }
+    let dll = fs::canonicalize(&args[0])?;
+    ort::init_from(dll.to_string_lossy())
+        .with_name("fuze-private-worker")
+        .commit()?;
+    let dictionary: Vec<String> = serde_json::from_slice(&fs::read(&args[2])?)?;
+    let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
+    let mut engine = ResilientRecognizer::new(
+        &PathBuf::from(&args[1]),
+        dictionary,
+        catalog,
+        Preference::parse(&args[4])?,
+    )?;
+    engine.warm_up()?;
+    let backend = |e: &ResilientRecognizer| {
+        if e.status().active == Backend::Cpu {
+            ActiveBackend::Cpu
+        } else {
+            ActiveBackend::DirectMl
+        }
+    };
+    let mut input = io::stdin().lock();
+    let mut out = io::stdout().lock();
+    wire::write_reply(
+        &mut out,
+        &Reply::Ready {
+            schema: 1,
+            backend: backend(&engine),
+            fallback_count: engine.status().fallback_count,
+        },
+    )?;
+    let mut last = None;
+    while let Some(request) = Request::read(&mut input)? {
+        let id = request.id;
+        if last.is_some_and(|old: wire::Identity| {
+            id.generation < old.generation || id.sequence <= old.sequence
+        }) {
+            return Err("worker-stale-request".into());
+        }
+        last = Some(id);
+        let atlas = request.atlas()?;
+        let result = engine.run("gpu_inference_failed", |e| e.recognize_atlas(&atlas));
+        match result {
+            Ok(result) => wire::write_reply(
+                &mut out,
+                &Reply::Result {
+                    id,
+                    slots: result.slots,
+                    ocr_ms: result.elapsed_ms,
+                    backend: backend(&engine),
+                    fallback_count: engine.status().fallback_count,
+                },
+            )?,
+            Err(_) => {
+                wire::write_reply(&mut out, &Reply::Failed { id })?;
+                return Err("worker-inference-failed".into());
+            }
+        }
+    }
+    Ok(())
+}
+fn main() {
+    std::panic::set_hook(Box::new(|_| {}));
+    if run().is_err() {
+        std::process::exit(1);
+    }
+}

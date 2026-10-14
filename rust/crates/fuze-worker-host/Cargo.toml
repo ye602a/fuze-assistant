@@ -1,0 +1,15 @@
+[package]
+name = "fuze-worker-host"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+fuze-contract = { path = "../fuze-contract" }
+fuze-runtime = { path = "../fuze-runtime" }
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+fuze-capture = { path = "../fuze-capture" }
