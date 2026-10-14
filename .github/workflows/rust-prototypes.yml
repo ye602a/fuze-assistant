@@ -1,0 +1,47 @@
+name: Rust isolated prototypes
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'rust/**'
+      - 'scripts/check-rust-prototypes.mjs'
+      - '.github/workflows/rust-prototypes.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prototypes:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Install existing runtime dependency for offline ONNX fixtures
+        run: npm ci --ignore-scripts
+      - name: Prepare Rust
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - name: Format, contracts and build
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --workspace --locked -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --workspace --release --locked -j 2
+          exit $LASTEXITCODE
+      - name: Offline ONNX and hidden native window
+        run: node scripts/check-rust-prototypes.mjs
+      - name: Scan upload content
+        run: npm run security:check
+      - name: Upload sanitized prototype reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-prototype-evidence
+          path: |
+            rust/artifacts/validation.json
+            rust/artifacts/native-overlay.png
+          if-no-files-found: ignore
