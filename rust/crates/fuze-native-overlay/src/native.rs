@@ -346,6 +346,7 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
     let mut resized = false;
     let mut failure = None;
     let mut failure_details = None;
+    let mut tick = 0u32;
     match OwnedWindowStream::start(hwnd as isize, true) {
         Err(error) => {
             failure = Some("wgc_start_unavailable");
@@ -364,6 +365,22 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
                 }
                 InvalidateRect(hwnd, null(), 0);
                 UpdateWindow(hwnd);
+                // A static repaint can legitimately be coalesced by DWM. Change a tiny area
+                // of this CI-owned source so frame/recreate progress doesn't depend on that.
+                tick += 1;
+                let dc = GetDC(hwnd);
+                if !dc.is_null() {
+                    let brush = CreateSolidBrush(if tick % 2 == 0 { 0x0000ff } else { 0x00ff00 });
+                    let pulse = RECT {
+                        left: 20,
+                        top: 20,
+                        right: 36,
+                        bottom: 36,
+                    };
+                    FillRect(dc, &pulse, brush);
+                    DeleteObject(brush);
+                    ReleaseDC(hwnd, dc);
+                }
                 match stream.next(std::time::Duration::from_millis(100)) {
                     Ok(FrameStatus::Ready) => {
                         frames += 1;
