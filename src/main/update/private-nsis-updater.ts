@@ -9,9 +9,11 @@ import type { ResolvedUpdateFileInfo } from 'electron-updater/out/types.js'
 import type { Provider } from 'electron-updater/out/providers/Provider.js'
 import { PrivateUpdateExecutor } from './private-update-executor.ts'
 import { reconstructPrivateUpdate, validateBlockmap } from './private-reconstruction.ts'
+import type { AppUpdateState } from '../../shared/ipc-contract.ts'
 
 // electron-updater 6.8.9 exposes this runtime field but omits it from its generated declarations.
 export class FuzeNsisUpdater extends NsisUpdater {
+  onTransferMode?: (mode: AppUpdateState['transferMode'], reason: AppUpdateState['transferReason']) => void
   httpExecutor: PrivateUpdateExecutor
   constructor(adapter?: AppAdapter) {
     super(null, adapter)
@@ -35,7 +37,10 @@ export class FuzeNsisUpdater extends NsisUpdater {
     }
     // Avoid metadata/blockmap requests and a second hash pass when no baseline exists.
     const baselineInfo = baseline && await stat(baseline).catch(() => null)
-    if (!baseline || !baselineInfo || !baselineInfo.isFile()) return true
+    if (!baseline || !baselineInfo || !baselineInfo.isFile()) {
+      this.onTransferMode?.('full', 'baseline-missing')
+      return true
+    }
     let step = 'release-metadata'
     try {
       const urls = await provider.getBlockMapFiles(file.url, this.currentVersion.version, options.updateInfoAndProvider.info.version)
@@ -50,6 +55,7 @@ export class FuzeNsisUpdater extends NsisUpdater {
       step = 'new-blockmap'
       const newMap = await load(urls[1], file.info.size!)
       step = 'reconstruction'
+      this.onTransferMode?.('differential', '')
       await reconstructPrivateUpdate({ oldMap, newMap, oldFile: baseline, destination, url: file.url,
         sha512: file.info.sha512, size: file.info.size!, executor: this.httpExecutor, headers: options.requestHeaders,
         token: options.cancellationToken, onProgress: progress => this.emit('download-progress', progress) })
@@ -64,6 +70,7 @@ export class FuzeNsisUpdater extends NsisUpdater {
       // Fixed categories only: never expose the SDK's URLs, headers or response bodies.
       this._logger.warn(`Private update fallback: ${step}/${reason}`)
       this.httpExecutor.resetRedirects()
+      this.onTransferMode?.('full', 'differential-unavailable')
       return true
     }
   }

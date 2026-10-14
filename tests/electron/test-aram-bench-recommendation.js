@@ -66,6 +66,11 @@ assert.equal(betterBench.currentChampion.championId, 63)
 assert.equal(betterBench.recommendedChampion.championId, 99)
 assert.ok(betterBench.deltaScore > 0)
 assert.deepEqual(collectAramCandidateChampionIds(makeSnapshot()), [63, 99, 101])
+assert.equal(betterBench.team.length, 5)
+assert.equal(betterBench.team[0].champion.championId, 63)
+assert.equal(betterBench.team[0].isCurrent, true)
+assert.equal(betterBench.team[4].champion, null)
+assert.deepEqual(Object.keys(betterBench.team[0]).sort(), ['champion','isCurrent','slot'])
 
 const noBench = getAramBenchRecommendation(
   makeSnapshot({ benchEnabled: false, benchChampions: [] }),

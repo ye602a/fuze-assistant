@@ -30,6 +30,8 @@ export function connectionIsVerified(connection: ConnectionStatus, now = Date.no
 
 export function runtimeState(status: RuntimeStatus, now = Date.now()): string {
   if (!connectionIsVerified(status.connection, now)) return status.connection.discovered ? 'connectionError' : 'waiting'
+  if (!status.automatic) return 'paused'
+  if (status.data?.state === 'error') return 'dataError'
   if (status.connection.phase === 'InProgress') {
     if (!status.automatic) return 'paused'
     if (status.ocr === 'error') return 'ocrError'

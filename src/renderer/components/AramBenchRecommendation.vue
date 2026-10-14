@@ -1,114 +1,33 @@
 <template>
-    <section class="aram-panel" :class="{ compact }">
-        <header class="panel-header">
-            <div class="title-lockup">
-                <Swords class="panel-icon" />
-                <div>
-                    <p class="section-kicker">ARAM</p>
-                    <h3>{{ t('bench.title') }}</h3>
-                </div>
-            </div>
-            <div class="panel-actions">
-                <span class="status-pill" :class="statusClass">{{ statusLabel }}</span>
-                <button class="refresh-btn" type="button" :title="t('bench.refreshTitle')" @click="refresh">
-                    <RefreshCw class="refresh-icon" :class="{ spinning: loading }" />
-                </button>
-            </div>
-        </header>
-
-        <div v-if="loading && !recommendation" class="empty-state">
-            <LoaderCircle class="empty-icon spinning" />
-            <span>{{ t('bench.reading') }}</span>
-        </div>
-
-        <div v-else-if="error" class="empty-state error-state">
-            <CircleAlert class="empty-icon" />
-            <span>{{ error }}</span>
-        </div>
-
-        <div v-else-if="!isChampSelect" class="empty-state">
-            <CircleDashed class="empty-icon" />
-            <span>{{ emptyMessage }}</span>
-        </div>
-
-        <div v-else class="recommendation-body">
-            <div
-                class="candidate-scroller"
-                :class="{
-                    'can-scroll-left': canScrollLeft,
-                    'can-scroll-right': canScrollRight,
-                }"
-            >
-                <button
-                    v-if="compact && canScrollLeft"
-                    class="candidate-scroll-nav left"
-                    type="button"
-                    :aria-label="t('bench.scrollLeft')"
-                    @click="scrollCandidates(-1)"
-                >
-                    <ChevronLeft class="candidate-scroll-icon" />
-                </button>
-                <div
-                    ref="candidateListRef"
-                    class="candidate-list"
-                    role="region"
-                    :aria-label="t('bench.candidateList')"
-                    :tabindex="compact ? 0 : undefined"
-                    @scroll.passive="updateCandidateScrollState"
-                    @wheel="handleCandidateWheel"
-                >
-                    <article
-                        v-for="candidate in topCandidates"
-                        :key="candidate.championId"
-                        class="candidate-row"
-                        :class="{
-                            current: candidate.isCurrent,
-                            recommended: isRecommended(candidate),
-                            teammate: candidate.source === 'teammate',
-                        }"
-                    >
-                        <div class="champion-mark">
-                            <img
-                                v-if="candidate.iconUrl"
-                                :src="candidate.iconUrl"
-                                :alt="candidate.name"
-                                class="champion-icon"
-                            />
-                            <span v-else>{{ candidate.championId }}</span>
-                        </div>
-                        <div class="candidate-main">
-                            <div class="candidate-title">
-                                <strong>{{ candidate.name }}</strong>
-                                <span class="source-tag" :class="`source-${candidate.source || 'bench'}`">
-                                    {{ candidateSourceLabel(candidate) }}
-                                </span>
-                            </div>
-                            <div class="stat-line">
-                                <div>{{ t('bench.winRate', { value: formatPercent(candidate.winRate) }) }}</div>
-                                <div>{{ t('bench.pickRate', { value: formatPercent(candidate.pickRate) }) }}</div>
-                            </div>
-                        </div>
-                    </article>
-                </div>
-                <button
-                    v-if="compact && canScrollRight"
-                    class="candidate-scroll-nav right"
-                    type="button"
-                    :aria-label="t('bench.scrollRight')"
-                    @click="scrollCandidates(1)"
-                >
-                    <ChevronRight class="candidate-scroll-icon" />
-                </button>
-            </div>
-        </div>
-    </section>
+  <section class="aram-panel" :class="{ compact }">
+    <header class="panel-header"><div class="title-lockup"><Swords class="panel-icon"/><h3>{{ t('bench.title') }}</h3></div><div class="panel-actions"><span class="status-pill" :class="statusClass">{{ statusLabel }}</span><button class="refresh-btn" type="button" :disabled="loading" :aria-label="t('bench.refreshTitle')" @click="refresh"><RefreshCw class="panel-icon" :class="{spinning: loading}"/></button></div></header>
+    <div v-if="loading && !recommendation" class="empty-state"><LoaderCircle class="panel-icon spinning"/>{{ t('bench.reading') }}</div>
+    <div v-else-if="error" class="empty-state error-state"><CircleAlert class="panel-icon"/>{{ error }}</div>
+    <div v-else-if="!isChampSelect" class="empty-state"><CircleDashed class="panel-icon"/>{{ emptyMessage }}</div>
+    <div v-else class="recommendation-body">
+      <h4>{{ t('bench.ourTeam') }}</h4>
+      <div class="team-line" :aria-label="t('bench.ourTeam')">
+        <article v-for="member in teamSlots" :key="member.slot" class="team-member" :class="{self:member.isCurrent}" :title="member.champion?.name || t('bench.unselected')">
+          <div class="team-portrait"><img v-if="member.champion?.iconUrl" :src="member.champion.iconUrl" alt=""/><span v-else>◇</span><small v-if="member.isCurrent">{{ t('bench.you') }}</small></div>
+          <strong>{{ member.champion?.name || t('bench.unselected') }}</strong><span>{{ formatPercent(member.champion?.winRate) }}</span>
+        </article>
+      </div>
+      <div class="candidate-heading"><h4>{{ t('bench.availableRank') }}</h4><span>{{ t('bench.byWinRate') }}</span></div>
+      <p class="bench-note">{{ t('bench.teamReference') }}</p>
+      <div class="candidate-list" role="region" :aria-label="t('bench.candidateList')" tabindex="0">
+        <article v-for="(candidate,index) in topCandidates" :key="candidate.championId" class="candidate-row" :class="{recommended:isRecommended(candidate)}">
+          <span class="rank">{{ index+1 }}</span><div class="champion-mark"><img v-if="candidate.iconUrl" :src="candidate.iconUrl" alt=""/><span v-else>◇</span></div>
+          <div class="candidate-main"><strong>{{ candidate.name }}</strong><small>{{ t('bench.pickRate', {value:formatPercent(candidate.pickRate)}) }}</small></div>
+          <div class="candidate-win"><strong>{{ formatPercent(candidate.winRate) }}</strong><small>{{ t('bench.winRateLabel') }}</small></div>
+        </article>
+        <p v-if="!topCandidates.length" class="empty-state">{{ t('bench.noAvailable') }}</p>
+      </div>
+    </div>
+  </section>
 </template>
-
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-    ChevronLeft,
-    ChevronRight,
     CircleAlert,
     CircleDashed,
     LoaderCircle,
@@ -137,15 +56,11 @@ const error = ref('')
 const refreshTimer = ref(null)
 const previewMode = ref(false)
 const requestInFlight = ref(false)
-const candidateListRef = ref(null)
-const canScrollLeft = ref(false)
-const canScrollRight = ref(false)
 const unsubscribeEvents = []
 const BENCH_REFRESH_TIMEOUT_MS = 8 * 1000
 let mounted = false
 let revision = 0
 let refreshQueued = false
-let candidateResizeObserver = null
 
 const isChampSelect = computed(() => recommendation.value?.gameflowPhase === 'ChampSelect')
 
@@ -175,13 +90,11 @@ const emptyMessage = computed(() => {
     return t('bench.waitingChampSelect')
 })
 
-const topCandidates = computed(() => recommendation.value?.candidates || [])
-const recommended = computed(() => recommendation.value?.recommendedChampion || null)
-const candidateSourceLabels = computed(() => ({
-    current: t('bench.sourceCurrent'),
-    bench: t('bench.sourceBench'),
-    teammate: t('bench.sourceTeammate'),
-}))
+const topCandidates = computed(() => (recommendation.value?.candidates || [])
+    .filter(candidate => candidate.source === 'bench')
+    .sort((a, b) => (b.winRate ?? -1) - (a.winRate ?? -1) || a.championId - b.championId))
+const teamSlots = computed(() => Array.from({length: 5}, (_, slot) => recommendation.value?.team?.[slot] || {slot, champion: slot === 0 ? recommendation.value?.currentChampion : null, isCurrent: slot === 0}))
+const recommended = computed(() => topCandidates.value.find(candidate => candidate.winRate != null) || null)
 
 const withTimeout = (promise, timeoutMs, message) => {
     let timeoutId
@@ -210,6 +123,7 @@ const applyPreviewRecommendation = (data) => {
 }
 
 const refresh = async (showLoading = true) => {
+    if (document.hidden && !showLoading) return
     if (!hasElectronAPI()) {
         error.value = t('bench.apiUnavailable')
         return
@@ -268,63 +182,9 @@ const refresh = async (showLoading = true) => {
 const isRecommended = (candidate) =>
     recommended.value && candidate.championId === recommended.value.championId
 
-const candidateSourceLabel = (candidate) =>
-    candidateSourceLabels.value[candidate?.source] || candidate?.sourceLabel || t('bench.sourceCandidate')
-
 const formatPercent = (value) => {
     if (value == null || Number.isNaN(Number(value))) return '--'
     return `${(Number(value) * 100).toFixed(1)}%`
-}
-
-const updateCandidateScrollState = () => {
-    const candidateList = candidateListRef.value
-    if (!props.compact || !candidateList) {
-        canScrollLeft.value = false
-        canScrollRight.value = false
-        return
-    }
-
-    const maxScrollLeft = Math.max(candidateList.scrollWidth - candidateList.clientWidth, 0)
-    canScrollLeft.value = candidateList.scrollLeft > 2
-    canScrollRight.value = candidateList.scrollLeft < maxScrollLeft - 2
-}
-
-const scrollCandidates = (direction) => {
-    const candidateList = candidateListRef.value
-    if (!candidateList) {
-        return
-    }
-
-    candidateList.scrollBy({
-        left: direction * Math.max(candidateList.clientWidth * 0.72, 96),
-        behavior: 'smooth',
-    })
-}
-
-const handleCandidateWheel = (event) => {
-    const candidateList = candidateListRef.value
-    if (!props.compact || !candidateList) {
-        return
-    }
-
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-        ? event.deltaX
-        : event.deltaY
-    if (!delta) {
-        return
-    }
-
-    const maxScrollLeft = Math.max(candidateList.scrollWidth - candidateList.clientWidth, 0)
-    const canScrollInDirection = delta < 0
-        ? candidateList.scrollLeft > 0
-        : candidateList.scrollLeft < maxScrollLeft
-
-    if (!canScrollInDirection) {
-        return
-    }
-
-    event.preventDefault()
-    candidateList.scrollLeft += delta
 }
 
 watch(
@@ -346,28 +206,6 @@ watch(
     },
     { immediate: true }
 )
-
-watch(topCandidates, async () => {
-    await nextTick()
-    updateCandidateScrollState()
-})
-
-watch(candidateListRef, async (candidateList) => {
-    candidateResizeObserver?.disconnect()
-    candidateResizeObserver = null
-
-    await nextTick()
-    updateCandidateScrollState()
-
-    if (
-        candidateList &&
-        candidateList === candidateListRef.value &&
-        typeof ResizeObserver !== 'undefined'
-    ) {
-        candidateResizeObserver = new ResizeObserver(updateCandidateScrollState)
-        candidateResizeObserver.observe(candidateList)
-    }
-})
 
 onMounted(() => {
     mounted = true
@@ -392,7 +230,6 @@ onMounted(() => {
     }
     refreshTimer.value = setInterval(() => refresh(false), 3000)
 
-    nextTick(updateCandidateScrollState)
 })
 
 onBeforeUnmount(() => {
@@ -402,496 +239,12 @@ onBeforeUnmount(() => {
     }
 
     unsubscribeEvents.splice(0).forEach((unsubscribe) => unsubscribe())
-    candidateResizeObserver?.disconnect()
-    candidateResizeObserver = null
     mounted = false
     revision += 1
     refreshQueued = false
 })
 </script>
-
 <style scoped>
-.aram-panel {
-    border: 1px solid rgba(60, 74, 71, 0.42);
-    border-radius: 4px;
-    padding: 14px;
-    background: rgba(31, 43, 53, 0.42);
-    color: #d7e4f1;
-    overflow: hidden;
-}
-
-.panel-header,
-.title-lockup,
-.panel-actions,
-.headline-row,
-.candidate-row,
-.candidate-title {
-    display: flex;
-    align-items: center;
-}
-
-.panel-header {
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.title-lockup {
-    gap: 10px;
-    min-width: 0;
-}
-
-.panel-icon {
-    width: 18px;
-    height: 18px;
-    color: #e2c384;
-}
-
-.section-kicker {
-    margin: 0 0 3px;
-    color: #e2c384;
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: 0;
-}
-
-h3 {
-    margin: 0;
-    color: #d7e4f1;
-    font-size: 15px;
-    font-weight: 900;
-}
-
-.panel-actions {
-    gap: 8px;
-    flex: 0 0 auto;
-}
-
-.status-pill {
-    display: inline-flex;
-    align-items: center;
-    min-height: 24px;
-    padding: 0 9px;
-    border: 1px solid rgba(60, 74, 71, 0.46);
-    border-radius: 4px;
-    background: rgba(4, 15, 24, 0.42);
-    color: #bacac6;
-    font-size: 11px;
-    font-weight: 900;
-    white-space: nowrap;
-}
-
-.status-pill.ready {
-    border-color: rgba(226, 192, 143, 0.32);
-    background: rgba(194, 156, 109, 0.12);
-    color: #e2c08f;
-}
-
-.status-pill.warning {
-    border-color: rgba(226, 195, 132, 0.38);
-    background: rgba(226, 195, 132, 0.1);
-    color: #e2c384;
-}
-
-.status-pill.loading,
-.status-pill.muted,
-.status-pill.idle {
-    color: #859491;
-}
-
-.refresh-btn {
-    width: 28px;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(60, 74, 71, 0.46);
-    border-radius: 4px;
-    background: rgba(17, 29, 38, 0.72);
-    color: #bacac6;
-    cursor: pointer;
-}
-
-.refresh-btn:hover {
-    border-color: rgba(226, 192, 143, 0.38);
-    color: #e2c08f;
-}
-
-.refresh-icon,
-.empty-icon {
-    width: 15px;
-    height: 15px;
-}
-
-.spinning {
-    animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-.empty-state {
-    min-height: 74px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border: 1px solid rgba(60, 74, 71, 0.28);
-    border-radius: 4px;
-    background: rgba(4, 15, 24, 0.32);
-    color: #859491;
-    font-size: 12px;
-    font-weight: 800;
-}
-
-.error-state {
-    color: #ffb4ab;
-}
-
-.recommendation-body {
-    display: grid;
-    gap: 10px;
-}
-
-.candidate-scroller {
-    position: relative;
-    min-width: 0;
-}
-
-.headline-row {
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-    padding: 11px 12px;
-    border-radius: 4px;
-    background: rgba(4, 15, 24, 0.42);
-}
-
-.headline-row div {
-    min-width: 0;
-}
-
-.headline-label {
-    display: block;
-    margin-bottom: 3px;
-    color: #859491;
-    font-size: 11px;
-    font-weight: 900;
-}
-
-.headline-row strong {
-    display: block;
-    overflow: hidden;
-    color: #e2c08f;
-    font-size: 16px;
-    font-weight: 900;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.delta-chip {
-    flex: 0 0 auto;
-    min-width: 42px;
-    padding: 5px 8px;
-    border: 1px solid rgba(226, 195, 132, 0.36);
-    border-radius: 4px;
-    background: rgba(226, 195, 132, 0.1);
-    color: #e2c384;
-    text-align: center;
-    font-size: 12px;
-    font-weight: 900;
-}
-
-.reason-line {
-    margin: 0;
-    color: #bacac6;
-    font-size: 12px;
-    font-weight: 800;
-    line-height: 1.45;
-}
-
-.candidate-list {
-    display: grid;
-    gap: 8px;
-}
-
-.candidate-row {
-    gap: 10px;
-    min-width: 0;
-    padding: 9px;
-    border: 1px solid rgba(60, 74, 71, 0.34);
-    border-radius: 4px;
-    background: rgba(17, 29, 38, 0.52);
-}
-
-.candidate-row.recommended {
-    border-color: rgba(226, 195, 132, 0.5);
-    background: rgba(35, 38, 37, 0.68);
-}
-
-.candidate-row.current:not(.recommended) {
-    border-color: rgba(226, 192, 143, 0.28);
-}
-
-.candidate-row.teammate:not(.recommended) {
-    border-color: rgba(96, 161, 176, 0.36);
-}
-
-.champion-mark {
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border: 1px solid rgba(226, 192, 143, 0.26);
-    border-radius: 4px;
-    background: rgba(4, 15, 24, 0.72);
-    color: #e2c08f;
-    font-size: 11px;
-    font-weight: 900;
-}
-
-.champion-icon {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.candidate-main {
-    min-width: 0;
-    flex: 1;
-}
-
-.candidate-title {
-    gap: 8px;
-    min-width: 0;
-    margin-bottom: 5px;
-}
-
-.candidate-title strong {
-    overflow: hidden;
-    color: #d7e4f1;
-    font-size: 13px;
-    font-weight: 900;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.source-tag {
-    flex: 0 0 auto;
-    padding: 2px 5px;
-    border: 1px solid rgba(60, 74, 71, 0.42);
-    border-radius: 4px;
-    background: rgba(4, 15, 24, 0.34);
-    color: #859491;
-    font-size: 10px;
-    font-weight: 900;
-    line-height: 1;
-}
-
-.source-tag.source-current {
-    border-color: rgba(226, 192, 143, 0.28);
-    color: #e2c08f;
-}
-
-.source-tag.source-teammate {
-    border-color: rgba(96, 161, 176, 0.34);
-    color: #a9cbd3;
-}
-
-.stat-line {
-    flex-wrap: wrap;
-    gap: 6px 10px;
-    color: #bacac6;
-    font-size: 11px;
-    font-weight: 800;
-}
-
-.score-box {
-    flex: 0 0 48px;
-    display: grid;
-    gap: 2px;
-    text-align: right;
-}
-
-.score-box span {
-    color: #859491;
-    font-size: 10px;
-    font-weight: 900;
-}
-
-.score-box strong {
-    color: #e2c384;
-    font-size: 15px;
-    font-weight: 900;
-}
-
-.aram-panel.compact {
-    padding: 10px;
-    background: rgba(17, 29, 38, 0.6);
-}
-
-.aram-panel.compact .panel-header {
-    margin-bottom: 8px;
-}
-
-.aram-panel.compact .panel-icon {
-    width: 15px;
-    height: 15px;
-}
-
-.aram-panel.compact h3 {
-    font-size: 13px;
-}
-
-.aram-panel.compact .status-pill {
-    min-height: 22px;
-    padding: 0 7px;
-    font-size: 10px;
-}
-
-.aram-panel.compact .refresh-btn {
-    width: 26px;
-    height: 26px;
-}
-
-.aram-panel.compact .recommendation-body {
-    gap: 8px;
-}
-
-.aram-panel.compact .headline-row {
-    min-height: 46px;
-    padding: 8px 10px;
-}
-
-.aram-panel.compact .headline-row strong {
-    font-size: 14px;
-}
-
-.aram-panel.compact .reason-line {
-    font-size: 11px;
-}
-
-.aram-panel.compact .candidate-list {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 2px 3px 8px;
-    overscroll-behavior-inline: contain;
-    scroll-behavior: smooth;
-    scroll-snap-type: x proximity;
-}
-
-.aram-panel.compact .candidate-row {
-    flex: 0 0 88px;
-    display: grid;
-    grid-template-rows: auto auto;
-    gap: 7px;
-    align-items: center;
-    scroll-snap-align: start;
-    scroll-snap-stop: normal;
-}
-
-.aram-panel.compact .champion-mark {
-    width: 34px;
-    height: 34px;
-    flex-basis: 34px;
-}
-
-.aram-panel.compact .candidate-title {
-    margin-bottom: 0;
-}
-
-.aram-panel.compact .stat-line {
-    gap: 4px 8px;
-    font-size: 10px;
-}
-
-.aram-panel.compact .score-box {
-    grid-column: 1 / -1;
-    display: flex;
-    justify-content: space-between;
-    text-align: left;
-}
-
-.aram-panel.compact .empty-state {
-    min-height: 58px;
-}
-
-.candidate-scroll-nav {
-    position: absolute;
-    z-index: 2;
-    top: 50%;
-    width: 40px;
-    height: 40px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: rgba(4, 15, 24, 0.94);
-    box-shadow:
-        0 0 0 1px rgba(226, 192, 143, 0.28),
-        0 5px 14px rgba(0, 0, 0, 0.34);
-    color: #e2c08f;
-    cursor: pointer;
-    translate: 0 -50%;
-    transition-property: background-color, color, box-shadow, scale;
-    transition-duration: 150ms;
-    transition-timing-function: ease-out;
-}
-
-.candidate-scroll-nav.left {
-    left: 2px;
-}
-
-.candidate-scroll-nav.right {
-    right: 2px;
-}
-
-.candidate-scroll-nav:hover {
-    background: rgba(31, 43, 53, 0.98);
-    box-shadow:
-        0 0 0 1px rgba(226, 192, 143, 0.5),
-        0 6px 18px rgba(0, 0, 0, 0.42);
-    color: #f4ecdc;
-}
-
-.candidate-scroll-nav:active {
-    scale: 0.96;
-}
-
-.candidate-scroll-nav:focus-visible {
-    outline: 2px solid rgba(226, 192, 143, 0.82);
-    outline-offset: 2px;
-}
-
-.candidate-scroll-icon {
-    width: 17px;
-    height: 17px;
-}
-
-.aram-panel.compact .candidate-list:focus-visible {
-    outline: 2px solid rgba(226, 192, 143, 0.72);
-    outline-offset: 2px;
-}
-
-.aram-panel.compact .candidate-list::-webkit-scrollbar {
-    height: 7px;
-}
-
-.aram-panel.compact .candidate-list::-webkit-scrollbar-track {
-    background: rgba(4, 15, 24, 0.42);
-}
-
-.aram-panel.compact .candidate-list::-webkit-scrollbar-thumb {
-    border-radius: 4px;
-    background: rgba(226, 192, 143, 0.36);
-}
+.aram-panel{padding:12px;background:linear-gradient(145deg,#142837,#091723);border:1px solid #635637;color:#f0e6d2;overflow:hidden;font-family:'Segoe UI','Microsoft YaHei',sans-serif}
+.panel-header,.title-lockup,.panel-actions,.candidate-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.panel-header{margin-bottom:12px}.title-lockup{justify-content:flex-start}h3,h4,p{margin:0}h3{font-size:13px}h4{font-size:11px;color:#c8aa6e;font-weight:600}.panel-icon{width:16px;height:16px;flex-shrink:0}.panel-actions{gap:5px}.status-pill{font-size:10px;color:#b0c5cc}.refresh-btn{width:25px;height:25px;display:grid;place-items:center;color:#cdbe91;background:#0a1926;border:1px solid #43525a;cursor:pointer}.refresh-btn:disabled{opacity:.4}.team-line{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:9px 0 15px}.team-member{min-width:0;text-align:center}.team-portrait{width:100%;max-width:48px;aspect-ratio:1;margin:auto;position:relative;display:grid;place-items:center;border:1px solid #435968;background:#07121c;color:#6c8b9a}.team-portrait img,.champion-mark img{width:100%;height:100%;object-fit:cover}.team-portrait small{position:absolute;bottom:0;right:0;font-size:9px;padding:0 3px;color:#06171b;background:#c8aa6e}.team-member.self .team-portrait{border-color:#c8aa6e}.team-member>strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:500;margin:4px 0}.team-member>span{font-size:10px;color:#91bbc9;font-variant-numeric:tabular-nums}.candidate-heading>span,.bench-note{font-size:10px;color:#91a6b1}.bench-note{line-height:1.5;margin:5px 0 8px}.candidate-list{display:flex;flex-direction:column;gap:5px;max-height:218px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#53636c transparent;overscroll-behavior:contain}.candidate-row{display:flex;align-items:center;gap:8px;min-height:55px;flex-shrink:0;padding:7px;border:1px solid #2b414e;background:#0a1925}.candidate-row.recommended{border-color:#89703f;background:#202b2d}.rank{width:12px;flex-shrink:0;font-size:11px;color:#9ab0bb}.champion-mark{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;border:1px solid #5d695c}.candidate-main{flex:1;min-width:0}.candidate-main strong{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.candidate-main small,.candidate-win small{display:block;margin-top:3px;color:#91a6b1;font-size:10px}.candidate-win{text-align:right;flex-shrink:0}.candidate-win strong{font-size:18px;color:#e6cb8d;font-variant-numeric:tabular-nums}.empty-state{display:flex;align-items:center;gap:8px;padding:12px 0;font-size:11px;color:#9fb1bc;line-height:1.6}.error-state{color:#f19b9b}button:focus-visible,.candidate-list:focus-visible{outline:2px solid #69bce6;outline-offset:2px}.spinning{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 </style>

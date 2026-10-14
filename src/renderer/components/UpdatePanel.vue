@@ -3,6 +3,8 @@
     <div class="update-heading"><div><small>FUZE / RELEASES</small><h2 id="update-heading">{{ t('title') }}</h2></div><span class="channel">{{ t('private') }}</span></div>
     <div class="release-line"><strong>v{{ state?.currentVersion || '—' }}</strong><span v-if="state?.latestVersion">→ v{{ state.latestVersion }}</span><span class="phase" role="status">{{ t('phase_' + (state?.phase || 'disabled')) }}</span></div>
     <p>{{ t('policy') }}</p>
+    <p>{{ t('differentialPolicy') }}</p>
+    <p v-if="state?.transferMode && state.transferMode !== 'idle'" class="message" role="status">{{ t('transfer_' + state.transferMode) }}<template v-if="state.transferReason"> · {{ t('transferReason_' + state.transferReason) }}</template></p>
     <p v-if="state?.gamePhase && ['ChampSelect', 'GameStart', 'InProgress', 'Reconnect'].includes(String(state.gamePhase))" class="message">{{ t('game') }}</p>
     <p v-if="!state?.installationSupported" class="message">{{ t('portable') }}</p>
     <p v-if="errorCode" class="error" role="alert">{{ t('error_' + errorCode) }}</p>
