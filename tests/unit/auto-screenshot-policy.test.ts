@@ -17,6 +17,12 @@ import {
 } from '../../src/main/auto-screenshot-policy.ts'
 
 describe('automatic screenshot policy', () => {
+  it('accelerates only the second gate frame, without shortening OCR backoff', () => {
+    const options = { mode: 'idle' as const, pendingFullCapture: false, intervalMs: 1500, elapsedMs: 40, now: 10000 }
+    expect(resolveGameflowNextCaptureDelay(options)).toBe(1460)
+    expect(resolveGameflowNextCaptureDelay({ ...options, candidateStreak: 1 })).toBe(460)
+    expect(resolveGameflowNextCaptureDelay({ ...options, candidateStreak: 1, fullOcrCooldownUntil: 12000 })).toBe(1460)
+  })
   it('uses the reduced automatic thumbnail and adaptive intervals', () => {
     expect(GAMEFLOW_CAPTURE_THUMBNAIL_SIZE).toEqual({ width: 1024, height: 576 })
     expect(resolveGameflowCaptureInterval('idle')).toBe(GAMEFLOW_IDLE_CAPTURE_INTERVAL_MS)

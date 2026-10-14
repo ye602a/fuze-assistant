@@ -1,5 +1,7 @@
 export const workbenchMessages = {
   "zh-CN": {
+    "overallBasis": "整体胜率 · 正式领取轮次未确认",
+    "missingHint": "此位置未识别，可能被遮挡；移开遮挡后自动重试。",
     "pinChampSelect": "选人时置顶英雄详情",
     "pinChampSelectHint": "选人阶段保持在普通窗口上方；进入游戏后按原设置隐藏。不会循环抢焦点。",
     "levelGateOption": "按强化等级节省识别开销",
@@ -140,6 +142,8 @@ export const workbenchMessages = {
     "clearPath": "清除备用目录"
   },
   "en-US": {
+    "overallBasis": "Overall win rate · claim round unconfirmed",
+    "missingHint": "Unread slot, possibly covered. Recognition retries automatically when visible.",
     "pinChampSelect": "Keep champion details on top during selection",
     "pinChampSelectHint": "Stay above normal windows in champion select; hide on game start as configured. No repeated focus stealing.",
     "levelGateOption": "Save work between augment levels",
@@ -280,6 +284,8 @@ export const workbenchMessages = {
     "clearPath": "Clear fallback"
   },
   "zh-TW": {
+    "overallBasis": "整體勝率 · 正式領取輪次未確認",
+    "missingHint": "此位置未識別，可能被遮擋；移開遮擋後自動重試。",
     "pinChampSelect": "選角時置頂英雄詳情",
     "pinChampSelectHint": "選角階段保持在一般視窗上方；進入遊戲後按原設定隱藏。不會循環搶焦點。",
     "levelGateOption": "依強化等級節省辨識開銷",

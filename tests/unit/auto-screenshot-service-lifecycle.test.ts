@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recognitionMeter } from '../../src/main/recognition-summary.ts'
 import { resolveCaptureStage } from '../../src/main/auto-screenshot-policy.ts'
+import { createInitialPartialAugmentSelection } from '../../src/main/augment-partial-merge.ts'
 
 const mocks = vi.hoisted(() => ({
   captureScreenshot: vi.fn(),
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('../../src/main/live-level-reader.ts', () => ({ LiveLevelReader: class { poll = vi.fn(async () => null); reset = vi.fn() } }))
+vi.mock('../../src/main/live-level-reader.ts', () => ({ LiveLevelReader: class { value: { level: number; checkedAt: number } | null = null; poll = vi.fn(async () => null); reset = vi.fn(() => { this.value = null }) } }))
 
 vi.mock('../../src/main/screenshot.ts', () => ({
   CAPTURE_THUMBNAIL_SIZE: { width: 1280, height: 720 },
@@ -29,6 +30,7 @@ vi.mock('../../src/main/image-analyzer.ts', () => ({
   analyzeScreenshot: mocks.analyzeScreenshot,
   analyzeScreenshotGate: mocks.analyzeScreenshotGate,
   warmupImageAnalyzer: mocks.warmupImageAnalyzer,
+  setOcrMatchActive: vi.fn(),
 }))
 
 vi.mock('electron', () => ({
@@ -65,7 +67,7 @@ vi.mock('../../src/main/modules/app-paths.ts', () => ({
 }))
 vi.mock('../../src/main/augment-partial-merge.ts', () => ({
   createInitialPartialAugmentSelection: vi.fn(() => null),
-  getAugmentIds: vi.fn((augments = []) => augments.map(augment => String(augment.id))),
+  getAugmentIds: vi.fn((augments = []) => augments.filter(augment => !augment.missing && augment.id != null).map(augment => String(augment.id))),
   mergePartialAugments: vi.fn(() => null),
 }))
 vi.mock('../../src/main/modules/user-preferences.ts', () => ({
@@ -98,6 +100,36 @@ const expectNextCaptureToUseGate = (service) => {
 }
 
 describe.sequential('automatic screenshot service lifecycle', () => {
+  it('does not wait for optional level telemetry before capturing', async () => {
+    const service = createRunningIdleService()
+    service.levelReader.poll.mockReturnValue(new Promise(() => {}))
+    mocks.captureScreenshot.mockResolvedValue({ success: false, error: 'fixture-no-frame' })
+    await service._captureScreenshot(service.runId)
+    expect(mocks.captureScreenshot).toHaveBeenCalledOnce()
+  })
+  it('retains a brief partial miss but replaces persistent unread slots without hiding known cards', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(10000)
+    const service = createRunningIdleService()
+    const augments = [{ id: 1, detectedSlot: 0 }, { id: 3, detectedSlot: 2 }]
+    service.lastDetectedAugmentIds = ['1', '2', '3']
+    service.lastDetectedAugments = [{ id: 1 }, { id: 2 }, { id: 3 }]
+    service.lastDetectedAugmentAt = 10000
+    const partial = [augments[0], { id: null, missing: true, detectedSlot: 1 }, augments[1]]
+    vi.mocked(createInitialPartialAugmentSelection).mockReturnValue({ augments: partial, missingSlots: [1], reason: 'unreadable-title-slot' })
+    mocks.analyzeScreenshot.mockResolvedValue({ success: true, analysis: {
+      cardCount: 2, confidence: .95, isAugmentPhase: true, augments,
+      augmentGate: { titleActivity: { likely: true }, rerollButtons: { visible: true } },
+    } })
+    const notify = vi.spyOn(service, '_notifyAugmentDetected').mockImplementation(() => {})
+    await service._analyzeScreenshot(Buffer.from('partial'))
+    expect(notify).not.toHaveBeenCalled()
+    vi.setSystemTime(13000)
+    await service._analyzeScreenshot(Buffer.from('partial'))
+    expect(notify).toHaveBeenCalledOnce()
+    expect(service.lastDetectedAugments).toEqual(partial)
+    vi.mocked(createInitialPartialAugmentSelection).mockReturnValue(null)
+    vi.useRealTimers()
+  })
   it('releases per-game buffers, selection and timers across one hundred stop/start cycles', () => {
     vi.useFakeTimers()
     try {
@@ -169,6 +201,7 @@ describe.sequential('automatic screenshot service lifecycle', () => {
   })
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(createInitialPartialAugmentSelection).mockReturnValue(null)
     mocks.windows.length = 0
     mocks.prepareWindows.mockResolvedValue([])
   })
@@ -176,18 +209,19 @@ describe.sequential('automatic screenshot service lifecycle', () => {
   afterEach(() => {
     autoScreenshotService.reset()
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('skips the actual screenshot call in level saving mode, but captures a deferred offer', async () => {
     recognitionMeter.begin()
     const service = createRunningIdleService()
     const now = Date.now()
-    service.levelReader.poll.mockResolvedValue({ level: 4, checkedAt: now })
+    service.levelReader.value = { level: 4, checkedAt: now }
     service.levelGate.completed.add(3)
     service.levelGate.decide(now)
     expect(await service._captureScreenshot(service.runId)).toMatchObject({ error: 'level-gate-idle' })
     expect(mocks.captureScreenshot).not.toHaveBeenCalled()
-    service.levelReader.poll.mockResolvedValue({ level: 8, checkedAt: now })
+    service.levelReader.value = { level: 8, checkedAt: now }
     mocks.captureScreenshot.mockResolvedValue({ success: false, error: 'fixture-no-frame' })
     await service._captureScreenshot(service.runId)
     expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1)

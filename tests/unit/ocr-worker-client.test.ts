@@ -24,6 +24,20 @@ vi.mock('../../src/main/modules/logger.ts', () => ({ default: { info: vi.fn(), w
 beforeEach(() => { vi.resetModules(); harness.gpu = true; harness.failure = ''; harness.children = [] })
 afterEach(() => vi.useRealTimers())
 describe('isolated OCR recovery', () => {
+  it('keeps one warm model through a match and releases it after leaving', async () => {
+    vi.useFakeTimers()
+    const client = await import('../../src/main/ocr-worker-client.ts')
+    client.setOcrMatchActive(true)
+    const service = await client.createOcrWorkerService({})
+    await vi.advanceTimersByTimeAsync(600000)
+    expect(harness.children).toHaveLength(1)
+    expect(harness.children[0].kill).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    client.setOcrMatchActive(false)
+    await vi.advanceTimersByTimeAsync(120001)
+    expect(harness.children[0].kill).toHaveBeenCalledOnce()
+    await service.destroy()
+  })
   it('does not accept new warmup after the app has begun quitting', async () => {
     const client = await import('../../src/main/ocr-worker-client.ts')
     const { app } = await import('electron')

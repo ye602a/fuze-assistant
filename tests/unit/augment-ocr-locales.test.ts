@@ -36,8 +36,8 @@ describe('localized augment OCR loading', () => {
       loadRecognitionBaseForOcrLocale: loadLocale,
       tryNormalizeDataLocale: () => null,
     }))
-    vi.doMock('../../src/main/services/lcu/process-auth-discovery.ts', () => ({
-      discoverLcuAuthFromProcess: vi.fn(async () => [null, null]),
+    vi.doMock('../../src/main/services/lcu/lcu-service.ts', () => ({
+      getLCUServiceInstance: () => ({ readClientLocaleHint: () => never }),
     }))
 
     const { matchAugmentDatabase, shutdownImageAnalyzer } = await import('../../src/main/image-analyzer.ts')

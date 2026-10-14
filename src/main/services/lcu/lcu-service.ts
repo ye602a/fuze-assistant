@@ -569,6 +569,20 @@ export class LCUService {
   getConnectionStatus() {
     return { discovered: this.active, verifiedAt: this.verifiedAt, phase: this.verifiedPhase, error: this.phaseError }
   }
+  // Optional OCR hint: use the verified connection only; never launch discovery here.
+  async readClientLocaleHint(): Promise<unknown> {
+    if (!this.active || !this.port || !this.token || this.phaseError || this.verifiedAt === null ||
+      Date.now() - this.verifiedAt > 20000 || Date.now() < this.verifiedAt) return null
+    const revision = this.diagnosticRevision
+    try {
+      const response = await axios.get(`https://127.0.0.1:${this.port}/riotclient/region-locale`, {
+        auth: { username: 'riot', password: this.token }, httpsAgent: this.httpsAgent,
+        timeout: 1000, maxRedirects: 0, proxy: false, maxContentLength: 4096,
+        validateStatus: status => status === 200,
+      })
+      return revision === this.diagnosticRevision && response.status === 200 ? response.data : null
+    } catch { return null }
+  }
   private active: boolean = false
   private url: string | null = null
   private token: string | null = null

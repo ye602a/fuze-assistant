@@ -23,6 +23,7 @@ export function resolveGameflowNextCaptureDelay({
     now = Date.now(),
     intervalMs,
     elapsedMs,
+    candidateStreak = 0,
 }: {
     mode: AutomaticCaptureMode
     pendingFullCapture: boolean
@@ -30,6 +31,7 @@ export function resolveGameflowNextCaptureDelay({
     now?: number
     intervalMs: number
     elapsedMs: number
+    candidateStreak?: number
 }): number {
     const fullCaptureReady = mode === 'idle' && resolveCaptureStage({
         mode,
@@ -38,7 +40,9 @@ export function resolveGameflowNextCaptureDelay({
         now,
     }) === 'full'
 
-    return fullCaptureReady ? 0 : Math.max(0, intervalMs - elapsedMs)
+    const confirmInterval = candidateStreak === 1 && now >= fullOcrCooldownUntil
+        ? Math.min(intervalMs, GAMEFLOW_ACTIVE_CAPTURE_INTERVAL_MS) : intervalMs
+    return fullCaptureReady ? 0 : Math.max(0, confirmInterval - elapsedMs)
 }
 
 export function resolveCaptureModeAfterAnalysis({
