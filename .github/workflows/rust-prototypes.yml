@@ -46,6 +46,8 @@ jobs:
           exit $LASTEXITCODE
       - name: Offline ONNX and hidden native window
         run: node scripts/check-rust-prototypes.mjs
+      - name: Persistent worker, raw atlas IPC and bounded lifecycle
+        run: node scripts/check-rust-worker.mjs
       - name: Native capture boundary and generated GPU ROI readback
         run: node scripts/check-rust-capture.mjs
       - name: Native atlas to OCR and own-window capture lifecycle
@@ -58,8 +60,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
-      - name: Persistent worker, raw atlas IPC and bounded lifecycle
-        run: node scripts/check-rust-worker.mjs
       - name: Scan upload content
         run: npm run security:check
       - name: Upload sanitized prototype reports
