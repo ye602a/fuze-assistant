@@ -27,10 +27,14 @@ try {
   else process.env.FUZE_RUST_GPU_ATLAS=old
 }
 let wgc={tested:false,reason:'visible-self-window-is-ci-only'}
+const wgcAttempts=[]
 if(process.env.GITHUB_ACTIONS==='true'&&process.env.FUZE_RUST_CI_VISIBLE==='1'){
-  wgc=run('fuze-native-overlay',['--wgc-ci',path.join(output,'snapshot.json')])
+  for(let attempt=0;attempt<5;attempt++){
+    wgcAttempts.push(run('fuze-native-overlay',['--wgc-ci',path.join(output,'snapshot.json')]))
+  }
+  wgc=wgcAttempts.find(r=>!r.exit_ok)||wgcAttempts[0]
 }
-const report={hardware,results,wgc,gameAccess:false,gameValidated:false,encodedCaptureImages:0}
+const report={hardware,results,wgc,wgcAttempts,gameAccess:false,gameValidated:false,encodedCaptureImages:0}
 await writeFile(path.join(output,'pipeline-validation.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify({hardware,results:results.map(({mode,ocr,overlay})=>({
   mode,passed:ocr.passed,backend:ocr.backend_status,frames:ocr.samples?.map(s=>({capture_ms:s.capture_ms,ocr_ms:s.runs_ms,roi_bytes:s.roi_bytes})),
