@@ -370,7 +370,8 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
                 tick += 1;
                 let dc = GetDC(hwnd);
                 if !dc.is_null() {
-                    let brush = CreateSolidBrush(if tick % 2 == 0 { 0x0000ff } else { 0x00ff00 });
+                    // Two-color alternation can alias when DWM samples every second paint.
+                    let brush = CreateSolidBrush(tick.wrapping_mul(0x00010101) & 0x00ffffff);
                     let pulse = RECT {
                         left: 20,
                         top: 20,
