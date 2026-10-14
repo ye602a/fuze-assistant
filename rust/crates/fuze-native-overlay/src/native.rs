@@ -323,6 +323,7 @@ pub fn run() -> Result<()> {
         if smoke {
             let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
             let no_activate = style & WS_EX_NOACTIVATE != 0;
+            let tool_window = style & WS_EX_TOOLWINDOW != 0;
             let hidden = IsWindowVisible(hwnd) == 0;
             let topmost = style & WS_EX_TOPMOST != 0;
             let render = save_own_surface(PathBuf::from(&args[1]), 760, 170);
@@ -342,9 +343,9 @@ pub fn run() -> Result<()> {
             }
             println!(
                 "{}",
-                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false})
+                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false})
             );
-            if !hidden || !no_activate || !topmost || !unchanged {
+            if !hidden || !no_activate || !tool_window || !topmost || !unchanged {
                 return Err("window-invariant".into());
             }
         } else {
