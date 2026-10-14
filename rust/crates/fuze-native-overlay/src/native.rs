@@ -1,8 +1,12 @@
+use fuze_contract::{ContextGate, Slot, Snapshot};
 use std::{
     mem::{size_of, zeroed},
     path::PathBuf,
     ptr::{null, null_mut},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        OnceLock,
+    },
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -15,6 +19,7 @@ use windows_sys::Win32::{
     UI::{HiDpi::*, WindowsAndMessaging::*},
 };
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
+static SNAPSHOT: OnceLock<Snapshot> = OnceLock::new();
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -71,7 +76,7 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
     fill(dc, rect(0, 0, 760, 170), rgb(5, 16, 25));
     label(
         dc,
-        "FUZE · Rust 原型 · 演示数据 / 整体胜率",
+        "FUZE · Rust 原型 · 离线识别 / 未确认选择界面",
         rect(12, 3, 580, 25),
         (12.0 * sy) as i32,
         rgb(198, 173, 112),
@@ -79,9 +84,16 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
     label(
         dc,
         "数据 fixture-v1",
-        rect(610, 3, 748, 25),
+        rect(600, 3, 715, 25),
         (11.0 * sy) as i32,
         rgb(145, 174, 184),
+    );
+    label(
+        dc,
+        "×",
+        rect(730, 2, 754, 25),
+        (16.0 * sy) as i32,
+        rgb(198, 173, 112),
     );
     for i in 0..3 {
         let x = 12 + i * 248;
@@ -95,11 +107,18 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
             (26.0 * sy) as i32,
             rgb(221, 190, 118),
         );
-        let (name, rate, pick, progress) = match i {
-            0 => ("示例强化甲", "胜率 56.3%", "选取率 12.1%", 0.83),
-            1 => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
-            _ => ("示例强化丙", "胜率 51.7%", "选取率 8.6%", 0.62),
-        };
+        let (name, rate, pick, progress) =
+            match &SNAPSHOT.get().expect("validated snapshot").slots[i as usize] {
+                Slot::Known {
+                    name, confidence, ..
+                } => (
+                    name.as_str(),
+                    "已识别",
+                    "识别置信度 · 胜率待接入",
+                    *confidence as f64,
+                ),
+                Slot::Unreadable => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
+            };
         label(
             dc,
             name,
@@ -139,6 +158,16 @@ unsafe extern "system" fn procedure(
 ) -> LRESULT {
     match message {
         WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
+        WM_LBUTTONUP => {
+            let mut bounds: RECT = zeroed();
+            GetClientRect(hwnd, &mut bounds);
+            let x = (lparam as u16) as i16 as i32;
+            let y = ((lparam >> 16) as u16) as i16 as i32;
+            if x >= bounds.right * 730 / 760 && y >= 0 && y <= bounds.bottom * 25 / 170 {
+                DestroyWindow(hwnd);
+            }
+            0
+        }
         WM_ERASEBKGND => 1,
         WM_PAINT => {
             let mut paint: PAINTSTRUCT = zeroed();
@@ -220,23 +249,36 @@ unsafe fn save_own_surface(path: PathBuf, w: i32, h: i32) -> Result<()> {
 fn ticks(t: FILETIME) -> u64 {
     (t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64
 }
-unsafe fn cpu_ticks() -> u64 {
+unsafe fn cpu_ticks() -> Result<u64> {
     let (mut created, mut exited, mut kernel, mut user) = (zeroed(), zeroed(), zeroed(), zeroed());
-    GetProcessTimes(
+    let ok = GetProcessTimes(
         GetCurrentProcess(),
         &mut created,
         &mut exited,
         &mut kernel,
         &mut user,
     );
-    ticks(kernel) + ticks(user)
+    if ok == 0 {
+        return Err("cpu-metric-unavailable".into());
+    }
+    Ok(ticks(kernel) + ticks(user))
 }
 pub fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let smoke = args.first().is_some_and(|v| v == "--smoke");
-    if !(smoke && args.len() == 2 || args == ["--show"]) {
+    if !(smoke && args.len() == 3 || args.len() == 2 && args[0] == "--show") {
         return Err("explicit-mode-required".into());
     }
+    let snapshot_path = args.last().unwrap();
+    if std::fs::metadata(snapshot_path)?.len() > 16 * 1024 {
+        return Err("snapshot-too-large".into());
+    }
+    let snapshot: Snapshot = serde_json::from_slice(&std::fs::read(snapshot_path)?)?;
+    let mut gate = ContextGate::new(1, "fixture-v1".into());
+    if !gate.accept(&snapshot) || snapshot.selection_confirmed {
+        return Err("invalid-offline-context".into());
+    }
+    SNAPSHOT.set(snapshot).map_err(|_| "duplicate-context")?;
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let foreground = GetForegroundWindow();
@@ -286,14 +328,18 @@ pub fn run() -> Result<()> {
             let render = save_own_surface(PathBuf::from(&args[1]), 760, 170);
             let cpu_start = cpu_ticks();
             std::thread::sleep(std::time::Duration::from_millis(500));
-            let idle_cpu_ms = (cpu_ticks() - cpu_start) as f64 / 10000.0;
+            let cpu_end = cpu_ticks();
             let mut memory: PROCESS_MEMORY_COUNTERS = zeroed();
             memory.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-            GetProcessMemoryInfo(GetCurrentProcess(), &mut memory, memory.cb);
+            let memory_ok = GetProcessMemoryInfo(GetCurrentProcess(), &mut memory, memory.cb) != 0;
             let unchanged = foreground == GetForegroundWindow();
             DestroyWindow(hwnd);
             UnregisterClassW(class.as_ptr(), instance);
             render?;
+            let idle_cpu_ms = (cpu_end? - cpu_start?) as f64 / 10000.0;
+            if !memory_ok {
+                return Err("memory-metric-unavailable".into());
+            }
             println!(
                 "{}",
                 serde_json::json!({"hidden":hidden,"no_activate":no_activate,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false})

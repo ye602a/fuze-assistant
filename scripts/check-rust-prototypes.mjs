@@ -33,7 +33,14 @@ function run(name, args) {
 }
 const ort = process.env.FUZE_RUST_ORT_DLL || path.join(root, 'node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll')
 const ocr = run('fuze-ocr', [ort, path.join(root, 'resources/paddleocr/rec/inference.onnx'), dictionaryPath, catalogPath, fixtures])
-const overlay = run('fuze-native-overlay', ['--smoke', path.join(output, 'native-overlay.png')])
+const snapshotPath = path.join(output, 'snapshot.json')
+// Use the real partial-fixture OCR result, preserving the two missing positions.
+const snapshot = ocr.samples?.[1]?.snapshot
+let overlay = { exit_ok: false, error: 'ocr-snapshot-unavailable' }
+if (snapshot) {
+  await writeFile(snapshotPath, JSON.stringify(snapshot))
+  overlay = run('fuze-native-overlay', ['--smoke', path.join(output, 'native-overlay.png'), snapshotPath])
+}
 await writeFile(path.join(output, 'validation.json'), JSON.stringify({ ocr, overlay, liveGameValidated: false, gpuValidated: false }, null, 2))
 console.log(JSON.stringify({ ocr, overlay, liveGameValidated: false, gpuValidated: false }, null, 2))
 if (!ocr.exit_ok || !ocr.passed || !overlay.exit_ok) process.exitCode = 1

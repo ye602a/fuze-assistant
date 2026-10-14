@@ -1,4 +1,4 @@
-use fuze_contract::Slot;
+use fuze_contract::{ActualStage, Slot, Snapshot};
 use fuze_ocr::{Recognizer, Result};
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::PathBuf, time::Instant};
@@ -19,6 +19,15 @@ fn run() -> Result<()> {
     ort::init_from(dll.to_string_lossy())
         .with_name("fuze-offline-prototype")
         .commit()?;
+    for (file, limit) in [
+        (&args[1], 64 * 1024 * 1024),
+        (&args[2], 2 * 1024 * 1024),
+        (&args[3], 2 * 1024 * 1024),
+    ] {
+        if fs::metadata(file)?.len() > limit {
+            return Err("input-too-large".into());
+        }
+    }
     let dictionary: Vec<String> = serde_json::from_slice(&fs::read(&args[2])?)?;
     let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
     let started = Instant::now();
@@ -28,6 +37,9 @@ fn run() -> Result<()> {
     engine.warm_up()?;
     let warm_ms = warm.elapsed().as_secs_f64() * 1000.0;
     let root = fs::canonicalize(&args[4])?;
+    if fs::metadata(root.join("manifest.json"))?.len() > 64 * 1024 {
+        return Err("manifest-too-large".into());
+    }
     let samples: Vec<Sample> = serde_json::from_slice(&fs::read(root.join("manifest.json"))?)?;
     if samples.len() > 32 {
         return Err("too-many-fixtures".into());
@@ -48,6 +60,7 @@ fn run() -> Result<()> {
         let frame = reader.decode()?.to_rgb8();
         let mut runs = Vec::new();
         let mut ids = Vec::new();
+        let mut snapshot = None;
         for _ in 0..3 {
             let result = engine.recognize(&frame)?;
             let current: Vec<Option<u32>> = result
@@ -67,8 +80,17 @@ fn run() -> Result<()> {
             passed &= current == expected;
             ids = current;
             runs.push(result.elapsed_ms);
+            snapshot = Some(Snapshot {
+                schema_version: 1,
+                generation: 1,
+                sequence: index as u64 + 1,
+                dataset_version: "fixture-v1".into(),
+                selection_confirmed: false,
+                actual_stage: ActualStage::Unknown,
+                slots: result.slots,
+            });
         }
-        results.push(serde_json::json!({"sample":index,"matched_ids":ids,"runs_ms":runs,"matches_expected":ids==(0..3).map(|i|sample.expected_ids.get(i).copied()).collect::<Vec<_>>()}));
+        results.push(serde_json::json!({"sample":index,"matched_ids":ids,"runs_ms":runs,"snapshot":snapshot,"matches_expected":ids==(0..3).map(|i|sample.expected_ids.get(i).copied()).collect::<Vec<_>>()}));
     }
     println!(
         "{}",
