@@ -94,6 +94,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuze-lcu"
+version = "0.1.0"
+dependencies = [
+ "fuze-runtime",
+ "serde_json",
+ "windows-sys",
+]
+
+[[package]]
 name = "fuze-native-overlay"
 version = "0.1.0"
 dependencies = [
