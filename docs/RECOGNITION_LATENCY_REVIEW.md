@@ -9,6 +9,7 @@ The local 0.6.2 match on 2026-10-14 ended at 22:27:58 (UTC+08). Its automatic re
 - At 22:19:17 and 22:25:31, matching alone took 4,207 and 5,026 ms. The old foreground locale lookup could repeat process discovery when process metadata was unreadable, despite an otherwise usable LCU connection.
 - Successful three-card updates took 170–364 ms. Capture averages in two later windows were 29 and 68 ms. The startup capture took 2,470 ms.
 - No accepted partial-card event was found in this match. The missing-slot change is regression-tested behavior, not proof of a recorded obstruction event.
+- The match journal, whose meter started slightly after the capture service, recorded 285 captures, 73 analyses, 75 level-gate waits, 47 WebGPU calls, zero CPU calls and zero backend fallbacks. Six recommendations and six window notifications were recorded: three observations at level 3 and three at level 7. These establish working GPU/level/notification paths, not confirmed reward ownership or six separate claims. A notification counter alone does not prove that a window was visible to the player.
 
 Only aggregate timings and counters are recorded here. Raw logs, account identifiers, credentials, screenshots of actual games and installation paths are excluded.
 
