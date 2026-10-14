@@ -220,6 +220,8 @@ export interface ClientVersionInfo extends LooseRecord {
 }
 
 export interface AppUpdateState extends LooseRecord {
+  transferMode?: 'idle' | 'checking' | 'differential' | 'full' | 'cached'
+  transferReason?: '' | 'baseline-missing' | 'differential-unavailable'
   credentialConfigured?: boolean
   installationSupported?: boolean
   canDownload?: boolean
@@ -318,6 +320,7 @@ export interface AramRecommendationCandidate extends LooseRecord {
 }
 
 export interface AramBenchRecommendation extends LooseRecord {
+  team?: Array<{ slot: number; isCurrent: boolean; champion: AramRecommendationCandidate | null }>
   readOnly: true
   status: string
   reason: string | null

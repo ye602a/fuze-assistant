@@ -13,17 +13,14 @@
         <div class="page-heading"><div><p class="eyebrow">{{ w('tagline') }}</p><h1>{{ w(tab === 'overview' ? 'workspace' : tab === 'settings' ? 'preferences' : 'history') }}</h1><p>{{ w(tab === 'settings' ? 'preferencesHint' : 'subtitle') }}</p></div><span class="version-chip">{{ w('brand') }} / {{ w('build') }}</span></div>
         <div v-if="notice" class="notice" role="status">{{ notice }}<button :aria-label="t('common.close')" @click="notice = ''"><X :size="16"/></button></div>
         <template v-if="tab === 'overview'">
-          <section class="status-hero" :class="{ warning: ['connectionError', 'ocrError', 'captureError'].includes(state) || loadError }">
+          <section class="status-hero" :class="'tone-' + health.tone">
             <div class="status-copy"><div class="eyebrow"><span class="live-dot"/>{{ w('live') }}</div><h2>{{ loadError ? w('unavailable') : status ? w(state) : w('checking') }}</h2><p v-if="status && !loadError">{{ w(state + 'Hint') }}</p><p class="verification">{{ w('verified') }} · {{ formatTime(status?.connection.verifiedAt) }}<span v-if="status?.connection.error"> · {{ status.connection.error }}</span></p></div>
             <button class="primary" :disabled="busy || !status" @click="toggleAutomatic"><Pause v-if="status?.automatic" :size="16"/><Play v-else :size="16"/>{{ w(status?.automatic ? 'pause' : 'resume') }}</button>
           </section>
           <button v-if="loadError" class="secondary" @click="refresh">{{ w('retry') }}</button>
           <p class="footnote" role="note">{{ w('overallBasis') }}</p>
           <section class="pipeline" :aria-label="w('live')">
-            <article><RuneGlyph name="network"/><small>{{ w('client') }}</small><strong :class="{ good: connected }">{{ w(connected ? 'connected' : 'disconnected') }}</strong><span>{{ status?.connection.phase || '—' }}</span></article>
-            <article><RuneGlyph name="capture"/><small>{{ w('capture') }}</small><strong>{{ w(status?.capture.error ? 'error' : status?.capture.lastCaptureAt ? 'captureReady' : 'captureWaiting') }}</strong><span>{{ w(status?.captureExecution?.backend === 'stream' ? 'captureStream' : status?.captureExecution?.backend === 'bitmap-fallback' ? 'captureFallback' : 'idle') }} · {{ formatTime(status?.capture.lastCaptureAt) }}</span></article>
-            <article><RuneGlyph name="recognition"/><small>{{ w('ocr') }}</small><strong :class="{ good: status?.ocr === 'ready', bad: status?.ocr === 'error' }">{{ w(status?.ocr || 'idle') }}</strong><span>{{ status?.ocrExecution?.warming ? w('warming') : status?.ocrExecution?.backend === 'webgpu' ? 'PaddleOCR · WebGPU' : status?.ocrExecution?.backend === 'cpu' ? 'PaddleOCR · CPU' : w('idle') }}<template v-if="status?.ocrExecution?.fallback"> · {{ w('cpuFallback') }}</template></span></article>
-            <article><RuneGlyph name="data"/><small>{{ w('data') }}</small><strong>{{ status?.data.version || w(status?.data.state || 'loading') }}</strong><span>{{ w('dataPatch') }} {{ status?.data.patch || '—' }}</span></article>
+            <article v-for="item in health.modules" :key="item.key" :class="'tone-' + item.tone"><RuneGlyph :name="item.icon"/><small>{{ w(item.key === 'client' ? 'client' : item.key) }}</small><strong><span class="health-dot"/>{{ w(item.label) }}</strong><span>{{ w(item.hint) }}</span></article>
           </section>
           <section class="panel choices-panel"><div class="section-heading"><div><h2>{{ w('recent') }}</h2><p>{{ w('recentHint') }}</p></div><span v-if="status?.recent.detectedAt" class="muted">{{ w('detected', {time: formatTime(status.recent.detectedAt)}) }}</span></div>
             <div class="choices"><article v-for="(card, index) in cards" :key="index" class="choice" :class="{ populated: card && !card.missing }"><div class="choice-index">{{ w('slot', {n: index + 1}) }}</div><RuneGlyph class="rune-mark" name="rune"/><h3>{{ card?.name || w(card ? 'missing' : 'empty') }}</h3><p v-if="card && !card.missing">{{ w('tier') }} <strong>{{ card.tier ? `T${card.tier}` : w('noRating') }}</strong></p><p v-else>{{ w(card?.missing ? 'missingHint' : 'emptyHint') }}</p></article></div>
@@ -62,6 +59,7 @@ import UpdatePanel from './UpdatePanel.vue'
 import StoragePanel from './StoragePanel.vue'
 import StageSignalDiagnostic from './StageSignalDiagnostic.vue'
 import { setAppLocale } from '../i18n/index.ts'
+import { workbenchHealth } from '../../shared/workbench-health.ts'
 import { connectionIsVerified, runtimeState, type RuntimeStatus } from '../../shared/runtime-status.ts'
 import type { AppStoreKey, SupportedDataLocale } from '../../shared/ipc-contract.ts'
 const MatchHistoryPanel = defineAsyncComponent(() => import('./MatchHistoryPanel.vue'))
@@ -79,6 +77,7 @@ const preferenceDefinitions: { key: AppStoreKey; label: string }[] = [{ key: 'oc
 const preferences = reactive<Record<string, boolean>>({})
 const state = computed(() => status.value ? runtimeState(status.value, status.value.sampledAt) : 'waiting')
 const connected = computed(() => !!status.value && connectionIsVerified(status.value.connection, status.value.sampledAt))
+const health = computed(() => workbenchHealth(status.value, loadError.value))
 const cards = computed(() => [0, 1, 2].map(slot => status.value?.recent.augments.find(card => card.slot === slot)))
 function formatTime(value?: number | null) { return value ? new Date(value).toLocaleTimeString(locale.value, { hour12: false }) : w('never') }
 let pollTimer: ReturnType<typeof setTimeout> | undefined

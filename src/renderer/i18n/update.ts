@@ -1,5 +1,13 @@
 export const updateMessages = {
   'zh-CN': {
+    "differentialPolicy": "优先增量下载：复用更新器保存的旧安装包，只下载变化部分。手动安装、缓存缺失或差分不可用时会下载完整包，安装仍需确认。",
+    "transfer_checking": "正在检查可复用数据",
+    "transfer_differential": "正在增量下载",
+    "transfer_full": "正在下载完整安装包",
+    "transfer_cached": "已复用验证过的安装包缓存",
+    "transferReason_baseline-missing": "未找到可复用的旧安装包",
+    "transferReason_differential-unavailable": "差分条件不满足或校验失败，已安全回退",
+
     title: '软件更新', private: '私有频道', policy: '仅从 ye602a/fuze-assistant 获取版本。下载和安装均由你决定，不会退出游戏。',
     game: '选人或对局期间暂停下载，禁止安装；结束后可手动继续。', portable: '便携包或开发环境：可查看发布页下载新版，保留原目录作为回退。',
     check: '检查新版', download: '下载更新', install: '安装更新', releases: '发布记录', authorized: '已保存私有频道授权 · 管理', authorize: '连接私有更新频道',
@@ -11,6 +19,14 @@ export const updateMessages = {
     'error_access-or-release': '无法访问发布版本：请检查令牌权限、有效期，以及仓库是否已发布正式版。', error_integrity: '下载校验失败，未安装。请重新检查并下载。', error_timeout: '连接超时，请稍后重试。', error_network: '网络或发布文件不可用，请稍后重试或查看发布记录。', error_busy: '更新正在进行，请稍后重试。', 'error_invalid-credential': '访问令牌格式无效。', 'error_encryption-unavailable': '本机安全加密不可用，未保存令牌。', error_unavailable: '当前状态不允许此操作，请检查对局状态或刷新更新。', 'error_auth-required': '请先连接私有更新频道。', 'error_install-failed': '安装未启动；请确认对局已结束后重试。',
   },
   'en-US': {
+    "differentialPolicy": "Prefer differential downloads using the updater’s previous installer cache. Manual installs, missing cache or unavailable deltas can require a full installer. Installation still requires confirmation.",
+    "transfer_checking": "Checking reusable data",
+    "transfer_differential": "Downloading changed blocks",
+    "transfer_full": "Downloading full installer",
+    "transfer_cached": "Reused verified installer cache",
+    "transferReason_baseline-missing": "No previous installer cache available",
+    "transferReason_differential-unavailable": "Differential unavailable or verification failed; using safe full download",
+
     title: 'App updates', private: 'Private channel', policy: 'Releases from ye602a/fuze-assistant only. You choose when to download and install. The game stays untouched.',
     game: 'Downloads pause and installation is blocked during champion selection or a match. Resume manually afterwards.', portable: 'Portable or development build: download a new version from Releases and keep the original folder for rollback.',
     check: 'Check updates', download: 'Download', install: 'Install update', releases: 'Release history', authorized: 'Private access saved · Manage', authorize: 'Connect private channel',
@@ -22,6 +38,14 @@ export const updateMessages = {
     'error_access-or-release': 'Cannot access release: check token permissions, expiry and whether a stable release exists.', error_integrity: 'Download integrity check failed. Nothing installed; check and download again.', error_timeout: 'Connection timed out. Try again later.', error_network: 'Network or release files unavailable. Retry or view release history.', error_busy: 'Update in progress. Please wait.', 'error_invalid-credential': 'Invalid token format.', 'error_encryption-unavailable': 'Secure encryption unavailable. Token was not saved.', error_unavailable: 'Action unavailable. Check game state or refresh updates.', 'error_auth-required': 'Connect the private channel first.', 'error_install-failed': 'Installer did not start. Retry after the match ends.',
   },
   'zh-TW': {
+    "differentialPolicy": "優先增量下載：重用更新器儲存的舊安裝包，只下載變更部分。手動安裝、快取缺失或差分無法使用時會下載完整包，安裝仍需確認。",
+    "transfer_checking": "正在檢查可重用資料",
+    "transfer_differential": "正在增量下載",
+    "transfer_full": "正在下載完整安裝包",
+    "transfer_cached": "已重用驗證過的安裝包快取",
+    "transferReason_baseline-missing": "未找到可重用的舊安裝包",
+    "transferReason_differential-unavailable": "差分條件不滿足或驗證失敗，已安全回退",
+
     title: '軟體更新', private: '私人頻道', policy: '僅從 ye602a/fuze-assistant 取得版本。下載和安裝均由你決定，不會退出遊戲。',
     game: '選角或對局期間暫停下載，禁止安裝；結束後可手動繼續。', portable: '可攜版或開發環境：可從發佈頁下載新版，保留原目錄作為備份。',
     check: '檢查新版', download: '下載更新', install: '安裝更新', releases: '發佈記錄', authorized: '已儲存私人頻道授權 · 管理', authorize: '連接私人更新頻道',

@@ -101,6 +101,8 @@ for(const kind of ['differential','missing-baseline','missing-map','bad-map','st
   const updater=new FuzeNsisUpdater({version:'0.5.0',name:'fixture',isPackaged:true,appUpdateConfigPath:config,userDataPath:base,baseCachePath:base,
     whenReady:async()=>{},relaunch(){throw new Error('Must not relaunch')},quit(){throw new Error('Must not install')},onQuit(){}})
   updater.logger=null;updater.autoDownload=false;updater.autoInstallOnAppQuit=false;updater.on('error',()=>{});updater.on('download-progress',()=>{})
+  const transferModes: Array<{mode: unknown; reason: unknown}> = []
+  updater.onTransferMode = (mode,reason) => { transferModes.push({mode,reason}) }
   updater.setFeedURL({provider:'custom',updateProvider:FuzePrivateProvider,token:fixtureAccess})
   await updater.checkForUpdates()
   let files:string[]=[];let failed=false
@@ -109,6 +111,10 @@ for(const kind of ['differential','missing-baseline','missing-map','bad-map','st
   else {assert.equal(failed,false,kind);assert.deepEqual(await readFile(files[0]),next);assert.ok(sawCdn)}
   if(kind==='differential'||kind==='retry'){assert.equal(fullBytes,0);assert.ok(rangeBytes>0&&rangeBytes<next.length)}
   if(kind==='missing-baseline'){assert.equal(maps,0);assert.equal(releaseCalls,0);assert.equal(fullBytes,next.length)}
+  if(kind==='differential')assert.deepEqual(transferModes.at(-1),{mode:'differential',reason:''})
+  if(kind==='missing-baseline')assert.deepEqual(transferModes.at(-1),{mode:'full',reason:'baseline-missing'})
+  if(['missing-map','bad-map','stale-baseline','ignore-range'].includes(kind))assert.deepEqual(transferModes.at(-1),{mode:'full',reason:'differential-unavailable'})
+  if(kind.startsWith('cancel'))assert.ok(!transferModes.some(value=>value.mode==='full'))
   if(['missing-map','bad-map','stale-baseline','ignore-range','short-range','long-range'].includes(kind))assert.ok(fullBytes>=next.length)
   results.push({scenario:kind,passed:true,rangeBytes,fullBytes,maps,releaseCalls})
   if(kind.startsWith('cancel-copy')) {

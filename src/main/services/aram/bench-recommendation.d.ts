@@ -28,6 +28,7 @@ export interface AramBenchCandidate {
 }
 
 export interface AramBenchRecommendation {
+  team?: Array<{ slot: number; isCurrent: boolean; champion: AramBenchCandidate | null }>
   readOnly: true
   status: AramBenchRecommendationStatus
   reason: string | null

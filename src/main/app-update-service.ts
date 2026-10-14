@@ -23,6 +23,7 @@ let state: AppUpdateState = {
   manualDownloadUrl: FUZE_RELEASE_URL, autoUpdateEnabled: false,
   credentialConfigured: false, gamePhase: '', available: false, downloaded: false,
   progress: null, error: '', lastCheckedAt: '', downloadDeferred: false,
+  transferMode: 'idle', transferReason: '',
 }
 type Result = { success: boolean; data: AppUpdateState; error?: string }
 
@@ -75,6 +76,9 @@ export function initializeAppUpdateService(options: { isDev: boolean }): void {
     autoUpdater.allowPrerelease = false
     autoUpdater.allowDowngrade = false
     autoUpdater.logger = null
+    autoUpdater.onTransferMode = (transferMode, transferReason) => {
+      if (cancellation && !cancellation.cancelled) publish({ transferMode, transferReason })
+    }
     autoUpdater.on('download-progress', progress => {
       if (!cancellation || cancellation.cancelled) return
       publish({ phase: 'downloading', progress: {
@@ -84,6 +88,7 @@ export function initializeAppUpdateService(options: { isDev: boolean }): void {
     autoUpdater.on('update-downloaded', event => {
       if (!cancellation || cancellation.cancelled) return
       publish({ phase: 'downloaded', latestVersion: event.version,
+      transferMode: state.transferMode === 'checking' ? 'cached' : state.transferMode,
       downloaded: true, available: true, progress: { percent: 100 }, error: '' })
     })
     autoUpdater.on('error', () => {})
@@ -114,7 +119,7 @@ export async function checkForAppUpdate(_reason = 'manual'): Promise<Result> {
   const token = readCredential()
   if (!token) { publish({ phase: 'auth-required' }); return result(false, 'auth-required') }
   autoUpdater.setFeedURL({ provider: 'custom', updateProvider: FuzePrivateProvider, token })
-  publish({ phase: 'checking', error: '', available: false, latestVersion: '', progress: null })
+  publish({ phase: 'checking', error: '', available: false, latestVersion: '', progress: null, transferMode: 'idle', transferReason: '' })
   checkPromise = (async () => {
     try {
       const update = await autoUpdater.checkForUpdates()
@@ -145,7 +150,7 @@ export async function downloadAppUpdate(_reason = 'manual-download'): Promise<Re
   if (!getAppUpdateState().canDownload || process.env.FUZE_PORTABLE === '1') return result(false, 'unavailable')
   cancellation = new CancellationToken()
   const active = cancellation
-  publish({ phase: 'downloading', progress: { percent: 0 }, error: '', downloadDeferred: false })
+  publish({ phase: 'downloading', progress: { percent: 0 }, error: '', downloadDeferred: false, transferMode: 'checking', transferReason: '' })
   downloadPromise = (async () => {
     try { await autoUpdater.downloadUpdate(active); return result() }
     catch (error) {

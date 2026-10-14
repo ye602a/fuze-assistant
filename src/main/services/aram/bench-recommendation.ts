@@ -392,12 +392,21 @@ export function getAramBenchRecommendation(
   const candidates = sortCandidates([...candidatesById.values()])
   const currentChampion = currentChampionId ? candidatesById.get(currentChampionId) || null : null
   const recommendedChampion = candidates[0] || null
+  // Preserve all five team positions, including unselected slots; send no player identifiers.
+  const members = [...(snapshot.myTeam || [])].sort((a, b) => Number(a.cellId ?? 0) - Number(b.cellId ?? 0)).slice(0, 5)
+  const team = Array.from({ length: 5 }, (_, slot) => {
+    const member = members[slot]
+    const id = toPositiveInteger(member?.championId)
+    const isCurrent = member?.cellId != null && member.cellId === snapshot.localPlayerCellId
+    return { slot, isCurrent, champion: id ? buildCandidate(id, isCurrent ? 'current' : 'teammate', snapshot, championStatsById) : null }
+  })
 
   if (!currentChampion) {
     return {
       ...buildBaseRecommendation(snapshot, NO_CURRENT_STATUS, 'no-current-champion'),
       recommendedChampion,
       candidates,
+      team,
       confidence: recommendedChampion?.confidence || 0,
       reasons: recommendedChampion
         ? [`当前英雄尚未稳定读取，候选中优先关注 ${getCandidateFocusName(recommendedChampion)}`]
@@ -438,6 +447,7 @@ export function getAramBenchRecommendation(
     currentChampion,
     recommendedChampion: recommendedChampion || currentChampion,
     candidates,
+    team,
     deltaScore,
     confidence: recommendedChampion?.confidence || currentChampion.confidence,
     reasons,

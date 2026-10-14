@@ -25,6 +25,22 @@ beforeEach(() => { vi.useFakeTimers(); api.get.mockReset(); api.events.clear() }
 afterEach(() => { wrapper?.unmount(); vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('bench refresh ownership', () => {
+  it('keeps five team slots separate from the bench and ranks available champions by win rate', async () => {
+    const fixture = { ...recommendation('bench', false), team: [
+      {slot:0,isCurrent:true,champion:{name:'自己',winRate:.45}},
+      {slot:1,isCurrent:false,champion:{name:'队友',winRate:.7}},
+    ], candidates: [
+      {championId:1,name:'低胜率',source:'bench',winRate:.48},
+      {championId:2,name:'队友',source:'teammate',winRate:.7},
+      {championId:3,name:'高胜率',source:'bench',winRate:.58},
+      {championId:4,name:'缺少数据',source:'bench',winRate:null},
+    ] }
+    start(fixture as any); await flushPromises()
+    expect(wrapper.findAll('.team-member')).toHaveLength(5)
+    expect(wrapper.findAll('.candidate-main strong').map(node=>node.text())).toEqual(['高胜率','低胜率','缺少数据'])
+    expect(wrapper.find('.team-line').text()).toContain('队友')
+    expect(api.get).not.toHaveBeenCalled()
+  })
   it('does not let an older request overwrite a newer selection snapshot and coalesces refreshes', async () => {
     let finish!: (value: unknown) => void
     api.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(result('最新候选'))

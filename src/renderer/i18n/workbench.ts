@@ -1,5 +1,7 @@
+import { playerHealthMessages } from './player-health.ts'
 export const workbenchMessages = {
   "zh-CN": {
+    ...playerHealthMessages['zh-CN'],
     "overallBasis": "整体胜率 · 正式领取轮次未确认",
     "missingHint": "此位置未识别，可能被遮挡；移开遮挡后自动重试。",
     "pinChampSelect": "选人时置顶英雄详情",
@@ -142,6 +144,7 @@ export const workbenchMessages = {
     "clearPath": "清除备用目录"
   },
   "en-US": {
+    ...playerHealthMessages['en-US'],
     "overallBasis": "Overall win rate · claim round unconfirmed",
     "missingHint": "Unread slot, possibly covered. Recognition retries automatically when visible.",
     "pinChampSelect": "Keep champion details on top during selection",
@@ -284,6 +287,7 @@ export const workbenchMessages = {
     "clearPath": "Clear fallback"
   },
   "zh-TW": {
+    ...playerHealthMessages['zh-TW'],
     "overallBasis": "整體勝率 · 正式領取輪次未確認",
     "missingHint": "此位置未識別，可能被遮擋；移開遮擋後自動重試。",
     "pinChampSelect": "選角時置頂英雄詳情",

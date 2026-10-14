@@ -123,3 +123,15 @@ select { max-width: 150px; }
   .path-control { flex-wrap: wrap; } .path-control input { flex-basis: 100%; }
   footer { flex-wrap: wrap; } .section-heading { flex-wrap: wrap; }
 }
+
+/* Static colors only: no animation or additional status polling. */
+.tone-blue { --health: #69bce6; --health-bg: #12324b; }
+.tone-green { --health: #79d6ae; --health-bg: #123d34; }
+.tone-yellow { --health: #e5c06d; --health-bg: #49391b; }
+.tone-red { --health: #f19b9b; --health-bg: #4b222b; }
+.status-hero { border-color: var(--health); background: linear-gradient(110deg, var(--health-bg), #0d1b28); }
+.status-hero::before, .status-hero .live-dot, .health-dot { background: var(--health); }
+.status-hero h2, .pipeline article strong { color: var(--health); }
+.health-dot { display:inline-block; width:6px; height:6px; margin-right:7px; border-radius:50%; vertical-align:middle; }
+.pipeline article { border-top: 2px solid var(--health); }
+.pipeline article strong { font-weight:600; }
