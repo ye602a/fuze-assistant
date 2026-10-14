@@ -28,6 +28,10 @@ wake_at 为宿主给出下一次唤醒时间。大厅、暂停、故障停止状
 
 Windows CI 继续执行隔离 workspace 检查；不跑无关 Electron 大测试。本 PR 同时为前置 WGC CI 探针补充固定操作名/HRESULT，使用普通自有测试窗口代替工具浮窗，以便区分 API 失败阶段；正式原生浮窗样式未变，本机不运行可见探针。
 
+代码提交 96577cf 的 [Windows CI](https://github.com/ye602a/fuze-assistant/actions/runs/38619216148) 全部通过。读取经 SHA、摘要和大小验证的脱敏报告：CPU/auto 两条 GPU 图集到 OCR 路径及隐藏浮窗通过；普通自有窗口 WGC 取得 3 帧，nonblack=true，尺寸重建一次，verified=true，前台未改变，game_access=false。整个探针约 230 ms，这不是逐帧截图或 OCR 延迟。前置 PR #21 的工具窗口启动失败已不再复现于该普通窗口；尚不能确定所有失败根因或推断游戏捕获兼容性。
+
+探针记录 handle_delta=90，包含首次 D3D/WinRT 初始化，不能据此证明资源无泄漏，也不能直接判定泄漏。长期反复创建/关闭、设备丢失恢复仍需单独验收。没有下载或运行 CI 可执行文件，没有在本机创建可见窗口或捕获桌面/游戏。
+
 ## 尚未连接
 
 LCU 发现/认证/WebSocket、真实等级输入、捕获 worker 进程管理、实际设备丢失后重建、数据下载缓存、设置界面均未接入。现有稳定版运行链路未变。这些宿主实现必须消费取消/清理指令，不能只调用 begin/finish 而忽略 worker 生命周期。
