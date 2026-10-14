@@ -18,6 +18,9 @@ for (const line of lines.slice(start + 1)) {
   else if (value.startsWith('"') && value.endsWith('"')) value = JSON.parse(value)
   dictionary.push(value)
 }
+// The bundled PP-OCRv5 model has 18,385 classes: blank + YAML characters + trailing space.
+// Paddle's use_space_char appends this class after the dictionary, not before it.
+dictionary.push(' ')
 const fixtures = path.join(root, 'tests/fixtures/augment-ocr')
 const manifest = JSON.parse(await readFile(path.join(fixtures, 'manifest.json'), 'utf8'))
 const catalog = Object.fromEntries(manifest.flatMap(row => row.expectedNames.map((name, i) => [name, row.expectedIds[i]])))
