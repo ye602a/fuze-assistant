@@ -1,4 +1,5 @@
 use fuze_contract::{ActualStage, Slot, Snapshot};
+use fuze_ocr::backend::{Preference, ResilientRecognizer};
 use fuze_ocr::{Recognizer, Result};
 use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,11 +13,12 @@ struct Sample {
 }
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() != 5 {
+    if !(5..=7).contains(&args.len()) {
         return Err(
             "usage: fuze-ocr ORT_DLL MODEL DICTIONARY_JSON CATALOG_JSON FIXTURE_DIRECTORY".into(),
         );
     }
+    let preference = Preference::parse(args.get(5).map(String::as_str).unwrap_or("cpu"))?;
     let dll = fs::canonicalize(&args[0])?;
     PHASE.store(1, Ordering::Relaxed);
     ort::init_from(dll.to_string_lossy())
@@ -35,7 +37,8 @@ fn run() -> Result<()> {
     let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
     let started = Instant::now();
     PHASE.store(2, Ordering::Relaxed);
-    let mut engine = Recognizer::new(&PathBuf::from(&args[1]), dictionary, catalog)?;
+    let mut engine =
+        ResilientRecognizer::new(&PathBuf::from(&args[1]), dictionary, catalog, preference)?;
     let init_ms = started.elapsed().as_secs_f64() * 1000.0;
     let warm = Instant::now();
     PHASE.store(3, Ordering::Relaxed);
@@ -47,11 +50,16 @@ fn run() -> Result<()> {
         return Err("manifest-too-large".into());
     }
     let samples: Vec<Sample> = serde_json::from_slice(&fs::read(root.join("manifest.json"))?)?;
-    if samples.len() > 32 {
+    if samples.is_empty() || samples.len() > 32 {
         return Err("too-many-fixtures".into());
     }
     let mut results = Vec::new();
     let mut passed = true;
+    let mut tensor_manifest = Vec::new();
+    let mut inference = Vec::new();
+    if let Some(directory) = args.get(6) {
+        fs::create_dir_all(directory)?;
+    }
     for (index, sample) in samples.iter().enumerate() {
         let file = fs::canonicalize(root.join(&sample.file))?;
         if !file.starts_with(&root) || fs::metadata(&file)?.len() > 32 * 1024 * 1024 {
@@ -67,9 +75,21 @@ fn run() -> Result<()> {
         let mut runs = Vec::new();
         let mut ids = Vec::new();
         let mut snapshot = None;
+        // Fixture-only conversion; production capture supplies BGRA directly.
+        let bgra: Vec<u8> = frame
+            .pixels()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let raw = fuze_contract::frame::BgraFrame::new(
+            &bgra,
+            frame.width() as usize,
+            frame.height() as usize,
+            frame.width() as usize * 4,
+        )?;
         for _ in 0..3 {
             PHASE.store(5, Ordering::Relaxed);
-            let result = engine.recognize(&frame)?;
+            let result =
+                engine.run("gpu_inference_failed", |engine| engine.recognize_bgra(&raw))?;
             let current: Vec<Option<u32>> = result
                 .slots
                 .iter()
@@ -98,10 +118,42 @@ fn run() -> Result<()> {
             });
         }
         results.push(serde_json::json!({"sample":index,"matched_ids":ids,"runs_ms":runs,"snapshot":snapshot,"matches_expected":ids==(0..3).map(|i|sample.expected_ids.get(i).copied()).collect::<Vec<_>>()}));
+        if let Some(directory) = args.get(6) {
+            for (slot, tensor) in Recognizer::prepare_frame(&frame)?.into_iter().enumerate() {
+                let file = format!("{index}-{slot}.f32le");
+                let bytes: Vec<u8> = tensor.data.iter().flat_map(|v| v.to_le_bytes()).collect();
+                fs::write(PathBuf::from(directory).join(&file), bytes)?;
+                let expected = sample.expected_ids.get(slot).copied();
+                tensor_manifest.push(
+                    serde_json::json!({"file":file,"width":tensor.width,"expected_id":expected}),
+                );
+                // Discard one run for each exact shape, then time only inference (not CTC or disk IO).
+                engine.run("gpu_benchmark_failed", |engine| {
+                    engine.infer_prepared(&tensor)
+                })?;
+                let mut runs = Vec::new();
+                let mut cpu_runs = Vec::new();
+                for _ in 0..3 {
+                    let (id, ms, cpu_ms) = engine.run("gpu_benchmark_failed", |engine| {
+                        engine.infer_prepared(&tensor)
+                    })?;
+                    passed &= id == expected;
+                    runs.push(ms);
+                    cpu_runs.push(cpu_ms);
+                }
+                inference.push(serde_json::json!({"sample":index,"slot":slot,"width":tensor.width,"runs_ms":runs,"cpu_ms":cpu_runs}));
+            }
+        }
+    }
+    if let Some(directory) = args.get(6) {
+        fs::write(
+            PathBuf::from(directory).join("manifest.json"),
+            serde_json::to_vec(&tensor_manifest)?,
+        )?;
     }
     println!(
         "{}",
-        serde_json::json!({"backend":"cpu","init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"passed":passed,"actual_stage":null,"selection_confirmed":false})
+        serde_json::json!({"backend_status":engine.status(),"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
     );
     if !passed {
         PHASE.store(6, Ordering::Relaxed);

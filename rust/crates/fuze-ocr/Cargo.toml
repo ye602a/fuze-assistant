@@ -10,3 +10,6 @@ serde.workspace = true
 serde_json.workspace = true
 image.workspace = true
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.59.0", features = ["Win32_Foundation", "Win32_System_Threading"] }

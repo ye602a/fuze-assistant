@@ -11,6 +11,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
+    Storage::Xps::{PrintWindow, PW_CLIENTONLY},
     System::{
         LibraryLoader::GetModuleHandleW,
         ProcessStatus::*,
@@ -169,6 +170,12 @@ unsafe extern "system" fn procedure(
             0
         }
         WM_ERASEBKGND => 1,
+        WM_PRINTCLIENT => {
+            let mut bounds: RECT = zeroed();
+            GetClientRect(hwnd, &mut bounds);
+            draw(wparam as HDC, bounds.right, bounds.bottom);
+            0
+        }
         WM_PAINT => {
             let mut paint: PAINTSTRUCT = zeroed();
             let dc = BeginPaint(hwnd, &mut paint);
@@ -245,6 +252,56 @@ unsafe fn save_own_surface(path: PathBuf, w: i32, h: i32) -> Result<()> {
         image::ImageFormat::Png,
     )?;
     Ok(())
+}
+// Private function: the only caller supplies the HWND created in this process.
+// No window enumeration, desktop DC, process discovery, or external HWND argument.
+unsafe fn capture_own_window(hwnd: HWND) -> Result<serde_json::Value> {
+    let mut bounds: RECT = zeroed();
+    if GetClientRect(hwnd, &mut bounds) == 0 {
+        return Err("capture-size-failed".into());
+    }
+    let (w, h) = (bounds.right, bounds.bottom);
+    if w <= 0 || h <= 0 || w > 4096 || h > 2160 {
+        return Err("capture-size-invalid".into());
+    }
+    let dc = CreateCompatibleDC(null_mut());
+    if dc.is_null() {
+        return Err("capture-dc-failed".into());
+    }
+    let mut info: BITMAPINFO = zeroed();
+    info.bmiHeader = BITMAPINFOHEADER {
+        biSize: size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: w,
+        biHeight: -h,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB,
+        ..zeroed()
+    };
+    let mut pixels = null_mut();
+    let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut pixels, null_mut(), 0);
+    if bitmap.is_null() {
+        DeleteDC(dc);
+        return Err("capture-dib-failed".into());
+    }
+    let previous = SelectObject(dc, bitmap);
+    let started = std::time::Instant::now();
+    let printed = PrintWindow(hwnd, dc, PW_CLIENTONLY) != 0;
+    GdiFlush();
+    let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+    let bytes = std::slice::from_raw_parts(pixels as *const u8, (w * h * 4) as usize);
+    let valid = fuze_contract::frame::BgraFrame::new(bytes, w as usize, h as usize, w as usize * 4)
+        .and_then(|frame| frame.rgb_roi(0, 0, 1, 1))
+        .is_ok_and(|rgb| rgb == [5, 16, 25]);
+    SelectObject(dc, previous);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    if !printed || !valid {
+        return Err("own-window-capture-invalid".into());
+    }
+    Ok(
+        serde_json::json!({"source":"owned_hidden_hwnd","width":w,"height":h,"stride":w*4,"capture_ms":elapsed,"bgra_valid":valid,"encoded_image_count":0}),
+    )
 }
 fn ticks(t: FILETIME) -> u64 {
     (t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64
@@ -327,6 +384,7 @@ pub fn run() -> Result<()> {
             let hidden = IsWindowVisible(hwnd) == 0;
             let topmost = style & WS_EX_TOPMOST != 0;
             let render = save_own_surface(PathBuf::from(&args[1]), 760, 170);
+            let capture = capture_own_window(hwnd);
             let cpu_start = cpu_ticks();
             std::thread::sleep(std::time::Duration::from_millis(500));
             let cpu_end = cpu_ticks();
@@ -337,13 +395,14 @@ pub fn run() -> Result<()> {
             DestroyWindow(hwnd);
             UnregisterClassW(class.as_ptr(), instance);
             render?;
+            let capture = capture?;
             let idle_cpu_ms = (cpu_end? - cpu_start?) as f64 / 10000.0;
             if !memory_ok {
                 return Err("memory-metric-unavailable".into());
             }
             println!(
                 "{}",
-                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false})
+                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false,"own_window_capture":capture})
             );
             if !hidden || !no_activate || !tool_window || !topmost || !unchanged {
                 return Err("window-invariant".into());

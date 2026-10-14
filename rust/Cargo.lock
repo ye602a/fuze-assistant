@@ -93,6 +93,7 @@ dependencies = [
  "ort",
  "serde",
  "serde_json",
+ "windows-sys",
 ]
 
 [[package]]

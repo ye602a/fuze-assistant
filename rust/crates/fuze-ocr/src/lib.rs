@@ -1,10 +1,21 @@
 use fuze_contract::Slot;
 use image::{imageops::FilterType, RgbImage};
-use ort::{session::Session, value::Tensor};
+use ort::{
+    execution_providers::DirectMLExecutionProvider,
+    session::Session,
+    value::{Tensor, TensorRef},
+};
 use serde::Serialize;
 use std::{collections::HashMap, path::Path, time::Instant};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub mod backend;
+mod metrics;
+use backend::Backend;
+pub struct PreparedTitle {
+    pub width: usize,
+    pub data: Vec<f32>,
+}
 pub struct Recognizer {
     session: Session,
     dictionary: Vec<String>,
@@ -77,16 +88,32 @@ impl Recognizer {
         dictionary: Vec<String>,
         catalog: HashMap<String, u32>,
     ) -> Result<Self> {
+        Self::with_backend(model, dictionary, catalog, Backend::Cpu)
+    }
+    pub fn with_backend(
+        model: &Path,
+        dictionary: Vec<String>,
+        catalog: HashMap<String, u32>,
+        backend: Backend,
+    ) -> Result<Self> {
         if dictionary.len() < 2 || dictionary.len() > 20000 || catalog.len() > 10000 {
             return Err("invalid-dictionary".into());
         }
-        let session = Session::builder()?
+        let mut builder = Session::builder()?
             .with_intra_threads(1)?
             .with_inter_threads(1)?
             .with_parallel_execution(false)?
             .with_config_entry("session.intra_op.allow_spinning", "0")?
-            .with_config_entry("session.inter_op.allow_spinning", "0")?
-            .commit_from_file(model)?;
+            .with_config_entry("session.inter_op.allow_spinning", "0")?;
+        if backend == Backend::DirectMl {
+            builder = builder
+                .with_memory_pattern(false)?
+                .with_config_entry("session.disable_cpu_ep_fallback", "1")?
+                .with_execution_providers([DirectMLExecutionProvider::default()
+                    .build()
+                    .error_on_failure()])?;
+        }
+        let session = builder.commit_from_file(model)?;
         Ok(Self {
             session,
             dictionary,
@@ -98,7 +125,7 @@ impl Recognizer {
         self.session.run(ort::inputs![tensor])?;
         Ok(())
     }
-    fn recognize_crop(&mut self, crop: RgbImage) -> Result<(String, f32)> {
+    fn prepare_crop(crop: RgbImage) -> PreparedTitle {
         let width =
             ((crop.width() as f64 * 48.0 / crop.height() as f64).round() as u32).clamp(16, 1024);
         let resized = image::imageops::resize(&crop, width, 48, FilterType::Triangle);
@@ -109,7 +136,42 @@ impl Recognizer {
                 input[c * plane + i] = p[c] as f32 / 127.5 - 1.0;
             }
         }
-        let tensor = Tensor::from_array(([1usize, 3, 48, width as usize], input))?;
+        PreparedTitle {
+            width: width as usize,
+            data: input,
+        }
+    }
+    pub fn infer_prepared(
+        &mut self,
+        input: &PreparedTitle,
+    ) -> Result<(Option<u32>, f64, Option<f64>)> {
+        let cpu = metrics::cpu_ms();
+        let started = Instant::now();
+        let tensor =
+            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
+        let result = self.session.run(ort::inputs![tensor])?;
+        let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+        let cpu_elapsed = metrics::cpu_ms().zip(cpu).map(|(end, start)| end - start);
+        let (shape, values) = result[0].try_extract_tensor::<f32>()?;
+        if shape.len() != 3 || shape[0] != 1 {
+            return Err("invalid-output-shape".into());
+        }
+        let (name, confidence) = decode_ctc(values, shape[2] as usize, &self.dictionary)?;
+        let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
+        Ok((
+            if confidence >= 0.75 {
+                self.catalog.get(&normalized).copied()
+            } else {
+                None
+            },
+            elapsed,
+            cpu_elapsed,
+        ))
+    }
+    fn recognize_crop(&mut self, crop: RgbImage) -> Result<(String, f32)> {
+        let input = Self::prepare_crop(crop);
+        let tensor =
+            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
         let result = self.session.run(ort::inputs![tensor])?;
         let (shape, values) = result[0].try_extract_tensor::<f32>()?;
         if shape.len() != 3 || shape[0] != 1 {
@@ -117,8 +179,49 @@ impl Recognizer {
         }
         decode_ctc(values, shape[2] as usize, &self.dictionary)
     }
+    pub fn prepare_frame(image: &RgbImage) -> Result<Vec<PreparedTitle>> {
+        let (w, h) = image.dimensions();
+        if w < 320 || h < 180 || w > 4096 || h > 2160 {
+            return Err("invalid-frame-size".into());
+        }
+        Ok((0..3)
+            .map(|i| {
+                let x = ((0.2305 + i as f64 * 0.1855 + 0.01344) * w as f64).round() as u32;
+                let y = (0.385 * h as f64).round() as u32;
+                let width = (0.14112 * w as f64).round() as u32;
+                let height = (0.03 * h as f64).round().max(1.0) as u32;
+                Self::prepare_crop(trim_title_padding(
+                    image::imageops::crop_imm(image, x, y, width, height).to_image(),
+                ))
+            })
+            .collect())
+    }
     pub fn recognize(&mut self, image: &RgbImage) -> Result<FrameResult> {
         let (w, h) = image.dimensions();
+        self.recognize_rois(w, h, |x, y, width, height| {
+            Ok(image::imageops::crop_imm(image, x, y, width, height).to_image())
+        })
+    }
+    pub fn recognize_bgra(
+        &mut self,
+        frame: &fuze_contract::frame::BgraFrame<'_>,
+    ) -> Result<FrameResult> {
+        self.recognize_rois(
+            frame.width as u32,
+            frame.height as u32,
+            |x, y, width, height| {
+                let bytes =
+                    frame.rgb_roi(x as usize, y as usize, width as usize, height as usize)?;
+                RgbImage::from_raw(width, height, bytes).ok_or_else(|| "invalid-roi-buffer".into())
+            },
+        )
+    }
+    fn recognize_rois(
+        &mut self,
+        w: u32,
+        h: u32,
+        mut crop: impl FnMut(u32, u32, u32, u32) -> Result<RgbImage>,
+    ) -> Result<FrameResult> {
         if w < 320 || h < 180 || w > 4096 || h > 2160 {
             return Err("invalid-frame-size".into());
         }
@@ -130,8 +233,8 @@ impl Recognizer {
             let y = (0.385 * h as f64).round() as u32;
             let width = (0.14112 * w as f64).round() as u32;
             let height = (0.03 * h as f64).round().max(1.0) as u32;
-            let crop = image::imageops::crop_imm(image, x, y, width, height).to_image();
-            let (name, confidence) = self.recognize_crop(trim_title_padding(crop))?;
+            let (name, confidence) =
+                self.recognize_crop(trim_title_padding(crop(x, y, width, height)?))?;
             let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
             if confidence >= 0.75 {
                 if let Some(&id) = self.catalog.get(&normalized) {

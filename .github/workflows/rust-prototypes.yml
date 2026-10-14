@@ -1,14 +1,22 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master]
+    branches: [master, feat/rust-foundation-prototypes]
     paths:
       - 'rust/**'
       - 'scripts/check-rust-prototypes.mjs'
+      - 'scripts/rust-prototype-tools.mjs'
+      - 'scripts/compare-rust-ocr.mjs'
+      - 'scripts/benchmark-rust-node.mjs'
+      - 'scripts/test-rust-host.mjs'
+      - '!rust/**/*.md'
       - '.github/workflows/rust-prototypes.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: rust-prototypes-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   prototypes:
     runs-on: windows-latest
@@ -34,6 +42,12 @@ jobs:
           exit $LASTEXITCODE
       - name: Offline ONNX and hidden native window
         run: node scripts/check-rust-prototypes.mjs
+      - name: Same-input CPU comparison and automatic fallback
+        run: |
+          node --test scripts/test-rust-host.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/compare-rust-ocr.mjs
+          exit $LASTEXITCODE
       - name: Scan upload content
         run: npm run security:check
       - name: Upload sanitized prototype reports
@@ -44,4 +58,16 @@ jobs:
           path: |
             rust/artifacts/validation.json
             rust/artifacts/native-overlay.png
+            rust/artifacts/comparison.json
           if-no-files-found: ignore
+      - name: Prepare isolated prototype executables
+        run: |
+          New-Item -ItemType Directory -Force rust/artifacts/tools | Out-Null
+          Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-native-overlay.exe rust/artifacts/tools/
+          Get-ChildItem rust/artifacts/tools/*.exe | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -Encoding ascii rust/artifacts/tools/SHA256SUMS.txt
+      - name: Upload isolated test tools (not a release installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-prototype-tools
+          path: rust/artifacts/tools/
+          retention-days: 7
