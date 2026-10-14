@@ -288,15 +288,26 @@ unsafe fn capture_own_window(hwnd: HWND) -> Result<serde_json::Value> {
     let started = std::time::Instant::now();
     let printed = PrintWindow(hwnd, dc, PW_CLIENTONLY) != 0;
     GdiFlush();
+    // Sample inside the surface, away from compositor-rounded corner pixels.
+    let valid_pixels = || {
+        let bytes = std::slice::from_raw_parts(pixels as *const u8, (w * h * 4) as usize);
+        fuze_contract::frame::BgraFrame::new(bytes, w as usize, h as usize, w as usize * 4)
+            .and_then(|frame| frame.rgb_roi(w as usize / 2, h as usize - 4, 1, 1))
+            .is_ok_and(|rgb| rgb == [5, 16, 25])
+    };
+    let print_window_verified = printed && valid_pixels();
+    // Hidden compositor surfaces may be blank. This is ONLY an owned-HWND contract
+    // test; explicitly report the fallback instead of pretending PrintWindow worked.
+    if !print_window_verified {
+        SendMessageW(hwnd, WM_PRINTCLIENT, dc as usize, PRF_CLIENT as isize);
+        GdiFlush();
+    }
     let elapsed = started.elapsed().as_secs_f64() * 1000.0;
-    let bytes = std::slice::from_raw_parts(pixels as *const u8, (w * h * 4) as usize);
-    let valid = fuze_contract::frame::BgraFrame::new(bytes, w as usize, h as usize, w as usize * 4)
-        .and_then(|frame| frame.rgb_roi(0, 0, 1, 1))
-        .is_ok_and(|rgb| rgb == [5, 16, 25]);
+    let valid = valid_pixels();
     SelectObject(dc, previous);
     DeleteObject(bitmap);
     DeleteDC(dc);
-    if !printed || !valid {
+    if !valid {
         println!(
             "{}",
             serde_json::json!({"error":"own-window-capture-invalid","print_succeeded":printed,"pixel_valid":valid})
@@ -304,7 +315,7 @@ unsafe fn capture_own_window(hwnd: HWND) -> Result<serde_json::Value> {
         return Err("own-window-capture-invalid".into());
     }
     Ok(
-        serde_json::json!({"source":"owned_hidden_hwnd","width":w,"height":h,"stride":w*4,"capture_ms":elapsed,"bgra_valid":valid,"encoded_image_count":0}),
+        serde_json::json!({"source":"owned_hidden_hwnd","capture_method":if print_window_verified {"print_window"} else {"wm_printclient"},"print_window_verified":print_window_verified,"width":w,"height":h,"stride":w*4,"capture_ms":elapsed,"bgra_valid":valid,"encoded_image_count":0}),
     )
 }
 fn ticks(t: FILETIME) -> u64 {

@@ -48,7 +48,7 @@ export function run(name, args) {
 }
 // Only auto may restart a crashed/timed-out native child once on CPU.
 export function runOcr(args, mode = 'cpu', tensorDirectory) {
-  if (!['cpu', 'dml', 'auto'].includes(mode)) throw new Error('Invalid backend')
+  if (!['cpu', 'dml', 'dml-strict', 'auto'].includes(mode)) throw new Error('Invalid backend')
   const launch = backend => run('fuze-ocr', [...args, backend, ...(tensorDirectory ? [tensorDirectory] : [])])
   const first = launch(mode)
   if (!shouldHostFallback(mode, first)) return first

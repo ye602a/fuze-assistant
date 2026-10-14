@@ -13,7 +13,7 @@ async function main() {
   const session = await ort.InferenceSession.create(model, {
     executionProviders: [provider], intraOpNumThreads: 1, interOpNumThreads: 1, executionMode: 'sequential',
     enableMemPattern: provider === 'cpu',
-    extra: { session: { intra_op: { allow_spinning: '0' }, inter_op: { allow_spinning: '0' }, ...(provider === 'dml' ? { disable_cpu_ep_fallback: '1' } : {}) } },
+    extra: { session: { intra_op: { allow_spinning: '0' }, inter_op: { allow_spinning: '0' } } },
   })
   const init_ms = performance.now() - start, samples = []
   let passed = true

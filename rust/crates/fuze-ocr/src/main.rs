@@ -35,6 +35,13 @@ fn run() -> Result<()> {
     }
     let dictionary: Vec<String> = serde_json::from_slice(&fs::read(&args[2])?)?;
     let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
+    let audit_inputs = std::env::var_os("FUZE_RUST_AUDIT_DIRECTORY").map(|directory| {
+        (
+            PathBuf::from(directory),
+            dictionary.clone(),
+            catalog.clone(),
+        )
+    });
     let started = Instant::now();
     PHASE.store(2, Ordering::Relaxed);
     let mut engine =
@@ -151,9 +158,15 @@ fn run() -> Result<()> {
             serde_json::to_vec(&tensor_manifest)?,
         )?;
     }
+    let backend_status = engine.status().clone();
+    drop(engine);
+    let provider_audit = audit_inputs.map(|(directory, dictionary, catalog)| {
+        Recognizer::audit_provider(&PathBuf::from(&args[1]), dictionary, catalog, &directory)
+            .unwrap_or_else(|_| serde_json::json!({"error":"provider-audit-failed","dml_execution_observed":false}))
+    });
     println!(
         "{}",
-        serde_json::json!({"backend_status":engine.status(),"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
+        serde_json::json!({"backend_status":backend_status,"gpu_graph_cpu_assistance_allowed":backend_status.active==fuze_ocr::backend::Backend::DirectMl,"provider_audit":provider_audit,"init_ms":init_ms,"warm_ms":warm_ms,"samples":results,"inference":inference,"passed":passed,"actual_stage":null,"selection_confirmed":false})
     );
     if !passed {
         PHASE.store(6, Ordering::Relaxed);

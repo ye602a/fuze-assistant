@@ -10,12 +10,14 @@ use std::{
 pub enum Backend {
     Cpu,
     DirectMl,
+    DirectMlStrict,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Preference {
     Cpu,
     DirectMl,
+    DirectMlStrict,
     Auto,
 }
 impl Preference {
@@ -23,6 +25,7 @@ impl Preference {
         match value {
             "cpu" => Ok(Self::Cpu),
             "dml" => Ok(Self::DirectMl),
+            "dml-strict" => Ok(Self::DirectMlStrict),
             "auto" => Ok(Self::Auto),
             _ => Err("invalid-backend".into()),
         }
@@ -65,10 +68,10 @@ impl ResilientRecognizer {
         catalog: HashMap<String, u32>,
         preference: Preference,
     ) -> Result<Self> {
-        let active = if preference == Preference::Cpu {
-            Backend::Cpu
-        } else {
-            Backend::DirectMl
+        let active = match preference {
+            Preference::Cpu => Backend::Cpu,
+            Preference::DirectMlStrict => Backend::DirectMlStrict,
+            _ => Backend::DirectMl,
         };
         let mut status = BackendStatus {
             requested: preference,
@@ -148,7 +151,12 @@ mod tests {
     use super::*;
     #[test]
     fn fallback_is_one_way_and_explicit_modes_never_hide_failure() {
-        for preference in [Preference::Cpu, Preference::DirectMl, Preference::Auto] {
+        for preference in [
+            Preference::Cpu,
+            Preference::DirectMl,
+            Preference::DirectMlStrict,
+            Preference::Auto,
+        ] {
             let mut status = BackendStatus {
                 requested: preference,
                 active: Backend::DirectMl,

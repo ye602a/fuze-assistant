@@ -96,6 +96,15 @@ impl Recognizer {
         catalog: HashMap<String, u32>,
         backend: Backend,
     ) -> Result<Self> {
+        Self::build(model, dictionary, catalog, backend, None)
+    }
+    fn build(
+        model: &Path,
+        dictionary: Vec<String>,
+        catalog: HashMap<String, u32>,
+        backend: Backend,
+        profile: Option<&Path>,
+    ) -> Result<Self> {
         if dictionary.len() < 2 || dictionary.len() > 20000 || catalog.len() > 10000 {
             return Err("invalid-dictionary".into());
         }
@@ -105,13 +114,18 @@ impl Recognizer {
             .with_parallel_execution(false)?
             .with_config_entry("session.intra_op.allow_spinning", "0")?
             .with_config_entry("session.inter_op.allow_spinning", "0")?;
-        if backend == Backend::DirectMl {
+        if backend != Backend::Cpu {
             builder = builder
                 .with_memory_pattern(false)?
-                .with_config_entry("session.disable_cpu_ep_fallback", "1")?
                 .with_execution_providers([DirectMLExecutionProvider::default()
                     .build()
                     .error_on_failure()])?;
+        }
+        if backend == Backend::DirectMlStrict {
+            builder = builder.with_config_entry("session.disable_cpu_ep_fallback", "1")?;
+        }
+        if let Some(file) = profile {
+            builder = builder.with_profiling(file)?;
         }
         let session = builder.commit_from_file(model)?;
         Ok(Self {
@@ -119,6 +133,43 @@ impl Recognizer {
             dictionary,
             catalog,
         })
+    }
+    // Explicit offline audit only, separate from all timing sessions. No per-frame profiling.
+    pub fn audit_provider(
+        model: &Path,
+        dictionary: Vec<String>,
+        catalog: HashMap<String, u32>,
+        directory: &Path,
+    ) -> Result<serde_json::Value> {
+        std::fs::create_dir_all(directory)?;
+        let prefix = directory.join(format!("provider-audit-{}", std::process::id()));
+        let mut engine = Self::build(model, dictionary, catalog, Backend::DirectMl, Some(&prefix))?;
+        engine.warm_up()?;
+        let file = engine.session.end_profiling()?;
+        if std::fs::metadata(&file)?.len() > 8 * 1024 * 1024 {
+            return Err("profile-too-large".into());
+        }
+        let events: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(file)?)?;
+        let (mut dml, mut cpu, mut other) = (0u64, 0u64, 0u64);
+        let (mut dml_us, mut cpu_us) = (0.0, 0.0);
+        for event in events {
+            let duration = event["dur"].as_f64().unwrap_or(0.0);
+            match event["args"]["provider"].as_str() {
+                Some("DmlExecutionProvider") => {
+                    dml += 1;
+                    dml_us += duration;
+                }
+                Some("CPUExecutionProvider") => {
+                    cpu += 1;
+                    cpu_us += duration;
+                }
+                Some(_) => other += 1,
+                None => {}
+            }
+        }
+        Ok(
+            serde_json::json!({"dml_events":dml,"cpu_events":cpu,"other_provider_events":other,"dml_event_us":dml_us,"cpu_event_us":cpu_us,"dml_execution_observed":dml>0}),
+        )
     }
     pub fn warm_up(&mut self) -> Result<()> {
         let tensor = Tensor::from_array(([1usize, 3, 48, 256], vec![0f32; 3 * 48 * 256]))?;
