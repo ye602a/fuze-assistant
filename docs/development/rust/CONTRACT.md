@@ -2,6 +2,8 @@
 
 本轮 Rust 类型在 rust/crates/fuze-contract/src/lib.rs。不是新的生产 Electron IPC，也不提供 HTTP 服务。
 
+本文以下为 M0 基线契约，后续增量以 M1–M4 文档为准。M2b/M2c 实现的私有管道在 wire.rs：父进程设置 Windows Job 后写入 FZH1 启动门；子进程加载模型并返回带长度的 Ready JSON；每帧输入 FZA1 + little-endian u64 generation/sequence + u32 单卡宽高 + 横排三卡 BGRA。输入布局有固定上限，输出 JSON 最多 8192 字节。读写共同限时；模型初始化和恢复另有限时。正式领取确认字段不通过此管道开启。
+
 ## OCR 输入与结果
 
 - 引擎初始化一次：显式模型路径、字符表、本地名称目录、后端 CPU。路径只在工具本地配置，不进入推荐消息。
