@@ -6,10 +6,74 @@ pub struct Line {
     pub text: String,
     pub icons: Vec<String>,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Detail {
     pub title: String,
     pub lines: Vec<Line>,
+    pub augments: Vec<Augment>,
+    pub guides: Vec<Guide>,
+    pub item_sets: Vec<Value>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Augment {
+    pub id: u32,
+    pub name: String,
+    pub icon: String,
+    pub rarity: Option<u8>,
+    pub tier: Option<u64>,
+    pub win: Option<f64>,
+    pub pick: Option<f64>,
+    pub description: String,
+    pub provenance: String,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Guide {
+    pub title: String,
+    pub url: String,
+}
+/// Plain text only: provider markup is never executed or handed to a web view.
+pub fn description(value: &str) -> String {
+    let mut tag = false;
+    let mut output = String::new();
+    for c in value.chars().take(8192) {
+        match c {
+            '<' => {
+                tag = true;
+                output.push(' ');
+            }
+            '>' => tag = false,
+            _ if !tag && !c.is_control() => output.push(c),
+            _ => (),
+        }
+    }
+    output
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(2048)
+        .collect()
+}
+/// External links must be ordinary HTTPS articles, never credentials, files or executable schemes.
+pub fn guide_url(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    value.len() <= 2048
+        && host.contains('.')
+        && !host.starts_with('.')
+        && host
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-')
+        && !value
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+        && !value.contains('@')
 }
 fn clean(v: &Value) -> String {
     v.as_str()
@@ -137,7 +201,23 @@ impl Prepared {
             return Err("detail-champion-duplicate");
         }
         let items = self.document("items.json").ok_or("detail-items-missing")?;
-        Ok(parse(row, items, self.locale))
+        let mut detail = parse(row, items, self.locale);
+        if let Some(catalog) = self.document("augments.json") {
+            for a in &mut detail.augments {
+                if let Some(base) =
+                    rows(&catalog["data"]).find(|v| v["id"].as_u64() == Some(a.id as u64))
+                {
+                    a.description = description(
+                        base["description"]
+                            .as_str()
+                            .filter(|s| !s.is_empty())
+                            .or_else(|| base["tooltip"].as_str())
+                            .unwrap_or(""),
+                    );
+                }
+            }
+        }
+        Ok(detail)
     }
 }
 fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
@@ -145,7 +225,7 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
     let stats = |v: &Value| stats(v, locale);
     let mut lines = Vec::new();
     let mut add = |text: String, icons: Vec<String>| {
-        if lines.len() < 320 {
+        if lines.len() < 1024 {
             lines.push(Line { text, icons });
         }
     };
@@ -194,6 +274,38 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
             vec![],
         );
         add(stats(&b["stats"]), vec![]);
+        for r in rows(&b["summonerSpells"]).take(3) {
+            let names = rows(&r["summonerSpellIds"])
+                .filter_map(Value::as_u64)
+                .map(|id| match id {
+                    4 => t("闪现").into(),
+                    32 => t("标记").into(),
+                    7 => t("治疗").into(),
+                    14 => t("点燃").into(),
+                    3 => t("虚弱").into(),
+                    6 => t("疾跑").into(),
+                    21 => t("屏障").into(),
+                    _ => format!("{} {id}", t("技能")),
+                })
+                .collect::<Vec<String>>();
+            add(
+                format!("{} · {} · {}", t("召唤师技能"), names.join(" / "), stats(r)),
+                rows(&r["summonerSpellIds"])
+                    .filter_map(Value::as_u64)
+                    .take(2)
+                    .map(|id| format!("https://cdn.dtodo.cn/hextech/summoner-spell-icons/{id}.png"))
+                    .collect(),
+            );
+        }
+        for r in rows(&b["skillOrders"]).take(3) {
+            let keys = rows(&r["skillKeys"])
+                .take(18)
+                .map(clean)
+                .collect::<Vec<_>>()
+                .join(" ");
+            add(format!("{} · {keys}", t("1–18 级加点")), vec![]);
+            add(stats(r), vec![]);
+        }
         for (field, label) in [
             ("startingItems", "出门"),
             ("coreItems", "核心"),
@@ -203,7 +315,12 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
         ] {
             let mut entries: Vec<_> = rows(&b[field]).collect();
             entries.sort_by_key(|r| std::cmp::Reverse(r["games"].as_u64().unwrap_or(0)));
-            for r in entries.into_iter().take(3) {
+            for r in entries.into_iter().take(match field {
+                "startingItems" => 2,
+                "coreItems" => 4,
+                "fullItems" => 3,
+                _ => 12,
+            }) {
                 if field == "itemExtensions" {
                     let names = rows(&r["coreItemIds"])
                         .take(6)
@@ -258,33 +375,6 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                 }
             }
         }
-        for r in rows(&b["skillOrders"]).take(1) {
-            let keys = rows(&r["skillKeys"])
-                .take(18)
-                .map(clean)
-                .collect::<Vec<_>>()
-                .join(" ");
-            add(format!("{} · {keys}", t("1–18 级加点")), vec![]);
-        }
-        for r in rows(&b["summonerSpells"]).take(1) {
-            let names = rows(&r["summonerSpellIds"])
-                .filter_map(Value::as_u64)
-                .map(|id| match id {
-                    4 => t("闪现").into(),
-                    32 => t("标记").into(),
-                    7 => t("治疗").into(),
-                    14 => t("点燃").into(),
-                    3 => t("虚弱").into(),
-                    6 => t("疾跑").into(),
-                    21 => t("屏障").into(),
-                    _ => format!("{} {id}", t("技能")),
-                })
-                .collect::<Vec<String>>();
-            add(
-                format!("{} · {}", t("召唤师技能"), names.join(" / ")),
-                vec![],
-            );
-        }
     }
     add(
         t("符文页：当前客户端数据接口未提供，未自动配置游戏符文").into(),
@@ -295,14 +385,65 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
         vec![],
     );
     let mut augments: Vec<_> = rows(&row["augments"]).collect();
+    let rank = |v: &Value| v["stats"]["rank"].as_u64().filter(|v| *v > 0);
+    let tier = |v: &Value| v["stats"]["tier"].as_u64().filter(|v| *v > 0);
+    let authoritative = !augments.is_empty() && augments.iter().all(|v| rank(v).is_some());
+    let tier_priority = !authoritative && augments.iter().any(|v| tier(v).is_some());
     augments.sort_by(|a, b| {
-        b["stats"]["winRate"]
-            .as_f64()
-            .partial_cmp(&a["stats"]["winRate"].as_f64())
-            .unwrap_or(std::cmp::Ordering::Equal)
+        // Same full-pool precedence as 0.6.3 augment-ranking.ts; filtering never reranks.
+        if authoritative {
+            return rank(a).cmp(&rank(b));
+        }
+        let primary = if tier_priority {
+            tier(a)
+                .unwrap_or(u64::MAX)
+                .cmp(&tier(b).unwrap_or(u64::MAX))
+        } else {
+            b["stats"]["recommendScore"]
+                .as_f64()
+                .unwrap_or(-1.)
+                .total_cmp(&a["stats"]["recommendScore"].as_f64().unwrap_or(-1.))
+        };
+        primary
+            .then_with(|| {
+                b["stats"]["pickRate"]
+                    .as_f64()
+                    .unwrap_or(-1.)
+                    .total_cmp(&a["stats"]["pickRate"].as_f64().unwrap_or(-1.))
+            })
+            .then_with(|| a["id"].as_u64().cmp(&b["id"].as_u64()))
     });
-    for a in augments.into_iter().take(20) {
+    let mut cards = Vec::new();
+    for a in augments.into_iter().take(512) {
         let s = &a["stats"];
+        if let Some(id) = a["id"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|id| *id > 0)
+        {
+            let valid_rate = |v: &Value| {
+                v.as_f64()
+                    .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            };
+            cards.push(Augment {
+                id,
+                name: clean(&a["name"]),
+                icon: clean(&a["iconUrl"]),
+                rarity: a["rarity"].as_u64().filter(|v| *v <= 2).map(|v| v as u8),
+                tier: s["tier"].as_u64(),
+                win: valid_rate(&s["winRate"]),
+                pick: valid_rate(&s["pickRate"]),
+                description: description(a["description"].as_str().unwrap_or("")),
+                provenance: format!(
+                    "{} {} / {} · {} {}",
+                    t("胜率来源"),
+                    clean(s.get("winRateSource").unwrap_or(&s["source"])),
+                    clean(s.get("winRateRegion").unwrap_or(&s["region"])),
+                    t("补丁"),
+                    clean(s.get("winRateGamePatch").unwrap_or(&s["gamePatch"]))
+                ),
+            });
+        }
         add(
             format!("{} · {}", clean(&a["name"]), stats(s)),
             vec![clean(&a["iconUrl"])],
@@ -319,14 +460,83 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
             vec![],
         );
     }
+    let mut guides = Vec::new();
+    for record in rows(&row["relatedBlogs"]).chain(rows(&c["relatedBlogs"])) {
+        let url = record
+            .as_str()
+            .or_else(|| record["url"].as_str())
+            .or_else(|| record["href"].as_str())
+            .or_else(|| record["link"].as_str())
+            .unwrap_or("");
+        if guides.len() < 12 && guide_url(url) && !guides.iter().any(|g: &Guide| g.url == url) {
+            guides.push(Guide {
+                title: record["title"]
+                    .as_str()
+                    .or_else(|| record["name"].as_str())
+                    .map(description)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "英雄攻略".into()),
+                url: url.into(),
+            });
+        }
+    }
     Detail {
         title: format!("{} · {}", clean(&c["name"]), clean(&c["title"])),
         lines,
+        augments: cards,
+        guides,
+        item_sets: crate::item_sets::create(
+            c["id"].as_u64().unwrap_or(0) as u32,
+            &clean(&c["name"]),
+            &builds,
+        ),
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn detail_order_uses_authoritative_pool_rank_then_tier_and_pick_like_v063() {
+        let mut row = serde_json::json!({"champion":{},"augments":[{"id":1,"stats":{"rank":2,"tier":1,"pickRate":0.9,"winRate":0.9}},{"id":2,"stats":{"rank":1,"tier":2,"pickRate":0.1,"winRate":0.4}}]});
+        let data = serde_json::json!({"data":[]});
+        assert_eq!(parse(&row, &data, Locale::ZhCn).augments[0].id, 2);
+        row["augments"][1]["stats"]["rank"] = Value::Null;
+        assert_eq!(parse(&row, &data, Locale::ZhCn).augments[0].id, 1);
+        row["augments"][1]["stats"]["tier"] = serde_json::json!(1);
+        row["augments"][1]["stats"]["pickRate"] = serde_json::json!(0.95);
+        assert_eq!(parse(&row, &data, Locale::ZhCn).augments[0].id, 2);
+    }
+    #[test]
+    fn complete_rarity_list_and_safe_guides_do_not_drop_low_ranked_augments() {
+        let augments: Vec<_> = (1..=120).map(|id|serde_json::json!({"id":id,"name":format!("A{id}"),"rarity":id%3,"stats":{"winRate":(121-id) as f64/121.}})).collect();
+        let row = serde_json::json!({"champion":{"name":"Fixture"},"augments":augments,"relatedBlogs":[{"title":"Guide","url":"https://example.com/guide"},{"url":"javascript:alert(1)"},{"url":"https://secret@example.com/private"}]});
+        let detail = parse(&row, &serde_json::json!({"data":[]}), Locale::ZhCn);
+        assert_eq!(detail.augments.len(), 120);
+        for rarity in 0..3 {
+            assert_eq!(
+                detail
+                    .augments
+                    .iter()
+                    .filter(|a| a.rarity == Some(rarity))
+                    .count(),
+                40
+            );
+        }
+        assert_eq!(detail.augments.last().unwrap().id, 120);
+        assert_eq!(detail.guides.len(), 1);
+        assert_eq!(
+            description("<attention>伤害</attention><br>提升&nbsp;20%"),
+            "伤害 提升 20%"
+        );
+        for url in [
+            "file:///C:/test",
+            "https://example.com\\bad",
+            "https://127.0.0.1:1234/",
+            "https://example.com/\ncmd",
+        ] {
+            assert!(!guide_url(url));
+        }
+    }
     #[test]
     fn details_follow_locale_without_translating_data_names() {
         let row = serde_json::json!({"champion":{"name":"fixture-name"},"build":{"queueId":450}});

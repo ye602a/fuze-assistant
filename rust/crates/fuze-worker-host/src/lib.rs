@@ -20,6 +20,8 @@ pub type Result<T> = std::result::Result<T, &'static str>;
 #[cfg(windows)]
 pub mod account_history;
 #[cfg(windows)]
+mod background_data;
+#[cfg(windows)]
 pub mod cache_maintenance;
 #[cfg(windows)]
 pub mod champ_select;
@@ -48,6 +50,8 @@ pub mod managed_install;
 mod overlay_art;
 #[cfg(windows)]
 pub mod pipeline;
+#[cfg(windows)]
+mod post_game_history;
 #[cfg(windows)]
 pub mod preferences;
 #[cfg(windows)]
@@ -80,6 +84,13 @@ pub struct Worker {
     pub fallback_count: u8,
 }
 impl Worker {
+    #[cfg(windows)]
+    pub(crate) fn usage(&self) -> Option<(u32, u64, u64)> {
+        use std::os::windows::io::AsRawHandle;
+        let (cpu, memory) = crate::resources::process(self.child.as_raw_handle())?;
+        Some((self.child.id(), cpu, memory))
+    }
+
     pub fn start(executable: &Path, args: &[String], timeout: Duration) -> Result<Self> {
         Self::start_with_catalog(executable, args, timeout, None)
     }
@@ -283,3 +294,12 @@ impl Drop for Worker {
         let _ = self.stop();
     }
 }
+
+#[cfg(windows)]
+pub mod storage;
+
+#[cfg(windows)]
+pub mod recognition_sources;
+
+#[cfg(windows)]
+pub mod resources;

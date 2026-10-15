@@ -125,7 +125,22 @@ impl Service {
     }
     pub fn changed(&self, previous: &Reply) -> Option<Reply> {
         let s = self.state.0.lock().ok()?;
+        if s.reply.key.is_none() && s.desired.is_some() {
+            return None;
+        }
         (s.reply.key != previous.key || s.reply.serial != previous.serial).then(|| s.reply.clone())
+    }
+    /// Only explicit viewport changes reprioritize images. Details stay in the worker cache.
+    pub fn prioritize(&self, icons: Vec<String>) {
+        if let Ok(mut s) = self.state.0.lock() {
+            if let Some(req) = s.desired.as_mut() {
+                if req.icons != icons {
+                    req.icons = icons;
+                    s.generation = s.generation.wrapping_add(1);
+                    self.state.1.notify_all();
+                }
+            }
+        }
     }
 }
 
@@ -159,6 +174,7 @@ fn run_icons(shared: Arc<(Mutex<State>, Condvar)>, offline: bool) {
         };
         let mut urls = req.icons.clone();
         if let Some(d) = &reply.detail {
+            urls.extend(d.augments.iter().take(24).map(|a| a.icon.clone()));
             for l in &d.lines {
                 urls.extend(l.icons.iter().cloned());
             }
@@ -235,7 +251,13 @@ pub(crate) fn icon_path(url: &str) -> Result<&str> {
         .ok_or("icon-origin")?;
     let relative = p.strip_prefix("/hextech/").ok_or("icon-path")?;
     let (kind, file) = relative.split_once('/').ok_or("icon-path")?;
-    if !["champion-icons", "item-icons", "augment-icons"].contains(&kind)
+    if ![
+        "champion-icons",
+        "item-icons",
+        "augment-icons",
+        "summoner-spell-icons",
+    ]
+    .contains(&kind)
         || !file.ends_with(".png")
         || file.len() > 100
         || file.is_empty()

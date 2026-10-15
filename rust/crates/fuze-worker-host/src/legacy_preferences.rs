@@ -40,6 +40,7 @@ fn convert(value: &Value, current: &Preferences) -> Result<Preferences> {
     for (group, key, target) in [
         ("ocr", "levelGateEnabled", &mut next.level_gate),
         ("augments", "showTopOverlay", &mut next.augment_overlay),
+        ("augments", "showSidePanel", &mut next.augment_side_panel),
     ] {
         if let Some(v) = field(group, key)? {
             *target = v.as_bool().ok_or("legacy-settings-type")?;

@@ -59,6 +59,7 @@ impl Art {
                 presentation: Some(Arc::new(fuze_data::champion_detail::Detail {
                     title: String::new(),
                     lines: vec![],
+                    ..Default::default()
                 })),
                 version: self.version.clone(),
                 id: 0,

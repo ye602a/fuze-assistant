@@ -36,6 +36,13 @@ pub struct LevelGate {
     last_absent: bool,
 }
 impl LevelGate {
+    pub fn next_level(&self) -> Option<u8> {
+        [3, 7, 11, 15]
+            .into_iter()
+            .enumerate()
+            .find(|(i, _)| self.finished_windows & (1 << i) == 0)
+            .map(|(_, n)| n)
+    }
     pub fn clear_level(&mut self) {
         self.level = None;
     }

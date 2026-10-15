@@ -23,6 +23,7 @@ fn loading_handoff(old: Context, new: Context) -> bool {
 }
 
 struct Observation {
+    journal: Option<crate::local_records::Binding>,
     locale: Option<fuze_lcu::locale::Locale>,
     state: fuze_lcu::reconnect::State,
     context: Option<Context>,
@@ -69,6 +70,20 @@ pub struct MonitorControl {
     latest: Arc<Mutex<Observation>>,
 }
 impl MonitorControl {
+    pub(crate) fn diagnostic_context(&self) -> (u64, bool) {
+        self.latest
+            .lock()
+            .map(|s| {
+                (
+                    s.revision,
+                    s.updated.elapsed() < Duration::from_secs(8)
+                        && s.context
+                            .is_some_and(|c| c.supported && c.phase == Phase::InProgress),
+                )
+            })
+            .unwrap_or((0, false))
+    }
+
     pub fn enable(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
         if let Some(wake) = self.wake.as_ref() {
@@ -79,6 +94,7 @@ impl MonitorControl {
                 if let Some(c) = latest.cancellation.take() {
                     c.cancel();
                 }
+                latest.journal = None;
                 latest.publish(None, None);
                 latest.state = fuze_lcu::reconnect::State::Paused;
             }
@@ -127,6 +143,11 @@ impl Monitor {
     pub fn control(&self) -> MonitorControl {
         self.control.clone()
     }
+    pub fn verified_age(&self) -> Option<u64> {
+        let s = self.latest.lock().ok()?;
+        matches!(s.state, fuze_lcu::reconnect::State::Connected(_))
+            .then(|| s.updated.elapsed().as_secs())
+    }
     pub fn state(&self) -> Option<fuze_lcu::reconnect::State> {
         self.latest.lock().ok().map(|s| {
             if matches!(s.state, fuze_lcu::reconnect::State::Connected(_))
@@ -146,6 +167,7 @@ impl Monitor {
     }
     pub fn start_with_fallback(initial: bool, manual: Option<PathBuf>) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
+            journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: None,
@@ -167,8 +189,11 @@ impl Monitor {
             .spawn(move || {
                 let mut client = AutoClient::with_fallback(manual);
                 let mut was_enabled = true;
+                let mut journal: Option<crate::local_records::Binding> = None;
+                let mut journal_retry = Instant::now();
                 while !stopped.load(Ordering::Acquire) {
                     if !enabled.load(Ordering::Acquire) {
+                        journal = None;
                         if was_enabled {
                             client.pause();
                         }
@@ -185,10 +210,21 @@ impl Monitor {
                         let context = client.context();
                         let root = client.game_root().map(PathBuf::from);
                         let locale = client.locale();
+                        let game = context.and_then(|c| c.observed_game_id());
+                        if journal.as_ref().map(|j| j.game) != game {
+                            journal = None;
+                        }
+                        if game.is_some() && journal.is_none() && Instant::now() >= journal_retry {
+                            journal_retry = Instant::now() + Duration::from_secs(30);
+                            journal = client.journal_owner().ok().and_then(|(owner, id)| {
+                                crate::local_records::Binding::from_owner(&owner, id).ok()
+                            });
+                        }
                         if let Ok(mut latest) = shared.lock() {
                             if !enabled.load(Ordering::Acquire) {
                                 continue;
                             }
+                            latest.journal = journal.clone();
                             latest.set_locale(locale);
                             latest.publish(context, root);
                             if let Some(verified) = client.verified_at() {
@@ -295,7 +331,10 @@ impl Config {
         Ok(())
     }
     fn prepare(&self, champion: u32, locale: fuze_data::Locale) -> Result<Pipeline> {
-        let data = fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Champion(champion))?;
+        let mut data =
+            fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Champion(champion))?;
+        let (supplement, _) = crate::recognition_sources::load(&self.roots)?;
+        data.supplement_recognition(&supplement);
         let catalog =
             fuze_contract::wire::encode_catalog(data.catalog()).map_err(|_| "catalog-encode")?;
         let args = vec![
@@ -336,7 +375,12 @@ impl Retry {
 }
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PipelineStatus {
+    pub schedule: Option<(fuze_runtime::gate::Mode, u64, Option<u8>)>,
+    pub recent_tiers: [Option<u64>; 3],
     pub recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
+    pub skipped_frames: u64,
+    pub analyses: u64,
+    pub analysis_ms: Option<f64>,
     pub capture: &'static str,
     pub backend: Option<fuze_contract::wire::ActiveBackend>,
     pub dataset: Option<String>,
@@ -345,6 +389,9 @@ pub struct PipelineStatus {
     pub level: Option<u8>,
 }
 pub struct Controller {
+    recent_tiers: [Option<u64>; 3],
+    analyses: u64,
+    analysis_ms: Option<f64>,
     recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
     level_reader: Option<crate::live_level::Reader>,
     records: crate::local_records::Journal,
@@ -357,10 +404,13 @@ pub struct Controller {
     epoch: Instant,
 }
 impl Controller {
+    pub(crate) fn usage(&self) -> Option<(u32, u64, u64)> {
+        self.pipeline.as_ref().and_then(|p| p.worker.usage())
+    }
     pub fn enable_local_records(&mut self) {
         if let Some(root) = std::env::var_os("LOCALAPPDATA") {
             self.records = crate::local_records::Journal::open(
-                std::path::PathBuf::from(root).join("FuzeRustPreview/observations.json"),
+                std::path::PathBuf::from(root).join("FuzeRustPreview/observations-v2.json"),
             );
         }
     }
@@ -369,6 +419,15 @@ impl Controller {
     }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
+            skipped_frames: self
+                .pipeline
+                .as_ref()
+                .map(|p| p.skipped_frames)
+                .unwrap_or(0),
+            schedule: self.pipeline.as_ref().map(|p| p.scheduling()),
+            recent_tiers: self.recent_tiers,
+            analyses: self.analyses,
+            analysis_ms: self.analysis_ms,
             recent: self.recent.clone(),
             capture: self
                 .pipeline
@@ -407,6 +466,9 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            recent_tiers: [None; 3],
+            analyses: 0,
+            analysis_ms: None,
             recent: None,
             level_reader: None,
             records: Default::default(),
@@ -420,6 +482,7 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
+        self.recent_tiers = [None; 3];
         self.recent = None;
         if let Some(reader) = &self.level_reader {
             reader.enable(false);
@@ -433,7 +496,7 @@ impl Controller {
     }
     /// One bounded unit of work; caller yields between ticks and never runs this on UI.
     pub fn tick(&mut self, monitor: &Monitor) -> Result<()> {
-        let (context, root, revision, fresh, detected_locale) = {
+        let (context, root, revision, fresh, detected_locale, journal) = {
             let latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
             (
                 latest.context,
@@ -441,14 +504,19 @@ impl Controller {
                 latest.revision,
                 latest.updated.elapsed() < Duration::from_secs(8),
                 latest.locale,
+                latest.journal.clone(),
             )
         };
         if revision != self.revision {
+            if fresh && context.is_some_and(|c| c.phase == Phase::PostGame) {
+                self.records.verified_end();
+            }
             self.clear();
             self.revision = revision;
             self.last_error = None;
             self.retry = Retry::default();
         }
+        self.records.bind(if fresh { journal } else { None });
         let active = context.filter(|c| {
             fresh
                 && matches!(c.phase, Phase::Loading | Phase::InProgress)
@@ -530,6 +598,17 @@ impl Controller {
                 pipeline.clear_level();
             }
             if let Some(delivery) = pipeline.tick_wgc()? {
+                self.analyses = self.analyses.saturating_add(1);
+                self.records.metrics(
+                    delivery.total_ms,
+                    delivery.ocr_ms,
+                    delivery
+                        .snapshot
+                        .slots
+                        .iter()
+                        .any(|s| matches!(s, fuze_contract::Slot::Unreadable)),
+                );
+                self.analysis_ms = Some(delivery.total_ms);
                 if delivery.title_kind == fuze_contract::wire::TitleKind::Candidate
                     && delivery
                         .snapshot
@@ -538,9 +617,19 @@ impl Controller {
                         .any(|s| matches!(s, fuze_contract::Slot::Known { .. }))
                 {
                     self.recent = Some(std::sync::Arc::new(delivery.snapshot.slots.clone()));
+                    self.recent_tiers = std::array::from_fn(|i| match delivery.snapshot.slots[i] {
+                        fuze_contract::Slot::Known { id, .. } => pipeline.tier(id),
+                        _ => None,
+                    });
                 }
                 self.records
-                    .observe(context.champion.unwrap_or(0), &delivery.snapshot.slots);
+                    .visibility(delivery.display_visible, sample.map(|v| v.0));
+                if delivery.title_kind == fuze_contract::wire::TitleKind::Candidate
+                    && !delivery.retained
+                {
+                    self.records
+                        .observe(context.champion.unwrap_or(0), &delivery.snapshot.slots);
+                }
                 pipeline
                     .overlay
                     .visible(delivery.display_visible && self.config.augment_overlay)?;
@@ -605,6 +694,7 @@ mod tests {
                 .unwrap();
         let cancellation = window.cancellation();
         let mut observation = Observation {
+            journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: Some(loading),
@@ -633,6 +723,7 @@ mod tests {
         };
         let first = context(8, 1);
         let mut observation = Observation {
+            journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: Some(first),
@@ -678,6 +769,7 @@ mod tests {
     #[test]
     fn latest_observation_drops_old_context_and_backoff_is_bounded() {
         let mut observation = Observation {
+            journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: None,

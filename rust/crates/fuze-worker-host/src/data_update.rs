@@ -15,8 +15,9 @@ use windows_sys::Win32::Storage::FileSystem::{
 fn numeric(v: &str) -> bool {
     v.len() < 64
         && !v.is_empty()
-        && v.split('.')
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && v.split('.').all(|p| {
+            !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u64>().is_ok()
+        })
 }
 fn pointer(locale: Locale) -> String {
     if locale == Locale::ZhCn {
@@ -191,6 +192,61 @@ mod tests {
 }
 type Fetch<'a> = dyn Fn(&str, usize, &dyn Fn() -> bool) -> Result<Vec<u8>> + 'a;
 fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Result<Vec<String>> {
+    refresh_for(
+        root,
+        &[Locale::ZhCn, Locale::ZhTw, Locale::EnUs],
+        cancel,
+        fetch,
+    )
+}
+/// Idle background refresh compares the complete selected local bundle first. No repeated full
+/// verification/download of an unchanged bundled version and no unrelated language downloads.
+pub fn refresh_current(
+    root: &Path,
+    roots: &[Root],
+    locale: Locale,
+    cancel: &dyn Fn() -> bool,
+) -> Result<bool> {
+    let path = if locale == Locale::ZhCn {
+        "/api/client/v1/config".into()
+    } else {
+        format!("/api/client/v1/config?locale={}", locale.code())
+    };
+    let config = update_io::data_get(&path, 65536, cancel)?;
+    let value: Value = serde_json::from_slice(&config).map_err(|_| "data-update-config")?;
+    let version = value["dataVersion"]
+        .as_str()
+        .filter(|v| numeric(v))
+        .ok_or("data-update-version")?;
+    if locale != Locale::ZhCn && value["locale"] != locale.code() {
+        return Err("data-update-locale");
+    }
+    let order = |v: &str| {
+        v.split('.')
+            .map(|p| p.parse::<u64>())
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .ok()
+    };
+    if fuze_data::prepare(roots, locale, Scope::Champions)
+        .is_ok_and(|data| order(data.version()) >= order(version))
+    {
+        return Ok(false);
+    }
+    refresh_for(root, &[locale], cancel, &|p, n, c| {
+        if p == path {
+            Ok(config.clone())
+        } else {
+            update_io::data_get(p, n, c)
+        }
+    })?;
+    Ok(true)
+}
+fn refresh_for(
+    root: &Path,
+    locales: &[Locale],
+    cancel: &dyn Fn() -> bool,
+    fetch: &Fetch<'_>,
+) -> Result<Vec<String>> {
     clean_dir(root)?;
     let canonical = fs::canonicalize(root).map_err(|_| "data-update-directory")?;
     let root = canonical.as_path();
@@ -210,7 +266,7 @@ fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Re
         }
     };
     let mut versions = Vec::new();
-    for locale in [Locale::ZhCn, Locale::ZhTw, Locale::EnUs] {
+    for &locale in locales {
         check()?;
         let config_path = if locale == Locale::ZhCn {
             "/api/client/v1/config".into()
@@ -263,6 +319,10 @@ fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Re
             false,
         );
         fs::create_dir(&stage.0).map_err(|_| "data-update-stage")?;
+        write(
+            &stage.0.join(".fuze-data-transaction"),
+            b"fuze-data-staging-v1",
+        )?;
         let relative = prefix(locale, version);
         let destination = stage.0.join(&relative);
         write(&destination.join("manifest.json"), &manifest_bytes)?;

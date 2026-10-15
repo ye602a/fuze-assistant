@@ -3,6 +3,21 @@ use crate::Result;
 use fuze_lcu::history::{Match, Owner};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+pub fn error_label(error: Option<&str>) -> &'static str {
+    match error {
+        None => "",
+        Some("history-platform-unknown" | "history-platform-conflict") => {
+            "区服未确认，请确认客户端已登录"
+        }
+        Some("history-account-changed" | "history-owner-mismatch") => "账号发生变化，请重新查询",
+        Some("history-idle-required") => "返回大厅后可查询战绩",
+        Some(
+            "history-client-unavailable" | "history-discovery-failed" | "history-connect-failed",
+        ) => "客户端连接未就绪",
+        Some("history-cache-invalid") => "本地缓存无法读取，原文件已保留",
+        Some(_) => "查询未完成；已保留本地缓存，可稍后重试",
+    }
+}
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Saved {
@@ -30,6 +45,8 @@ pub struct View {
     pub error: Option<&'static str>,
     pub cached: bool,
     pub pending: usize,
+    pub next_start: Option<u32>,
+    pub source: String,
 }
 // UI snapshots share immutable vectors: comparing hundreds of records every timer tick
 // adds no information. New snapshots invalidate once, even when their contents match.
@@ -46,6 +63,8 @@ impl PartialEq for View {
             && self.error == other.error
             && self.cached == other.cached
             && self.pending == other.pending
+            && self.next_start == other.next_start
+            && self.source == other.source
     }
 }
 pub struct Import {
@@ -64,7 +83,7 @@ fn key(owner: &Owner) -> Result<String> {
     Ok(crate::update_io::hex(&hash?))
 }
 pub fn path() -> Result<PathBuf> {
-    Ok(crate::preferences::path()?.with_file_name("account-history-v2.json"))
+    Ok(crate::preferences::path()?.with_file_name("account-history-v3.json"))
 }
 /// Explicit offline browsing; never claims this is the currently logged-in account.
 pub fn offline(path: &Path, index: usize) -> Result<View> {
@@ -84,14 +103,23 @@ pub fn offline(path: &Path, index: usize) -> Result<View> {
 }
 fn read(path: &Path) -> Result<Saved> {
     // New fields never rewrite an older binary's strict schema. Read old data only
-    // until the first successful v2 save; a malformed v2 file must not fall back.
+    // until the first successful save; malformed new schemas never silently fall back.
     let legacy;
     let path = if !path.exists()
         && path
             .file_name()
-            .is_some_and(|n| n == "account-history-v2.json")
+            .is_some_and(|n| n == "account-history-v2.json" || n == "account-history-v3.json")
     {
-        legacy = path.with_file_name("account-history.json");
+        let v2 = path.with_file_name("account-history-v2.json");
+        legacy = if path
+            .file_name()
+            .is_some_and(|n| n == "account-history-v3.json")
+            && v2.exists()
+        {
+            v2
+        } else {
+            path.with_file_name("account-history.json")
+        };
         legacy.as_path()
     } else {
         path
@@ -99,7 +127,7 @@ fn read(path: &Path) -> Result<Saved> {
     if !path.exists() {
         return Ok(Saved::default());
     }
-    let data: Saved =
+    let mut data: Saved =
         serde_json::from_slice(&crate::update_channel::bounded(path, 6 * 1024 * 1024)?)
             .map_err(|_| "history-cache-invalid")?;
     let mut keys = std::collections::HashSet::new();
@@ -117,6 +145,41 @@ fn read(path: &Path) -> Result<Saved> {
         })
     {
         return Err("history-cache-invalid");
+    }
+    if path.file_name().is_some_and(|n| {
+        n == "account-history-v3.json"
+            || n == "account-history-v2.json"
+            || n == "account-history.json"
+    }) {
+        let new_journal = path.with_file_name("observations-v2.json");
+        let journal = if new_journal.exists() {
+            new_journal
+        } else {
+            path.with_file_name("observations.json")
+        };
+        for account in &mut data.accounts {
+            if let Ok(records) =
+                crate::local_records::bound_observations(&journal, &account.key, &account.platform)
+            {
+                for record in records {
+                    if let Some(old) = account
+                        .observations
+                        .iter_mut()
+                        .find(|o| o.game_id == record.game_id)
+                    {
+                        if record.events.len() > old.events.len() {
+                            *old = record;
+                        }
+                    } else {
+                        account.observations.push(record);
+                    }
+                }
+                account
+                    .observations
+                    .sort_by_key(|o| std::cmp::Reverse(o.game_id));
+                account.observations.truncate(100);
+            }
+        }
     }
     Ok(data)
 }
@@ -178,11 +241,95 @@ impl Source for fuze_lcu::discovery::HistorySession {
     }
 }
 pub fn refresh(manual: Option<&Path>, path: &Path) -> View {
-    match fuze_lcu::discovery::HistorySession::open(manual) {
-        Ok(session) => refresh_from(&session, path),
+    refresh_page(manual, path, 0, None, None)
+}
+pub fn refresh_page(
+    manual: Option<&Path>,
+    path: &Path,
+    start: u32,
+    expected: Option<(&str, &str)>,
+    source: Option<&str>,
+) -> View {
+    struct Page {
+        session: fuze_lcu::discovery::HistorySession,
+        owner: Owner,
+        start: u32,
+        count: std::cell::Cell<usize>,
+        source: std::cell::Cell<&'static str>,
+    }
+    impl Source for Page {
+        fn owner(&self) -> Result<Owner> {
+            let owner = self.session.owner()?;
+            if owner != self.owner {
+                return Err("history-account-changed");
+            }
+            Ok(owner)
+        }
+        fn rows(&self, owner: &Owner) -> Result<Vec<Match>> {
+            let rows = match self.source.get() {
+                "lcu" => self.session.rows_page(owner, self.start)?,
+                "sgp" => self.session.sgp_rows(owner, self.start)?,
+                _ => match self.session.sgp_rows(owner, self.start) {
+                    Ok(rows) => {
+                        self.source.set("sgp");
+                        rows
+                    }
+                    Err(
+                        e @ ("history-account-changed"
+                        | "history-owner-mismatch"
+                        | "history-platform-conflict"
+                        | "history-idle-required"),
+                    ) => return Err(e),
+                    Err(_) => {
+                        let rows = self.session.rows_page(owner, self.start)?;
+                        self.source.set("lcu");
+                        rows
+                    }
+                },
+            };
+            self.count.set(rows.len());
+            Ok(rows)
+        }
+    }
+    let prepared = (|| {
+        if start > 950 || start % 50 != 0 {
+            return Err("history-page-limit");
+        }
+        let session = fuze_lcu::discovery::HistorySession::open(manual)?;
+        let owner = session.owner()?;
+        if let Some((account, platform)) = expected {
+            if &key(&owner)?[..8] != account || owner.platform() != platform {
+                return Err("history-account-changed");
+            }
+        }
+        Ok(Page {
+            session,
+            owner,
+            start,
+            count: std::cell::Cell::new(0),
+            source: std::cell::Cell::new(match source {
+                Some("lcu") => "lcu",
+                Some("sgp") => "sgp",
+                _ => "",
+            }),
+        })
+    })();
+    match prepared {
+        Ok(page) => {
+            let mut view = refresh_from(&page, path);
+            view.source = page.source.get().into();
+            view.next_start = if view.error.is_some() {
+                Some(start)
+            } else if (page.count.get() > 0 || page.source.get() == "lcu") && start < 950 {
+                Some(start + 50)
+            } else {
+                None
+            };
+            view
+        }
         Err(error) => View {
             error: Some(error),
-            ..View::default()
+            ..Default::default()
         },
     }
 }
@@ -350,6 +497,14 @@ mod tests {
         merge(&new, &account, vec![row(2)], false).unwrap();
         assert_eq!(read(&new).unwrap().accounts[0].rows.len(), 2);
         assert_eq!(std::fs::read(&old).unwrap(), bytes);
+        let v3 = root.join("account-history-v3.json");
+        let v2_bytes = std::fs::read(&new).unwrap();
+        assert_eq!(read(&v3).unwrap().accounts[0].rows.len(), 2);
+        merge(&v3, &account, vec![row(3)], false).unwrap();
+        assert_eq!(std::fs::read(&new).unwrap(), v2_bytes);
+        std::fs::write(&v3, b"invalid").unwrap();
+        assert!(matches!(read(&v3), Err("history-cache-invalid")));
+        std::fs::remove_file(v3).unwrap();
         std::fs::write(&new, b"invalid").unwrap();
         assert!(matches!(read(&new), Err("history-cache-invalid")));
         std::fs::remove_file(old).unwrap();
@@ -365,10 +520,12 @@ mod tests {
         let b = owner("fixture-account-B", "HN1");
         merge(&path, &a, vec![row(1)], false).unwrap();
         let observation = fuze_lcu::history::Observation {
+            recognition: None,
             game_id: 1,
             interrupted: true,
             capped: false,
             events: vec![fuze_lcu::history::ObservedCards {
+                observed_at: None,
                 cards: [Some(1), None, Some(3)],
                 level: Some(11),
                 partial: true,

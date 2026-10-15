@@ -11,6 +11,7 @@ use std::{
 pub struct Preferences {
     pub level_gate: bool,
     pub augment_overlay: bool,
+    pub augment_side_panel: bool,
     pub schema: u32,
     pub backend: String,
     pub locale: String,
@@ -28,6 +29,7 @@ impl Default for Preferences {
         Self {
             level_gate: true,
             augment_overlay: true,
+            augment_side_panel: false,
             schema: 1,
             backend: "auto".into(),
             locale: "auto".into(),

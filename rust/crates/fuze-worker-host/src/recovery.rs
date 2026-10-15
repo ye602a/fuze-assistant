@@ -17,6 +17,11 @@ pub struct Supervisor {
     catalog: Option<std::sync::Arc<Vec<u8>>>,
 }
 impl Supervisor {
+    #[cfg(windows)]
+    pub(crate) fn usage(&self) -> Option<(u32, u64, u64)> {
+        self.worker.as_ref().and_then(|w| w.usage())
+    }
+
     /// The last argument is the backend. Auto uses explicit DML in the child so only this
     /// supervisor owns fallback; worker and host cannot each consume a separate retry.
     pub fn start(executable: &Path, args: &[String], timeout: Duration) -> Result<Self> {

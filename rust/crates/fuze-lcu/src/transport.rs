@@ -1,4 +1,4 @@
-//! Fixed loopback HTTPS only. No arbitrary URL, proxy, redirect or write method.
+//! Fixed loopback HTTPS. Reads by default; the explicit item-set transaction alone permits PUT.
 //! Temporary identity responses are reduced to local hero context, never logged or returned.
 use super::{basic, parse_phase, status, wipe, Credentials, Endpoint, Error, Result};
 use fuze_runtime::session::Phase;
@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 use windows_sys::Win32::Networking::WinHttp::*;
+#[path = "sgp.rs"]
+mod sgp;
 struct Handle(*mut c_void);
 impl Handle {
     fn new(p: *mut c_void) -> Result<Self> {
@@ -64,6 +66,30 @@ pub struct ReadOnlyClient {
     credentials: Credentials,
 }
 impl ReadOnlyClient {
+    pub(crate) fn journal_owner(
+        &self,
+        pid: u32,
+    ) -> crate::history::Result<(crate::history::Owner, u64)> {
+        let before = self.context(pid).map_err(|_| "journal-context")?;
+        let game = before.observed_game_id().ok_or("journal-context")?;
+        let summoner = self.history_value(pid, Endpoint::SummonerIdentity)?;
+        let mut routing = Vec::new();
+        for endpoint in [Endpoint::Authorization, Endpoint::ChatMe] {
+            if let Ok(v) = self.history_value(pid, endpoint) {
+                routing.push(v);
+            }
+        }
+        let owner = crate::history::Owner::from_values(&summoner, &routing)?;
+        let after = self.context(pid).map_err(|_| "journal-context")?;
+        if before != after {
+            return Err("journal-context-changed");
+        }
+        let verified = self.history_value(pid, Endpoint::SummonerIdentity)?;
+        if crate::history::Owner::from_values(&verified, &routing)? != owner {
+            return Err("journal-account-changed");
+        }
+        Ok((owner, game))
+    }
     fn history_value(
         &self,
         pid: u32,
@@ -100,8 +126,81 @@ impl ReadOnlyClient {
         &self,
         pid: u32,
         owner: &crate::history::Owner,
+        start: u32,
     ) -> crate::history::Result<Vec<crate::history::Match>> {
-        crate::history::parse(owner, &self.history_value(pid, Endpoint::History)?)
+        if start > 950 || start % 50 != 0 {
+            return Err("history-page-limit");
+        }
+        let local=if start==0 {self.history_value(pid,Endpoint::History)}else{
+            let path=format!("/lol-match-history/v1/products/lol/current-summoner/matches?begIndex={start}&endIndex={}",start+49);
+            self.request_at(pid,&path,"GET",&[],4*1024*1024,false).map_err(|_|"history-request-failed").and_then(|(_,mut bytes)|{let result=serde_json::from_slice(&bytes).map_err(|_|"history-invalid-response");wipe(&mut bytes);result})
+        }.and_then(|v|crate::history::parse(owner,&v));
+        local
+    }
+    pub(crate) fn history_sgp(
+        &self,
+        pid: u32,
+        owner: &crate::history::Owner,
+        start: u32,
+    ) -> crate::history::Result<Vec<crate::history::Match>> {
+        if start > 950 || start % 50 != 0 {
+            return Err("history-page-limit");
+        }
+        if &self.history_owner(pid)? != owner {
+            return Err("history-account-changed");
+        }
+        let token = self.history_value(pid, Endpoint::Entitlements)?;
+        let result = sgp::fetch(owner, &token, start);
+        if &self.history_owner(pid)? != owner {
+            return Err("history-account-changed");
+        }
+        result
+    }
+    pub(crate) fn install_item_sets(
+        &self,
+        pid: u32,
+        champion: u32,
+        sets: &[serde_json::Value],
+    ) -> crate::history::Result<()> {
+        let verify = || -> crate::history::Result<(u64, u64)> {
+            let c = self
+                .context(pid)
+                .map_err(|_| "item-sets-client-unavailable")?;
+            if c.phase != Phase::ChampSelect || c.champion != Some(champion) {
+                return Err("item-sets-selection-changed");
+            }
+            let s = self.history_value(pid, Endpoint::SummonerIdentity)?;
+            let id = |key: &str| {
+                s[key]
+                    .as_u64()
+                    .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991)
+                    .ok_or("item-sets-account-unavailable")
+            };
+            Ok((id("summonerId")?, id("accountId")?))
+        };
+        let identity = verify()?;
+        let (summoner, account) = identity;
+        let path = format!("/lol-item-sets/v1/item-sets/{summoner}/sets");
+        let (_, mut bytes) = self
+            .request_at(pid, &path, "GET", &[], 1024 * 1024, false)
+            .map_err(|_| "item-sets-read-failed")?;
+        let current = serde_json::from_slice(&bytes).map_err(|_| "item-sets-current-invalid");
+        wipe(&mut bytes);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "item-sets-clock")?
+            .as_millis() as u64;
+        let merged = crate::item_sets::merge(&current?, sets, champion, account, now)?;
+        if verify()? != identity {
+            return Err("item-sets-account-changed");
+        }
+        let mut bytes = serde_json::to_vec(&merged).map_err(|_| "item-sets-invalid")?;
+        let result = self
+            .request_at(pid, &path, "PUT", &bytes, 0, true)
+            .map(|_| ())
+            .map_err(|_| "item-sets-write-failed");
+        wipe(&mut bytes);
+        result
     }
     pub fn websocket(&self) -> Result<crate::websocket::Socket> {
         crate::websocket::Socket::connect(&self.credentials)
@@ -167,14 +266,40 @@ impl ReadOnlyClient {
         status(code)
     }
     fn request(&self, current_pid: u32, endpoint: Endpoint) -> Result<(u32, Vec<u8>)> {
+        let limit = if matches!(endpoint, Endpoint::Phase) {
+            128
+        } else if matches!(endpoint, Endpoint::History) {
+            4 * 1024 * 1024
+        } else {
+            256 * 1024
+        };
+        self.request_at(
+            current_pid,
+            endpoint.path(),
+            "GET",
+            &[],
+            limit,
+            matches!(endpoint, Endpoint::SummonerStatus),
+        )
+    }
+    // Private transport: only typed read endpoints and the explicit item-set transaction reach here.
+    fn request_at(
+        &self,
+        current_pid: u32,
+        path: &str,
+        method: &str,
+        payload: &[u8],
+        limit: usize,
+        status_only: bool,
+    ) -> Result<(u32, Vec<u8>)> {
         if !self.credentials.belongs_to(current_pid) {
             return Err(Error::AuthInput);
         }
         unsafe {
             let request = Handle::new(WinHttpOpenRequest(
                 self.connection.0,
-                wide("GET").as_ptr(),
-                wide(endpoint.path()).as_ptr(),
+                wide(method).as_ptr(),
+                wide(path).as_ptr(),
                 null(),
                 null(),
                 null(),
@@ -196,14 +321,23 @@ impl ReadOnlyClient {
                 WINHTTP_OPTION_SECURITY_FLAGS,
                 SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID,
             )?;
-            let header = Header::new(&self.credentials);
+            let mut header = Header::new(&self.credentials);
+            if method == "PUT" {
+                header
+                    .0
+                    .extend("Content-Type: application/json\r\n".encode_utf16());
+            }
             ok(WinHttpSendRequest(
                 request.0,
                 header.0.as_ptr(),
                 header.0.len() as u32,
-                null(),
-                0,
-                0,
+                if payload.is_empty() {
+                    null()
+                } else {
+                    payload.as_ptr().cast()
+                },
+                payload.len() as u32,
+                payload.len() as u32,
                 0,
             ))?;
             drop(header);
@@ -218,19 +352,14 @@ impl ReadOnlyClient {
                 &mut size,
                 null_mut(),
             ))?;
-            status(code)?;
-            // Deliberately never read, parse, retain or log the summoner identity response.
-            if matches!(endpoint, Endpoint::SummonerStatus) {
+            if !(method == "PUT" && (200..300).contains(&code)) {
+                status(code)?;
+            }
+            // Deliberately never read the body of status-only probes or successful writes.
+            if status_only {
                 return Ok((code, Vec::new()));
             }
             let started = Instant::now();
-            let limit = if matches!(endpoint, Endpoint::Phase) {
-                128
-            } else if matches!(endpoint, Endpoint::History) {
-                4 * 1024 * 1024
-            } else {
-                256 * 1024
-            };
             let mut body = Vec::with_capacity(limit.min(4096));
             for _ in 0..=limit.div_ceil(4096) {
                 if started.elapsed() > Duration::from_secs(2) {
@@ -260,6 +389,18 @@ impl ReadOnlyClient {
 /// Live Client Data uses a separate fixed loopback endpoint, never LCU credentials.
 /// Only a level survives parsing; no identities are materialized or returned.
 pub fn active_player_level() -> Result<u8> {
+    let mut body = live_probe(1)?;
+    let result = parse_active_player_level(&body);
+    wipe(&mut body);
+    result
+}
+pub(crate) fn live_probe(index: usize) -> Result<Vec<u8>> {
+    let (path, limit) = match index {
+        0 => ("/swagger/v3/openapi.json", 2 * 1024 * 1024),
+        1 => ("/liveclientdata/activeplayer", 256 * 1024),
+        2 => ("/liveclientdata/eventdata", 256 * 1024),
+        _ => return Err(Error::AuthInput),
+    };
     struct Body(Vec<u8>);
     impl Drop for Body {
         fn drop(&mut self) {
@@ -284,7 +425,7 @@ pub fn active_player_level() -> Result<u8> {
         let request = Handle::new(WinHttpOpenRequest(
             connection.0,
             wide("GET").as_ptr(),
-            wide("/liveclientdata/activeplayer").as_ptr(),
+            wide(path).as_ptr(),
             null(),
             null(),
             null(),
@@ -322,7 +463,7 @@ pub fn active_player_level() -> Result<u8> {
         }
         let started = Instant::now();
         let mut body = Body(Vec::with_capacity(4096));
-        for _ in 0..17 {
+        for _ in 0..(limit / 4096 + 1) {
             if started.elapsed() > Duration::from_millis(900) {
                 return Err(Error::Transport);
             }
@@ -335,9 +476,9 @@ pub fn active_player_level() -> Result<u8> {
                 &mut read,
             ))?;
             if read == 0 {
-                return parse_active_player_level(&body.0);
+                return Ok(std::mem::take(&mut body.0));
             }
-            if body.0.len() + read as usize > 65536 {
+            if body.0.len() + read as usize > limit {
                 return Err(Error::ResponseLimit);
             }
             body.0.extend_from_slice(&buffer.0[..read as usize]);

@@ -91,6 +91,7 @@ fn present(row: &fuze_lcu::history::Match, data: &fuze_data::Prepared) -> Detail
     Detail {
         title: name(hero, row.champion),
         lines,
+        ..Default::default()
     }
 }
 /// UTC explicitly labelled; does not imply the time zone from the old machine.

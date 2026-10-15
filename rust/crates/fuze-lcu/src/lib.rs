@@ -1,4 +1,4 @@
-//! Read-only LCU boundary. Nothing runs at import; caller supplies freshly observed credentials.
+//! Read-only LCU boundary with a separately invoked, player-requested item-set transaction. Nothing runs at import; caller supplies freshly observed credentials.
 use fuze_runtime::session::Phase;
 use std::fmt;
 #[cfg(windows)]
@@ -8,8 +8,10 @@ pub mod context;
 pub mod discovery;
 pub mod events;
 pub mod history;
+pub mod item_sets;
 pub mod locale;
 pub mod reconnect;
+pub mod stage_probe;
 #[cfg(windows)]
 pub mod transport;
 #[cfg(windows)]
@@ -128,6 +130,7 @@ pub(crate) enum Endpoint {
     History,
     Authorization,
     ChatMe,
+    Entitlements,
 }
 impl Endpoint {
     pub(crate) fn path(self) -> &'static str {
@@ -142,6 +145,7 @@ impl Endpoint {
             }
             Self::Authorization => "/lol-rso-auth/v1/authorization",
             Self::ChatMe => "/lol-chat/v1/me",
+            Self::Entitlements => "/entitlements/v1/token",
         }
     }
 }

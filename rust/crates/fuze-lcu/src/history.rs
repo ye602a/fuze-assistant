@@ -52,6 +52,9 @@ impl Owner {
             platform: found.ok_or("history-platform-unknown")?,
         })
     }
+    pub(crate) fn sgp_path(&self, start: u32) -> String {
+        format!("/match-history-query/v1/products/lol/player/{}/SUMMARY?startIndex={start}&count=50&tag=q_2400&tagsQueryType=AND", self.puuid)
+    }
     pub fn platform(&self) -> &str {
         &self.platform
     }
@@ -181,6 +184,42 @@ pub fn parse(owner: &Owner, v: &Value) -> Result<Vec<Match>> {
     }
     Ok(out)
 }
+/// Reduce the allowed SGP summary schema into the same owner-checked representation.
+pub fn parse_sgp(owner: &Owner, payload: &Value) -> Result<Vec<Match>> {
+    let games = payload["games"]
+        .as_array()
+        .filter(|v| v.len() <= 50)
+        .ok_or("history-invalid-response")?;
+    let mut normalized = Vec::new();
+    for entry in games {
+        let game = entry["json"]
+            .as_object()
+            .ok_or("history-invalid-response")?;
+        let game = Value::Object(game.clone());
+        if game["queueId"].as_u64() != Some(2400) {
+            continue;
+        }
+        if reported(&game)?.as_deref() != Some(owner.platform.as_str()) {
+            return Err("history-account-changed");
+        }
+        let participants = game["participants"]
+            .as_array()
+            .filter(|v| v.len() <= 20)
+            .ok_or("history-invalid-response")?;
+        let owned: Vec<_> = participants
+            .iter()
+            .filter(|p| p["puuid"].as_str() == Some(&owner.puuid))
+            .collect();
+        if owned.len() != 1 {
+            return Err("history-owner-mismatch");
+        }
+        let p = owned[0];
+        normalized.push(serde_json::json!({"platformId":owner.platform,"gameId":game["gameId"],"gameCreation":game["gameCreation"],"gameDuration":game["gameDuration"],"queueId":2400,
+            "participantIdentities":[{"participantId":1,"player":{"puuid":owner.puuid}}],
+            "participants":[{"participantId":1,"championId":p["championId"],"stats":p}]}));
+    }
+    parse(owner, &serde_json::json!({"games":{"games":normalized}}))
+}
 pub fn legacy(owner: &Owner, v: &Value) -> Result<Vec<Match>> {
     if v["version"] != 1 {
         return Err("history-legacy-schema");
@@ -234,6 +273,8 @@ pub fn legacy(owner: &Owner, v: &Value) -> Result<Vec<Match>> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Observation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recognition: Option<Recognition>,
     pub game_id: u64,
     pub interrupted: bool,
     pub capped: bool,
@@ -242,18 +283,37 @@ pub struct Observation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservedCards {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<u64>,
     pub cards: [Option<u32>; 3],
     pub level: Option<u32>,
     pub partial: bool,
     pub kind: String,
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recognition {
+    pub analyses: u64,
+    pub partial: u64,
+    pub total_ms: f64,
+    pub ocr_ms: f64,
 }
 impl Observation {
     pub fn valid(&self) -> bool {
         self.game_id > 0
             && self.game_id <= 9_007_199_254_740_991
             && self.events.len() <= 80
+            && self.recognition.as_ref().is_none_or(|r| {
+                r.analyses <= 1_000_000
+                    && r.partial <= r.analyses
+                    && [r.total_ms, r.ocr_ms]
+                        .iter()
+                        .all(|n| n.is_finite() && (0.0..=1e12).contains(n))
+            })
             && self.events.iter().all(|e| {
                 e.cards.iter().flatten().all(|id| *id > 0)
+                    && e.observed_at
+                        .is_none_or(|t| t > 0 && t <= 9_007_199_254_740_991)
                     && e.level.is_none_or(|l| (1..=30).contains(&l))
                     && ["first", "changed", "reappeared"].contains(&e.kind.as_str())
             })
@@ -297,6 +357,7 @@ pub fn legacy_observations(owner: &Owner, v: &Value, game_id: u64) -> Result<Obs
                 Some(small(&e["level"])?)
             };
             Ok(ObservedCards {
+                observed_at: e["observedAt"].as_u64(),
                 cards,
                 level,
                 partial: e["partial"] == true || cards.iter().any(Option::is_none),
@@ -305,6 +366,7 @@ pub fn legacy_observations(owner: &Owner, v: &Value, game_id: u64) -> Result<Obs
         })
         .collect::<Result<Vec<_>>>()?;
     let out = Observation {
+        recognition: None,
         game_id,
         events,
         interrupted: s["interrupted"] == true || s["endedAt"].is_null(),
@@ -317,6 +379,28 @@ pub fn legacy_observations(owner: &Owner, v: &Value, game_id: u64) -> Result<Obs
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sgp_summary_rejects_unknown_owner_and_platform_without_inventing_claim_order() {
+        use serde_json::json;
+        let owner =
+            super::Owner::from_values(&json!({"puuid":"fixture-owner","platformId":"HN1"}), &[])
+                .unwrap();
+        let mut value = json!({"games":[{"json":{"gameId":12,"platformId":"HN1","queueId":2400,"gameCreation":123,"gameDuration":900,"participants":[{"puuid":"fixture-owner","championId":21,"kills":2,"deaths":3,"assists":4,"win":true,"item0":1001,"playerAugment1":7}]}}]});
+        let rows = super::parse_sgp(&owner, &value).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].augments, vec![7]);
+        value["games"][0]["json"]["platformId"] = json!("HN10");
+        assert_eq!(
+            super::parse_sgp(&owner, &value),
+            Err("history-account-changed")
+        );
+        value["games"][0]["json"]["platformId"] = json!("HN1");
+        value["games"][0]["json"]["participants"][0]["puuid"] = json!("another-owner");
+        assert_eq!(
+            super::parse_sgp(&owner, &value),
+            Err("history-owner-mismatch")
+        );
+    }
     use super::*;
     use serde_json::json;
     #[test]

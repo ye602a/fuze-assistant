@@ -1,5 +1,7 @@
 //! Read-only champion overview; no LCU requests, account data, pick actions or per-paint IO.
 use crate::Result;
+#[path = "champ_augments.rs"]
+mod augment_ui;
 #[path = "champ_presentation.rs"]
 mod presentation;
 use fuze_lcu::context::Selection;
@@ -12,7 +14,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::LibraryLoader::GetModuleHandleW,
-    UI::{HiDpi::*, WindowsAndMessaging::*},
+    UI::{Controls::WM_MOUSELEAVE, HiDpi::*, WindowsAndMessaging::*},
 };
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hero {
@@ -22,6 +24,7 @@ pub struct Hero {
     pub win: Option<f64>,
     pub pick: Option<f64>,
     pub games: Option<u64>,
+    pub tier: Option<u64>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
@@ -87,6 +90,7 @@ impl Catalog {
                         win: rate("winRate"),
                         pick: rate("pickRate"),
                         games: r["stats"]["games"].as_u64(),
+                        tier: r["stats"]["tier"].as_u64(),
                     },
                 )
                 .is_some()
@@ -109,6 +113,7 @@ impl Catalog {
                 win: None,
                 pick: None,
                 games: None,
+                tier: None,
             })
         };
         let mut bench: Vec<_> = selection.bench[..selection.count]
@@ -151,6 +156,13 @@ struct State {
     scroll: usize,
     page_scroll: i32,
     active_tab: usize,
+    rarity: usize,
+    hover: Option<u32>,
+    inspected: Option<u32>,
+    description_scroll: usize,
+    build_route: usize,
+    install: Option<std::sync::mpsc::Receiver<Result<()>>>,
+    install_status: Option<(u32, bool)>,
     assets: crate::champion_assets::Service,
     reply: crate::champion_assets::Reply,
 }
@@ -206,6 +218,13 @@ impl Window {
                 scroll: 0,
                 page_scroll: 0,
                 active_tab: 0,
+                rarity: 0,
+                hover: None,
+                inspected: None,
+                description_scroll: 0,
+                build_route: 0,
+                install: None,
+                install_status: None,
                 assets: crate::champion_assets::Service::new(roots, offline)?,
                 reply: Default::default(),
             });
@@ -218,11 +237,11 @@ impl Window {
                     "符择 · 选人参考"
                 })
                 .as_ptr(),
-                WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME | if side { 0 } else { WS_VSCROLL },
+                WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME | WS_VSCROLL,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                if side { 460 } else { 480 },
-                780,
+                if side { 460 } else { 420 },
+                640,
                 null_mut(),
                 null_mut(),
                 instance,
@@ -244,9 +263,9 @@ impl Window {
                     null_mut(),
                     monitor.rcWork.left,
                     monitor.rcWork.top,
-                    ((if side { 460 } else { 480 }) * d / 96)
+                    ((if side { 460 } else { 420 }) * d / 96)
                         .min(monitor.rcWork.right - monitor.rcWork.left),
-                    (780 * d / 96).min(monitor.rcWork.bottom - monitor.rcWork.top),
+                    (640 * d / 96).min(monitor.rcWork.bottom - monitor.rcWork.top),
                     SWP_NOACTIVATE | SWP_NOZORDER,
                 );
             }
@@ -346,6 +365,7 @@ impl Window {
         std::fs::create_dir_all(directory).map_err(|_| "fixture-directory")?;
         if let Some(root) = std::env::var_os("FUZE_POPUP_REVIEW_ART") {
             let root = std::path::PathBuf::from(root);
+            let mut unique = std::collections::HashSet::new();
             let urls: Vec<_> = self
                 .state
                 .view
@@ -356,9 +376,17 @@ impl Window {
                         .reply
                         .detail
                         .iter()
+                        .flat_map(|d| d.augments.iter().map(|a| a.icon.clone())),
+                )
+                .chain(
+                    self.state
+                        .reply
+                        .detail
+                        .iter()
                         .flat_map(|d| d.lines.iter().flat_map(|l| l.icons.clone())),
                 )
-                .take(96)
+                .filter(|url| unique.insert(url.clone()))
+                .take(192)
                 .collect();
             for url in urls {
                 let Ok(relative) = crate::champion_assets::icon_path(&url) else {
@@ -383,6 +411,30 @@ impl Window {
         unsafe {
             self.state.page_scroll = presentation::layout(self.hwnd, &self.state).hero_top;
             self.render(&directory.join("champion-detail.png"))?;
+            let l = presentation::layout(self.hwnd, &self.state);
+            self.state.page_scroll = presentation::body_top(&self.state, &l);
+            for rarity in 1..=3 {
+                let x = (16 + rarity * ((l.width - 32) / 4) + 8) * l.dpi / 96;
+                let y = (40 + presentation::body_top(&self.state, &l) - self.state.page_scroll
+                    + 40)
+                    * l.dpi
+                    / 96;
+                presentation::click(self.hwnd, &mut self.state, x, y);
+                if self.state.rarity != rarity as usize
+                    || augment_ui::cards(&self.state)
+                        .iter()
+                        .any(|a| a.rarity != Some((rarity - 1) as u8))
+                {
+                    return Err("fixture-rarity-filter");
+                }
+            }
+            self.render(&directory.join("champion-prismatic.png"))?;
+            self.state.rarity = 0;
+            self.state.inspected = augment_ui::cards(&self.state).first().map(|a| a.id);
+            self.render(&directory.join("champion-description.png"))?;
+            self.state.inspected = None;
+            self.state.page_scroll = l.hero_top;
+
             // The same callback used by the window validates content coordinates after scrolling.
             let layout = presentation::layout(self.hwnd, &self.state);
             let x = (16 + (layout.width - 32) / 2 + 8) * layout.dpi / 96;
@@ -424,6 +476,12 @@ impl Window {
         if !self.state.offline {
             return Err("fixture-only");
         }
+        let mut previous: RECT = unsafe { zeroed() };
+        unsafe {
+            GetWindowRect(self.hwnd, &mut previous);
+        }
+        let scroll = self.state.page_scroll;
+        self.state.page_scroll = 0;
         self.state.side = true;
         self.state.scroll = 0;
         unsafe {
@@ -439,14 +497,15 @@ impl Window {
         }
         let result = self.render(path);
         self.state.side = false;
+        self.state.page_scroll = scroll;
         unsafe {
             SetWindowPos(
                 self.hwnd,
                 std::ptr::null_mut(),
                 0,
                 0,
-                480,
-                780,
+                previous.right - previous.left,
+                previous.bottom - previous.top,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
@@ -567,17 +626,41 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
     }
     match msg {
         WM_TIMER if w == 2 => {
+            if let Some(result) = (*p).install.as_ref().and_then(|r| match r.try_recv() {
+                Ok(v) => Some(v),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err("item-set-worker")),
+                _ => None,
+            }) {
+                (*p).install = None;
+                if let Some((id, _)) = (*p).install_status {
+                    (*p).install_status = Some((id, result.is_ok()));
+                }
+                InvalidateRect(hwnd, null(), 0);
+            }
             if (*p).stage_panel {
                 if let Some(next) = (*p).stage_service.changed((*p).stage_reply.serial) {
                     (*p).stage_reply = next;
                     InvalidateRect(hwnd, null(), 0);
                 }
             }
-            if let Some(next) = (*p).assets.changed(&(*p).reply) {
-                (*p).reply = next;
-                if !(*p).side {
-                    presentation::scroll(hwnd, &mut *p, 0);
+            if let Some(mut next) = (*p).assets.changed(&(*p).reply) {
+                if next
+                    .key
+                    .as_ref()
+                    .zip((*p).reply.key.as_ref())
+                    .is_some_and(|(a, b)| a.id == b.id && a.version == b.version)
+                {
+                    for (url, picture) in &(*p).reply.icons {
+                        if next.icons.len() >= 192 {
+                            break;
+                        }
+                        next.icons
+                            .entry(url.clone())
+                            .or_insert_with(|| picture.clone());
+                    }
                 }
+                (*p).reply = next;
+                presentation::scroll(hwnd, &mut *p, 0);
                 InvalidateRect(hwnd, null(), 0);
             }
             0
@@ -591,7 +674,22 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             );
             0
         }
-        WM_VSCROLL if !(*p).side => {
+        WM_MOUSEMOVE => {
+            augment_ui::hover(
+                hwnd,
+                &mut *p,
+                l as u16 as i16 as i32,
+                (l >> 16) as u16 as i16 as i32,
+            );
+            0
+        }
+        WM_MOUSELEAVE => {
+            if (*p).hover.take().is_some() {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            0
+        }
+        WM_VSCROLL => {
             let mut info: SCROLLINFO = zeroed();
             info.cbSize = std::mem::size_of::<SCROLLINFO>() as u32;
             info.fMask = SIF_ALL;
@@ -624,22 +722,24 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_MOUSEWHEEL => {
             let delta = ((w >> 16) as u16 as i16) as i32;
-            if !(*p).side {
-                let layout = presentation::layout(hwnd, &*p);
-                let mut point = POINT {
-                    x: (l as u16 as i16) as i32,
-                    y: ((l >> 16) as u16 as i16) as i32,
-                };
-                ScreenToClient(hwnd, &mut point);
-                let y = point.y * 96 / layout.dpi - 40 + (*p).page_scroll;
-                let stage_rows =
-                    (*p).stage_panel && y >= layout.detail_top + 120 && y < layout.detail_top + 488;
-                if !stage_rows {
-                    presentation::scroll(hwnd, &mut *p, if delta > 0 { -72 } else { 72 });
-                    return 0;
-                }
+            let layout = presentation::layout(hwnd, &*p);
+            let mut point = POINT {
+                x: l as u16 as i16 as i32,
+                y: (l >> 16) as u16 as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut point);
+            if augment_ui::scroll_description(
+                hwnd,
+                &mut *p,
+                &layout,
+                point.x * 96 / layout.dpi,
+                point.y * 96 / layout.dpi,
+                delta,
+            ) {
+                return 0;
             }
-            if (*p).stage_panel {
+            let y = point.y * 96 / layout.dpi - 40 + (*p).page_scroll;
+            if (*p).stage_panel && y >= layout.detail_top + 120 && y < layout.detail_top + 488 {
                 let count = (*p)
                     .stage_reply
                     .snapshot
@@ -652,29 +752,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     ((*p).stage_scroll + 3).min(count.saturating_sub(1))
                 };
                 InvalidateRect(hwnd, null(), 0);
-                return 0;
-            }
-            let count = (*p)
-                .reply
-                .detail
-                .as_ref()
-                .map(|d| {
-                    if (*p).side {
-                        side_lines(d)
-                            .iter()
-                            .filter(|row| !presentation::source_line(&row.text))
-                            .count()
-                    } else {
-                        d.lines.len()
-                    }
-                })
-                .unwrap_or(0);
-            (*p).scroll = if delta > 0 {
-                (*p).scroll.saturating_sub(3)
             } else {
-                ((*p).scroll + 3).min(count.saturating_sub(1))
-            };
-            InvalidateRect(hwnd, null(), 0);
+                presentation::scroll(hwnd, &mut *p, if delta > 0 { -72 } else { 72 });
+            }
             0
         }
         WM_EXITSIZEMOVE => {
@@ -700,9 +780,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
         WM_ERASEBKGND => 1,
         WM_SIZE => {
-            if !(*p).side {
-                presentation::scroll(hwnd, &mut *p, 0);
-            }
+            presentation::scroll(hwnd, &mut *p, 0);
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -743,141 +821,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         _ => DefWindowProcW(hwnd, msg, w, l),
     }
 }
-fn side_lines(detail: &fuze_data::champion_detail::Detail) -> &[fuze_data::champion_detail::Line] {
-    detail
-        .lines
-        .iter()
-        .position(|l| {
-            ["海克斯强化", "海克斯增幅", "Augments ·"]
-                .iter()
-                .any(|p| l.text.starts_with(p))
-        })
-        .map(|i| &detail.lines[i + 1..])
-        .unwrap_or(&[])
-}
-unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
-    use crate::desktop::{fill, rgb, text};
-    let mut r: RECT = zeroed();
-    GetClientRect(hwnd, &mut r);
-    let dpi = GetDpiForWindow(hwnd).max(96) as i32;
-    let x = |v| v * dpi / 96;
-    fill(dc, r, rgb(17, 30, 46));
-    presentation::header(hwnd, dc, state);
-    let line = |s: &str, top, size, color| {
-        text(
-            dc,
-            s,
-            RECT {
-                left: x(16),
-                top,
-                right: r.right - x(16),
-                bottom: top + x(30),
-            },
-            x(size),
-            color,
-        )
-    };
-    line(
-        "实际领取轮次未确认；与三卡识别独立",
-        x(48),
-        12,
-        rgb(138, 167, 180),
-    );
-    if let Some(detail) = &state.reply.detail {
-        line(&detail.title, x(82), 17, rgb(222, 233, 234));
-        let mut top = x(125);
-        for row in side_lines(detail)
-            .iter()
-            .filter(|row| !presentation::source_line(&row.text))
-            .skip(state.scroll)
-        {
-            let chunks = wrap(
-                &row.text,
-                ((r.right - x(70))
-                    / x(if crate::i18n::locale() == "en-US" {
-                        9
-                    } else {
-                        16
-                    }))
-                .max(8) as usize,
-            );
-            let height = x((chunks.len() as i32 * 23 + 18).max(63));
-            if top + height > r.bottom - x(52) {
-                break;
-            }
-            fill(
-                dc,
-                RECT {
-                    left: x(16),
-                    top,
-                    right: r.right - x(16),
-                    bottom: top + height - x(8),
-                },
-                rgb(43, 64, 87),
-            );
-            fill(
-                dc,
-                RECT {
-                    left: x(17),
-                    top: top + 1,
-                    right: r.right - x(17),
-                    bottom: top + height - x(8) - 1,
-                },
-                rgb(26, 43, 62),
-            );
-            let left = if let Some(url) = row.icons.first() {
-                icon(dc, state, url, x(24), top + x(8), x(36));
-                x(70)
-            } else {
-                x(24)
-            };
-            for (i, chunk) in chunks.iter().enumerate() {
-                text(
-                    dc,
-                    chunk,
-                    RECT {
-                        left,
-                        top: top + x(i as i32 * 23 + 5),
-                        right: r.right - x(24),
-                        bottom: top + x(i as i32 * 23 + 28),
-                    },
-                    x(if row.icons.is_empty() { 12 } else { 15 }),
-                    rgb(176, 211, 215),
-                );
-            }
-            top += height;
-        }
-        if side_lines(detail).is_empty() {
-            line(
-                "本地详情不可用；可暂停后更新数据",
-                x(130),
-                14,
-                rgb(198, 171, 100),
-            );
-        }
-    } else {
-        line(
-            if state.reply.error.is_some() {
-                "本地详情不可用；可暂停后更新数据"
-            } else {
-                "正在读取本地详情…"
-            },
-            x(100),
-            15,
-            rgb(176, 211, 215),
-        );
-    }
-    if let Some(view) = &state.view {
-        line(&view.version, r.bottom - x(50), 12, rgb(138, 167, 180));
-    }
-    line("滚轮浏览详情", r.bottom - x(28), 12, rgb(205, 174, 108));
-}
 unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
-    if state.side {
-        draw_side(hwnd, dc, state);
-    } else {
-        presentation::draw(hwnd, dc, state);
-    }
+    presentation::draw(hwnd, dc, state);
 }
 unsafe fn draw_stage(dc: HDC, state: &State, r: RECT, d: i32) {
     use crate::desktop::{fill, rgb, text};
@@ -1092,6 +1037,45 @@ mod tests {
 }
 
 impl State {
+    fn can_install(&self) -> bool {
+        !self.side
+            && self.install.is_none()
+            && self
+                .reply
+                .detail
+                .as_ref()
+                .is_some_and(|d| !d.item_sets.is_empty())
+            && self.view.as_ref().is_some_and(|v| {
+                v.local_slot
+                    .and_then(|i| v.team.get(i))
+                    .is_some_and(|h| h.id == self.selected && h.id > 0)
+            })
+    }
+    fn install_items(&mut self) {
+        if self.offline || !self.can_install() {
+            return;
+        }
+        let id = self.selected;
+        let sets = self.reply.detail.as_ref().unwrap().item_sets.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let result = std::thread::Builder::new()
+            .name("fuze-item-sets".into())
+            .spawn(move || {
+                let result = (|| {
+                    let prefs = crate::preferences::read(&crate::preferences::path()?)?;
+                    let manual = (!prefs.manual_directory.is_empty())
+                        .then(|| std::path::Path::new(&prefs.manual_directory));
+                    let session = fuze_lcu::discovery::HistorySession::open(manual)?;
+                    session.install_item_sets(id, &sets)
+                })();
+                let _ = tx.send(result);
+            });
+        self.install_status = Some((id, false));
+        if result.is_ok() {
+            self.install = Some(rx);
+        }
+    }
+
     fn stage_request(&mut self, refresh: bool) {
         if !self.stage_panel || !self.stage_allowed || self.selected == 0 {
             self.stage_service.request(None);
@@ -1131,6 +1115,24 @@ impl State {
     }
 
     fn request(&mut self) {
+        // Bench/team refresh must not reset a player browsing the same champion.
+        if self
+            .view
+            .as_ref()
+            .zip(self.reply.key.as_ref())
+            .is_some_and(|(v, key)| {
+                key.id == self.selected
+                    && key.version == v.version
+                    && key.download == self.downloads
+                    && !self.dismissed
+            })
+        {
+            self.stage_request(false);
+            return;
+        }
+        self.hover = None;
+        self.inspected = None;
+        self.build_route = 0;
         self.stage_request(false);
         self.reply = Default::default();
         self.assets.request(

@@ -57,6 +57,17 @@ impl HistorySession {
             client,
         })
     }
+    /// Called only after a player's explicit item-set button, never from the monitor.
+    pub fn install_item_sets(
+        &self,
+        champion: u32,
+        sets: &[serde_json::Value],
+    ) -> crate::history::Result<()> {
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("item-sets-client-unavailable");
+        }
+        self.client.install_item_sets(self.pid, champion, sets)
+    }
     pub fn owner(&self) -> crate::history::Result<crate::history::Owner> {
         if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
             return Err("history-client-unavailable");
@@ -67,12 +78,33 @@ impl HistorySession {
         &self,
         owner: &crate::history::Owner,
     ) -> crate::history::Result<Vec<crate::history::Match>> {
+        self.rows_page(owner, 0)
+    }
+    pub fn sgp_rows(
+        &self,
+        owner: &crate::history::Owner,
+        start: u32,
+    ) -> crate::history::Result<Vec<crate::history::Match>> {
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("history-client-unavailable");
+        }
+        let result = self.client.history_sgp(self.pid, owner, start);
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("history-client-unavailable");
+        }
+        result
+    }
+    pub fn rows_page(
+        &self,
+        owner: &crate::history::Owner,
+        start: u32,
+    ) -> crate::history::Result<Vec<crate::history::Match>> {
         // The host brackets this request with owner()/phase verification.
         // Parsing independently rejects any participant belonging to a different owner.
         if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
             return Err("history-client-unavailable");
         }
-        let result = self.client.history_rows(self.pid, owner);
+        let result = self.client.history_rows(self.pid, owner, start);
         if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
             return Err("history-client-unavailable");
         }
@@ -335,6 +367,23 @@ impl Default for AutoClient {
     }
 }
 impl AutoClient {
+    /// Called at most once per verified game/reconnect by the monitor, outside OCR/UI work.
+    pub fn journal_owner(&self) -> crate::history::Result<(crate::history::Owner, u64)> {
+        let c = self
+            .connection
+            .as_ref()
+            .ok_or("journal-client-unavailable")?;
+        if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("journal-client-unavailable");
+        }
+        let result = c.client.journal_owner(c.pid)?;
+        if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT
+            || self.context.and_then(|c| c.observed_game_id()) != Some(result.1)
+        {
+            return Err("journal-context-changed");
+        }
+        Ok(result)
+    }
     pub fn with_fallback(manual: Option<PathBuf>) -> Self {
         Self {
             manual,

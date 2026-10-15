@@ -17,11 +17,31 @@ pub(super) unsafe fn rail(hwnd: HWND) -> i32 {
 }
 fn height(u: &Ui) -> i32 {
     if u.settings {
-        1100
+        1680 + storage_extra(u)
+    } else if u.records && u.history && !u.journal {
+        history_ui::height(u).max(620)
     } else if u.records {
         620
     } else {
-        750
+        1010 + if u.level_details { 80 } else { 0 } + if u.data_details { 154 } else { 0 }
+    }
+}
+fn storage_extra(u: &Ui) -> i32 {
+    u.maintenance
+        .storage
+        .as_ref()
+        .map(|p| (p.categories.len() + p.versions.len()) as i32 * 26 + 28)
+        .unwrap_or(0)
+}
+pub(super) fn settings_y(y: i32, u: &Ui) -> i32 {
+    if !u.settings {
+        y
+    } else if y >= 1442 {
+        y - 1176
+    } else if y >= 266 {
+        y + 232 + storage_extra(u)
+    } else {
+        y
     }
 }
 pub(super) unsafe fn bounds(hwnd: HWND, u: &Ui) -> RECT {
@@ -53,6 +73,8 @@ pub(super) unsafe fn configure_scroll(hwnd: HWND, u: &mut Ui) {
 }
 pub(super) unsafe fn place(hwnd: HWND, child: HWND, x: i32, y: i32, w: i32, h: i32, redraw: i32) {
     let u = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Ui);
+    let d = dpi(hwnd);
+    let y = settings_y(y * 96 / d, u) * d / 96;
     MoveWindow(
         child,
         rail(hwnd) + x,
@@ -315,7 +337,7 @@ pub(super) unsafe fn navigation(hwnd: HWND, u: &Ui) {
         );
     }
     if u.settings {
-        for (i, id) in [201, 202, 203, 204, 205, 206, 207, 208, 223, 224]
+        for (i, id) in [201, 202, 203, 204, 205, 206, 207, 208, 223, 224, 225]
             .iter()
             .enumerate()
         {
@@ -333,7 +355,7 @@ pub(super) unsafe fn navigation(hwnd: HWND, u: &Ui) {
             hwnd,
             GetDlgItem(hwnd, IMPORT_SETTINGS as i32),
             x(48),
-            x(1020),
+            x(1080),
             x(190),
             x(38),
             1,
@@ -342,7 +364,7 @@ pub(super) unsafe fn navigation(hwnd: HWND, u: &Ui) {
             hwnd,
             GetDlgItem(hwnd, SAVE_SETTINGS as i32),
             right - x(212),
-            x(1020),
+            x(1080),
             x(164),
             x(38),
             1,
@@ -351,7 +373,7 @@ pub(super) unsafe fn navigation(hwnd: HWND, u: &Ui) {
             hwnd,
             GetDlgItem(hwnd, 210),
             x(48),
-            x(936),
+            x(992),
             right - x(96),
             x(32),
             1,
@@ -442,9 +464,9 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     let x = |v| v * d / 96;
     let rect = |l, t, rr, b| RECT {
         left: x(l),
-        top: x(t),
+        top: x(settings_y(t, u)),
         right: rr,
-        bottom: x(b),
+        bottom: x(settings_y(b, u)),
     };
     let width = r.right;
     let right = width - x(28);
@@ -481,7 +503,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     text(
         dc,
         if u.settings {
-            "暂停识别后可修改设置，保存后再次开始识别。"
+            "暂停后可修改；开关即时保存，目录单独保存，再次开始识别生效。"
         } else {
             "连接、识别与推荐，进度一目了然。"
         },
@@ -498,7 +520,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             x(14),
             GOLD,
         );
-        box_rect(dc, rect(28, 266, right, 858), PANEL, EDGE);
+        box_rect(dc, rect(28, 266, right, 914), PANEL, EDGE);
         let labels = [
             "识别计算方式",
             "识别与推荐数据语言",
@@ -510,6 +532,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             "暂停快捷键 Ctrl+Shift+F8",
             "等级辅助调度",
             "显示三卡推荐",
+            "自动显示局内侧栏",
         ];
         for (i, label) in labels.iter().enumerate() {
             let top = 282 + i as i32 * 56;
@@ -520,33 +543,124 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
                 x(14),
                 IVORY,
             );
-            if i < 9 {
+            if i < 10 {
                 fill(dc, rect(48, top + 55, right - x(20), top + 56), EDGE);
             }
         }
-        box_rect(dc, rect(28, 878, right, 990), PANEL, EDGE);
-        box_rect(dc, rect(47, 935, right - x(19), 969), BASE, EDGE);
+        box_rect(dc, rect(28, 934, right, 1046), PANEL, EDGE);
+        box_rect(dc, rect(47, 991, right - x(19), 1025), BASE, EDGE);
         text(
             dc,
             "连接与诊断",
-            rect(48, 886, right - x(20), 911),
+            rect(48, 942, right - x(20), 967),
             x(16),
             GOLD,
         );
         text(
             dc,
             "自动发现客户端；下方目录仅在自动发现失败后使用，可留空。",
-            rect(48, 910, right - x(20), 935),
+            rect(48, 966, right - x(20), 991),
             x(12),
             MUTED,
         );
         text(
             dc,
             u.shown.notice.unwrap_or("更改在下次开始识别时生效。"),
-            rect(48, 972, right - x(20), 993),
+            rect(48, 1028, right - x(20), 1049),
             x(12),
             MUTED,
         );
+        box_rect(dc, rect(28, 1136, right, 1424), PANEL, EDGE);
+        text(
+            dc,
+            "浮窗与领取信号诊断",
+            rect(48, 1142, right - x(20), 1167),
+            x(16),
+            GOLD,
+        );
+        text(
+            dc,
+            "实际领取轮次未确认，继续使用整体胜率。预览内容不是本局识别结果。",
+            rect(48, 1212, right - x(20), 1242),
+            x(12),
+            MUTED,
+        );
+        claim_ui::paint(dc, u, right, d);
+        box_rect(
+            dc,
+            rect(28, 1442, right, 1650 + storage_extra(u)),
+            PANEL,
+            EDGE,
+        );
+        text(
+            dc,
+            "存储管理",
+            rect(48, 1452, right - x(20), 1480),
+            x(16),
+            GOLD,
+        );
+        text(
+            dc,
+            "保留个人记录、设置、当前与回退版本；清理预览中的过期数据及下载事务。",
+            rect(48, 1534, right - x(20), 1560),
+            x(12),
+            MUTED,
+        );
+        if let Some(p) = &u.maintenance.storage {
+            for (i, (label, n, bytes)) in p
+                .categories
+                .iter()
+                .map(|(l, n, b)| (crate::i18n::text(l).to_owned(), *n, *b))
+                .chain(p.versions.iter().cloned())
+                .enumerate()
+            {
+                text(
+                    dc,
+                    &format!(
+                        "{label} · {n} {} · {:.1} MB",
+                        crate::i18n::text("文件"),
+                        bytes as f64 / 1048576.0
+                    ),
+                    rect(
+                        48,
+                        1648 + i as i32 * 26,
+                        right - x(20),
+                        1672 + i as i32 * 26,
+                    ),
+                    x(12),
+                    MUTED,
+                );
+            }
+            let line = format!(
+                "{} {:.1} MB · {} {} · {} {:.1} MB / {}",
+                crate::i18n::text("存储占用"),
+                p.bytes as f64 / 1048576.0,
+                crate::i18n::text("文件"),
+                p.files,
+                crate::i18n::text("可回收"),
+                p.reclaimable as f64 / 1048576.0,
+                p.removable
+            );
+            text(dc, &line, rect(48, 1564, right - x(20), 1594), x(14), IVORY);
+            if p.protection_unknown {
+                text(
+                    dc,
+                    "部分数据保护状态不明，已保留。",
+                    rect(48, 1594, right - x(20), 1618),
+                    x(12),
+                    GOLD,
+                );
+            }
+        }
+        if let Some(message) = u.maintenance.message {
+            text(
+                dc,
+                message,
+                rect(48, 1620, right - x(20), 1646),
+                x(12),
+                MUTED,
+            );
+        }
         return;
     }
     let p = &u.shown.pipeline;
@@ -672,10 +786,19 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             x(14),
             IVORY,
         );
-        if i == 3 {
+        if i == 0 || i == 3 {
+            let verification = format!(
+                "{} · {}",
+                crate::i18n::text("最近连接验证"),
+                u.shown.verified_time.as_deref().unwrap_or("—")
+            );
             text(
                 dc,
-                "数据版本",
+                if i == 3 {
+                    "数据版本"
+                } else {
+                    &verification
+                },
                 RECT {
                     left: l + x(16),
                     top: x(413),
@@ -690,7 +813,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     box_rect(dc, rect(28, 458, right, 686), PANEL, EDGE);
     text(
         dc,
-        "本次运行最近识别",
+        "本局最近识别",
         rect(48, 472, right - x(20), 501),
         x(17),
         GOLD,
@@ -717,6 +840,20 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             EDGE,
         );
         let slot = p.recent.as_ref().map(|s| &s[i]);
+        if let Some(tier) = p.recent_tiers[i] {
+            text(
+                dc,
+                &format!("{} {}", crate::i18n::text("梯队"), tier),
+                RECT {
+                    left: l + x(64),
+                    top: x(558),
+                    right: l + card - x(12),
+                    bottom: x(584),
+                },
+                x(13),
+                GOLD,
+            );
+        }
         let (name, hint) = match slot {
             Some(fuze_contract::Slot::Known { name, .. }) => (name.as_str(), "最近识别的候选"),
             Some(fuze_contract::Slot::Unreadable) => ("此位置未识别", "可能被遮挡，等待下一次识别"),
@@ -755,6 +892,163 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             MUTED,
         );
     }
+    box_rect(dc, rect(28, 702, right, 868), PANEL, EDGE);
+    text(
+        dc,
+        "运行开销",
+        rect(48, 714, right - x(20), 742),
+        x(17),
+        GOLD,
+    );
+    let values = [
+        ("CPU", u.shown.resources.cpu.map(|v| format!("{v:.1}%"))),
+        (
+            "内存",
+            u.shown.resources.memory_mb.map(|v| format!("{v:.0} MB")),
+        ),
+        ("识别次数", Some(p.analyses.to_string())),
+        ("最近识别耗时", p.analysis_ms.map(|v| format!("{v:.0} ms"))),
+    ];
+    let cell = (width - x(96)) / 4;
+    for (i, (label, value)) in values.iter().enumerate() {
+        let left = x(48) + i as i32 * cell;
+        text(
+            dc,
+            label,
+            RECT {
+                left,
+                top: x(756),
+                right: left + cell - x(12),
+                bottom: x(777),
+            },
+            x(12),
+            MUTED,
+        );
+        text(
+            dc,
+            value.as_deref().unwrap_or("—"),
+            RECT {
+                left,
+                top: x(780),
+                right: left + cell - x(12),
+                bottom: x(819),
+            },
+            x(23),
+            IVORY,
+        );
+    }
+    text(
+        dc,
+        &format!(
+            "{} · {} · {} {}",
+            crate::i18n::text("每 2 秒采样自身与 OCR 子进程"),
+            u.shown.resources.sampled.as_deref().unwrap_or("—"),
+            crate::i18n::text("调度跳过"),
+            p.skipped_frames
+        ),
+        rect(48, 833, right - x(20), 855),
+        x(12),
+        MUTED,
+    );
+    let level_bottom = 920 + if u.level_details { 80 } else { 0 };
+    box_rect(dc, rect(28, 884, right, level_bottom), PANEL, EDGE);
+    text(
+        dc,
+        if u.level_details {
+            "▾ 等级辅助调度"
+        } else {
+            "▸ 等级辅助调度"
+        },
+        rect(48, 888, right - x(20), 916),
+        x(14),
+        GOLD,
+    );
+    if u.level_details {
+        let mut value = format!(
+            "{} {} · {}",
+            crate::i18n::text("当前等级"),
+            p.level.map(|v| v.to_string()).unwrap_or("—".into()),
+            crate::i18n::text(if u.shown.preferences.level_gate {
+                "已开启"
+            } else {
+                "已关闭"
+            })
+        );
+        if let Some((_, interval, next)) = p.schedule {
+            value.push_str(&format!(
+                " · {} {} · {} {interval} ms",
+                crate::i18n::text("下次调度等级"),
+                next.map(|v| v.to_string()).unwrap_or("—".into()),
+                crate::i18n::text("检查间隔")
+            ));
+        }
+        text(dc, &value, rect(48, 926, right - x(20), 951), x(14), IVORY);
+        text(
+            dc,
+            "等级仅辅助安排识别；无法确认实际领取轮次。",
+            rect(48, 956, right - x(20), 981),
+            x(12),
+            MUTED,
+        );
+    }
+    let data_top = level_bottom + 16;
+    let data_bottom = data_top + 36 + if u.data_details { 154 } else { 0 };
+    box_rect(dc, rect(28, data_top, right, data_bottom), PANEL, EDGE);
+    text(
+        dc,
+        if u.data_details {
+            "▾ 数据来源与版本"
+        } else {
+            "▸ 数据来源与版本"
+        },
+        rect(48, data_top + 4, right - x(20), data_top + 32),
+        x(14),
+        GOLD,
+    );
+    if u.data_details {
+        let r = &u.shown.recognition;
+        for (i, value) in [
+            format!(
+                "{} / ARAMMayhem {} · {} · {}",
+                crate::i18n::text("识别字典"),
+                r.patch,
+                r.count,
+                r.date
+            ),
+            format!(
+                "{} / ARAMGG {}",
+                crate::i18n::text("推荐数据"),
+                u.shown.available.as_deref().unwrap_or("—")
+            ),
+            format!(
+                "{} {}",
+                crate::i18n::text("腾讯版本参考（非本机实测）"),
+                if r.reference.is_empty() {
+                    "—"
+                } else {
+                    &r.reference
+                }
+            ),
+            crate::i18n::text("多源补充名称；胜率采用单一来源，不混用其他补丁。").into(),
+            "ARAMMayhem · CC BY 4.0 · arammayhem.com/zh-cn/data/".into(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            text(
+                dc,
+                value,
+                rect(
+                    48,
+                    data_top + 42 + i as i32 * 26,
+                    right - x(20),
+                    data_top + 66 + i as i32 * 26,
+                ),
+                x(12),
+                MUTED,
+            );
+        }
+    }
     text(
         dc,
         if u.tray && u.shown.preferences.close_to_tray {
@@ -762,10 +1056,34 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         } else {
             "关闭窗口将退出；你也可以使用左侧“退出”。"
         },
-        rect(28, 702, right, 731),
+        rect(28, data_bottom + 16, right, data_bottom + 44),
         x(12),
         MUTED,
     );
+}
+
+pub(super) unsafe fn click(hwnd: HWND, u: &mut Ui, px: i32, py: i32) {
+    if u.records || u.settings {
+        return;
+    }
+    let d = dpi(hwnd);
+    let left = (px - rail(hwnd)) * 96 / d;
+    let top = (py + u.scroll) * 96 / d;
+    let width = bounds(hwnd, u).right * 96 / d;
+    if left < 28 || left >= width - 28 {
+        return;
+    }
+    if (884..920).contains(&top) {
+        u.level_details = !u.level_details;
+    } else {
+        let data_top = 936 + if u.level_details { 80 } else { 0 };
+        if !(data_top..data_top + 36).contains(&top) {
+            return;
+        }
+        u.data_details = !u.data_details;
+    }
+    SendMessageW(hwnd, WM_SIZE, 0, 0);
+    InvalidateRect(hwnd, null(), 0);
 }
 
 /// Bounded renders of this hidden fixture window only. No input, live discovery or capture.
@@ -824,6 +1142,14 @@ pub(super) unsafe fn review(hwnd: HWND, u: &mut Ui, directory: &str) -> Result<(
         SendMessageW(hwnd, WM_COMMAND, SETTINGS, 0);
         u.scroll = i32::MAX;
         SendMessageW(hwnd, WM_SIZE, 0, 0);
+        render(hwnd, u, "settings-bottom.png")?;
+        // Reveal a focused directory control through our own notification handler.
+        SendMessageW(
+            hwnd,
+            WM_COMMAND,
+            210 | ((EN_SETFOCUS as usize) << 16),
+            GetDlgItem(hwnd, 210) as isize,
+        );
         let mut edit: RECT = zeroed();
         GetWindowRect(GetDlgItem(hwnd, 210), &mut edit);
         let mut point = POINT {
@@ -836,7 +1162,7 @@ pub(super) unsafe fn review(hwnd: HWND, u: &mut Ui, directory: &str) -> Result<(
         if u.scroll <= 0 || point.y < 0 || point.y + edit.bottom - edit.top > client.bottom {
             return Err("workbench-scroll-layout");
         }
-        render(hwnd, u, "settings-bottom.png")?;
+        render(hwnd, u, "settings-directory.png")?;
         SendMessageW(hwnd, WM_COMMAND, RECORDS, 0);
         if !u.records || u.settings || u.scroll != 0 {
             return Err("workbench-history-navigation");
@@ -845,6 +1171,13 @@ pub(super) unsafe fn review(hwnd: HWND, u: &mut Ui, directory: &str) -> Result<(
         if u.records || u.settings || u.scroll != 0 {
             return Err("workbench-home-navigation");
         }
+        u.level_details = true;
+        u.data_details = true;
+        u.scroll = i32::MAX;
+        SendMessageW(hwnd, WM_SIZE, 0, 0);
+        render(hwnd, u, "main-details.png")?;
+        u.level_details = false;
+        u.data_details = false;
         Ok(())
     })();
     u.shown = shown;

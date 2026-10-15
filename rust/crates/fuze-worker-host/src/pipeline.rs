@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    tiers: std::collections::HashMap<u32, u64>,
     pub(crate) art: Option<crate::overlay_art::Art>,
     retention: crate::retention::Retention,
     pub capture_state: &'static str,
@@ -27,6 +28,7 @@ pub struct Pipeline {
     closed: bool,
     capture_failure: Option<serde_json::Value>,
     next_capture_at: u64,
+    pub skipped_frames: u64,
     pub busy_frames: u64,
     busy_streak: u8,
 }
@@ -40,6 +42,10 @@ pub struct Delivery {
     pub total_ms: f64,
 }
 impl Pipeline {
+    pub fn scheduling(&self) -> (fuze_runtime::gate::Mode, u64, Option<u8>) {
+        let (d, next) = self.session.level_schedule(self.now());
+        (d.mode, d.interval_ms, next)
+    }
     pub fn new(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
         Self::new_inner(worker, data, champion, false)
     }
@@ -53,6 +59,13 @@ impl Pipeline {
         persist: bool,
     ) -> Result<Self> {
         let dataset = data.identity();
+        let tiers = data
+            .champion_detail(champion)
+            .ok()
+            .into_iter()
+            .flat_map(|d| d.augments)
+            .filter_map(|a| a.tier.filter(|t| *t > 0).map(|t| (a.id, t)))
+            .collect();
         let mut session = Session::new(dataset.clone())?;
         session.update_phase(Phase::Loading)?;
         let stats = data.recommendations(champion)?;
@@ -67,6 +80,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            tiers,
             art: None,
             retention: Default::default(),
             capture_state: "waiting",
@@ -79,6 +93,7 @@ impl Pipeline {
             closed: false,
             capture_failure: None,
             next_capture_at: 0,
+            skipped_frames: 0,
             busy_frames: 0,
             busy_streak: 0,
         })
@@ -97,6 +112,9 @@ impl Pipeline {
     }
     pub fn dataset(&self) -> &str {
         &self.dataset
+    }
+    pub fn tier(&self, id: u32) -> Option<u64> {
+        self.tiers.get(&id).copied()
     }
     pub fn now(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
@@ -289,6 +307,7 @@ impl Pipeline {
             self.capture_state = "waiting-frame";
         }
         if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
+            self.skipped_frames = self.skipped_frames.saturating_add(1);
             return Ok(None);
         }
         let Some(mut capture) = self.capture.take() else {

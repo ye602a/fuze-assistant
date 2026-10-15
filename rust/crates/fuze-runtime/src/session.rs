@@ -155,6 +155,9 @@ impl Session {
     pub fn clear_level(&mut self) {
         self.gate.clear_level();
     }
+    pub fn level_schedule(&self, now: u64) -> (crate::gate::Decision, Option<u8>) {
+        (self.gate.decision(now), self.gate.next_level())
+    }
     pub fn update_level(&mut self, level: u8, now: u64) {
         if self.phase == Phase::InProgress && !self.paused {
             self.gate.update_level(level, now);

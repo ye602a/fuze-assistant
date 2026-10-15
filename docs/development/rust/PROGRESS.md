@@ -1,6 +1,6 @@
 # Rust migration status - 2026-10-16
 
-This is the current checklist. Earlier milestone documents are historical evidence, not a second list of current blockers. The stable application remains Electron/Vue. Rust is an isolated development preview and the repository remains private.
+The exact [v0.6.3 parity audit](V063_PARITY.md) now governs completion; full parity is NOT accepted. This is the current checklist. Earlier milestone documents are historical evidence, not a second list of current blockers. The stable application remains Electron/Vue. Rust is an isolated development preview and the repository remains private.
 
 | Area | Implemented | Remaining acceptance or development |
 | --- | --- | --- |
@@ -8,10 +8,10 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Client integration | Process-first discovery, command-line fallback, WebSocket/reconnect, phase/hero changes and automatic language | Real client reconnect and region-specific acceptance |
 | Scheduling | M11 connects the actual local level endpoint; expiry, cancellation generations and ordinary fallback | Gameplay timing; levels never prove actual claims |
 | Main UI / tray / settings | Restored Chinese sidebar/status/four-module/three-card structure; three languages, pause/exit, tray, safe defaults, legacy import, directory fallback, OCR/backend and module status | Final player interaction review and optional legacy controls |
-| Champion view | Restored vertical team/bench/hero/statistics/two-tab popup; details, items and bounded public icon cache, scrolled hit coordinates and compact layout | Rune-page source and optional write actions are absent; original rarity filters, hover descriptions and guide links remain separate UI work |
+| Champion view | Restored vertical team/bench/hero/statistics/two-tab popup; details, items and bounded public icon cache, scrolled hit coordinates and compact layout | Original rarity filters, complete ranked augment pool, descriptions, guide links and route selection are now implemented; explicit item-set transactions and skill grids are now connected; final old/new interaction acceptance remains open |
 | Window continuity | Main, champion and augment geometry; monitor clamping and health handshake | Physical multi-monitor/DPI/fullscreen acceptance |
-| Data / cleanup | Local-first locale isolation, explicit pause-only transactional update, bounded retirement preserving current/previous/unknown files | Background refresh parity and long-term usage; interrupted staging is preserved |
-| History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON / local PNG export | External SGP with unambiguous region; player acceptance; observation is not a claim |
+| Data / cleanup | Local-first locale isolation, explicit pause-only transactional update, bounded retirement preserving current/previous/unknown files | Idle background refresh with cancellation/version comparison implemented; manual classified storage preview/cleanup is implemented; marked stale transaction cleanup implemented while retaining recovery backups; long-term usage remains open |
+| History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON / local PNG export | Fixed-route SGP, cached lists/filter/paging, anonymous clipboard, post-game sync and verified runtime observation bindings implemented; timestamped observation timelines and recognition summaries implemented; player acceptance remains open |
 | Updates | Private credentials, differential reconstruction/full fallback, managed version switch and rollback | Publisher signing and production channel policy |
 | Local installation | M15 per-user Windows Apps registration and owned maintenance refresh; M14 shortcuts / conservative uninstall; M12 offline installation | Signed installer/bootstrap, runtime prerequisites and end-to-end player acceptance |
 | Stage winrate | M13 native manual reference: All/1-4, public source/patch/sample labels, isolated cache and explicit refresh; automatic ranking stays overall | Provider/live interaction acceptance and reliable actual-claim source for automatic ranking; no inference from levels/shards/forges/rerolls |
@@ -19,6 +19,8 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Secondary augment panel | M14 explicit tray entry, active supported champion, local overall rates and bounded icon cache; hidden on pause/disconnect | Actual gameplay/fullscreen acceptance; no inferred acquisition stage |
 
 ## Latest changes
+
+- Exact 0.6.3 comparison: full augment lists and authoritative ranking, rarity/description/guide controls, shared side-panel rendering and automatic side-panel preference, viewport-prioritized artwork and idle data refresh. See the parity audit for mandatory remaining features.
 
 - [Chinese workbench restoration](../../../rust/docs/WORKBENCH_RESTORATION.md) and [champion / in-game popup restoration](../../../rust/docs/POPUP_RESTORATION.md): actual hidden Win32 renders compared with retained Vue components, existing public artwork, bounded nonblocking three-card image delivery. PR #46's CI-only WGC failure is not declared resolved by local visual checks.
 

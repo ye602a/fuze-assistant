@@ -8,6 +8,63 @@ pub struct Request {
     pub path: PathBuf,
     pub bytes: Vec<u8>,
 }
+fn clipboard_dib(png: &[u8]) -> Result<Vec<u8>> {
+    if png.len() > 4 * 1024 * 1024 {
+        return Err("share-image-limit");
+    }
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(2048);
+    limits.max_image_height = Some(2048);
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    reader.limits(limits);
+    let pixels = reader
+        .decode()
+        .map_err(|_| "share-image-invalid")?
+        .to_rgba8();
+    let (width, height) = pixels.dimensions();
+    let mut dib = vec![0u8; 40];
+    dib[0..4].copy_from_slice(&40u32.to_le_bytes());
+    dib[4..8].copy_from_slice(&(width as i32).to_le_bytes());
+    dib[8..12].copy_from_slice(&(-(height as i32)).to_le_bytes());
+    dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+    dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+    for p in pixels.pixels() {
+        dib.extend_from_slice(&[p[2], p[1], p[0], 255]);
+    }
+    Ok(dib)
+}
+/// Only the player's explicit Copy button calls this; smoke tests never read or write clipboard.
+pub unsafe fn copy_image(hwnd: windows_sys::Win32::Foundation::HWND, png: &[u8]) -> Result<()> {
+    use windows_sys::Win32::{
+        Foundation::GlobalFree,
+        System::{DataExchange::*, Memory::*},
+    };
+    let dib = clipboard_dib(png)?;
+    let memory = GlobalAlloc(GMEM_MOVEABLE, dib.len());
+    if memory.is_null() {
+        return Err("share-allocation");
+    }
+    let pointer = GlobalLock(memory);
+    if pointer.is_null() {
+        GlobalFree(memory);
+        return Err("share-allocation");
+    }
+    std::ptr::copy_nonoverlapping(dib.as_ptr(), pointer.cast::<u8>(), dib.len());
+    GlobalUnlock(memory);
+    if OpenClipboard(hwnd) == 0 {
+        GlobalFree(memory);
+        return Err("share-clipboard-busy");
+    }
+    let success = EmptyClipboard() != 0 && !SetClipboardData(8, memory).is_null(); // CF_DIB, ownership transfers only on success.
+    CloseClipboard();
+    if !success {
+        GlobalFree(memory);
+        return Err("share-clipboard-failed");
+    }
+    Ok(())
+}
 pub fn encode(
     row: &fuze_lcu::history::Match,
     observation: Option<&fuze_lcu::history::Observation>,
@@ -21,7 +78,7 @@ pub fn encode(
         "schema":1,"kind":"fuze-anonymous-match-summary","cached":cached,
         "result":{"champion":row.champion,"outcome":row.result,"durationSeconds":row.duration,
             "kills":row.kills,"deaths":row.deaths,"assists":row.assists,"items":row.items,"augments":row.augments},
-        "candidateObservations":observation.map(|o| &o.events),
+        "candidateObservations":observation.map(|o| o.events.iter().map(|e|serde_json::json!({"cards":e.cards,"level":e.level,"partial":e.partial,"kind":e.kind})).collect::<Vec<_>>()),
         "observationsInterrupted":observation.map(|o| o.interrupted),
         "observationsCapped":observation.map(|o| o.capped),
         "actualClaimRound":null,"recommendationScope":"overall",
@@ -395,6 +452,9 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" · ");
             let detail = Detail {
+                augments: vec![],
+                guides: vec![],
+                item_sets: vec![],
                 title: if locale == "en-US" {
                     "Synthetic champion".into()
                 } else {
@@ -449,10 +509,12 @@ mod tests {
             augments: vec![7],
         };
         let observation = fuze_lcu::history::Observation {
+            recognition: None,
             game_id: row.game_id,
             interrupted: true,
             capped: false,
             events: vec![fuze_lcu::history::ObservedCards {
+                observed_at: Some(1_700_000_123_456),
                 cards: [Some(1), None, Some(3)],
                 level: Some(7),
                 partial: true,
@@ -463,6 +525,16 @@ mod tests {
         let picture = png(&bytes, None, None).unwrap();
         assert!(picture.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert_eq!(image::load_from_memory(&picture).unwrap().width(), 1200);
+        // Validate clipboard bytes without reading or changing the user's clipboard.
+        let dib = clipboard_dib(&picture).unwrap();
+        assert_eq!(u32::from_le_bytes(dib[0..4].try_into().unwrap()), 40);
+        assert_eq!(i32::from_le_bytes(dib[4..8].try_into().unwrap()), 1200);
+        assert!(i32::from_le_bytes(dib[8..12].try_into().unwrap()) < 0);
+        assert_eq!(
+            dib.len(),
+            40 + image::load_from_memory(&picture).unwrap().height() as usize * 1200 * 4
+        );
+        assert!(clipboard_dib(b"not an image").is_err());
         if let Some(path) = std::env::var_os("FUZE_SHARE_FIXTURE") {
             save(Request {
                 path: path.into(),
@@ -475,6 +547,8 @@ mod tests {
             "99887766",
             "1234567890",
             "game_id",
+            "observed_at",
+            "1700000123456",
             "created",
             "account",
             "platform",

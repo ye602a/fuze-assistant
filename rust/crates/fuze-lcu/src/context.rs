@@ -12,6 +12,13 @@ pub struct Context {
     game: u64,
 }
 impl Context {
+    pub fn observed_game_id(&self) -> Option<u64> {
+        (self.supported
+            && self.phase == Phase::InProgress
+            && self.game > 0
+            && self.game <= 9_007_199_254_740_991)
+            .then_some(self.game)
+    }
     pub fn idle(phase: Phase) -> Self {
         Self {
             phase,
