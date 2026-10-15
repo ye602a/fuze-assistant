@@ -10,7 +10,7 @@ fn clean(v: &Value) -> String {
         .collect()
 }
 fn asset(doc: &Value, id: u32) -> &Value {
-    let d = &doc["data"];
+    let d = doc.get("data").unwrap_or(doc);
     let key = id.to_string();
     if let Some(a) = d.as_array() {
         a.iter()
@@ -129,6 +129,13 @@ mod tests {
                 1001
             ),
             "Boots"
+        );
+        assert_eq!(
+            name(
+                asset(&serde_json::json!([{"id":7,"name":"Fixture augment"}]), 7),
+                7
+            ),
+            "Fixture augment"
         );
     }
 }
