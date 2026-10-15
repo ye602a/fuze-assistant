@@ -12,6 +12,8 @@ pub type Result<T> = std::result::Result<T, &'static str>;
 #[cfg(windows)]
 pub mod account_history;
 #[cfg(windows)]
+pub mod cache_maintenance;
+#[cfg(windows)]
 pub mod champ_select;
 #[cfg(windows)]
 pub mod champion_assets;

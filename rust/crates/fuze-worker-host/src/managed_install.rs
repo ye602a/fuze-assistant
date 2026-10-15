@@ -474,7 +474,35 @@ pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
         return Err("install-close-preview-first");
     }
     let _lock = lock(root)?;
-    launch_with(root, bundled, &check_bundle, &start)
+    launch_with(root, bundled, &check_bundle, &start)?;
+    // A healthy launch retains both rollback versions; maintenance is best effort.
+    prune_versions(root, bundled);
+    Ok(())
+}
+fn prune_versions(root: &Path, bundled: &Path) {
+    let Ok(state) = read(root) else { return };
+    if state.pending {
+        return;
+    }
+    let versions = root.join("versions");
+    let protected = fs::canonicalize(bundled).ok();
+    for path in crate::cache_maintenance::children(&versions) {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !update_channel::revision(name)
+            || state.current.as_ref().is_some_and(|v| v.revision == name)
+            || state.previous.as_ref().is_some_and(|v| v.revision == name)
+            || fs::canonicalize(&path).ok() == protected
+        {
+            continue;
+        }
+        if bundled_version(&path).is_ok_and(|v| v.revision == name) {
+            let _ = crate::cache_maintenance::retire(&versions, &path, &|s| {
+                allowed(s) || ["package.fuz", "package.blockmap"].contains(&s)
+            });
+        }
+    }
 }
 pub(crate) fn launch_with(
     root: &Path,
@@ -498,9 +526,6 @@ pub(crate) fn launch_with(
                 state.pending = false;
                 save(root, &state)?;
             }
-        } else {
-            state.pending = false;
-            save(root, &state)?;
         }
     }
     let directory = state
@@ -508,7 +533,11 @@ pub(crate) fn launch_with(
         .as_ref()
         .map(|v| root.join("versions").join(&v.revision))
         .unwrap_or_else(|| bundled.to_path_buf());
-    if start(&directory).is_err() {
+    let launched = start(&directory);
+    if launched == Err("install-launch-cancelled") {
+        return launched;
+    }
+    if launched.is_err() {
         if state.previous.is_some() {
             rollback(root)?;
             let old = read(root)?.current.ok_or("rollback-unavailable")?;
@@ -516,6 +545,10 @@ pub(crate) fn launch_with(
         } else {
             return Err("install-launch-readiness");
         }
+    } else if state.pending {
+        // Do not commit health before the launched UI has acknowledged readiness.
+        state.pending = false;
+        save(root, &state)?;
     }
     Ok(())
 }
@@ -546,7 +579,8 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
     std::thread::spawn(move || {
         use std::io::BufRead;
         let mut line = String::new();
-        let _ = std::io::BufReader::new(stdout.take(1024)).read_line(&mut line);
+        let mut input = std::io::BufReader::new(stdout.take(1024));
+        let _ = input.read_line(&mut line);
         let ready = if smoke {
             serde_json::from_str::<serde_json::Value>(&line).is_ok_and(|r| {
                 r["desktop_ready"] == true
@@ -554,11 +588,32 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
                     && r["game_access"] == false
             })
         } else {
-            line.trim() == "FUZE_DESKTOP_READY_1"
+            if line.trim() == "FUZE_DESKTOP_READY_2" {
+                line.clear();
+                let _ = input.read_line(&mut line);
+                if line.trim() == "FUZE_DESKTOP_CLOSED_2" {
+                    let _ = tx.send(Err("install-launch-cancelled"));
+                    return;
+                }
+                line.trim() == "FUZE_DESKTOP_HEALTHY_2"
+            } else {
+                // Existing preview packages predate the two-step health protocol.
+                line.trim() == "FUZE_DESKTOP_READY_1"
+            }
         };
-        let _ = tx.send(ready);
+        let _ = tx.send(if ready {
+            Ok(())
+        } else {
+            Err("install-launch-readiness")
+        });
     });
-    if rx.recv_timeout(Duration::from_secs(15)) != Ok(true) {
+    let acknowledgement = rx
+        .recv_timeout(Duration::from_secs(15))
+        .unwrap_or(Err("install-launch-readiness"));
+    if acknowledgement == Err("install-launch-cancelled") {
+        return acknowledgement;
+    }
+    if acknowledgement.is_err() {
         let _ = child.kill();
         let _ = child.wait();
         return Err("install-launch-readiness");
@@ -583,6 +638,54 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retirement_keeps_current_previous_and_unrecognized_files() {
+        let root = std::env::temp_dir().join(format!("fuze-retention-{}", std::process::id()));
+        safe_dir(&root).unwrap();
+        let root = fs::canonicalize(root).unwrap();
+        for revision in [
+            "111111111111",
+            "222222222222",
+            "333333333333",
+            "444444444444",
+        ] {
+            let dir = root.join("versions").join(revision);
+            safe_dir(&dir).unwrap();
+            fs::write(dir.join("build.json"), serde_json::json!({"revision":revision,"channel":"rust-development-preview","sequence":1}).to_string()).unwrap();
+        }
+        fs::write(root.join("versions/444444444444/personal.txt"), b"fixture").unwrap();
+        save(
+            &root,
+            &State {
+                current: Some(Installed {
+                    revision: "111111111111".into(),
+                    sequence: 3,
+                }),
+                previous: Some(Installed {
+                    revision: "222222222222".into(),
+                    sequence: 2,
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        prune_versions(&root, &root);
+        assert!(root.join("versions/111111111111").exists());
+        assert!(root.join("versions/222222222222").exists());
+        assert!(!root.join("versions/333333333333").exists());
+        assert!(root.join("versions/444444444444/personal.txt").exists());
+        for revision in ["111111111111", "222222222222", "444444444444"] {
+            let dir = root.join("versions").join(revision);
+            if revision == "444444444444" {
+                fs::remove_file(dir.join("personal.txt")).unwrap();
+            }
+            crate::cache_maintenance::retire(&root.join("versions"), &dir, &|s| s == "build.json")
+                .unwrap();
+        }
+        fs::remove_file(root.join("current.json")).unwrap();
+        fs::remove_dir(root.join("versions")).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn bundle_sequence_is_read_before_first_update_and_same_revision_cannot_activate() {
         let root = std::env::temp_dir().join(format!("fuze-version-test-{}", std::process::id()));
@@ -671,6 +774,10 @@ mod tests {
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
             starts.borrow_mut().push(name.clone());
             if name == manifest.revision {
+                assert!(
+                    read(&root).unwrap().pending,
+                    "readiness must precede pointer commit"
+                );
                 Err("fixture-not-ready")
             } else {
                 Ok(())

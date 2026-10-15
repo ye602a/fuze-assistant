@@ -7,7 +7,7 @@ use std::{
 use windows_sys::Win32::{Foundation::*, Security::Credentials::*};
 const TARGET: &str = "Fuze/Rust/GitHub/ye602a/fuze-assistant";
 fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(Some(0)).collect()
+    crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
 pub struct Secret(Vec<u8>);
 impl Secret {

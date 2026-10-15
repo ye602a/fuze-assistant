@@ -2,6 +2,8 @@
 
 ## 当前增量状态（M7c）
 
+M10: [runtime continuity and current release gates](M10.md). This is the current backlog; tables below retain historical milestone boundaries.
+
 M9: [match detail and selective observation import](M9.md).
 
 M8: [account history and selective import](M8.md).

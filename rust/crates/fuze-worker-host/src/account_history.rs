@@ -17,7 +17,7 @@ struct Account {
     #[serde(default)]
     observations: Vec<fuze_lcu::history::Observation>,
 }
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct View {
     pub augment_names: std::sync::Arc<std::collections::HashMap<u32, String>>,
     pub observations: std::sync::Arc<Vec<fuze_lcu::history::Observation>>,
@@ -30,6 +30,23 @@ pub struct View {
     pub error: Option<&'static str>,
     pub cached: bool,
     pub pending: usize,
+}
+// UI snapshots share immutable vectors: comparing hundreds of records every timer tick
+// adds no information. New snapshots invalidate once, even when their contents match.
+impl PartialEq for View {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.rows, &other.rows)
+            && std::sync::Arc::ptr_eq(&self.details, &other.details)
+            && std::sync::Arc::ptr_eq(&self.observations, &other.observations)
+            && std::sync::Arc::ptr_eq(&self.augment_names, &other.augment_names)
+            && self.asset_version == other.asset_version
+            && self.journal_preview == other.journal_preview
+            && self.account == other.account
+            && self.platform == other.platform
+            && self.error == other.error
+            && self.cached == other.cached
+            && self.pending == other.pending
+    }
 }
 pub struct Import {
     owner: Owner,
@@ -47,7 +64,7 @@ fn key(owner: &Owner) -> Result<String> {
     Ok(crate::update_io::hex(&hash?))
 }
 pub fn path() -> Result<PathBuf> {
-    Ok(crate::preferences::path()?.with_file_name("account-history.json"))
+    Ok(crate::preferences::path()?.with_file_name("account-history-v2.json"))
 }
 /// Explicit offline browsing; never claims this is the currently logged-in account.
 pub fn offline(path: &Path, index: usize) -> Result<View> {
@@ -66,6 +83,19 @@ pub fn offline(path: &Path, index: usize) -> Result<View> {
     })
 }
 fn read(path: &Path) -> Result<Saved> {
+    // New fields never rewrite an older binary's strict schema. Read old data only
+    // until the first successful v2 save; a malformed v2 file must not fall back.
+    let legacy;
+    let path = if !path.exists()
+        && path
+            .file_name()
+            .is_some_and(|n| n == "account-history-v2.json")
+    {
+        legacy = path.with_file_name("account-history.json");
+        legacy.as_path()
+    } else {
+        path
+    };
     if !path.exists() {
         return Ok(Saved::default());
     }
@@ -307,6 +337,25 @@ fn save_observation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_cache_keeps_legacy_bytes_and_rejects_corrupt_new_schema() {
+        let root = std::env::temp_dir().join(format!("fuze-history-v2-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old = root.join("account-history.json");
+        let new = root.join("account-history-v2.json");
+        let account = owner("fixture-account", "HN1");
+        merge(&old, &account, vec![row(1)], false).unwrap();
+        let bytes = std::fs::read(&old).unwrap();
+        assert_eq!(read(&new).unwrap().accounts[0].rows.len(), 1);
+        merge(&new, &account, vec![row(2)], false).unwrap();
+        assert_eq!(read(&new).unwrap().accounts[0].rows.len(), 2);
+        assert_eq!(std::fs::read(&old).unwrap(), bytes);
+        std::fs::write(&new, b"invalid").unwrap();
+        assert!(matches!(read(&new), Err("history-cache-invalid")));
+        std::fs::remove_file(old).unwrap();
+        std::fs::remove_file(new).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn journal_is_account_bound_idempotent_and_survives_history_refresh() {
         let dir = std::env::temp_dir().join(format!("fuze-journal-fixture-{}", std::process::id()));

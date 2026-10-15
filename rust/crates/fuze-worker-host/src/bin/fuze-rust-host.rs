@@ -40,7 +40,13 @@ fn run() -> Result<(), &'static str> {
         return Ok(());
     }
     let desktop = args.len() == 2
-        && ["--desktop", "--managed-desktop", "--desktop-smoke"].contains(&args[0].as_str());
+        && [
+            "--desktop",
+            "--managed-desktop",
+            "--desktop-smoke",
+            "--managed-desktop-smoke",
+        ]
+        .contains(&args[0].as_str());
     let check = args.len() == 2 && args[0] == "--check-bundle";
     if !check && !desktop && (args.len() != 3 || args[0] != "--live-control") {
         return Err("usage-live-control-config-seconds");
@@ -105,8 +111,8 @@ fn run() -> Result<(), &'static str> {
     if desktop {
         return fuze_worker_host::desktop::run(
             config,
-            args[0] == "--desktop-smoke",
-            args[0] == "--managed-desktop",
+            ["--desktop-smoke", "--managed-desktop-smoke"].contains(&args[0].as_str()),
+            ["--managed-desktop", "--managed-desktop-smoke"].contains(&args[0].as_str()),
         );
     }
     if check {

@@ -8,6 +8,13 @@ pub fn set(locale: &str) {
         _ => 0,
     });
 }
+pub fn locale() -> &'static str {
+    match LOCALE.get() {
+        1 => "zh-TW",
+        2 => "en-US",
+        _ => "zh-CN",
+    }
+}
 pub fn text(s: &str) -> &str {
     let locale = LOCALE.get();
     if locale == 0 {
@@ -21,6 +28,24 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["符择 · Rust 更新", "符擇 · Rust 更新", "FUZE · Rust update"],
+    ["取消", "取消", "Cancel"],
+    ["正在取消 · 等待当前请求结束，旧版本保留", "正在取消 · 等待目前請求結束，保留舊版", "Cancelling · Waiting for the current request; previous version retained"],
+    ["等待确认 · 随时可以取消，旧版本保留", "等待確認 · 可隨時取消，保留舊版", "Waiting for confirmation · You can cancel; previous version retained"],
+    ["正在检查固定 Rust 频道", "正在檢查固定 Rust 頻道", "Checking the configured Rust channel"],
+    ["正在下载 · 优先复用旧包，失败一次全量回退", "正在下載 · 優先重用舊包，失敗時一次完整下載", "Downloading · Reusing existing blocks; one full-download fallback"],
+    ["正在解包并验证 OCR · 不连接游戏", "正在解壓並驗證 OCR · 不連接遊戲", "Unpacking and checking OCR · No game connection"],
+    ["正在切换版本指针 · 保留上一版本", "正在切換版本指標 · 保留上一版本", "Activating the update · Keeping the previous version"],
+    ["私有频道令牌已删除。公开频道无需令牌。", "私人頻道權杖已刪除。公開頻道不需要權杖。", "Private-channel token removed. Public channels do not require a token."],
+    ["已切回上一版，下次启动生效。", "已切回上一版，下次啟動生效。", "Previous version restored. It will be used on the next launch."],
+    ["检查 Rust 开发频道更新？公开频道无需令牌。下载和安装均由你确认；不会操作游戏或 Electron 稳定版。", "檢查 Rust 開發頻道更新？公開頻道不需要權杖。下載及安裝均需確認；不會操作遊戲或 Electron 穩定版。", "Check for Rust preview updates? Public channels need no token. You confirm downloads and installation. The game and stable Electron app are unaffected."],
+    ["当前已是同版/更新版本，或此版本曾启动失败。不会重复安装。", "目前已是相同或較新版本，或此版本曾啟動失敗。不會重複安裝。", "Already on this or a newer version, or this update previously failed to start. Nothing will be reinstalled."],
+    ["发现 Rust 版本 {}，完整包约 {} MB。下载并校验？有可用基线时优先差分，失败最多回退一次全量。", "發現 Rust 版本 {}，完整包約 {} MB。下載並驗證？優先差分，失敗時最多一次完整下載。", "Rust version {} is available (full package: {} MB). Download and verify? Existing blocks are reused where possible, with at most one full-download fallback."],
+    ["下载与离线 OCR 自检通过（{}，下载 {} MB）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", "下載及離線 OCR 自檢通過（{}，下載 {} MB）。安裝到獨立 Rust 目錄？保留上一版，啟動驗證失敗時自動回復。", "Download and offline OCR checks passed ({}, {} MB downloaded). Install to the isolated Rust directory? The previous version is retained for startup rollback."],
+    ["Rust 更新已准备好。下次使用 Start-preview.cmd 启动新版；验证失败自动回到上一版。没有重启任何程序。", "Rust 更新已準備好。下次使用 Start-preview.cmd 啟動新版；驗證失敗時回復上一版。未重新啟動任何程式。", "Rust update is ready. Use Start-preview.cmd next time; failed startup validation restores the previous version. No application was restarted."],
+    ["操作未完成：{}\n原有版本与 Electron 稳定版保持不变。私有频道请使用 Private-channel.cmd 管理令牌；公开仓库无需令牌。", "操作未完成：{}\n保留原有版本及 Electron 穩定版。私人頻道請使用 Private-channel.cmd 管理權杖；公開儲存庫不需要權杖。", "Operation did not complete: {}\nThe previous version and stable Electron app are retained. Use Private-channel.cmd for private-channel credentials; public repositories need no token."],
+    ["仅私有频道需要：用户名可填 GitHub，密码栏填写仅此仓库 Contents 只读令牌。公开频道无需填写。", "僅私人頻道需要：使用者名稱可填 GitHub，密碼填此儲存庫 Contents 唯讀權杖。公開頻道不需要。", "Private channels only: use GitHub as the username and a token with read-only Contents access to this repository as the password. Public channels need no credentials."],
+    ["符择 · 私有更新凭据", "符擇 · 私人更新認證", "FUZE · Private update credentials"],
     ["首次观察", "首次觀察", "First observed"],
     ["候选变化", "候選變化", "Candidates changed"],
     ["再次出现", "再次出現", "Reappeared"],

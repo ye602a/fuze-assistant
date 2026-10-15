@@ -16,7 +16,7 @@ pub fn cancelled() -> bool {
     CANCEL.load(Ordering::Acquire)
 }
 fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(Some(0)).collect()
+    crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
@@ -36,6 +36,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
     }
 }
 pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
+    let locale = crate::i18n::locale();
     unsafe {
         let instance = GetModuleHandleW(null());
         let class = wide("FuzeRustUpdateProgress");
@@ -56,8 +57,8 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            540,
-            170,
+            720,
+            230,
             null_mut(),
             null_mut(),
             instance,
@@ -74,8 +75,8 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             WS_CHILD | WS_VISIBLE,
             20,
             20,
-            490,
-            40,
+            660,
+            80,
             hwnd,
             1usize as HMENU,
             instance,
@@ -86,8 +87,8 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             wide("BUTTON").as_ptr(),
             wide("取消").as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-            380,
-            70,
+            560,
+            130,
             110,
             30,
             hwnd,
@@ -98,6 +99,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
         let result = Arc::new(Mutex::new(None));
         let output = result.clone();
         std::thread::spawn(move || {
+            crate::i18n::set(locale);
             let r = std::panic::catch_unwind(work).unwrap_or(Err("update-worker-failed"));
             if let Ok(mut slot) = output.lock() {
                 *slot = Some(r);
@@ -130,5 +132,42 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+/// The launching desktop supplies its resolved language. Standalone commands use saved settings.
+pub fn init_locale() {
+    let locale = std::env::var("FUZE_UPDATE_LOCALE")
+        .ok()
+        .filter(|l| ["zh-CN", "zh-TW", "en-US"].contains(&l.as_str()))
+        .or_else(|| {
+            crate::preferences::path()
+                .ok()
+                .and_then(|p| crate::preferences::read(&p).ok())
+                .map(|p| p.locale)
+        })
+        .unwrap_or_else(|| "zh-CN".into());
+    crate::i18n::set(&locale);
+}
+pub fn translated(template: &str, values: &[String]) -> String {
+    let mut parts = crate::i18n::text(template).split("{}");
+    let mut output = parts.next().unwrap_or_default().to_owned();
+    for (part, value) in parts.zip(values) {
+        output.push_str(value);
+        output.push_str(part);
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn templates_preserve_values_without_recursive_substitution() {
+        crate::i18n::set("en-US");
+        assert_eq!(
+            super::translated("A {} B {}", &["{}".into(), "value".into()]),
+            "A {} B value"
+        );
+        crate::i18n::set("zh-CN");
     }
 }

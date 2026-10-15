@@ -277,7 +277,7 @@ impl Config {
             Duration::from_secs(30),
             Some(Arc::new(catalog)),
         )?;
-        let mut pipeline = Pipeline::new(worker, &data, champion)?;
+        let mut pipeline = Pipeline::managed(worker, &data, champion)?;
         pipeline.phase(Phase::InProgress)?;
         Ok(pipeline)
     }

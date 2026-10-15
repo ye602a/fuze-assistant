@@ -165,6 +165,13 @@ mod tests {
             p, "1.0.1", false
         ))
         .is_ok());
+        refresh_with(&test_dir.0, &|| false, &|p, _, _| {
+            fixture(p, "1.0.2", false)
+        })
+        .unwrap();
+        assert!(!test_dir.0.join("versions/1.0.0").exists());
+        assert!(test_dir.0.join("versions/1.0.1").exists());
+        assert!(test_dir.0.join("versions/1.0.2").exists());
         assert_eq!(
             refresh_with(&test_dir.0, &|| true, &|_, _, _| panic!(
                 "cancelled must not fetch"
@@ -223,11 +230,14 @@ fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Re
             path: root.to_path_buf(),
             source: Source::Cache,
         }];
-        if let Ok(existing) = fuze_data::prepare(&roots, locale, Scope::Full) {
+        let previous = fuze_data::prepare(&roots, locale, Scope::Full)
+            .ok()
+            .map(|v| v.version().to_owned());
+        if let Some(existing) = previous.as_deref() {
             let order =
                 |s: &str| -> Option<Vec<u64>> { s.split('.').map(|p| p.parse().ok()).collect() };
-            if order(existing.version()) >= order(version) {
-                versions.push(existing.identity());
+            if order(existing) >= order(version) {
+                versions.push(format!("{}@{existing}", locale.code()));
                 continue;
             }
         }
@@ -354,6 +364,38 @@ fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Re
             return Err("data-update-activate");
         }
         stage.1 = false;
+        // Only after pointer commit; retain the previous complete locale version.
+        let parent = final_dir.parent().ok_or("data-update-path")?;
+        if let Some(previous) = previous.as_deref() {
+            for old in crate::cache_maintenance::children(parent) {
+                let Some(name) = old.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !numeric(name) || name == version || name == previous {
+                    continue;
+                }
+                let manifest =
+                    crate::update_channel::bounded(&old.join("manifest.json"), 2 * 1024 * 1024)
+                        .ok()
+                        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                if manifest
+                    .is_some_and(|m| m["dataVersion"] == name && m["locale"] == locale.code())
+                {
+                    let _ = crate::cache_maintenance::retire(parent, &old, &|s| {
+                        [
+                            "manifest.json",
+                            "augments.json",
+                            "champions.json",
+                            "items.json",
+                        ]
+                        .contains(&s)
+                            || s.starts_with("champion-shards/")
+                                && s.ends_with(".json")
+                                && fuze_data::safe_path(s).is_ok()
+                    });
+                }
+            }
+        }
         versions.push(format!("{}@{version}", locale.code()));
     }
     Ok(versions)

@@ -18,6 +18,27 @@ use windows_sys::Win32::{
     },
     UI::{HiDpi::*, WindowsAndMessaging::*},
 };
+/// Optional host-owned geometry persistence. Fixtures leave this unset.
+pub trait Placement: Send {
+    fn restore(&mut self, hwnd: isize);
+    fn remember(&mut self, hwnd: isize);
+    fn recover(&mut self, hwnd: isize);
+}
+thread_local! { static PLACEMENT: std::cell::RefCell<Option<Box<dyn Placement>>> = const { std::cell::RefCell::new(None) }; }
+fn placement(hwnd: HWND, event: u8) {
+    PLACEMENT.with(|p| {
+        // SetWindowPos can synchronously re-enter the window procedure.
+        if let Ok(mut p) = p.try_borrow_mut() {
+            if let Some(p) = p.as_mut() {
+                match event {
+                    0 => p.restore(hwnd as isize),
+                    1 => p.remember(hwnd as isize),
+                    _ => p.recover(hwnd as isize),
+                }
+            }
+        }
+    });
+}
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
 thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
 thread_local! {
@@ -296,6 +317,35 @@ unsafe extern "system" fn procedure(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
+        WM_NCHITTEST => {
+            let hit = DefWindowProcW(hwnd, message, wparam, lparam);
+            let mut point = POINT {
+                x: (lparam as u16) as i16 as i32,
+                y: ((lparam >> 16) as u16) as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut point);
+            let mut r: RECT = zeroed();
+            GetClientRect(hwnd, &mut r);
+            if hit == HTCLIENT as isize
+                && point.y >= 0
+                && point.y < r.bottom * 25 / 170
+                && point.x < r.right * 730 / 760
+            {
+                HTCAPTION as isize
+            } else {
+                hit
+            }
+        }
+        WM_EXITSIZEMOVE => {
+            placement(hwnd, 2);
+            placement(hwnd, 1);
+            0
+        }
+        WM_DISPLAYCHANGE => {
+            placement(hwnd, 2);
+            placement(hwnd, 1);
+            0
+        }
         WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
         WM_LBUTTONUP => {
             let mut bounds: RECT = zeroed();
@@ -335,10 +385,13 @@ unsafe extern "system" fn procedure(
                 bounds.bottom - bounds.top,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             );
+            placement(hwnd, 2);
+            placement(hwnd, 1);
             InvalidateRect(hwnd, null(), 0);
             0
         }
         WM_CLOSE => {
+            placement(hwnd, 1);
             DestroyWindow(hwnd);
             0
         }
@@ -731,6 +784,7 @@ impl HiddenOverlay {
             std::collections::HashMap::new(),
             None,
             false,
+            None,
         )
     }
     pub fn with_statistics(
@@ -738,7 +792,15 @@ impl HiddenOverlay {
         dataset: String,
         stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
     ) -> std::result::Result<Self, &'static str> {
-        Self::start_inner(generation, dataset, stats, None, true)
+        Self::start_inner(generation, dataset, stats, None, true, None)
+    }
+    pub fn with_placement(
+        generation: u64,
+        dataset: String,
+        stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
+        placement: Box<dyn Placement>,
+    ) -> std::result::Result<Self, &'static str> {
+        Self::start_inner(generation, dataset, stats, None, true, Some(placement))
     }
     pub fn fixture_source(image: SourceImage) -> std::result::Result<Self, &'static str> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
@@ -760,6 +822,7 @@ impl HiddenOverlay {
             std::collections::HashMap::new(),
             Some(image),
             false,
+            None,
         )
     }
     pub fn cancellation(&self) -> Cancellation {
@@ -779,6 +842,7 @@ impl HiddenOverlay {
         stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
         source: Option<SourceImage>,
         statistics_mode: bool,
+        geometry: Option<Box<dyn Placement>>,
     ) -> std::result::Result<Self, &'static str> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -786,6 +850,7 @@ impl HiddenOverlay {
         let ui_flag = flag.clone();
         let thread = std::thread::spawn(move || unsafe {
             SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            PLACEMENT.with(|p| *p.borrow_mut() = geometry);
             let visible = source.is_some();
             let (width, height) = source
                 .as_ref()
@@ -838,6 +903,7 @@ impl HiddenOverlay {
                 UnregisterClassW(class.as_ptr(), instance);
                 return;
             }
+            placement(hwnd, 0);
             SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
@@ -889,7 +955,10 @@ impl HiddenOverlay {
                                             20,
                                             0,
                                             0,
-                                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                                            SWP_NOMOVE
+                                                | SWP_NOSIZE
+                                                | SWP_NOACTIVATE
+                                                | SWP_SHOWWINDOW,
                                         );
                                     } else {
                                         ShowWindow(hwnd, SW_HIDE);

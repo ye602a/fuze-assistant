@@ -5,7 +5,10 @@ use std::{
     mem::{size_of, zeroed},
     path::PathBuf,
     ptr::null_mut,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex,
+    },
     thread,
 };
 use windows_sys::Win32::{
@@ -52,6 +55,7 @@ struct Pending {
     stop: bool,
 }
 pub struct Memory {
+    failed: Arc<AtomicBool>,
     initial: Option<Geometry>,
     last: Option<Geometry>,
     shared: Arc<(Mutex<Pending>, Condvar)>,
@@ -74,8 +78,10 @@ impl Memory {
             .and_then(|b| serde_json::from_slice::<Geometry>(&b).ok())
             .filter(|v| v.valid());
         let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
+        let failed = Arc::new(AtomicBool::new(false));
         let worker = path.and_then(|path| {
             let shared = shared.clone();
+            let failed = failed.clone();
             thread::Builder::new()
                 .name("fuze-window-save".into())
                 .spawn(move || loop {
@@ -91,7 +97,7 @@ impl Memory {
                     let stop = state.stop;
                     drop(state);
                     if let Some(next) = next {
-                        let _ = save(&path, next);
+                        failed.store(save(&path, next).is_err(), Ordering::Release);
                     }
                     if stop {
                         break;
@@ -100,11 +106,15 @@ impl Memory {
                 .ok()
         });
         Self {
+            failed,
             initial,
             last: initial,
             shared,
             worker,
         }
+    }
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
     }
     pub unsafe fn restore(&self, hwnd: HWND) {
         if let Some(g) = self.initial {
@@ -143,7 +153,7 @@ impl Memory {
             return;
         }
         let next = read_window(hwnd);
-        if next.is_none() || self.last == next {
+        if next.is_none() || self.last == next && !self.failed() {
             return;
         }
         if let Ok(mut p) = self.shared.0.lock() {
@@ -229,5 +239,17 @@ mod tests {
             dpi: 96
         }
         .valid());
+    }
+}
+
+impl fuze_native_overlay::native::Placement for Memory {
+    fn restore(&mut self, hwnd: isize) {
+        unsafe { Memory::restore(self, hwnd as HWND) }
+    }
+    fn remember(&mut self, hwnd: isize) {
+        unsafe { Memory::remember(self, hwnd as HWND) }
+    }
+    fn recover(&mut self, hwnd: isize) {
+        unsafe { Memory::recover(self, hwnd as HWND) }
     }
 }

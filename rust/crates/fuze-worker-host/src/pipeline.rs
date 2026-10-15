@@ -36,14 +36,31 @@ pub struct Delivery {
 }
 impl Pipeline {
     pub fn new(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
+        Self::new_inner(worker, data, champion, false)
+    }
+    pub fn managed(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
+        Self::new_inner(worker, data, champion, true)
+    }
+    fn new_inner(
+        worker: Supervisor,
+        data: &Prepared,
+        champion: u32,
+        persist: bool,
+    ) -> Result<Self> {
         let dataset = data.identity();
         let mut session = Session::new(dataset.clone())?;
         session.update_phase(Phase::Loading)?;
-        let overlay = HiddenOverlay::with_statistics(
-            session.generation(),
-            dataset.clone(),
-            data.recommendations(champion)?,
-        )?;
+        let stats = data.recommendations(champion)?;
+        let overlay = if persist {
+            HiddenOverlay::with_placement(
+                session.generation(),
+                dataset.clone(),
+                stats,
+                Box::new(crate::window_memory::Memory::new("augments", false)),
+            )?
+        } else {
+            HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
+        };
         Ok(Self {
             capture_state: "waiting",
             session,

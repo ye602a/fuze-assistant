@@ -103,7 +103,7 @@ fn run() -> Result<(), &'static str> {
         );
         return Ok(());
     }
-    if !message(&format!("发现 Rust 版本 {}，完整包约 {} MB。下载并校验？有可用基线时优先差分，失败最多回退一次全量。",release.manifest.revision,release.manifest.size/1024/1024),true){return Ok(());}
+    if !message(&fuze_worker_host::update_progress::translated("发现 Rust 版本 {}，完整包约 {} MB。下载并校验？有可用基线时优先差分，失败最多回退一次全量。", &[release.manifest.revision.clone(), (release.manifest.size/1024/1024).to_string()]),true){return Ok(());}
     let stage = root.join(format!(
         "pending-{}-{}",
         std::process::id(),
@@ -172,7 +172,7 @@ fn run() -> Result<(), &'static str> {
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
-        if !message(&format!("下载与离线 OCR 自检通过（{}，下载 {} MB）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。",transfer.mode,transfer.downloaded/1024/1024),true){return Ok(());}
+        if !message(&fuze_worker_host::update_progress::translated("下载与离线 OCR 自检通过（{}，下载 {} MB）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", &[transfer.mode.to_string(), (transfer.downloaded/1024/1024).to_string()]),true){return Ok(());}
         let versions = root.join("versions");
         install::safe_dir(&versions)?;
         let target = versions.join(&release.manifest.revision);
@@ -221,7 +221,12 @@ fn run() -> Result<(), &'static str> {
 #[cfg(windows)]
 fn message(text: &str, question: bool) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let wide = |s: &str| {
+        fuze_worker_host::i18n::text(s)
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
     unsafe {
         MessageBoxW(
             fuze_worker_host::update_progress::OWNER.load(std::sync::atomic::Ordering::Acquire)
@@ -238,6 +243,10 @@ fn message(text: &str, question: bool) -> bool {
 }
 fn main() {
     #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() != Some("--verify-package") {
+        fuze_worker_host::update_progress::init_locale();
+    }
+    #[cfg(windows)]
     if let Err(error) = if matches!(
         std::env::args().nth(1).as_deref(),
         Some("--update") | Some("--update-private")
@@ -250,7 +259,7 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        message(&format!("操作未完成：{error}\n原有版本与 Electron 稳定版保持不变。私有频道请使用 Private-channel.cmd 管理令牌；公开仓库无需令牌。"),false);
+        message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n原有版本与 Electron 稳定版保持不变。私有频道请使用 Private-channel.cmd 管理令牌；公开仓库无需令牌。", &[error.to_string()]),false);
         std::process::exit(1);
     }
     #[cfg(not(windows))]

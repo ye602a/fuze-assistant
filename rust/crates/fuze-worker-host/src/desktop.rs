@@ -794,6 +794,7 @@ fn explain(error: Option<&str>) -> &'static str {
     }
 }
 struct Ui {
+    health_wait: Option<Instant>,
     journal: bool,
     journal_offset: usize,
     history_assets: crate::champion_assets::Service,
@@ -1532,6 +1533,8 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         format!("{}: {e}", crate::i18n::text("错误分类"))
     } else if let Some(Connection::Retry(e)) = u.shown.connection {
         format!("{}: {e:?}", crate::i18n::text("连接错误分类"))
+    } else if u.placement.failed() {
+        "window-placement-save-failed".into()
     } else if let Some(age) = u.shown.pipeline.frame_age {
         format!("{}: {age}", crate::i18n::text("上次识别（秒）"))
     } else {
@@ -1957,6 +1960,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                                 } else {
                                     "--update"
                                 })
+                                .env("FUZE_UPDATE_LOCALE", &u.shown.ui_locale)
                                 .creation_flags(0x08000000)
                                 .spawn()
                                 .is_ok()
@@ -2158,7 +2162,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         PostMessageW(hwnd, WM_COMMAND, TOGGLE, 0);
                         u.smoke_step = 2;
                     }
-                    2 if u.shown.mode == PAUSED => {
+                    2 if u.shown.mode == PAUSED
+                        && u.health_wait
+                            .is_none_or(|t| t.elapsed() >= Duration::from_millis(3500)) =>
+                    {
                         if let Ok(path) = std::env::var("FUZE_SETTINGS_PREVIEW") {
                             u.settings = true;
                             u.draft = u.shown.preferences.clone();
@@ -2315,6 +2322,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         let icon = app_icon();
         let mut ui = Box::new(Ui {
+            health_wait: (managed && smoke).then(Instant::now),
             journal: false,
             journal_offset: 0,
             history_assets: crate::champion_assets::Service::new(champion_roots.clone(), smoke)?,
@@ -2463,9 +2471,11 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         if managed {
             use std::io::Write;
-            println!("FUZE_DESKTOP_READY_1");
+            println!("FUZE_DESKTOP_READY_2");
             let _ = std::io::stdout().flush();
         }
+        let health_started = Instant::now();
+        let mut health_sent = false;
         let mut msg: MSG = zeroed();
         let failed = loop {
             let result = GetMessageW(&mut msg, null_mut(), 0, 0);
@@ -2476,7 +2486,23 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
+            if managed
+                && !health_sent
+                && health_started.elapsed() >= Duration::from_secs(3)
+                && !worker.is_finished()
+                && shared.desired.load(Ordering::Acquire) != EXIT
+            {
+                use std::io::Write;
+                println!("FUZE_DESKTOP_HEALTHY_2");
+                let _ = std::io::stdout().flush();
+                health_sent = true;
+            }
         };
+        if managed && !health_sent {
+            use std::io::Write;
+            println!("FUZE_DESKTOP_CLOSED_2");
+            let _ = std::io::stdout().flush();
+        }
         shared.request(EXIT);
         if worker.is_finished() {
             let _ = worker.join();

@@ -25,5 +25,13 @@ for (const locale of ['zh-TW','en-US']) {
  if(localized.status!==0||!value?.desktop_ready||!value.pause_resume_exit||!value.preview_rendered||!value.champion_preview||value.game_access!==false)throw new Error(`Native desktop locale failed: ${locale}`)
  report.locales.push(locale)
 }
+// Same two-step protocol as managed launch, but hidden and isolated from all game/user IO.
+const health=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--managed-desktop-smoke',path.join(folder,'preview.json')],{
+ cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,env:{...process.env,FUZE_RUST_CI_TRAY:'0'}
+})
+const lines=health.stdout?.trim().split(/\r?\n/)
+let healthy;try{healthy=JSON.parse(lines?.[2])}catch{}
+if(health.status!==0||lines?.[0]!=='FUZE_DESKTOP_READY_2'||lines?.[1]!=='FUZE_DESKTOP_HEALTHY_2'||healthy?.game_access!==false||!healthy?.pause_resume_exit)throw new Error('Managed UI health protocol failed')
+report.managed_ui_health=true
 await writeFile(path.join(root,'rust/artifacts/desktop-validation.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify(report))
