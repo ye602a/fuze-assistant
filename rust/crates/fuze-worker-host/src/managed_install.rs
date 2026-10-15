@@ -184,6 +184,7 @@ fn allowed(path: &str) -> bool {
         "Private-channel.cmd",
         "Forget-private-token.cmd",
         "Rollback.cmd",
+        "Install-local.cmd",
     ]
     .contains(&path)
         || path == "resources/inference.onnx"
@@ -361,6 +362,58 @@ pub fn activate(
     state.pending = true;
     save(root, &state)
 }
+pub(crate) fn copy_bundle(bundled: &Path, target: &Path) -> Result<()> {
+    let mut count = 0;
+    let mut total = 0;
+    fn copy(
+        from: &Path,
+        to: &Path,
+        relative: &str,
+        count: &mut usize,
+        total: &mut u64,
+    ) -> Result<()> {
+        for entry in fs::read_dir(from).map_err(|_| "install-baseline")? {
+            let entry = entry.map_err(|_| "install-baseline")?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "install-baseline")?;
+            let logical = if relative.is_empty() {
+                name
+            } else {
+                format!("{relative}/{name}")
+            };
+            let meta = fs::symlink_metadata(entry.path()).map_err(|_| "install-baseline")?;
+            if meta.file_attributes() & 0x400 != 0 {
+                return Err("install-reparse");
+            }
+            if meta.is_dir() {
+                if ["resources", "resources/client-data"].contains(&logical.as_str())
+                    || logical.starts_with("resources/client-data/")
+                {
+                    safe_dir(&to.join(entry.file_name()))?;
+                    copy(
+                        &entry.path(),
+                        &to.join(entry.file_name()),
+                        &logical,
+                        count,
+                        total,
+                    )?;
+                }
+            } else if allowed(&logical) {
+                *count += 1;
+                *total += meta.len();
+                if *count > 1024 || *total > 512 * 1024 * 1024 {
+                    return Err("install-baseline-limit");
+                }
+                fs::copy(entry.path(), to.join(entry.file_name()))
+                    .map_err(|_| "install-baseline")?;
+            }
+        }
+        Ok(())
+    }
+    copy(bundled, target, "", &mut count, &mut total)
+}
 pub fn bootstrap(root: &Path, bundled: &Path) -> Result<()> {
     if read(root)?.current.is_some() {
         return Ok(());
@@ -370,56 +423,7 @@ pub fn bootstrap(root: &Path, bundled: &Path) -> Result<()> {
     let target = root.join("versions").join(revision);
     if !target.exists() {
         safe_dir(&target)?;
-        let mut count = 0;
-        let mut total = 0;
-        fn copy(
-            from: &Path,
-            to: &Path,
-            relative: &str,
-            count: &mut usize,
-            total: &mut u64,
-        ) -> Result<()> {
-            for entry in fs::read_dir(from).map_err(|_| "install-baseline")? {
-                let entry = entry.map_err(|_| "install-baseline")?;
-                let name = entry
-                    .file_name()
-                    .into_string()
-                    .map_err(|_| "install-baseline")?;
-                let logical = if relative.is_empty() {
-                    name
-                } else {
-                    format!("{relative}/{name}")
-                };
-                let meta = fs::symlink_metadata(entry.path()).map_err(|_| "install-baseline")?;
-                if meta.file_attributes() & 0x400 != 0 {
-                    return Err("install-reparse");
-                }
-                if meta.is_dir() {
-                    if ["resources", "resources/client-data"].contains(&logical.as_str())
-                        || logical.starts_with("resources/client-data/")
-                    {
-                        safe_dir(&to.join(entry.file_name()))?;
-                        copy(
-                            &entry.path(),
-                            &to.join(entry.file_name()),
-                            &logical,
-                            count,
-                            total,
-                        )?;
-                    }
-                } else if allowed(&logical) {
-                    *count += 1;
-                    *total += meta.len();
-                    if *count > 1024 || *total > 512 * 1024 * 1024 {
-                        return Err("install-baseline-limit");
-                    }
-                    fs::copy(entry.path(), to.join(entry.file_name()))
-                        .map_err(|_| "install-baseline")?;
-                }
-            }
-            Ok(())
-        }
-        copy(bundled, &target, "", &mut count, &mut total)?;
+        copy_bundle(bundled, &target)?;
     }
     check_bundle(&target)?;
     save(

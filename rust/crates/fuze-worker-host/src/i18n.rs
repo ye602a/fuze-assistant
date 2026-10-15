@@ -28,6 +28,9 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["将当前 Rust 测试包安装到独立用户目录？无需管理员权限，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", "將目前 Rust 測試包安裝至獨立使用者目錄？無需管理員權限，不修改穩定版，不自動啟動。安裝後可刪除解壓目錄；設定與個人記錄獨立保留。", "Install this Rust preview into its separate user directory? No administrator access, stable-app changes or automatic launch. The extracted download can then be removed; settings and records remain separate."],
+    ["安装完成。请运行 LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。", "安裝完成。請執行 LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd。首次啟動通過健康檢查後確認新版；此包仍為未簽署開發預覽。", "Installed. Run LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd. The first healthy launch commits this version. This remains an unsigned development preview."],
+    ["当前版本已安装，启动入口已检查。没有重复安装或启动程序。", "目前版本已安裝，啟動入口已檢查。沒有重複安裝或啟動程式。", "This version is already installed and its entry point was checked. Nothing was reinstalled or launched."],
     ["导出当前对局（匿名）", "匯出匿名對局", "Export anonymous match"],
     ["匿名导出已保存到本机。", "匿名匯出已儲存於本機。", "Anonymous export saved locally."],
     ["不含账号、区服、时间与对局标识。", "不含帳號、區服、時間與對局識別碼。", "No account, region, timestamps or match IDs."],

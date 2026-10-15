@@ -11,7 +11,16 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
     fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
     install::safe_dir(root)?;
     let _lock = install::lock(root)?;
-    install::bootstrap(root, baseline)?;
+    crate::local_setup::install_with(root, baseline, &install::check_bundle)?;
+    install::launch_with(
+        root,
+        &root.join("no-portable-fallback"),
+        &install::check_bundle,
+        &install::start_smoke,
+    )?;
+    if crate::local_setup::install_with(root, baseline, &install::check_bundle)? {
+        return Err("validation-setup-idempotence");
+    }
     let mut initial = install::read(root)?;
     // CI may use the same built package for both versions; alias only its isolated baseline.
     if initial

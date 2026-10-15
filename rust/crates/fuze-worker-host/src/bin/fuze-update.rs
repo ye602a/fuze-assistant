@@ -54,6 +54,24 @@ fn run() -> Result<(), &'static str> {
         .ok_or("update-location")?
         .to_path_buf();
     let root = install::root()?;
+    if action == "--install-local" {
+        if !message("将当前 Rust 测试包安装到独立用户目录？无需管理员权限，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", true) { return Ok(()); }
+        if install::desktop_running() {
+            return Err("install-close-preview-first");
+        }
+        let _lock = install::lock(&root)?;
+        let changed =
+            fuze_worker_host::local_setup::install_with(&root, &bundled, &install::check_bundle)?;
+        message(
+            if changed {
+                "安装完成。请运行 LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
+            } else {
+                "当前版本已安装，启动入口已检查。没有重复安装或启动程序。"
+            },
+            false,
+        );
+        return Ok(());
+    }
     if action == "--launch" {
         return install::launch(&root, &bundled);
     }

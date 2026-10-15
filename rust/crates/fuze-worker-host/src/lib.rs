@@ -1,4 +1,6 @@
 //! One persistent child and one pipe thread. The caller must not run blocking calls on a UI loop.
+#[cfg(windows)]
+pub mod local_setup;
 use fuze_contract::wire::{self, ActiveBackend, Reply, Request};
 use std::{
     io::Write,
