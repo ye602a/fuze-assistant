@@ -18,12 +18,20 @@ pub mod desktop;
 #[cfg(windows)]
 mod job;
 #[cfg(windows)]
+pub mod managed_install;
+#[cfg(windows)]
 pub mod pipeline;
 #[cfg(windows)]
 pub mod private_update;
 pub mod recovery;
 #[cfg(windows)]
+pub mod update_channel;
+#[cfg(windows)]
+pub mod update_credential;
+#[cfg(windows)]
 pub mod update_io;
+#[cfg(windows)]
+pub mod update_progress;
 pub struct Worker {
     child: Child,
     send: Option<SyncSender<Request>>,

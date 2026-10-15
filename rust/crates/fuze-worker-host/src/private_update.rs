@@ -1,4 +1,4 @@
-//! Private-channel download core only. No credentials on disk, installer execution, or auto-update.
+//! Bounded differential reconstruction, shared by explicit public and private updates.
 use crate::{update_io, Result};
 use serde::Deserialize;
 use std::{
@@ -88,7 +88,39 @@ pub fn plan(
         });
         offset += size;
     }
-    Ok(out)
+    let mut merged: Vec<Operation> = Vec::new();
+    for op in out {
+        let extends = match (merged.last_mut(), &op) {
+            (
+                Some(Operation::Copy {
+                    offset: a,
+                    length: b,
+                }),
+                Operation::Copy {
+                    offset: c,
+                    length: d,
+                },
+            )
+            | (
+                Some(Operation::Download {
+                    offset: a,
+                    length: b,
+                }),
+                Operation::Download {
+                    offset: c,
+                    length: d,
+                },
+            ) if *a + *b == *c => {
+                *b += *d;
+                true
+            }
+            _ => false,
+        };
+        if !extends {
+            merged.push(op);
+        }
+    }
+    Ok(merged)
 }
 /// Exact range lengths are checked again after the HTTPS transport validates 206/Content-Range.
 /// Output must be a new staging file. Final SHA-512 is required before any caller activates it.
@@ -134,7 +166,7 @@ pub fn reconstruct<R: Read + Seek, W: Read + Write + Seek>(
             if cancel() {
                 return Err("delta-cancelled");
             }
-            let count = (length - consumed).min(65536) as usize;
+            let count = (length - consumed).min(if copy { 65536 } else { 1024 * 1024 }) as usize;
             let bytes = if copy {
                 let mut b = vec![0; count];
                 old.read_exact(&mut b).map_err(|_| "delta-baseline")?;
@@ -167,7 +199,7 @@ pub fn reconstruct<R: Read + Seek, W: Read + Write + Seek>(
     }
     Ok(downloaded)
 }
-fn hash_reader(reader: &mut dyn Read, cancel: &dyn Fn() -> bool) -> Result<Vec<u8>> {
+pub(crate) fn hash_reader(reader: &mut dyn Read, cancel: &dyn Fn() -> bool) -> Result<Vec<u8>> {
     use windows_sys::Win32::Security::Cryptography::*;
     struct Hash(BCRYPT_HASH_HANDLE);
     impl Drop for Hash {
@@ -231,7 +263,7 @@ pub fn target(url: &str) -> Result<Target<'_>> {
         let asset = suffix
             .strip_prefix("assets/")
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
-        if suffix == "latest" || asset {
+        if suffix == "latest" || suffix == "tags/rust-preview" || asset {
             return Ok(Target::Api(path));
         }
     } else if [

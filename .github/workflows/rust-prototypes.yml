@@ -1,10 +1,12 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control]
     paths:
       - 'rust/**'
       - 'scripts/package-rust-preview.mjs'
+      - 'scripts/package-rust-update.mjs'
+      - 'scripts/check-rust-update.mjs'
       - 'scripts/check-rust-desktop.mjs'
       - 'scripts/prepare-rust-data.mjs'
       - 'scripts/check-rust-prototypes.mjs'
@@ -70,6 +72,10 @@ jobs:
           node scripts/prepare-rust-data.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-preview.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/package-rust-update.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-rust-update.mjs
           exit $LASTEXITCODE
       - name: Native desktop pause and exit (own window only)
         env:
@@ -82,6 +88,9 @@ jobs:
           path: |
             rust/artifacts/preview/*.zip
             rust/artifacts/preview/*.sha256
+            rust/artifacts/preview/*.fuz
+            rust/artifacts/preview/*.blockmap
+            rust/artifacts/preview/rust-update.json
           retention-days: 7
       - name: Scan upload content
         run: npm run security:check
@@ -92,6 +101,7 @@ jobs:
           name: rust-prototype-evidence
           path: |
             rust/artifacts/desktop-validation.json
+            rust/artifacts/update-validation.json
             rust/artifacts/desktop.png
             rust/artifacts/preview-validation.json
             rust/artifacts/validation.json

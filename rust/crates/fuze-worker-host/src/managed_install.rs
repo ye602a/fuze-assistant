@@ -1,0 +1,591 @@
+//! Immutable per-user Rust versions. Atomic pointer switching; no in-place executable replacement.
+use crate::{
+    update_channel::{self, Manifest},
+    Result,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    os::windows::{
+        fs::{MetadataExt, OpenOptionsExt},
+        process::CommandExt,
+    },
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+};
+pub fn safe_dir(path: &Path) -> Result<()> {
+    for p in path.ancestors() {
+        if let Ok(m) = fs::symlink_metadata(p) {
+            if m.file_attributes() & 0x400 != 0 {
+                return Err("install-reparse");
+            }
+        }
+    }
+    fs::create_dir_all(path).map_err(|_| "install-directory")
+}
+pub fn root() -> Result<PathBuf> {
+    let p = std::env::var_os("LOCALAPPDATA").ok_or("install-root")?;
+    let p = PathBuf::from(p).join("FuzeRustPreview/releases");
+    safe_dir(&p)?;
+    fs::canonicalize(p).map_err(|_| "install-root")
+}
+pub fn lock(root: &Path) -> Result<File> {
+    safe_dir(root)?;
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(root.join("update.lock"))
+        .map_err(|_| "update-busy")
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Installed {
+    pub revision: String,
+    pub sequence: u64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct State {
+    pub current: Option<Installed>,
+    pub previous: Option<Installed>,
+    pub pending: bool,
+    pub rejected: Option<String>,
+}
+fn valid(s: &State) -> bool {
+    [s.current.as_ref(), s.previous.as_ref()]
+        .into_iter()
+        .flatten()
+        .all(|v| update_channel::revision(&v.revision))
+        && s.rejected
+            .as_ref()
+            .is_none_or(|v| update_channel::revision(v))
+}
+pub fn read(root: &Path) -> Result<State> {
+    if !root.join("current.json").exists() {
+        return Ok(State::default());
+    }
+    let s = serde_json::from_slice(&update_channel::bounded(&root.join("current.json"), 16384)?)
+        .map_err(|_| "install-pointer")?;
+    if !valid(&s) {
+        return Err("install-pointer");
+    }
+    Ok(s)
+}
+pub fn save(root: &Path, state: &State) -> Result<()> {
+    if !valid(state) {
+        return Err("install-pointer");
+    }
+    safe_dir(root)?;
+    let tmp = root.join(format!(
+        "pointer-{}-{}.tmp",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| "install-clock")?
+            .as_nanos()
+    ));
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|_| "install-pointer")?;
+    f.write_all(&serde_json::to_vec(state).map_err(|_| "install-pointer")?)
+        .map_err(|_| "install-pointer")?;
+    f.sync_all().map_err(|_| "install-pointer")?;
+    drop(f);
+    let wide = |p: &Path| {
+        p.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    use std::os::windows::ffi::OsStrExt;
+    if unsafe {
+        MoveFileExW(
+            wide(&tmp).as_ptr(),
+            wide(&root.join("current.json")).as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        let _ = fs::remove_file(tmp);
+        return Err("install-pointer");
+    }
+    Ok(())
+}
+pub fn rollback(root: &Path) -> Result<()> {
+    let mut s = read(root)?;
+    let old = s.previous.take().ok_or("rollback-unavailable")?;
+    s.rejected = s.current.as_ref().map(|v| v.revision.clone());
+    s.current = Some(old);
+    s.pending = false;
+    save(root, &s)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Entry {
+    path: String,
+    size: u64,
+    compressed: u64,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Index {
+    schema: u32,
+    revision: String,
+    files: Vec<Entry>,
+}
+fn allowed(path: &str) -> bool {
+    if path.len() > 240
+        || path.contains('\\')
+        || path.split('/').any(|s| {
+            s.is_empty()
+                || s == "."
+                || s == ".."
+                || s.ends_with('.')
+                || s.starts_with('.')
+                || !s
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                || ["con", "prn", "aux", "nul", "com1", "lpt1"].contains(
+                    &s.split('.')
+                        .next()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .as_str(),
+                )
+        })
+    {
+        return false;
+    }
+    [
+        "fuze-rust-host.exe",
+        "fuze-ocr-worker.exe",
+        "fuze-update.exe",
+        "onnxruntime.dll",
+        "DirectML.dll",
+        "dxcompiler.dll",
+        "dxil.dll",
+        "preview.json",
+        "build.json",
+        "THANKS.md",
+        "README.txt",
+        "Start-preview.cmd",
+        "Check-preview.cmd",
+        "Update.cmd",
+        "Private-channel.cmd",
+        "Forget-private-token.cmd",
+        "Rollback.cmd",
+    ]
+    .contains(&path)
+        || path == "resources/inference.onnx"
+        || path == "resources/dictionary.json"
+        || path.starts_with("resources/client-data/") && path.ends_with(".json")
+}
+pub fn unpack(archive: &Path, destination: &Path, revision: &str) -> Result<()> {
+    if destination.exists() {
+        return Err("install-stage-exists");
+    }
+    safe_dir(destination)?;
+    let mut input = File::open(archive).map_err(|_| "install-archive")?;
+    let mut header = [0u8; 12];
+    input
+        .read_exact(&mut header)
+        .map_err(|_| "install-archive")?;
+    if &header[..8] != b"FUZEUP01" {
+        return Err("install-format");
+    }
+    let size = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
+    if size > 512 * 1024 {
+        return Err("install-index-limit");
+    }
+    let mut data = vec![0; size];
+    input.read_exact(&mut data).map_err(|_| "install-index")?;
+    let index: Index = serde_json::from_slice(&data).map_err(|_| "install-index")?;
+    if index.schema != 1
+        || index.revision != revision
+        || index.files.is_empty()
+        || index.files.len() > 1024
+    {
+        return Err("install-index");
+    }
+    let mut total = 0u64;
+    let mut names = HashSet::new();
+    for e in &index.files {
+        if !allowed(&e.path)
+            || !names.insert(e.path.to_ascii_lowercase())
+            || e.size > 128 * 1024 * 1024
+            || e.compressed > 128 * 1024 * 1024
+        {
+            return Err("install-entry");
+        }
+        total = total
+            .checked_add(e.size)
+            .filter(|v| *v <= 512 * 1024 * 1024)
+            .ok_or("install-expanded-limit")?;
+    }
+    for required in [
+        "fuze-rust-host.exe",
+        "fuze-ocr-worker.exe",
+        "fuze-update.exe",
+        "preview.json",
+        "build.json",
+        "onnxruntime.dll",
+    ] {
+        if !names.contains(required) {
+            return Err("install-missing-file");
+        }
+    }
+    for e in index.files {
+        let path = destination.join(e.path);
+        safe_dir(path.parent().ok_or("install-path")?)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|_| "install-write")?;
+        let mut compressed = (&mut input).take(e.compressed);
+        let mut decoder = flate2::read::DeflateDecoder::new(&mut compressed).take(e.size + 1);
+        if std::io::copy(&mut decoder, &mut output).map_err(|_| "install-deflate")? != e.size {
+            return Err("install-file-size");
+        }
+        drop(decoder);
+        if compressed.limit() != 0 {
+            return Err("install-compressed-size");
+        }
+        output.sync_all().map_err(|_| "install-write")?;
+    }
+    if input.read(&mut [0]).map_err(|_| "install-archive")? != 0 {
+        return Err("install-trailing-data");
+    }
+    let config: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &destination.join("preview.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-config")?;
+    for (key, value) in [
+        ("bundled_data", "resources/client-data"),
+        ("worker", "fuze-ocr-worker.exe"),
+        ("ort", "onnxruntime.dll"),
+        ("model", "resources/inference.onnx"),
+        ("dictionary", "resources/dictionary.json"),
+        ("locale", "auto"),
+        ("backend", "auto"),
+    ] {
+        if config[key] != value {
+            return Err("install-config-policy");
+        }
+    }
+    if config.get("cache_data").is_some() {
+        return Err("install-config-policy");
+    }
+    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &destination.join("build.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-build")?;
+    if build["revision"] != revision || build["channel"] != "rust-development-preview" {
+        return Err("install-channel");
+    }
+    Ok(())
+}
+pub fn check_bundle(directory: &Path) -> Result<()> {
+    let mut child = Command::new(directory.join("fuze-rust-host.exe"))
+        .arg("--check-bundle")
+        .arg(directory.join("preview.json"))
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|_| "install-check-start")?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => {
+                return if s.success() {
+                    Ok(())
+                } else {
+                    Err("install-check-failed")
+                }
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("install-check-wait");
+            }
+            _ => {}
+        }
+        if start.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("install-check-timeout");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+pub fn activate(
+    root: &Path,
+    manifest: &Manifest,
+    verify: &dyn Fn(&Path) -> Result<()>,
+) -> Result<()> {
+    let mut state = read(root)?;
+    if state.pending {
+        return Err("install-validation-pending");
+    }
+    if state
+        .current
+        .as_ref()
+        .is_some_and(|s| manifest.sequence <= s.sequence)
+        || state.rejected.as_ref() == Some(&manifest.revision)
+    {
+        return Err("install-old-or-rejected");
+    }
+    let target = root.join("versions").join(&manifest.revision);
+    verify(&target)?;
+    state.previous = state.current.take();
+    state.current = Some(Installed {
+        revision: manifest.revision.clone(),
+        sequence: manifest.sequence,
+    });
+    state.pending = true;
+    save(root, &state)
+}
+pub fn bootstrap(root: &Path, bundled: &Path) -> Result<()> {
+    if read(root)?.current.is_some() {
+        return Ok(());
+    }
+    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &bundled.join("build.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-build")?;
+    let revision = build["revision"]
+        .as_str()
+        .filter(|r| update_channel::revision(r))
+        .ok_or("install-build")?;
+    if build["channel"] != "rust-development-preview" {
+        return Err("install-channel");
+    }
+    let target = root.join("versions").join(revision);
+    if !target.exists() {
+        safe_dir(&target)?;
+        let mut count = 0;
+        let mut total = 0;
+        fn copy(
+            from: &Path,
+            to: &Path,
+            relative: &str,
+            count: &mut usize,
+            total: &mut u64,
+        ) -> Result<()> {
+            for entry in fs::read_dir(from).map_err(|_| "install-baseline")? {
+                let entry = entry.map_err(|_| "install-baseline")?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| "install-baseline")?;
+                let logical = if relative.is_empty() {
+                    name
+                } else {
+                    format!("{relative}/{name}")
+                };
+                let meta = fs::symlink_metadata(entry.path()).map_err(|_| "install-baseline")?;
+                if meta.file_attributes() & 0x400 != 0 {
+                    return Err("install-reparse");
+                }
+                if meta.is_dir() {
+                    if ["resources", "resources/client-data"].contains(&logical.as_str())
+                        || logical.starts_with("resources/client-data/")
+                    {
+                        safe_dir(&to.join(entry.file_name()))?;
+                        copy(
+                            &entry.path(),
+                            &to.join(entry.file_name()),
+                            &logical,
+                            count,
+                            total,
+                        )?;
+                    }
+                } else if allowed(&logical) {
+                    *count += 1;
+                    *total += meta.len();
+                    if *count > 1024 || *total > 512 * 1024 * 1024 {
+                        return Err("install-baseline-limit");
+                    }
+                    fs::copy(entry.path(), to.join(entry.file_name()))
+                        .map_err(|_| "install-baseline")?;
+                }
+            }
+            Ok(())
+        }
+        copy(bundled, &target, "", &mut count, &mut total)?;
+    }
+    check_bundle(&target)?;
+    save(
+        root,
+        &State {
+            current: Some(Installed {
+                revision: revision.into(),
+                sequence: 0,
+            }),
+            ..Default::default()
+        },
+    )
+}
+/// Uses only the fixed native preview mutex, never enumerates or terminates other applications.
+pub fn desktop_running() -> bool {
+    unsafe {
+        use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::OpenMutexW};
+        let n: Vec<u16> = "Local\\FuzeRustDesktopPreview"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let h = OpenMutexW(0x00100000, 0, n.as_ptr());
+        if h.is_null() {
+            false
+        } else {
+            CloseHandle(h);
+            true
+        }
+    }
+}
+pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
+    if desktop_running() {
+        return Err("install-close-preview-first");
+    }
+    let _lock = lock(root)?;
+    let mut state = read(root)?;
+    let dir = state
+        .current
+        .as_ref()
+        .map(|v| root.join("versions").join(&v.revision))
+        .unwrap_or_else(|| bundled.to_path_buf());
+    if state.pending {
+        if check_bundle(&dir).is_err() {
+            if state.previous.is_some() {
+                rollback(root)?;
+                state = read(root)?;
+            } else {
+                state.rejected = state.current.take().map(|v| v.revision);
+                state.pending = false;
+                save(root, &state)?;
+            }
+        } else {
+            state.pending = false;
+            save(root, &state)?;
+        }
+    }
+    let directory = state
+        .current
+        .as_ref()
+        .map(|v| root.join("versions").join(&v.revision))
+        .unwrap_or_else(|| bundled.to_path_buf());
+    if start(&directory).is_err() {
+        if state.previous.is_some() {
+            rollback(root)?;
+            let old = read(root)?.current.ok_or("rollback-unavailable")?;
+            start(&root.join("versions").join(old.revision))?;
+        } else {
+            return Err("install-launch-readiness");
+        }
+    }
+    Ok(())
+}
+fn start(directory: &Path) -> Result<()> {
+    let mut child = Command::new(directory.join("fuze-rust-host.exe"))
+        .arg("--managed-desktop")
+        .arg(directory.join("preview.json"))
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|_| "install-launch")?;
+    let stdout = child.stdout.take().ok_or("install-launch")?;
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(stdout.take(256)).read_line(&mut line);
+        let _ = tx.send(line.trim() == "FUZE_DESKTOP_READY_1");
+    });
+    if rx.recv_timeout(Duration::from_secs(15)) != Ok(true) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("install-launch-readiness");
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pointer_commit_failure_and_health_failure_preserve_rollback() {
+        let root = std::env::temp_dir().join(format!("fuze-pointer-test-{}", std::process::id()));
+        safe_dir(&root).unwrap();
+        let initial = State {
+            current: Some(Installed {
+                revision: "111111111111".into(),
+                sequence: 1,
+            }),
+            ..Default::default()
+        };
+        save(&root, &initial).unwrap();
+        let manifest = Manifest {
+            schema: 1,
+            channel: "rust-preview".into(),
+            revision: "222222222222".into(),
+            sequence: 2,
+            archive: "Fuze-Rust-222222222222.fuz".into(),
+            size: 1,
+            sha512: "00".repeat(64),
+            blockmap_sha256: "00".repeat(32),
+        };
+        assert_eq!(
+            activate(&root, &manifest, &|_| Err("fixture-health-failed")),
+            Err("fixture-health-failed")
+        );
+        assert_eq!(read(&root).unwrap(), initial);
+        let locked = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(root.join("current.json"))
+            .unwrap();
+        assert!(activate(&root, &manifest, &|_| Ok(())).is_err());
+        drop(locked);
+        assert_eq!(read(&root).unwrap(), initial);
+        activate(&root, &manifest, &|_| Ok(())).unwrap();
+        assert!(read(&root).unwrap().pending);
+        rollback(&root).unwrap();
+        let rolled = read(&root).unwrap();
+        assert_eq!(rolled.current, initial.current);
+        assert_eq!(rolled.rejected, Some(manifest.revision.clone()));
+        assert!(activate(&root, &manifest, &|_| Ok(())).is_err());
+        for invalid in [
+            "../fuze-rust-host.exe",
+            "C:/evil.exe",
+            "resources/client-data/../x.json",
+            "resources/client-data/CON.json",
+            "resources/client-data/a.json:stream",
+            "secret.txt",
+        ] {
+            assert!(!allowed(invalid));
+        }
+        assert!(allowed(
+            "resources/client-data/versions/16.20.1/augments.json"
+        ));
+        std::fs::remove_file(root.join("current.json")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+}

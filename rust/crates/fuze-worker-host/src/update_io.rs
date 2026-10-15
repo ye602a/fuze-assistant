@@ -72,6 +72,22 @@ pub(crate) fn get(
     range: Option<(u64, u64, u64)>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    if transfer(host, path, limit, authorization, range, cancel, &mut output)?.is_some() {
+        return Err("update-unexpected-redirect");
+    }
+    Ok(output)
+}
+/// Streams bytes into staging. Redirects are returned, never followed with ambient credentials.
+pub(crate) fn transfer(
+    host: &str,
+    path: &str,
+    limit: usize,
+    authorization: Option<&str>,
+    range: Option<(u64, u64, u64)>,
+    cancel: &dyn Fn() -> bool,
+    output: &mut dyn std::io::Write,
+) -> Result<Option<String>> {
     let started = Instant::now();
     let check = || {
         if cancel() || started.elapsed() > Duration::from_secs(45) {
@@ -116,7 +132,12 @@ pub(crate) fn get(
                 return Err("update-network");
             }
         }
-        let mut headers = String::from("Accept: application/octet-stream\r\n");
+        let mut headers = if path.contains("/releases/tags/") || path.ends_with("/releases/latest")
+        {
+            String::from("Accept: application/vnd.github+json\r\n")
+        } else {
+            String::from("Accept: application/octet-stream\r\n")
+        };
         if let Some(token) = authorization {
             if host != "api.github.com"
                 || token.is_empty()
@@ -166,6 +187,31 @@ pub(crate) fn get(
         {
             return Err("update-response");
         }
+        if [301, 302, 303, 307, 308].contains(&code) {
+            let mut value = [0u16; 8192];
+            let mut length = (value.len() * 2) as u32;
+            if WinHttpQueryHeaders(
+                request.0,
+                WINHTTP_QUERY_LOCATION,
+                null(),
+                value.as_mut_ptr().cast(),
+                &mut length,
+                null_mut(),
+            ) == 0
+                || length as usize > value.len() * 2
+            {
+                return Err("update-redirect");
+            }
+            return Ok(Some(
+                String::from_utf16(&value[..length as usize / 2])
+                    .map_err(|_| "update-redirect")?
+                    .trim_end_matches('\0')
+                    .to_owned(),
+            ));
+        }
+        if code == 401 || code == 403 || code == 404 {
+            return Err("update-access-or-release");
+        }
         if code != if range.is_some() { 206 } else { 200 } {
             return Err("update-http-status");
         }
@@ -190,7 +236,7 @@ pub(crate) fn get(
                 return Err("update-range");
             }
         }
-        let mut bytes = Vec::new();
+        let mut bytes = 0usize;
         let mut buffer = [0u8; 65536];
         loop {
             check()?;
@@ -207,15 +253,18 @@ pub(crate) fn get(
             if read == 0 {
                 break;
             }
-            if bytes.len() + read as usize > limit {
+            if bytes + read as usize > limit {
                 return Err("update-size");
             }
-            bytes.extend_from_slice(&buffer[..read as usize]);
+            output
+                .write_all(&buffer[..read as usize])
+                .map_err(|_| "update-write")?;
+            bytes += read as usize;
         }
         check()?;
-        if range.is_some() && bytes.len() != limit {
+        if range.is_some() && bytes != limit {
             return Err("update-range");
         }
-        Ok(bytes)
+        Ok(None)
     }
 }

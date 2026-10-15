@@ -27,6 +27,7 @@ const RUNNING: u8 = 1;
 const EXIT: u8 = 2;
 const DATA: u8 = 3;
 const UPDATE_DATA: usize = 105;
+const UPDATE_APP: usize = 106;
 const TOGGLE: usize = 101;
 const HIDE: usize = 102;
 const QUIT: usize = 103;
@@ -282,7 +283,7 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
     let old = SelectObject(memory, bitmap);
     draw(hwnd, memory, ui);
     // Native hidden-window render; never captures the desktop or another application.
-    for id in [TOGGLE, UPDATE_DATA, HIDE, QUIT] {
+    for id in [TOGGLE, UPDATE_DATA, UPDATE_APP, HIDE, QUIT] {
         let child = GetDlgItem(hwnd, id as i32);
         let mut bounds: RECT = zeroed();
         GetWindowRect(child, &mut bounds);
@@ -672,12 +673,15 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let mut r: RECT = zeroed();
             GetClientRect(hwnd, &mut r);
             let d = GetDpiForWindow(hwnd).max(96) as i32;
-            for (i, id) in [TOGGLE, UPDATE_DATA, HIDE, QUIT].iter().enumerate() {
+            for (i, id) in [TOGGLE, UPDATE_DATA, UPDATE_APP, HIDE, QUIT]
+                .iter()
+                .enumerate()
+            {
                 MoveWindow(
                     GetDlgItem(hwnd, *id as i32),
-                    28 * d / 96 + i as i32 * 180 * d / 96,
+                    28 * d / 96 + i as i32 * ((r.right - 56 * d / 96) / 5),
                     r.bottom - 60 * d / 96,
-                    166 * d / 96,
+                    ((r.right - 56 * d / 96) / 5 - 12 * d / 96).max(1),
                     38 * d / 96,
                     1,
                 );
@@ -711,6 +715,24 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 UPDATE_DATA => {
                     if u.shared.desired.load(Ordering::Acquire) == PAUSED {
                         u.shared.request(DATA);
+                    }
+                }
+                UPDATE_APP => {
+                    if !u.smoke
+                        && u.shared.desired.load(Ordering::Acquire) == PAUSED
+                        && u.shown.mode == PAUSED
+                    {
+                        use std::os::windows::process::CommandExt;
+                        if let Ok(exe) = std::env::current_exe() {
+                            if std::process::Command::new(exe.with_file_name("fuze-update.exe"))
+                                .arg("--update")
+                                .creation_flags(0x08000000)
+                                .spawn()
+                                .is_ok()
+                            {
+                                u.shared.request(EXIT);
+                            }
+                        }
                     }
                 }
                 HIDE => {
@@ -802,6 +824,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     GetDlgItem(hwnd, UPDATE_DATA as i32),
                     i32::from(desired == PAUSED),
                 );
+                EnableWindow(
+                    GetDlgItem(hwnd, UPDATE_APP as i32),
+                    i32::from(desired == PAUSED && u.shown.mode == PAUSED),
+                );
                 InvalidateRect(hwnd, null(), 0);
             }
             if u.smoke {
@@ -865,7 +891,7 @@ pub fn startup_error(error: &str) {
         );
     }
 }
-pub fn run(config: Config, smoke: bool) -> Result<()> {
+pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
     struct Instance(HANDLE);
     impl Drop for Instance {
         fn drop(&mut self) {
@@ -963,6 +989,7 @@ pub fn run(config: Config, smoke: bool) -> Result<()> {
         for (id, label) in [
             (TOGGLE, "开始识别"),
             (UPDATE_DATA, "更新推荐数据"),
+            (UPDATE_APP, "退出并检查更新"),
             (HIDE, "收起到托盘"),
             (QUIT, "退出"),
         ] {
@@ -996,6 +1023,11 @@ pub fn run(config: Config, smoke: bool) -> Result<()> {
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         } else {
             SendMessageW(hwnd, WM_PAINT, 0, 0);
+        }
+        if managed {
+            use std::io::Write;
+            println!("FUZE_DESKTOP_READY_1");
+            let _ = std::io::stdout().flush();
         }
         let mut msg: MSG = zeroed();
         let failed = loop {
