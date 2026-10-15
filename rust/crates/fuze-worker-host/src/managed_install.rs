@@ -464,6 +464,14 @@ pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
         return Err("install-close-preview-first");
     }
     let _lock = lock(root)?;
+    launch_with(root, bundled, &check_bundle, &start)
+}
+fn launch_with(
+    root: &Path,
+    bundled: &Path,
+    check: &dyn Fn(&Path) -> Result<()>,
+    start: &dyn Fn(&Path) -> Result<()>,
+) -> Result<()> {
     let mut state = read(root)?;
     let dir = state
         .current
@@ -471,7 +479,7 @@ pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
         .map(|v| root.join("versions").join(&v.revision))
         .unwrap_or_else(|| bundled.to_path_buf());
     if state.pending {
-        if check_bundle(&dir).is_err() {
+        if check(&dir).is_err() {
             if state.previous.is_some() {
                 rollback(root)?;
                 state = read(root)?;
@@ -564,6 +572,35 @@ mod tests {
             .unwrap();
         assert!(activate(&root, &manifest, &|_| Ok(())).is_err());
         drop(locked);
+        assert_eq!(read(&root).unwrap(), initial);
+        // Failed readiness must switch to the previous version, then start only that version.
+        save(&root, &initial).unwrap();
+        activate(&root, &manifest, &|_| Ok(())).unwrap();
+        let starts = std::cell::RefCell::new(Vec::new());
+        launch_with(&root, &root, &|_| Ok(()), &|p| {
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            starts.borrow_mut().push(name.clone());
+            if name == manifest.revision {
+                Err("fixture-not-ready")
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!(
+            *starts.borrow(),
+            vec![manifest.revision.clone(), "111111111111".into()]
+        );
+        assert_eq!(read(&root).unwrap().current, initial.current);
+        save(&root, &initial).unwrap();
+        activate(&root, &manifest, &|_| Ok(())).unwrap();
+        launch_with(&root, &root, &|_| Err("fixture-unhealthy"), &|p| {
+            assert_eq!(p.file_name().unwrap(), "111111111111");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(read(&root).unwrap().current, initial.current);
+        save(&root, &initial).unwrap();
         assert_eq!(read(&root).unwrap(), initial);
         activate(&root, &manifest, &|_| Ok(())).unwrap();
         assert!(read(&root).unwrap().pending);

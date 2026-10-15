@@ -169,7 +169,16 @@ fn run() -> Result<(), &'static str> {
         install::safe_dir(&versions)?;
         let target = versions.join(&release.manifest.revision);
         if target.exists() {
-            return Err("install-version-exists");
+            if [state.current.as_ref(), state.previous.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|v| v.revision == release.manifest.revision)
+            {
+                return Err("install-version-in-use");
+            }
+            install::safe_dir(&target)?;
+            fs::rename(&target, stage.join("abandoned-version"))
+                .map_err(|_| "install-orphan-recovery")?;
         }
         fs::rename(destination, extracted.join("package.fuz")).map_err(|_| "install-cache")?;
         if !map.is_empty() {
@@ -183,6 +192,12 @@ fn run() -> Result<(), &'static str> {
         }
         fuze_worker_host::update_progress::STAGE.store(4, std::sync::atomic::Ordering::Release);
         install::bootstrap(&root, &bundled)?;
+        if fuze_worker_host::update_progress::cancelled() {
+            return Err("update-cancelled");
+        }
+        if install::desktop_running() {
+            return Err("install-close-preview-first");
+        }
         install::activate(&root, &release.manifest, &|_| Ok(()))?;
         message("Rust 更新已准备好。下次使用 Start-preview.cmd 启动新版；验证失败自动回到上一版。没有重启任何程序。",false);
         Ok(())

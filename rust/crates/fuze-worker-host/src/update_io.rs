@@ -90,7 +90,10 @@ pub(crate) fn transfer(
 ) -> Result<Option<String>> {
     let started = Instant::now();
     let check = || {
-        if cancel() || started.elapsed() > Duration::from_secs(45) {
+        if cancel()
+            || started.elapsed()
+                > Duration::from_secs(if limit > 8 * 1024 * 1024 { 600 } else { 45 })
+        {
             Err("update-cancelled-or-timeout")
         } else {
             Ok(())
