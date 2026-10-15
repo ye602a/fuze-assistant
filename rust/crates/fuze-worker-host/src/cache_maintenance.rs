@@ -9,6 +9,17 @@ use std::{
 /// Unknown files, links and excessive trees are preserved. Delete files individually,
 /// then empty directories: never recursively follow a user-controlled directory.
 pub fn retire(root: &Path, target: &Path, allowed: &dyn Fn(&str) -> bool) -> Result<()> {
+    process(root, target, allowed, false)
+}
+pub fn inspect(root: &Path, target: &Path, allowed: &dyn Fn(&str) -> bool) -> Result<()> {
+    process(root, target, allowed, true)
+}
+fn process(
+    root: &Path,
+    target: &Path,
+    allowed: &dyn Fn(&str) -> bool,
+    inspect_only: bool,
+) -> Result<()> {
     let root = fs::canonicalize(root).map_err(|_| "cleanup-root")?;
     validate(&root, target)?;
     let target = fs::canonicalize(target).map_err(|_| "cleanup-target")?;
@@ -48,6 +59,9 @@ pub fn retire(root: &Path, target: &Path, allowed: &dyn Fn(&str) -> bool) -> Res
             }
         }
         index += 1;
+    }
+    if inspect_only {
+        return Ok(());
     }
     for path in files {
         validate(&root, &path)?;

@@ -15,7 +15,7 @@ try{
  const verifier=path.join(process.env.FUZE_RUST_BIN_DIR || path.join(root,'rust/target/release'),'fuze-update-verify.exe')
  const lifecycle=spawnSync(verifier,['--offline',manifest,path.join(directory,m.archive),path.join(directory,`fuze-rust-preview-${revision}`),path.join(temp,'installation')],{cwd:temp,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:65536,env:{...process.env,FUZE_RUST_CI_TRAY:'0'}})
  let installed;try{installed=JSON.parse(lifecycle.stdout?.trim())}catch{}
- if(lifecycle.status!==0||!installed?.local_setup||!installed.setup_idempotent||!installed.installed||!installed.repeat_launch||!installed.health_failure_rollback||!installed.process_start_failure_rollback||installed.game_access!==false)throw new Error('Native install/rollback lifecycle failed: '+String(lifecycle.stderr).replace(/[^a-z0-9-\s]/gi,'').slice(0,128))
+ if(lifecycle.status!==0||!installed?.local_setup||!installed.shortcuts||!installed.uninstall||!installed.setup_idempotent||!installed.installed||!installed.repeat_launch||!installed.health_failure_rollback||!installed.process_start_failure_rollback||installed.game_access!==false)throw new Error('Native install/rollback lifecycle failed: '+String(lifecycle.stderr).replace(/[^a-z0-9-\s]/gi,'').slice(0,128))
  report={...report,...installed}
  await writeFile(path.join(root,'rust/artifacts/update-validation.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report))
 }finally{if(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep)&&path.basename(temp).startsWith('fuze-native-update-'))await rm(temp,{recursive:true,force:true})}

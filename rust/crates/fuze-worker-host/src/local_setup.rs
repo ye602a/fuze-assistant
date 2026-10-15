@@ -7,7 +7,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const START: &[u8] = b"@echo off\r\ncd /d \"%~dp0\"\r\nstart \"\" fuze-launcher.exe --launch\r\n";
+pub(crate) const START: &[u8] =
+    b"@echo off\r\ncd /d \"%~dp0\"\r\nstart \"\" fuze-launcher.exe --launch\r\n";
 
 /// Caller holds the installation lock. Verification runs only against a copied bundle.
 pub fn install_with(
@@ -110,7 +111,7 @@ fn launcher(root: &Path, bundle: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn regular(path: &Path) -> Result<()> {
+pub(crate) fn regular(path: &Path) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
     let m = fs::symlink_metadata(path).map_err(|_| "setup-file")?;
     if !m.is_file() || m.file_attributes() & 0x400 != 0 {
@@ -118,7 +119,7 @@ fn regular(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

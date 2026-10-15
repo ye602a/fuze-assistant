@@ -61,6 +61,7 @@ const TOGGLE: usize = 101;
 const HIDE: usize = 102;
 const QUIT: usize = 103;
 const OPEN: usize = 104;
+const SIDE: usize = 109;
 const TRAY: u32 = WM_APP + 1;
 #[derive(Clone, Debug, PartialEq)]
 struct Status {
@@ -77,6 +78,7 @@ struct Status {
     update_error: Option<&'static str>,
     preferences: crate::preferences::Preferences,
     selection: Option<crate::champ_select::View>,
+    playing: Option<crate::champ_select::View>,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -94,6 +96,7 @@ impl Default for Status {
             update_error: None,
             preferences: Default::default(),
             selection: None,
+            playing: None,
         }
     }
 }
@@ -572,6 +575,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     s.connection = m.state();
                     s.pipeline = controller.status();
                     s.selection = selection_view.clone();
+                    s.playing = m
+                        .playing_champion()
+                        .and_then(|id| champion_catalog.as_ref().map(|c| c.playing(id)));
                     // Only change interface language after that locale's catalogue is ready.
                     if let Some(c) = champion_catalog.as_ref() {
                         if let Some(locale) = c.identity().split('@').next() {
@@ -841,6 +847,9 @@ struct Ui {
     settings: bool,
     draft: crate::preferences::Preferences,
     champions: Option<crate::champ_select::Window>,
+    side: Option<crate::champ_select::Window>,
+    side_roots: Vec<fuze_data::Root>,
+    side_open: bool,
     champion_preview_ok: bool,
     shared: Arc<Shared>,
     shown: Status,
@@ -1971,6 +1980,22 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                             u.shown.history.cached,
                         ) {
                             if let Some(path) = crate::record_export::choose(hwnd) {
+                                let bytes =
+                                    if path.extension().and_then(|s| s.to_str()) == Some("png") {
+                                        match crate::record_export::png(
+                                            &bytes,
+                                            u.shown
+                                                .history
+                                                .details
+                                                .get(u.history_offset)
+                                                .map(|d| d.as_ref()),
+                                        ) {
+                                            Ok(bytes) => bytes,
+                                            Err(_) => return 0,
+                                        }
+                                    } else {
+                                        bytes
+                                    };
                                 if let Ok(mut request) = u.shared.export.lock() {
                                     *request = Some(crate::record_export::Request { path, bytes });
                                 }
@@ -2096,6 +2121,22 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     }
                 }
                 QUIT => u.shared.request(EXIT),
+                SIDE if !u.smoke && u.desired == RUNNING && u.shown.playing.is_some() => {
+                    u.side_open = !u.side_open || u.side.as_ref().is_some_and(|s| s.dismissed());
+                    if u.side_open {
+                        // Re-create only on explicit reopening; close stays dismissed this session.
+                        u.side =
+                            crate::champ_select::Window::side(u.side_roots.clone(), false).ok();
+                    }
+                    if let Some(side) = u.side.as_mut() {
+                        side.update(
+                            u.shown.playing.clone().filter(|_| u.side_open),
+                            true,
+                            false,
+                            u.shown.preferences.icon_downloads,
+                        );
+                    }
+                }
                 OPEN => {
                     if !u.smoke {
                         show(hwnd);
@@ -2126,6 +2167,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 WM_RBUTTONUP => {
                     let menu = CreatePopupMenu();
                     AppendMenuW(menu, MF_STRING, OPEN, wide("打开符择").as_ptr());
+                    AppendMenuW(
+                        menu,
+                        MF_STRING
+                            | if u.desired == RUNNING && u.shown.playing.is_some() {
+                                0
+                            } else {
+                                MF_GRAYED
+                            },
+                        SIDE,
+                        wide("显示 / 隐藏局内海克斯参考").as_ptr(),
+                    );
                     AppendMenuW(
                         menu,
                         MF_STRING,
@@ -2233,6 +2285,20 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         u.shown.preferences.icon_downloads,
                     );
                 }
+                if u.shown.playing.is_none() || desired != RUNNING {
+                    u.side_open = false;
+                }
+                if let Some(side) = u.side.as_mut() {
+                    side.update(
+                        u.shown
+                            .playing
+                            .clone()
+                            .filter(|_| u.side_open && desired == RUNNING),
+                        true,
+                        u.smoke,
+                        u.shown.preferences.icon_downloads,
+                    );
+                }
                 u.desired = desired;
                 settings_controls(hwnd, u);
                 SetWindowTextW(
@@ -2275,6 +2341,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         {
                             u.champion_preview_ok = u.shown.selection.is_some()
                                 && window.render(std::path::Path::new(&path)).is_ok();
+                        }
+                        if let (Some(window), Ok(path)) =
+                            (u.champions.as_mut(), std::env::var("FUZE_SIDE_PREVIEW"))
+                        {
+                            u.champion_preview_ok &= window
+                                .render_side_fixture(std::path::Path::new(&path))
+                                .is_ok();
                         }
                         if let (Some(window), Ok(path)) =
                             (u.champions.as_mut(), std::env::var("FUZE_STAGE_PREVIEW"))
@@ -2465,6 +2538,9 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
             hotkey_ok: true,
             settings: false,
             draft: Default::default(),
+            side: None,
+            side_roots: champion_roots.clone(),
+            side_open: false,
             champions: crate::champ_select::Window::new(champion_roots, smoke).ok(),
             champion_preview_ok: false,
             icon: icon.unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION)),

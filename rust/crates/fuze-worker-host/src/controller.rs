@@ -74,6 +74,19 @@ pub struct Monitor {
     thread: Option<JoinHandle<()>>,
 }
 impl Monitor {
+    pub fn playing_champion(&self) -> Option<u32> {
+        let latest = self.latest.lock().ok()?;
+        if latest.updated.elapsed() >= Duration::from_secs(8)
+            || !matches!(
+                latest.state,
+                fuze_lcu::reconnect::State::Connected(Phase::InProgress)
+            )
+        {
+            return None;
+        }
+        let context = latest.context?;
+        context.supported.then_some(context.champion).flatten()
+    }
     pub fn data_locale(&self) -> Option<fuze_data::Locale> {
         Some(match self.latest.lock().ok()?.locale? {
             fuze_lcu::locale::Locale::ZhCn => fuze_data::Locale::ZhCn,

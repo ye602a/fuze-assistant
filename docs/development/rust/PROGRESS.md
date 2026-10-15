@@ -11,14 +11,17 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Champion view | Five-player team, ranked available heroes, details, items and bounded public icon cache | Complete rune-page source and optional write actions are absent |
 | Window continuity | Main, champion and augment geometry; monitor clamping and health handshake | Physical multi-monitor/DPI/fullscreen acceptance |
 | Data / cleanup | Local-first locale isolation, transactional update, bounded retirement preserving current/previous/unknown files | Long-term real usage; interrupted staging is preserved |
-| History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON export | External SGP with unambiguous region; image sharing; observation is not a claim |
+| History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON / local PNG export | External SGP with unambiguous region; share-card icon styling and player acceptance; observation is not a claim |
 | Updates | Private credentials, differential reconstruction/full fallback, managed version switch and rollback | Publisher signing and production channel policy |
-| Local installation | M12 allowlisted offline installation, fixed launch entry, idempotence and pending health | Signed installer/bootstrap, uninstall/shortcut integration and end-to-end player acceptance |
+| Local installation | M14 Start menu shortcuts and explicit conservative uninstall; M12 offline installation and pending health | Signed installer/bootstrap, Windows Apps registration and end-to-end player acceptance |
 | Stage winrate | M13 native manual reference: All/1-4, public source/patch/sample labels, isolated cache and explicit refresh; automatic ranking stays overall | Provider/live interaction acceptance and reliable actual-claim source for automatic ranking; no inference from levels/shards/forges/rerolls |
 | Public release | Private branch/PR workflow, sanitized CI artifacts | Full history, Actions, release-asset and redistribution-license audit after migration |
 
+| Secondary augment panel | M14 explicit tray entry, active supported champion, local overall rates and bounded icon cache; hidden on pause/disconnect | Actual gameplay/fullscreen acceptance; no inferred acquisition stage |
+
 ## Latest changes
 
+- [M14: shortcuts, uninstall, secondary reference and local image export](M14.md)
 - [M13: native manual stage reference](M13.md)
 - [M12: independent local installation](M12.md)
 - [M11: live level scheduling, native preferences and reduced export](M11.md)

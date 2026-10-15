@@ -28,6 +28,22 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["未知", "未知", "Unknown"],
+    ["时长", "時長", "Duration"],
+    ["FUZE / 对局分享", "FUZE / 對局分享", "FUZE / MATCH SUMMARY"],
+    ["缓存结果", "快取結果", "CACHED RESULT"],
+    ["对局结果", "對局結果", "RESULT"],
+    ["结算强化", "結算增幅", "RESULT AUGMENTS"],
+    ["领取顺序未确认 / 推荐使用整体胜率", "領取順序未確認 / 推薦使用整體勝率", "Acquisition order unconfirmed / Overall recommendations"],
+    ["未包含候选观察、账号、区服、对局编号或时间戳。", "未包含候選觀察、帳號、區服、對局編號或時間戳。", "No candidate observations, account, region, match ID or timestamp."],
+    ["符择 · 局内海克斯参考", "符擇 · 局內海克斯參考", "Fuze · In-game augment reference"],
+    ["局内海克斯参考 · 整体胜率", "局內海克斯參考 · 整體勝率", "Augment reference · Overall rates"],
+    ["实际领取轮次未确认；与三卡识别独立", "實際領取輪次未確認；與三卡辨識獨立", "Claim round unknown; separate from OCR cards"],
+    ["显示 / 隐藏局内海克斯参考", "顯示 / 隱藏局內海克斯參考", "Show / hide in-game augment reference"],
+    ["卸载独立 Rust 预览版和开始菜单快捷方式？设置、个人记录、缓存与私有令牌会保留。未知文件不会删除；临时卸载工具由系统临时文件清理。", "解除安裝獨立 Rust 預覽版與開始功能表捷徑？設定、個人記錄、快取與私人權杖保留。未知檔案不會刪除；暫存卸載工具由系統暫存清理。", "Remove Rust Preview and Start menu shortcuts? Settings, records, caches and private tokens are kept. Unknown files stay. The temporary helper is left for system temp cleanup."],
+    ["Rust 程序与快捷方式已移除。用户数据、令牌、未识别文件和安装锁文件保留。Electron 稳定版未改动。", "Rust 程式與捷徑已移除。使用者資料、權杖、未知檔案與安裝鎖檔保留。Electron 穩定版未變動。", "Rust program and shortcuts removed. User data, tokens, unknown files and installation lock are kept. Electron stable is unchanged."],
+    ["安装完成。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。", "安裝完成。開始功能表已有 Fuze Rust Preview 啟動與卸載捷徑。首次啟動通過健康檢查後確認新版；仍為未簽章開發預覽。", "Installed. Start menu shortcuts launch or uninstall Fuze Rust Preview. First launch validates health. This remains an unsigned development preview."],
+    ["操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", "操作未完成：{}\n請關閉 Rust 預覽版後重試。未知檔案保留；安裝或卸載可能部分完成。Electron 穩定版未變動。", "Operation incomplete: {}\nClose Rust Preview before retrying. Unknown files are kept; installation or removal may be partial. Electron stable is unchanged."],
     ["请求较频繁，请稍后刷新", "請求較頻繁，請稍後重新整理", "Please wait before refreshing again"],
     ["正在刷新，继续显示已有数据", "正在重新整理，繼續顯示現有資料", "Refreshing; keeping existing data visible"],
     ["阶段参考", "階段參考", "Stages"],

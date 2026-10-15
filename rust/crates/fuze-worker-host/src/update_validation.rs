@@ -36,6 +36,7 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
         .map_err(|_| "validation-baseline")?;
         old.revision = "000000000001".into();
         old.sequence = manifest.sequence.saturating_sub(1);
+        fs::write(root.join("versions/000000000001/build.json"),serde_json::to_vec(&serde_json::json!({"revision":old.revision,"sequence":old.sequence,"channel":"rust-development-preview"})).map_err(|_| "validation-baseline")?).map_err(|_| "validation-baseline")?;
         install::save(root, &initial)?;
     }
     let target = root.join("versions").join(&manifest.revision);
@@ -90,7 +91,15 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
     );
     fs::rename(&held, &executable).map_err(|_| "validation-restore")?;
     startup?;
-    verify_rollback(root, &initial, manifest)
+    verify_rollback(root, &initial, manifest)?;
+    let menu = root.join("fixture-programs");
+    crate::install_entries::create(root, baseline, &menu)?;
+    crate::install_entries::create(root, baseline, &menu)?;
+    crate::install_entries::uninstall(root, &menu)?;
+    if root.join("current.json").exists() || root.join("fuze-launcher.exe").exists() {
+        return Err("validation-uninstall");
+    }
+    Ok(())
 }
 fn verify_rollback(root: &Path, initial: &install::State, manifest: &Manifest) -> Result<()> {
     let state = install::read(root)?;

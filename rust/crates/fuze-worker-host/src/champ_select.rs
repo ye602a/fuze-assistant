@@ -32,6 +32,14 @@ pub struct Catalog {
     version: String,
 }
 impl Catalog {
+    pub fn playing(&self, id: u32) -> View {
+        self.view(Selection {
+            team: [id, 0, 0, 0, 0],
+            local_slot: Some(0),
+            bench: [0; 20],
+            count: 0,
+        })
+    }
     pub fn identity(&self) -> &str {
         &self.version
     }
@@ -121,6 +129,7 @@ fn wide(s: &str) -> Vec<u16> {
     crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
 struct State {
+    side: bool,
     stage_service: crate::stage_reference::Service,
     stage_reply: crate::stage_reference::Reply,
     stage_panel: bool,
@@ -144,7 +153,16 @@ pub struct Window {
     topmost: bool,
 }
 impl Window {
+    pub fn dismissed(&self) -> bool {
+        self.state.dismissed
+    }
     pub fn new(roots: Vec<fuze_data::Root>, offline: bool) -> Result<Self> {
+        Self::create(roots, offline, false)
+    }
+    pub fn side(roots: Vec<fuze_data::Root>, offline: bool) -> Result<Self> {
+        Self::create(roots, offline, true)
+    }
+    fn create(roots: Vec<fuze_data::Root>, offline: bool, side: bool) -> Result<Self> {
         unsafe {
             let class = wide("FuzeRustChampionOverview");
             let instance = GetModuleHandleW(null());
@@ -157,6 +175,7 @@ impl Window {
             };
             RegisterClassW(&wc);
             let mut state = Box::new(State {
+                side,
                 stage_service: crate::stage_reference::Service::new(roots.clone(), offline)?,
                 stage_reply: Default::default(),
                 stage_panel: false,
@@ -165,7 +184,14 @@ impl Window {
                 stage_allowed: false,
                 stage_key: None,
                 offline,
-                placement: crate::window_memory::Memory::new("champions", offline),
+                placement: crate::window_memory::Memory::new(
+                    if side {
+                        "augment-reference"
+                    } else {
+                        "champions"
+                    },
+                    offline,
+                ),
                 view: None,
                 dismissed: false,
                 selected: 0,
@@ -177,11 +203,16 @@ impl Window {
             let hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class.as_ptr(),
-                wide("符择 · 选人参考").as_ptr(),
+                wide(if side {
+                    "符择 · 局内海克斯参考"
+                } else {
+                    "符择 · 选人参考"
+                })
+                .as_ptr(),
                 WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                1280,
+                if side { 460 } else { 1280 },
                 780,
                 null_mut(),
                 null_mut(),
@@ -204,7 +235,8 @@ impl Window {
                     null_mut(),
                     monitor.rcWork.left,
                     monitor.rcWork.top,
-                    (1280 * d / 96).min(monitor.rcWork.right - monitor.rcWork.left),
+                    ((if side { 460 } else { 1280 }) * d / 96)
+                        .min(monitor.rcWork.right - monitor.rcWork.left),
                     (780 * d / 96).min(monitor.rcWork.bottom - monitor.rcWork.top),
                     SWP_NOACTIVATE | SWP_NOZORDER,
                 );
@@ -293,6 +325,38 @@ impl Window {
     }
     pub fn detail_ready(&self) -> bool {
         self.state.reply.detail.is_some()
+    }
+    pub fn render_side_fixture(&mut self, path: &std::path::Path) -> Result<()> {
+        if !self.state.offline {
+            return Err("fixture-only");
+        }
+        self.state.side = true;
+        self.state.scroll = 0;
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                460,
+                780,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        let result = self.render(path);
+        self.state.side = false;
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                1280,
+                780,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        result
     }
     pub fn render_stage_fixture(&mut self, path: &std::path::Path) -> Result<()> {
         if !self.state.offline {
@@ -418,7 +482,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             }
             0
         }
-        WM_LBUTTONUP => {
+        WM_LBUTTONUP if !(*p).side => {
             let px = (l as u16 as i16) as i32;
             let py = ((l >> 16) as u16 as i16) as i32;
             let d = GetDpiForWindow(hwnd).max(96) as i32;
@@ -508,7 +572,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 .reply
                 .detail
                 .as_ref()
-                .map(|d| d.lines.len())
+                .map(|d| {
+                    if (*p).side {
+                        side_lines(d).len()
+                    } else {
+                        d.lines.len()
+                    }
+                })
                 .unwrap_or(0);
             (*p).scroll = if delta > 0 {
                 (*p).scroll.saturating_sub(3)
@@ -564,8 +634,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
             GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
             m.ptMinTrackSize = POINT {
-                x: (1080 * d / 96).min(info.rcWork.right - info.rcWork.left),
-                y: (650 * d / 96).min(info.rcWork.bottom - info.rcWork.top),
+                x: ((if (*p).side { 360 } else { 1080 }) * d / 96)
+                    .min(info.rcWork.right - info.rcWork.left),
+                y: ((if (*p).side { 400 } else { 650 }) * d / 96)
+                    .min(info.rcWork.bottom - info.rcWork.top),
             };
             0
         }
@@ -579,7 +651,107 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         _ => DefWindowProcW(hwnd, msg, w, l),
     }
 }
+fn side_lines(detail: &fuze_data::champion_detail::Detail) -> &[fuze_data::champion_detail::Line] {
+    detail
+        .lines
+        .iter()
+        .position(|l| {
+            ["海克斯强化", "海克斯增幅", "Augments ·"]
+                .iter()
+                .any(|p| l.text.starts_with(p))
+        })
+        .map(|i| &detail.lines[i + 1..])
+        .unwrap_or(&[])
+}
+unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
+    use crate::desktop::{fill, rgb, text};
+    let mut r: RECT = zeroed();
+    GetClientRect(hwnd, &mut r);
+    let dpi = GetDpiForWindow(hwnd).max(96) as i32;
+    let x = |v| v * dpi / 96;
+    fill(dc, r, rgb(6, 17, 26));
+    let line = |s: &str, top, size, color| {
+        text(
+            dc,
+            s,
+            RECT {
+                left: x(16),
+                top,
+                right: r.right - x(16),
+                bottom: top + x(30),
+            },
+            x(size),
+            color,
+        )
+    };
+    line("局内海克斯参考 · 整体胜率", x(14), 20, rgb(205, 174, 108));
+    line(
+        "实际领取轮次未确认；与三卡识别独立",
+        x(48),
+        12,
+        rgb(138, 167, 180),
+    );
+    if let Some(detail) = &state.reply.detail {
+        line(&detail.title, x(82), 17, rgb(222, 233, 234));
+        let mut top = x(125);
+        for row in side_lines(detail).iter().skip(state.scroll) {
+            let chunks = wrap(
+                &row.text,
+                ((r.right - x(70))
+                    / x(if crate::i18n::locale() == "en-US" {
+                        7
+                    } else {
+                        13
+                    }))
+                .max(8) as usize,
+            );
+            let height = x((chunks.len() as i32 * 23 + 12).max(42));
+            if top + height > r.bottom - x(52) {
+                break;
+            }
+            let left = if let Some(url) = row.icons.first() {
+                icon(dc, state, url, x(16), top, x(32));
+                x(57)
+            } else {
+                x(16)
+            };
+            for (i, chunk) in chunks.iter().enumerate() {
+                text(
+                    dc,
+                    chunk,
+                    RECT {
+                        left,
+                        top: top + x(i as i32 * 23),
+                        right: r.right - x(16),
+                        bottom: top + x(i as i32 * 23 + 23),
+                    },
+                    x(if row.icons.is_empty() { 12 } else { 15 }),
+                    rgb(176, 211, 215),
+                );
+            }
+            top += height;
+        }
+        if side_lines(detail).is_empty() {
+            line(
+                "本地详情不可用；可暂停后更新数据",
+                x(130),
+                14,
+                rgb(198, 171, 100),
+            );
+        }
+    } else {
+        line("正在读取本地详情…", x(100), 15, rgb(176, 211, 215));
+    }
+    if let Some(view) = &state.view {
+        line(&view.version, r.bottom - x(50), 12, rgb(138, 167, 180));
+    }
+    line("滚轮浏览详情", r.bottom - x(28), 12, rgb(205, 174, 108));
+}
 unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
+    if state.side {
+        draw_side(hwnd, dc, state);
+        return;
+    }
     use crate::desktop::{fill, rgb, text};
     let mut r: RECT = zeroed();
     GetClientRect(hwnd, &mut r);

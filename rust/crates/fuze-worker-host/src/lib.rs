@@ -1,5 +1,7 @@
 //! One persistent child and one pipe thread. The caller must not run blocking calls on a UI loop.
 #[cfg(windows)]
+pub mod install_entries;
+#[cfg(windows)]
 pub mod local_setup;
 #[cfg(windows)]
 pub mod stage_reference;

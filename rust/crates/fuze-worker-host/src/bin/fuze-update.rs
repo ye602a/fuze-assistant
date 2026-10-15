@@ -54,17 +54,73 @@ fn run() -> Result<(), &'static str> {
         .ok_or("update-location")?
         .to_path_buf();
     let root = install::root()?;
+    if action == "--uninstall-local" {
+        // Run outside the managed tree so Windows can release and delete installed binaries.
+        use std::os::windows::process::CommandExt;
+        let temporary = std::env::temp_dir().join(format!(
+            "fuze-uninstall-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "install-clock")?
+                .as_nanos()
+        ));
+        fs::create_dir(&temporary).map_err(|_| "uninstall-helper")?;
+        install::safe_dir(&temporary)?;
+        let helper = temporary.join("fuze-update.exe");
+        fs::copy(
+            std::env::current_exe().map_err(|_| "update-location")?,
+            &helper,
+        )
+        .map_err(|_| "uninstall-helper")?;
+        std::process::Command::new(helper)
+            .arg("--uninstall-worker")
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|_| "uninstall-helper")?;
+        return Ok(());
+    }
+    if action == "--uninstall-worker" {
+        if fs::canonicalize(&bundled)
+            .map_err(|_| "uninstall-helper-location")?
+            .starts_with(&root)
+        {
+            return Err("uninstall-helper-location");
+        }
+        if !message("卸载独立 Rust 预览版和开始菜单快捷方式？设置、个人记录、缓存与私有令牌会保留。未知文件不会删除；临时卸载工具由系统临时文件清理。", true) { return Ok(()); }
+        if install::desktop_running() {
+            return Err("install-close-preview-first");
+        }
+        let _lock = install::lock(&root)?;
+        fuze_worker_host::install_entries::uninstall(
+            &root,
+            &fuze_worker_host::install_entries::programs()?,
+        )?;
+        message("Rust 程序与快捷方式已移除。用户数据、令牌、未识别文件和安装锁文件保留。Electron 稳定版未改动。", false);
+        return Ok(());
+    }
     if action == "--install-local" {
         if !message("将当前 Rust 测试包安装到独立用户目录？无需管理员权限，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", true) { return Ok(()); }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
         let _lock = install::lock(&root)?;
-        let changed =
-            fuze_worker_host::local_setup::install_with(&root, &bundled, &install::check_bundle)?;
+        let state = install::read(&root)?;
+        let repairing_pending =
+            state.pending && state.current.as_ref() == Some(&install::bundled_version(&bundled)?);
+        let changed = if repairing_pending {
+            false
+        } else {
+            fuze_worker_host::local_setup::install_with(&root, &bundled, &install::check_bundle)?
+        };
+        fuze_worker_host::install_entries::create(
+            &root,
+            &bundled,
+            &fuze_worker_host::install_entries::programs()?,
+        )?;
         message(
             if changed {
-                "安装完成。请运行 LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
+                "安装完成。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
             } else {
                 "当前版本已安装，启动入口已检查。没有重复安装或启动程序。"
             },
@@ -277,7 +333,7 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n原有版本与 Electron 稳定版保持不变。私有频道请使用 Private-channel.cmd 管理令牌；公开仓库无需令牌。", &[error.to_string()]),false);
+        message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
         std::process::exit(1);
     }
     #[cfg(not(windows))]

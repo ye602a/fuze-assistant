@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates, feat/rust-install-validation-ui, feat/rust-champion-detail, feat/rust-desktop-continuity, feat/rust-account-history, feat/rust-history-detail, feat/rust-runtime-continuity, feat/rust-live-level-gate, feat/rust-local-setup]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates, feat/rust-install-validation-ui, feat/rust-champion-detail, feat/rust-desktop-continuity, feat/rust-account-history, feat/rust-history-detail, feat/rust-runtime-continuity, feat/rust-live-level-gate, feat/rust-local-setup, feat/rust-stage-reference]
     paths:
       - 'rust/**'
       - 'scripts/check-secrets.mjs'
@@ -49,6 +49,8 @@ jobs:
         run: |
           cargo fmt --all -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $env:FUZE_SHARE_FIXTURE = Join-Path (Get-Location) 'artifacts/share.png'
           cargo test --workspace --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo build --workspace --release --locked -j 2
@@ -108,6 +110,10 @@ jobs:
             rust/artifacts/update-validation.json
             rust/artifacts/desktop.png
             rust/artifacts/champion-select.png
+            rust/artifacts/augment-reference.png
+            rust/artifacts/share.png
+            rust/artifacts/desktop-en-US-augments.png
+            rust/artifacts/desktop-zh-TW-augments.png
             rust/artifacts/stage-reference.png
             rust/artifacts/desktop-en-US-stages.png
             rust/artifacts/desktop-zh-TW-stages.png

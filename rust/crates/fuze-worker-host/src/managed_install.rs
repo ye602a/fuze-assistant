@@ -143,7 +143,7 @@ struct Index {
     revision: String,
     files: Vec<Entry>,
 }
-fn allowed(path: &str) -> bool {
+pub(crate) fn allowed(path: &str) -> bool {
     if path.len() > 240
         || path.contains('\\')
         || path.split('/').any(|s| {
@@ -185,6 +185,7 @@ fn allowed(path: &str) -> bool {
         "Forget-private-token.cmd",
         "Rollback.cmd",
         "Install-local.cmd",
+        "Uninstall-local.cmd",
     ]
     .contains(&path)
         || path == "resources/inference.onnx"
