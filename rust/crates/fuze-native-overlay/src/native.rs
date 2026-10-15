@@ -782,8 +782,16 @@ impl HiddenOverlay {
                 class.as_ptr(),
                 wide("FUZE Rust integrated hidden overlay").as_ptr(),
                 WS_POPUP,
-                0,
-                0,
+                if visible {
+                    (GetSystemMetrics(SM_CXSCREEN) - width) / 2
+                } else {
+                    0
+                },
+                if visible {
+                    (GetSystemMetrics(SM_CYSCREEN) - height) / 2
+                } else {
+                    0
+                },
                 width,
                 height,
                 null_mut(),
@@ -979,4 +987,9 @@ impl Drop for Surface {
             DeleteDC(self.dc);
         }
     }
+}
+
+/// Numeric test metadata only; never reads desktop pixels.
+pub fn fixture_screen_size() -> (i32, i32) {
+    unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
 }
