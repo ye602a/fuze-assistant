@@ -60,3 +60,12 @@ augment-journal-v1.json
 *.njsproj
 *.sln
 *.sw?
+
+# Native preview runtime state is private, even when copied into the checkout.
+FuzeRustPreview/
+account-history.json
+account-history-v*.json
+observations.json
+window-main.json
+window-champions.json
+window-augments.json
