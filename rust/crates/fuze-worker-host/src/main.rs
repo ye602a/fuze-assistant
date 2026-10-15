@@ -295,6 +295,10 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
                 .map(|i| sample.expected_ids.get(i).copied())
                 .collect();
             if actual != expected {
+                println!(
+                    "{}",
+                    serde_json::json!({"passed":false,"error":"fixture-mismatch","source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"sample":sample_index,"known_slots":actual.iter().filter(|s|s.is_some()).count(),"slot_matches":actual.iter().zip(&expected).map(|(a,b)|a==b).collect::<Vec<_>>(),"roi_bytes":delivery.roi_bytes})
+                );
                 return Err("fixture-mismatch".into());
             }
             if pipeline.overlay.update(delivery.snapshot.clone())? {
@@ -358,7 +362,29 @@ fn run() -> Result<()> {
 }
 fn main() {
     std::panic::set_hook(Box::new(|_| {}));
-    if run().is_err() {
+    if let Err(error) = run() {
+        let text = error.to_string();
+        let code = match text.as_str() {
+            "fixture-mismatch"
+            | "capture-phase"
+            | "capture-start"
+            | "capture-frame"
+            | "capture-atlas"
+            | "capture-missing"
+            | "wgc-delivery-timeout"
+            | "overlay-start"
+            | "overlay-reset"
+            | "overlay-delivery"
+            | "overlay-timeout"
+            | "worker-timeout"
+            | "worker-not-ready"
+            | "postgame-not-idle"
+            | "source-dimensions" => text.as_str(),
+            _ => "host-failed",
+        };
+        if code != "fixture-mismatch" {
+            println!("{}", serde_json::json!({"passed":false,"error":code}));
+        }
         eprintln!("fuze-worker-host: failed");
         std::process::exit(1);
     }

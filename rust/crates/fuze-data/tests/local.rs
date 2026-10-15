@@ -153,6 +153,7 @@ fn champion_scope_reads_only_selected_shard_and_preserves_missing_rates_and_orig
     let data = prepare(&roots, Locale::ZhCn, Scope::Champion(8)).unwrap();
     let stats = data.recommendations(8).unwrap();
     assert_eq!(stats[&100].win_rate, Some(0.6));
+    assert!((stats[&100].score.unwrap() - 0.384).abs() < 1e-9);
     assert_eq!(stats[&100].region, "WORLD");
     assert_eq!(stats[&100].patch, "16.19");
     assert_eq!(stats[&101].win_rate, None);

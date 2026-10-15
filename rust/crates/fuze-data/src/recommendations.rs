@@ -63,20 +63,12 @@ impl Prepared {
                 let pick_rate = rate("pickRate", "pick_rate");
                 let rank = number(s, "rank", "rank").filter(|v| *v >= 1. && v.fract() == 0.);
                 let total = number(s, "total", "total").filter(|v| *v >= 1. && v.fract() == 0.);
-                let score = match (rank, total) {
-                    (Some(rank), Some(total)) if rank <= total => Some(if total == 1. {
-                        1.
-                    } else {
-                        (total - rank) / (total - 1.)
-                    }),
-                    _ => win_rate.map(|w| {
-                        w * 0.6
-                            + pick_rate.unwrap_or(0.) * 0.2
-                            + (number(s, "games", "num_games").unwrap_or(0.).max(0.) / 1000.)
-                                .min(1.)
-                                * 0.2
-                    }),
-                };
+                let score = win_rate.map(|w| {
+                    w * 0.6
+                        + pick_rate.unwrap_or(0.) * 0.2
+                        + (number(s, "games", "num_games").unwrap_or(0.).max(0.) / 1000.).min(1.)
+                            * 0.2
+                });
                 let explicit = s
                     .get("winRateSource")
                     .and_then(Value::as_str)
@@ -110,6 +102,17 @@ impl Prepared {
         }
         if !found {
             return Err("data-champion-missing");
+        }
+        if !ordering.is_empty() && ordering.iter().all(|r| r.1.is_some()) {
+            let count = ordering.len() as f64;
+            for row in &ordering {
+                let total = row.2.unwrap_or(count);
+                result.get_mut(&row.0).unwrap().score = Some(if total <= 1. {
+                    1.
+                } else {
+                    ((total - row.1.unwrap()) / (total - 1.)).clamp(0., 1.)
+                });
+            }
         }
         // Match the existing tier-priority path when the complete pool has no authoritative ranks.
         if !ordering.is_empty()

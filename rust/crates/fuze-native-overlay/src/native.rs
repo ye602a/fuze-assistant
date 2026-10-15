@@ -196,7 +196,9 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
                 .map(|v| format!("\u{9009}\u{53d6} {:.1}% / \u{6574}\u{4f53}", v * 100.))
                 .unwrap_or("\u{9009}\u{53d6} -- / \u{6574}\u{4f53}".into())
         });
-        let missing_statistics = STATISTICS_MODE.with(|s| s.get()) && recommendation.is_none();
+        let missing_statistics = STATISTICS_MODE.with(|s| s.get())
+            && recommendation.is_none()
+            && matches!(&slots[i as usize], Slot::Known { .. });
         let rate_text = if missing_statistics {
             Some("\u{6682}\u{65e0}\u{80dc}\u{7387}".into())
         } else {
