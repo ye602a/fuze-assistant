@@ -42,14 +42,25 @@ impl Candidate {
         unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_TIMEOUT }
     }
 }
-fn discover() -> Result<Option<Candidate>> {
-    match discover_lockfile() {
+fn discover(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
+    let automatic = match discover_lockfile(None) {
         Ok(Some(c)) => Ok(Some(c)),
         Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
         previous => match discover_command() {
             Ok(None) => previous,
             other => other,
         },
+    };
+    match automatic {
+        Ok(Some(c)) => Ok(Some(c)),
+        Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
+        other => {
+            if let Some(root) = manual {
+                discover_lockfile(Some(root))
+            } else {
+                other
+            }
+        }
     }
 }
 fn discover_command() -> Result<Option<Candidate>> {
@@ -134,7 +145,7 @@ fn discover_command() -> Result<Option<Candidate>> {
         Ok(found)
     }
 }
-fn discover_lockfile() -> Result<Option<Candidate>> {
+fn discover_lockfile(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -168,12 +179,30 @@ fn discover_lockfile() -> Result<Option<Candidate>> {
                     let process = Handle(process);
                     let mut path = vec![0u16; 32768];
                     let mut length = path.len() as u32;
-                    if QueryFullProcessImageNameW(process.0, 0, path.as_mut_ptr(), &mut length) == 0
-                    {
-                        denied = true;
+                    let readable =
+                        QueryFullProcessImageNameW(process.0, 0, path.as_mut_ptr(), &mut length)
+                            != 0;
+                    let image = if readable {
+                        Some(PathBuf::from(String::from_utf16_lossy(
+                            &path[..length as usize],
+                        )))
                     } else {
-                        let image =
-                            PathBuf::from(String::from_utf16_lossy(&path[..length as usize]));
+                        manual
+                            .filter(|r| r.join("LeagueClient.exe").is_file())
+                            .map(|r| r.join("LeagueClient.exe"))
+                    };
+                    if image.is_none() {
+                        denied = true;
+                    }
+                    if let Some(image) = image {
+                        if let Some(root) = manual {
+                            if readable
+                                && std::fs::canonicalize(root).ok()
+                                    != image.parent().and_then(|p| std::fs::canonicalize(p).ok())
+                            {
+                                return Err(Error::Discovery);
+                            }
+                        }
                         if image.file_name().is_some_and(|n| {
                             n.to_string_lossy().eq_ignore_ascii_case("LeagueClient.exe")
                         }) {
@@ -237,6 +266,7 @@ struct Connected {
 /// Own this on a dedicated control/IO thread. `poll` is synchronous, bounded per WinHTTP
 /// operation, not hard-cancellable. Caller schedules `wake_at`; no UI/OCR thread invocation.
 pub struct AutoClient {
+    manual: Option<PathBuf>,
     locale: Option<crate::locale::Locale>,
     dirty: bool,
     last_read: u64,
@@ -249,6 +279,7 @@ pub struct AutoClient {
 impl Default for AutoClient {
     fn default() -> Self {
         Self {
+            manual: None,
             locale: None,
             dirty: false,
             last_read: 0,
@@ -261,6 +292,12 @@ impl Default for AutoClient {
     }
 }
 impl AutoClient {
+    pub fn with_fallback(manual: Option<PathBuf>) -> Self {
+        Self {
+            manual,
+            ..Default::default()
+        }
+    }
     pub fn verified_at(&self) -> Option<Instant> {
         self.verified_at
     }
@@ -327,7 +364,7 @@ impl AutoClient {
                 }
             }
             if self.connection.is_none() {
-                let Some(c) = discover()? else {
+                let Some(c) = discover(self.manual.as_deref())? else {
                     return Ok(None);
                 };
                 self.connection = Some(Connected {

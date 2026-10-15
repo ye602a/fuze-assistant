@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Preferences {
     pub schema: u32,
     pub backend: String,
@@ -15,6 +15,10 @@ pub struct Preferences {
     pub champ_select: bool,
     pub champ_topmost: bool,
     pub close_to_tray: bool,
+    pub private_updates: bool,
+    pub icon_downloads: bool,
+    pub pause_hotkey: bool,
+    pub manual_directory: String,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -25,6 +29,10 @@ impl Default for Preferences {
             champ_select: true,
             champ_topmost: true,
             close_to_tray: true,
+            private_updates: true,
+            icon_downloads: true,
+            pause_hotkey: false,
+            manual_directory: String::new(),
         }
     }
 }
@@ -35,6 +43,14 @@ impl Preferences {
             || !["auto", "zh-CN", "zh-TW", "en-US"].contains(&self.locale.as_str())
         {
             return Err("preferences-invalid");
+        }
+        if !self.manual_directory.is_empty()
+            && (self.manual_directory.len() > 512
+                || !Path::new(&self.manual_directory).is_absolute()
+                || self.manual_directory.starts_with("\\\\")
+                || self.manual_directory.chars().any(char::is_control))
+        {
+            return Err("preferences-directory");
         }
         Ok(())
     }
@@ -70,6 +86,13 @@ pub fn read(path: &Path) -> Result<Preferences> {
     Ok(value)
 }
 pub fn save(path: &Path, value: &Preferences) -> Result<()> {
+    if !value.manual_directory.is_empty()
+        && !Path::new(&value.manual_directory)
+            .join("LeagueClient.exe")
+            .is_file()
+    {
+        return Err("preferences-directory-client-missing");
+    }
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -121,6 +144,17 @@ pub fn save(path: &Path, value: &Preferences) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn older_preferences_receive_safe_defaults_and_reject_remote_fallback() {
+        let mut p:Preferences=serde_json::from_str(r#"{"schema":1,"backend":"cpu","locale":"auto","champ_select":true,"champ_topmost":false,"close_to_tray":true}"#).unwrap();
+        p.validate().unwrap();
+        assert!(p.private_updates);
+        assert!(!p.pause_hotkey);
+        p.manual_directory = r"\\server\share".into();
+        assert!(p.validate().is_err());
+        p.manual_directory = "../private".into();
+        assert!(p.validate().is_err());
+    }
     #[test]
     fn preferences_roundtrip_reject_invalid_and_preserve_on_locked_commit() {
         use std::os::windows::fs::OpenOptionsExt;

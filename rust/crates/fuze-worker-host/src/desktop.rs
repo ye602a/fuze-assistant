@@ -14,8 +14,12 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODS_FOCUS, ODS_SELECTED};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows_sys::Win32::UI::Controls::{
+    DRAWITEMSTRUCT, EM_SETLIMITTEXT, ODS_DISABLED, ODS_FOCUS, ODS_SELECTED,
+};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, RegisterHotKey, UnregisterHotKey, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, VK_F8,
+};
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
@@ -28,7 +32,7 @@ const EXIT: u8 = 2;
 const DATA: u8 = 3;
 const APPLY: u8 = 4;
 const SETTINGS: usize = 107;
-const SAVE_SETTINGS: usize = 206;
+const SAVE_SETTINGS: usize = 209;
 const UPDATE_DATA: usize = 105;
 const UPDATE_APP: usize = 106;
 const TOGGLE: usize = 101;
@@ -175,6 +179,10 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 }
                 config = next;
                 preferences = p;
+                if let Ok(mut control) = shared.monitor.lock() {
+                    *control = None;
+                }
+                monitor = None;
                 controller = Controller::new(config.clone());
                 champion_catalog = None;
                 champion_locale = None;
@@ -260,7 +268,14 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 }
             }
             if monitor.is_none() {
-                match Monitor::start_enabled(false) {
+                match Monitor::start_with_fallback(
+                    false,
+                    if preferences.manual_directory.is_empty() {
+                        None
+                    } else {
+                        Some(std::path::PathBuf::from(&preferences.manual_directory))
+                    },
+                ) {
                     Ok(m) => {
                         if let Ok(mut control) = shared.monitor.lock() {
                             let c = m.control();
@@ -413,6 +428,10 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
         204,
         205,
         206,
+        207,
+        208,
+        209,
+        210,
     ] {
         let child = GetDlgItem(hwnd, id as i32);
         if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
@@ -430,7 +449,7 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
             child,
             WM_PRINT,
             memory as usize,
-            (PRF_CLIENT | PRF_ERASEBKGND) as isize,
+            (PRF_CLIENT | PRF_ERASEBKGND | PRF_NONCLIENT) as isize,
         );
         SetViewportOrgEx(memory, 0, 0, null_mut());
     }
@@ -534,6 +553,7 @@ fn explain(error: Option<&str>) -> &'static str {
     }
 }
 struct Ui {
+    hotkey_ok: bool,
     settings: bool,
     draft: crate::preferences::Preferences,
     champions: Option<crate::champ_select::Window>,
@@ -575,6 +595,14 @@ fn cycle<'a>(current: &str, values: &[&'a str]) -> &'a str {
     values[(values.iter().position(|s| *s == current).unwrap_or(0) + 1) % values.len()]
 }
 unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
+    ShowWindow(
+        GetDlgItem(hwnd, 210),
+        if u.settings { SW_SHOWNA } else { SW_HIDE },
+    );
+    EnableWindow(
+        GetDlgItem(hwnd, 210),
+        i32::from(u.desired == PAUSED && u.shown.mode == PAUSED),
+    );
     let yes = |v| if v { "开启" } else { "关闭" };
     let labels = [
         format!(
@@ -601,6 +629,14 @@ unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
             "退出程序"
         }
         .into(),
+        yes(u.draft.icon_downloads).into(),
+        if u.draft.private_updates {
+            "私有频道（凭据管理器）"
+        } else {
+            "公开频道（无令牌）"
+        }
+        .into(),
+        yes(u.draft.pause_hotkey).into(),
         "保存设置".into(),
     ];
     for (i, label) in labels.iter().enumerate() {
@@ -653,6 +689,8 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         dim,
     );
     if u.settings {
+        fill(dc, rect(27, 476, r.right - x(27), 506), rgb(76, 94, 100));
+        fill(dc, rect(28, 477, r.right - x(28), 505), rgb(15, 30, 41));
         text(
             dc,
             "偏好设置 · 暂停识别后保存",
@@ -666,31 +704,44 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
             "显示选人参考",
             "选人窗口置顶",
             "关闭主界面",
+            "后台下载公共图标",
+            "软件更新频道",
+            "暂停快捷键 Ctrl+Shift+F8",
         ]
         .iter()
         .enumerate()
         {
-            let t = 160 + i as i32 * 49;
-            text(dc, label, rect(28, t, r.right / 2, t + 40), x(17), pale);
+            let t = 148 + (i / 2) as i32 * 67;
+            let l = x(28) + (i % 2) as i32 * (r.right / 2);
+            text(
+                dc,
+                label,
+                RECT {
+                    left: l,
+                    top: y(t),
+                    right: l + r.right / 2 - x(40),
+                    bottom: y(t + 24),
+                },
+                x(14),
+                pale,
+            );
         }
         text(
             dc,
-            "自动模式按已有策略运行并允许 CPU 回退；界面显示实际后端。",
+            "高级目录回退（可留空，仅自动发现失败后使用）",
             rect(28, 449, r.right - x(28), 474),
             x(13),
             dim,
         );
+        text(dc, "", rect(28, 475, r.right - x(28), 500), x(13), dim);
         text(
             dc,
-            "语言数据校验成功后才保存。不会写入游戏、凭据或账号信息。",
-            rect(28, 475, r.right - x(28), 500),
-            x(13),
-            dim,
-        );
-        text(
-            dc,
-            u.shown.notice.unwrap_or("更改在下次开始识别时生效。"),
-            rect(28, 405, r.right / 2 - x(12), 444),
+            if !u.hotkey_ok {
+                "快捷键已被占用；仍可使用按钮或托盘暂停。"
+            } else {
+                u.shown.notice.unwrap_or("更改在下次开始识别时生效。")
+            },
+            rect(28, 418, r.right / 2 - x(12), 444),
             x(13),
             dim,
         );
@@ -918,16 +969,28 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     1,
                 );
             }
-            for i in 0..6 {
+            for i in 0..9 {
                 MoveWindow(
                     GetDlgItem(hwnd, 201 + i),
-                    r.right / 2,
-                    (160 + i * 49) * d / 96,
-                    r.right / 2 - 28 * d / 96,
+                    if i == 8 {
+                        r.right / 2
+                    } else {
+                        28 * d / 96 + (i % 2) * (r.right / 2)
+                    },
+                    (if i == 8 { 418 } else { 174 + (i / 2) * 67 }) * d / 96,
+                    r.right / 2 - 56 * d / 96,
                     38 * d / 96,
                     1,
                 );
             }
+            MoveWindow(
+                GetDlgItem(hwnd, 210),
+                28 * d / 96,
+                477 * d / 96,
+                r.right - 56 * d / 96,
+                28 * d / 96,
+                1,
+            );
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -944,16 +1007,26 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             );
             0
         }
+        WM_HOTKEY if w == 1 => {
+            if !u.smoke && [PAUSED, RUNNING].contains(&u.desired) {
+                PostMessageW(hwnd, WM_COMMAND, TOGGLE, 0);
+            }
+            0
+        }
         WM_COMMAND => {
             match w & 0xffff {
                 SETTINGS => {
                     u.settings = !u.settings;
                     if u.settings {
                         u.draft = u.shown.preferences.clone();
+                        SetWindowTextW(
+                            GetDlgItem(hwnd, 210),
+                            wide(&u.draft.manual_directory).as_ptr(),
+                        );
                     }
                     settings_controls(hwnd, u);
                 }
-                201..=205 if u.settings => {
+                201..=208 if u.settings && u.desired == PAUSED && u.shown.mode == PAUSED => {
                     match w & 0xffff {
                         201 => {
                             u.draft.backend =
@@ -966,6 +1039,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         203 => u.draft.champ_select = !u.draft.champ_select,
                         204 => u.draft.champ_topmost = !u.draft.champ_topmost,
                         205 => u.draft.close_to_tray = !u.draft.close_to_tray,
+                        206 => u.draft.icon_downloads = !u.draft.icon_downloads,
+                        207 => u.draft.private_updates = !u.draft.private_updates,
+                        208 => u.draft.pause_hotkey = !u.draft.pause_hotkey,
                         _ => {}
                     }
                     settings_controls(hwnd, u);
@@ -973,6 +1049,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 SAVE_SETTINGS if u.settings => {
                     if u.shared.desired.load(Ordering::Acquire) == PAUSED && u.shown.mode == PAUSED
                     {
+                        let mut directory = [0u16; 513];
+                        let n = GetWindowTextW(GetDlgItem(hwnd, 210), directory.as_mut_ptr(), 513);
+                        u.draft.manual_directory =
+                            String::from_utf16_lossy(&directory[..n.max(0) as usize])
+                                .trim()
+                                .into();
                         if let Ok(mut pending) = u.shared.pending.lock() {
                             *pending = Some(u.draft.clone());
                         }
@@ -1000,7 +1082,11 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         use std::os::windows::process::CommandExt;
                         if let Ok(exe) = std::env::current_exe() {
                             if std::process::Command::new(exe.with_file_name("fuze-update.exe"))
-                                .arg("--update")
+                                .arg(if u.shown.preferences.private_updates {
+                                    "--update-private"
+                                } else {
+                                    "--update"
+                                })
                                 .creation_flags(0x08000000)
                                 .spawn()
                                 .is_ok()
@@ -1083,12 +1169,25 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let next = u.shared.status();
             let desired = u.shared.desired.load(Ordering::Acquire);
             if next != u.shown || desired != u.desired {
+                if !u.smoke && next.preferences.pause_hotkey != u.shown.preferences.pause_hotkey {
+                    UnregisterHotKey(hwnd, 1);
+                    u.hotkey_ok = true;
+                    if next.preferences.pause_hotkey {
+                        u.hotkey_ok = RegisterHotKey(
+                            hwnd,
+                            1,
+                            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                            VK_F8 as u32,
+                        ) != 0;
+                    }
+                }
                 u.shown = next;
                 if let Some(window) = u.champions.as_mut() {
                     window.update(
                         u.shown.selection.clone().filter(|_| desired == RUNNING),
                         u.shown.preferences.champ_topmost,
                         u.smoke,
+                        u.shown.preferences.icon_downloads,
                     );
                 }
                 u.desired = desired;
@@ -1125,7 +1224,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         PostMessageW(hwnd, WM_COMMAND, TOGGLE, 0);
                         u.smoke_step = 1;
                     }
-                    1 if u.shown.mode == RUNNING => {
+                    1 if u.shown.mode == RUNNING
+                        && u.champions.as_ref().is_some_and(|w| w.detail_ready()) =>
+                    {
                         if let (Some(window), Ok(path)) =
                             (u.champions.as_ref(), std::env::var("FUZE_CHAMPION_PREVIEW"))
                         {
@@ -1167,6 +1268,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         WM_DESTROY => {
             u.shared.request(EXIT);
             KillTimer(hwnd, 1);
+            if !u.smoke {
+                UnregisterHotKey(hwnd, 1);
+            }
             if u.tray {
                 u.tray_removed = tray(hwnd, u.icon, false);
                 u.tray = false;
@@ -1229,6 +1333,15 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         monitor: Mutex::new(None),
         pending: Mutex::new(None),
     });
+    let mut champion_roots = config.roots.clone();
+    if !smoke {
+        if let Some(p) = std::env::var_os("LOCALAPPDATA") {
+            champion_roots.push(fuze_data::Root {
+                path: std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"),
+                source: fuze_data::Source::Cache,
+            });
+        }
+    }
     let worker_shared = shared.clone();
     let worker = thread::Builder::new()
         .name("fuze-desktop-control".into())
@@ -1252,9 +1365,10 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         let icon = app_icon();
         let mut ui = Box::new(Ui {
+            hotkey_ok: true,
             settings: false,
             draft: Default::default(),
-            champions: crate::champ_select::Window::new().ok(),
+            champions: crate::champ_select::Window::new(champion_roots, smoke).ok(),
             champion_preview_ok: false,
             icon: icon.unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION)),
             icon_owned: icon.is_some(),
@@ -1316,7 +1430,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 null(),
             );
         }
-        for id in 201..=206 {
+        for id in 201..=209 {
             CreateWindowExW(
                 0,
                 wide("BUTTON").as_ptr(),
@@ -1332,6 +1446,32 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 null(),
             );
         }
+        let edit = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            wide("EDIT").as_ptr(),
+            wide("").as_ptr(),
+            WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL as u32,
+            0,
+            0,
+            0,
+            0,
+            hwnd,
+            210 as HMENU,
+            instance,
+            null(),
+        );
+        if edit.is_null() {
+            shared.request(EXIT);
+            DestroyWindow(hwnd);
+            return Err("desktop-directory-control");
+        }
+        SendMessageW(edit, EM_SETLIMITTEXT, 512, 0);
+        SendMessageW(
+            edit,
+            WM_SETFONT,
+            GetStockObject(DEFAULT_GUI_FONT) as usize,
+            0,
+        );
         settings_controls(hwnd, &ui);
         SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, ui.icon as isize);
         SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, ui.icon as isize);

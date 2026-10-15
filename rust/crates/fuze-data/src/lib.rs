@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+pub mod champion_detail;
 pub mod recommendations;
 pub type Result<T> = std::result::Result<T, &'static str>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub enum Scope {
     Ocr,
     Champions,
     Champion(u32),
+    Detail(u32),
     Full,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -229,8 +231,11 @@ fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
             files.insert(p.into(), 0);
         }
     }
-    if matches!(scope, Scope::Champion(_)) {
+    if matches!(scope, Scope::Champion(_) | Scope::Detail(_)) {
         files.insert("champion-shards/index.json".into(), 0);
+        if matches!(scope, Scope::Detail(_)) {
+            files.insert("items.json".into(), 0);
+        }
     }
     let mut add = |path: &str, entry: &Value| -> Result<()> {
         safe_path(path)?;
@@ -293,7 +298,7 @@ fn load(
         declared(&value, locale, ver, false)?;
         documents.insert(path, value);
     }
-    if let Scope::Champion(champion) = scope {
+    if let Scope::Champion(champion) | Scope::Detail(champion) = scope {
         let index = documents
             .get("champion-shards/index.json")
             .ok_or("data-shard-index")?;

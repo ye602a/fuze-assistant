@@ -111,6 +111,9 @@ impl Monitor {
         Self::start_enabled(true)
     }
     pub fn start_enabled(initial: bool) -> Result<Self> {
+        Self::start_with_fallback(initial, None)
+    }
+    pub fn start_with_fallback(initial: bool, manual: Option<PathBuf>) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
@@ -131,7 +134,7 @@ impl Monitor {
         let thread = thread::Builder::new()
             .name("fuze-lcu-control".into())
             .spawn(move || {
-                let mut client = AutoClient::default();
+                let mut client = AutoClient::with_fallback(manual);
                 let mut was_enabled = true;
                 while !stopped.load(Ordering::Acquire) {
                     if !enabled.load(Ordering::Acquire) {
