@@ -699,9 +699,9 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
                 &row.text,
                 ((r.right - x(70))
                     / x(if crate::i18n::locale() == "en-US" {
-                        7
+                        9
                     } else {
-                        13
+                        16
                     }))
                 .max(8) as usize,
             );
@@ -740,7 +740,16 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
             );
         }
     } else {
-        line("正在读取本地详情…", x(100), 15, rgb(176, 211, 215));
+        line(
+            if state.reply.error.is_some() {
+                "本地详情不可用；可暂停后更新数据"
+            } else {
+                "正在读取本地详情…"
+            },
+            x(100),
+            15,
+            rgb(176, 211, 215),
+        );
     }
     if let Some(view) = &state.view {
         line(&view.version, r.bottom - x(50), 12, rgb(138, 167, 180));
