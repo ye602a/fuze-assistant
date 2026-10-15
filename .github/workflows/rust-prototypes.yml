@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay]
     paths:
       - 'rust/**'
       - 'scripts/check-rust-prototypes.mjs'
@@ -47,6 +47,8 @@ jobs:
       - name: Offline ONNX and hidden native window
         run: node scripts/check-rust-prototypes.mjs
       - name: Persistent worker, raw atlas IPC and bounded lifecycle
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
         run: node scripts/check-rust-worker.mjs
       - name: Native capture boundary and generated GPU ROI readback
         run: node scripts/check-rust-capture.mjs

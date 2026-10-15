@@ -11,6 +11,8 @@ use std::{
 pub type Result<T> = std::result::Result<T, &'static str>;
 #[cfg(windows)]
 mod job;
+#[cfg(windows)]
+pub mod pipeline;
 pub mod recovery;
 pub struct Worker {
     child: Child,

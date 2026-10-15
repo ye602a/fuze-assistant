@@ -20,6 +20,17 @@ use windows_sys::Win32::{
 };
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
 thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
+thread_local! {
+    static STATS: std::cell::RefCell<std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static SOURCE: std::cell::RefCell<Option<SourceImage>> = const { std::cell::RefCell::new(None) };
+    static STATISTICS_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PULSE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+pub struct SourceImage {
+    pub bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -65,6 +76,50 @@ unsafe fn label(dc: HDC, value: &str, rect: RECT, size: i32, color: u32) {
     DeleteObject(font);
 }
 unsafe fn draw(dc: HDC, w: i32, h: i32) {
+    if SOURCE.with(|s| {
+        let source = s.borrow();
+        let Some(source) = source.as_ref() else {
+            return false;
+        };
+        let mut info: BITMAPINFO = zeroed();
+        info.bmiHeader = BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: source.width as i32,
+            biHeight: -(source.height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..zeroed()
+        };
+        StretchDIBits(
+            dc,
+            0,
+            0,
+            w,
+            h,
+            0,
+            0,
+            source.width as i32,
+            source.height as i32,
+            source.bytes.as_ptr().cast(),
+            &info,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+        fill(
+            dc,
+            RECT {
+                left: 0,
+                top: 0,
+                right: 8,
+                bottom: 8,
+            },
+            PULSE.with(|p| p.get()).wrapping_mul(0x010101) & 0xffffff,
+        );
+        true
+    }) {
+        return;
+    }
     let snapshot = SNAPSHOT.with(|s| s.borrow().clone());
     let slots = snapshot
         .as_ref()
@@ -127,6 +182,47 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
             ),
             Slot::Unreadable => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
         };
+        let recommendation = match &slots[i as usize] {
+            Slot::Known { id, .. } => STATS.with(|s| s.borrow().get(id).cloned()),
+            _ => None,
+        };
+        let rate_text = recommendation.as_ref().map(|r| {
+            r.win_rate
+                .map(|v| format!("\u{80dc}\u{7387} {:.1}%", v * 100.))
+                .unwrap_or("\u{6682}\u{65e0}\u{80dc}\u{7387}".into())
+        });
+        let pick_text = recommendation.as_ref().map(|r| {
+            r.pick_rate
+                .map(|v| format!("\u{9009}\u{53d6} {:.1}% / \u{6574}\u{4f53}", v * 100.))
+                .unwrap_or("\u{9009}\u{53d6} -- / \u{6574}\u{4f53}".into())
+        });
+        let missing_statistics = STATISTICS_MODE.with(|s| s.get()) && recommendation.is_none();
+        let rate_text = if missing_statistics {
+            Some("\u{6682}\u{65e0}\u{80dc}\u{7387}".into())
+        } else {
+            rate_text
+        };
+        let pick_text = if missing_statistics {
+            Some("\u{6682}\u{65e0}\u{7edf}\u{8ba1}".into())
+        } else {
+            pick_text
+        };
+        let progress = if missing_statistics { 0. } else { progress };
+        let progress = recommendation
+            .as_ref()
+            .map(|r| r.score.unwrap_or(0.))
+            .unwrap_or(progress);
+        let rate = rate_text.as_deref().unwrap_or(rate);
+        let pick = pick_text.as_deref().unwrap_or(pick);
+        if let Some(r) = &recommendation {
+            label(
+                dc,
+                &format!("{} / {} / {}", r.origin, r.region, r.patch),
+                rect(x + 10, 120, x + 230, 132),
+                (9.0 * sy) as i32,
+                rgb(145, 174, 184),
+            );
+        }
         label(
             dc,
             name,
@@ -564,7 +660,25 @@ pub fn run() -> Result<()> {
 
 /// Event-driven hidden overlay used by the integrated host. No timers, foreign HWNDs or input.
 /// OCR waits stay on the caller's control thread, never on this window's message thread.
+#[derive(Clone)]
+pub struct Cancellation {
+    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    hwnd: isize,
+}
+impl Cancellation {
+    pub fn cancel(&self) {
+        if !self.flag.swap(true, Ordering::AcqRel) {
+            unsafe {
+                PostMessageW(self.hwnd as HWND, WM_APP + 3, 0, 0);
+            }
+        }
+    }
+    pub fn cancelled(&self) -> bool {
+        self.flag.load(Ordering::Acquire)
+    }
+}
 pub struct HiddenOverlay {
+    cancellation: Cancellation,
     hwnd: isize,
     tx: std::sync::mpsc::SyncSender<OverlayCommand>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -575,9 +689,75 @@ enum OverlayCommand {
 }
 impl HiddenOverlay {
     pub fn start(generation: u64, dataset: String) -> std::result::Result<Self, &'static str> {
+        Self::start_inner(
+            generation,
+            dataset,
+            std::collections::HashMap::new(),
+            None,
+            false,
+        )
+    }
+    pub fn with_statistics(
+        generation: u64,
+        dataset: String,
+        stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
+    ) -> std::result::Result<Self, &'static str> {
+        Self::start_inner(generation, dataset, stats, None, true)
+    }
+    pub fn fixture_source(image: SourceImage) -> std::result::Result<Self, &'static str> {
+        if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("FUZE_RUST_CI_VISIBLE").as_deref() != Ok("1")
+        {
+            return Err("visible-test-ci-only");
+        }
+        if image.width == 0
+            || image.height == 0
+            || image.width > 4096
+            || image.height > 2160
+            || image.bytes.len() != image.width as usize * image.height as usize * 4
+        {
+            return Err("source-dimensions");
+        }
+        Self::start_inner(
+            1,
+            "fixture-v1".into(),
+            std::collections::HashMap::new(),
+            Some(image),
+            false,
+        )
+    }
+    pub fn cancellation(&self) -> Cancellation {
+        self.cancellation.clone()
+    }
+    pub fn owned_handle(&self) -> isize {
+        self.hwnd
+    }
+    pub fn pulse(&self) {
+        unsafe {
+            PostMessageW(self.hwnd as HWND, WM_APP + 2, 0, 0);
+        }
+    }
+    fn start_inner(
+        generation: u64,
+        dataset: String,
+        stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
+        source: Option<SourceImage>,
+        statistics_mode: bool,
+    ) -> std::result::Result<Self, &'static str> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ui_flag = flag.clone();
         let thread = std::thread::spawn(move || unsafe {
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let visible = source.is_some();
+            let (width, height) = source
+                .as_ref()
+                .map(|s| (s.width as i32, s.height as i32))
+                .unwrap_or((760, 170));
+            STATS.with(|s| *s.borrow_mut() = stats);
+            STATISTICS_MODE.with(|s| s.set(statistics_mode));
+            SOURCE.with(|s| *s.borrow_mut() = source);
             let instance = GetModuleHandleW(null());
             let class = wide(&format!("FuzeIntegrated-{}", GetCurrentThreadId()));
             let wc = WNDCLASSW {
@@ -597,8 +777,8 @@ impl HiddenOverlay {
                 WS_POPUP,
                 0,
                 0,
-                760,
-                170,
+                width,
+                height,
                 null_mut(),
                 null_mut(),
                 instance,
@@ -624,21 +804,34 @@ impl HiddenOverlay {
                 UnregisterClassW(class.as_ptr(), instance);
                 return;
             };
+            if visible {
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                UpdateWindow(hwnd);
+            }
             if ready_tx.send(hwnd as isize).is_err() {
                 DestroyWindow(hwnd);
                 UnregisterClassW(class.as_ptr(), instance);
                 return;
             }
             let mut current_generation = generation;
+            let mut current_dataset = dataset.clone();
             let mut gate = ContextGate::new(generation, dataset);
             let mut message: MSG = zeroed();
             while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
-                if message.message == WM_APP + 1 {
+                if message.message == WM_APP + 3 {
+                    SNAPSHOT.with(|s| *s.borrow_mut() = None);
+                    InvalidateRect(hwnd, null(), 0);
+                } else if message.message == WM_APP + 2 {
+                    PULSE.with(|p| p.set(p.get().wrapping_add(1)));
+                    InvalidateRect(hwnd, null(), 0);
+                    UpdateWindow(hwnd);
+                } else if message.message == WM_APP + 1 {
                     if let Ok(command) = rx.try_recv() {
                         let (accepted, ack) = match command {
                             OverlayCommand::Update(snapshot, ack) => {
-                                let accepted =
-                                    !snapshot.selection_confirmed && gate.accept(&snapshot);
+                                let accepted = !ui_flag.load(Ordering::Acquire)
+                                    && !snapshot.selection_confirmed
+                                    && gate.accept(&snapshot);
                                 if accepted {
                                     SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
                                 }
@@ -648,7 +841,11 @@ impl HiddenOverlay {
                                 let accepted = next > current_generation;
                                 if accepted {
                                     current_generation = next;
-                                    gate = ContextGate::new(next, dataset);
+                                    gate = ContextGate::new(next, dataset.clone());
+                                    if current_dataset != dataset {
+                                        STATS.with(|s| s.borrow_mut().clear());
+                                    }
+                                    current_dataset = dataset.clone();
                                     SNAPSHOT.with(|s| *s.borrow_mut() = None);
                                 }
                                 (accepted, ack)
@@ -680,6 +877,7 @@ impl HiddenOverlay {
             return Err("overlay-start");
         }
         Ok(Self {
+            cancellation: Cancellation { flag, hwnd },
             hwnd,
             tx,
             thread: Some(thread),
@@ -712,6 +910,7 @@ impl HiddenOverlay {
 }
 impl Drop for HiddenOverlay {
     fn drop(&mut self) {
+        self.cancellation.flag.store(true, Ordering::Release);
         unsafe {
             PostMessageW(self.hwnd as HWND, WM_CLOSE, 0, 0);
         }

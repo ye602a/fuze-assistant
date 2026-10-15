@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+fuze-data = { path = "../fuze-data" }
 fuze-contract = { path = "../fuze-contract" }
 serde_json.workspace = true
 image.workspace = true

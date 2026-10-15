@@ -26,3 +26,8 @@
 ## M5a update
 
 See [M5a](M5A.md): persistent hidden overlay delivery, startup-only catalog transfer from the prepared local data snapshot, and opt-in native process-path/lockfile discovery with bounded HTTP retry scheduling. Offline integration is implemented; live WGC-to-UI orchestration, production statistics, WebSocket reconnection and hard IO cancellation remain open. Stable application entry is unchanged.
+
+
+## M5b update
+
+PR #27 Windows CI 38673018122 passed at e5ae941. [M5b](M5B.md) adds a session-scoped host shared by GPU fixtures and real owned-window WGC, targeted champion-shard statistics, native overall-rate display, and an asynchronous display-cancellation handle. Live client events, foreign game-window attachment and the stable application entry remain outside this stage.

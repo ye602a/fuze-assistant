@@ -138,3 +138,31 @@ fn rejects_windows_path_aliases_bad_json_sizes_and_ambiguous_catalog() {
     );
     assert!(prepare(&roots, Locale::ZhCn, Scope::Ocr).is_err());
 }
+
+#[test]
+fn champion_scope_reads_only_selected_shard_and_preserves_missing_rates_and_origin() {
+    let root = Temp::new();
+    root.dataset("zh-CN", "16.20.1", false);
+    root.write("versions/16.20.1/champion-shards/index.json",json!({"dataVersion":"16.20.1","shards":[{"path":"champion-shards/1.json","championIds":[8]},{"path":"champion-shards/missing.json","championIds":[9]}]}));
+    root.write("versions/16.20.1/champion-shards/1.json",json!({"champions":{"8":{"augments":[
+        {"id":100,"stats":{"winRate":0.6,"pickRate":0.12,"rank":1,"total":2,"source":"tencent","region":"CN","winRateSource":"client","winRateRegion":"WORLD","winRateGamePatch":"16.19"}},
+        {"id":101,"stats":{"winRate":null,"pickRate":0.2,"rank":2,"total":2}},
+        {"id":102,"stats":{"winRate":60,"pickRate":-1}}
+    ]}}}));
+    let roots = [root.root(Source::Bundled)];
+    let data = prepare(&roots, Locale::ZhCn, Scope::Champion(8)).unwrap();
+    let stats = data.recommendations(8).unwrap();
+    assert_eq!(stats[&100].win_rate, Some(0.6));
+    assert_eq!(stats[&100].region, "WORLD");
+    assert_eq!(stats[&100].patch, "16.19");
+    assert_eq!(stats[&101].win_rate, None);
+    assert_eq!(stats[&102].win_rate, None);
+    assert_eq!(stats[&102].pick_rate, None);
+    assert!(data.recommendations(9).is_err());
+    assert!(prepare(&roots, Locale::ZhCn, Scope::Champion(9)).is_err());
+    root.write(
+        "versions/16.20.1/champion-shards/1.json",
+        json!({"dataVersion":"16.19.1","champions":{}}),
+    );
+    assert!(prepare(&roots, Locale::ZhCn, Scope::Champion(8)).is_err());
+}

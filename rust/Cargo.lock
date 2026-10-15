@@ -108,6 +108,7 @@ version = "0.1.0"
 dependencies = [
  "fuze-capture",
  "fuze-contract",
+ "fuze-data",
  "image",
  "serde_json",
  "windows-sys",

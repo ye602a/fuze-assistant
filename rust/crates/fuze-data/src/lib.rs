@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+pub mod recommendations;
 pub type Result<T> = std::result::Result<T, &'static str>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Locale {
@@ -26,6 +27,7 @@ impl Locale {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Scope {
     Ocr,
+    Champion(u32),
     Full,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -222,6 +224,9 @@ fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
             files.insert(p.into(), 0);
         }
     }
+    if matches!(scope, Scope::Champion(_)) {
+        files.insert("champion-shards/index.json".into(), 0);
+    }
     let mut add = |path: &str, entry: &Value| -> Result<()> {
         safe_path(path)?;
         if path == "augments.json"
@@ -281,6 +286,38 @@ fn load(
         }
         declared(&value, locale, ver, false)?;
         documents.insert(path, value);
+    }
+    if let Scope::Champion(champion) = scope {
+        let index = documents
+            .get("champion-shards/index.json")
+            .ok_or("data-shard-index")?;
+        let entries = index
+            .get("shards")
+            .and_then(Value::as_array)
+            .ok_or("data-shard-index")?;
+        if entries.len() > 512 {
+            return Err("data-file-count");
+        }
+        let mut selected = None;
+        for entry in entries {
+            if entry
+                .get("championIds")
+                .and_then(Value::as_array)
+                .is_some_and(|ids| ids.iter().any(|id| id.as_u64() == Some(champion as u64)))
+            {
+                if selected.is_some() {
+                    return Err("data-ambiguous-shard");
+                }
+                selected = entry.get("path").and_then(Value::as_str);
+            }
+        }
+        let path = selected.ok_or("data-champion-missing")?;
+        if !path.starts_with("champion-shards/") || path == "champion-shards/index.json" {
+            return Err("data-shard-path");
+        }
+        let (value, _) = read(root, &format!("{prefix}/{path}"), 32 * 1024 * 1024)?;
+        declared(&value, locale, ver, false)?;
+        documents.insert(path.into(), value);
     }
     let catalog = catalog(
         documents

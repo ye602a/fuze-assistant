@@ -2,10 +2,7 @@ use fuze_contract::{
     wire::{self, ActiveBackend, Identity, Reply, Request},
     Slot,
 };
-use fuze_runtime::{
-    gate::Selection,
-    session::{FrameKey, Phase, Session},
-};
+use fuze_runtime::session::{FrameKey, Phase};
 use fuze_worker_host::{recovery::Supervisor, Worker};
 use std::{
     fs, io,
@@ -168,10 +165,19 @@ struct Sample {
     file: String,
     expected_ids: Vec<u32>,
 }
+
 #[cfg(windows)]
-fn fixtures(args: &[String]) -> Result<()> {
+fn fixtures(args: &[String], wgc: bool) -> Result<()> {
+    use fuze_native_overlay::native::{HiddenOverlay, SourceImage};
+    use fuze_worker_host::pipeline::Pipeline;
     if args.len() != 8 {
         return Err("fixture-arguments".into());
+    }
+    if wgc
+        && !(std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+            && std::env::var("FUZE_RUST_CI_VISIBLE").as_deref() == Ok("1"))
+    {
+        return Err("wgc-ci-only".into());
     }
     let root = fs::canonicalize(&args[5])?;
     let manifest = root.join("manifest.json");
@@ -188,14 +194,17 @@ fn fixtures(args: &[String]) -> Result<()> {
             source: fuze_data::Source::Bundled,
         }],
         fuze_data::Locale::ZhCn,
-        fuze_data::Scope::Ocr,
+        fuze_data::Scope::Champion(8),
     )?;
-    let catalog = std::sync::Arc::new(wire::encode_catalog(prepared.catalog())?);
-    let dataset = prepared.identity();
-    let mut session = Session::new(dataset.clone())?;
-    session.update_phase(Phase::Loading)?;
+    let stats = prepared.recommendations(8)?;
+    if stats
+        .values()
+        .any(|s| s.win_rate != Some(0.6) || s.pick_rate != Some(0.12))
+    {
+        return Err("statistics-fixture-mismatch".into());
+    }
     let startup = Instant::now();
-    let mut worker = Supervisor::start_with_catalog(
+    let worker = Supervisor::start_with_catalog(
         Path::new(&args[0]),
         &[
             args[1].clone(),
@@ -205,18 +214,17 @@ fn fixtures(args: &[String]) -> Result<()> {
             args[6].clone(),
         ],
         Duration::from_secs(30),
-        Some(catalog),
+        Some(std::sync::Arc::new(wire::encode_catalog(
+            prepared.catalog(),
+        )?)),
     )?;
     let startup_ms = startup.elapsed().as_secs_f64() * 1000.;
-    session.update_phase(Phase::InProgress)?;
-    let overlay =
-        fuze_native_overlay::native::HiddenOverlay::start(session.generation(), dataset.clone())?;
-    let mut last_snapshot = None;
-    let epoch = Instant::now();
-    let now = || epoch.elapsed().as_millis() as u64;
+    let mut pipeline = Pipeline::new(worker, &prepared, 8)?;
+    pipeline.phase(Phase::InProgress)?;
     let mut reader = fuze_capture::native::GpuFixtureReader::new()?;
-    let mut sequence = 0;
     let mut reports = Vec::new();
+    let mut last = None;
+    let mut sequence = 0;
     for (sample_index, sample) in samples.iter().enumerate() {
         let path = fs::canonicalize(root.join(&sample.file))?;
         if !path.starts_with(&root) || fs::metadata(&path)?.len() > 32 * 1024 * 1024 {
@@ -233,44 +241,52 @@ fn fixtures(args: &[String]) -> Result<()> {
             .pixels()
             .flat_map(|p| [p[2], p[1], p[0], 255])
             .collect();
-        let uploaded = reader.upload(&bytes, image.width(), image.height())?;
+        let source = if wgc {
+            Some(HiddenOverlay::fixture_source(SourceImage {
+                bytes: bytes.clone(),
+                width: image.width(),
+                height: image.height(),
+            })?)
+        } else {
+            None
+        };
+        if let Some(source) = &source {
+            pipeline.capture_owned(source.owned_handle(), true)?;
+        }
+        let uploaded = if wgc {
+            None
+        } else {
+            Some(reader.upload(&bytes, image.width(), image.height())?)
+        };
         for _ in 0..3 {
-            session.update_level(3, now());
-            if let Some(wake) = session.wake_at(now()) {
-                std::thread::sleep(Duration::from_millis(wake.saturating_sub(now())));
+            pipeline.level(3);
+            if let Some(wake) = pipeline.wake_at() {
+                std::thread::sleep(Duration::from_millis(wake.saturating_sub(pipeline.now())));
             }
             sequence += 1;
-            let ticket = session
-                .begin(FrameKey { epoch: 1, sequence }, now())
-                .ok_or("session-job-rejected")?;
-            let started = Instant::now();
-            let atlas = reader.read(&uploaded)?;
-            let request = Request::from_atlas(
-                Identity {
-                    generation: ticket.generation,
-                    sequence: ticket.sequence,
-                },
-                &atlas,
-            );
-            let roi_bytes = request.pixels.len();
-            let reply = match worker.run(request, Duration::from_secs(3)) {
-                Ok(reply) => reply,
-                Err(error) => {
-                    session.fail(ticket, now());
-                    return Err(error.into());
+            let delivery = if let Some(source) = &source {
+                let deadline = Instant::now() + Duration::from_secs(8);
+                loop {
+                    source.pulse();
+                    if let Some(d) = pipeline.tick_wgc()? {
+                        break d;
+                    }
+                    if Instant::now() > deadline {
+                        return Err("wgc-delivery-timeout".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
                 }
+            } else {
+                let atlas = reader.read(uploaded.as_ref().ok_or("fixture-texture")?)?;
+                pipeline
+                    .recognize(FrameKey { epoch: 1, sequence }, &atlas)?
+                    .ok_or("session-job-rejected")?
             };
-            let total_ms = started.elapsed().as_secs_f64() * 1000.;
-            let Reply::Result { slots, ocr_ms, .. } = reply else {
-                return Err("unexpected-reply".into());
-            };
-            let snapshot = session
-                .finish(ticket, slots, Selection::Unknown, now())
-                .ok_or("session-result-rejected")?;
-            let actual: Vec<Option<u32>> = snapshot
+            let actual: Vec<Option<u32>> = delivery
+                .snapshot
                 .slots
                 .iter()
-                .map(|slot| match slot {
+                .map(|s| match s {
                     Slot::Known { id, .. } => Some(*id),
                     _ => None,
                 })
@@ -281,45 +297,51 @@ fn fixtures(args: &[String]) -> Result<()> {
             if actual != expected {
                 return Err("fixture-mismatch".into());
             }
-            if !overlay.update(snapshot.clone())? || overlay.update(snapshot.clone())? {
-                return Err("overlay-delivery-or-duplicate".into());
+            if pipeline.overlay.update(delivery.snapshot.clone())? {
+                return Err("duplicate-accepted".into());
             }
-            last_snapshot = Some(snapshot);
-            reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"roi_bytes":roi_bytes,"total_ms":total_ms,"ocr_ms":ocr_ms,"matched":true}));
+            reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"roi_bytes":delivery.roi_bytes,"ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"matched":true}));
+            last = Some(delivery.snapshot);
+        }
+        // Replacing source closes the old stream before the window is destroyed.
+        if wgc {
+            pipeline.phase(Phase::Loading)?;
+        }
+        drop(source);
+        if wgc {
+            pipeline.phase(Phase::InProgress)?;
         }
     }
-    // Exercise partial positions and context rejection on the same persistent window.
-    let mut partial = last_snapshot.clone().ok_or("missing-final-snapshot")?;
+    let previous = last.ok_or("missing-result")?;
+    let mut partial = previous.clone();
     partial.sequence += 1;
-    let mut wrong_dataset = partial.clone();
-    wrong_dataset.dataset_version = "zh-CN@0.0.0".into();
-    if overlay.update(wrong_dataset)? {
-        return Err("overlay-cross-dataset".into());
-    }
     partial.slots[1] = Slot::Unreadable;
-    if !overlay.update(partial)? {
-        return Err("overlay-partial-update".into());
+    // WGC changes phase between source windows, so its old snapshot must already be rejected.
+    if !wgc {
+        let mut bad = partial.clone();
+        bad.dataset_version = "zh-CN@0.0.0".into();
+        if pipeline.overlay.update(bad)? || !pipeline.overlay.update(partial)? {
+            return Err("partial-or-context".into());
+        }
     }
-    // Consume cleanup on the same window before stopping the integration.
-    let cleanup = session
-        .update_phase(Phase::PostGame)?
-        .ok_or("cleanup-missing")?;
-    worker.stop()?;
-    if !overlay.reset(cleanup.generation, dataset.clone())?
-        || overlay.update(last_snapshot.ok_or("missing-final-snapshot")?)?
-    {
-        return Err("overlay-cleanup-or-stale".into());
+    let cancellation = pipeline.cancellation();
+    cancellation.cancel();
+    let mut late = previous.clone();
+    late.sequence += 10;
+    if pipeline.overlay.update(late)? {
+        return Err("cancelled-update-accepted".into());
     }
-    drop(overlay);
-    if !cleanup.clear_overlay || !cleanup.stop_capture || session.wake_at(now()).is_some() {
+    pipeline.phase(Phase::PostGame)?;
+    if pipeline.wake_at().is_some() || pipeline.overlay.update(previous)? {
         return Err("postgame-not-idle".into());
     }
     println!(
         "{}",
-        serde_json::json!({"passed":true,"overlay_updates":reports.len()+1,"partial_slot_updated":true,"overlay_cleared":true,"stale_and_duplicate_rejected":true,"dataset_version":prepared.version(),"startup_ms":startup_ms,"backend":worker.backend(),"fallback_count":u8::from(worker.recovered()),"worker_launches":worker.launches(),"worker_reaped":worker.reaped(),"frames":reports,"actual_stage":null,"selection_confirmed":false,"game_access":false})
+        serde_json::json!({"passed":true,"source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"frames":reports,"overlay_updates":sequence+u64::from(!wgc),"partial_slot_updated":!wgc,"statistics_loaded":stats.len(),"statistics_scope":"overall","dataset_version":prepared.version(),"overlay_cleared":true,"stale_and_duplicate_rejected":true,"worker_reaped":pipeline.worker.reaped(),"worker_launches":pipeline.worker.launches(),"backend":pipeline.worker.backend(),"startup_ms":startup_ms,"actual_stage":null,"selection_confirmed":false,"game_access":false})
     );
     Ok(())
 }
+
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -328,7 +350,9 @@ fn run() -> Result<()> {
         }
         Some("--lifecycle") if args.len() == 1 => lifecycle(),
         #[cfg(windows)]
-        Some("--fixtures") => fixtures(&args[1..]),
+        Some("--fixtures") => fixtures(&args[1..], false),
+        #[cfg(windows)]
+        Some("--wgc-fixtures") => fixtures(&args[1..], true),
         _ => Err("host-arguments".into()),
     }
 }
