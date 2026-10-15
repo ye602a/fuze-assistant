@@ -22,6 +22,7 @@ pub struct Pipeline {
     dataset: String,
     epoch: Instant,
     closed: bool,
+    capture_failure: Option<serde_json::Value>,
 }
 pub struct Delivery {
     pub snapshot: Snapshot,
@@ -47,6 +48,7 @@ impl Pipeline {
             dataset,
             epoch: Instant::now(),
             closed: false,
+            capture_failure: None,
         })
     }
     pub fn cancellation(&self) -> fuze_native_overlay::native::Cancellation {
@@ -92,6 +94,9 @@ impl Pipeline {
         }
         Ok(())
     }
+    pub fn capture_failure(&self) -> Option<&serde_json::Value> {
+        self.capture_failure.as_ref()
+    }
     pub fn capture_owned(&mut self, hwnd: isize, visible_ci: bool) -> Result<()> {
         if self.closed || self.wake_at().is_none() {
             return Err("capture-phase");
@@ -104,8 +109,14 @@ impl Pipeline {
         {
             return Err("overlay-reset");
         }
-        self.capture =
-            Some(OwnedWindowStream::start(hwnd, visible_ci).map_err(|_| "capture-start")?);
+        self.capture_failure = None;
+        match OwnedWindowStream::start(hwnd, visible_ci) {
+            Ok(stream) => self.capture = Some(stream),
+            Err(error) => {
+                self.capture_failure = Some(fuze_capture::native::failure_details(&*error));
+                return Err("capture-start");
+            }
+        }
         Ok(())
     }
     pub fn recognize(&mut self, key: FrameKey, atlas: &Atlas<'_>) -> Result<Option<Delivery>> {

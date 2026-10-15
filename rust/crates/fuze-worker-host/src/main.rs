@@ -251,7 +251,13 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             None
         };
         if let Some(source) = &source {
-            pipeline.capture_owned(source.owned_handle(), true)?;
+            if let Err(error) = pipeline.capture_owned(source.owned_handle(), true) {
+                println!(
+                    "{}",
+                    serde_json::json!({"passed":false,"error":error,"capture_failure":pipeline.capture_failure()})
+                );
+                return Err("reported-capture-start".into());
+            }
         }
         let uploaded = if wgc {
             None
@@ -382,7 +388,7 @@ fn main() {
             | "source-dimensions" => text.as_str(),
             _ => "host-failed",
         };
-        if code != "fixture-mismatch" {
+        if code != "fixture-mismatch" && text != "reported-capture-start" {
             println!("{}", serde_json::json!({"passed":false,"error":code}));
         }
         eprintln!("fuze-worker-host: failed");
