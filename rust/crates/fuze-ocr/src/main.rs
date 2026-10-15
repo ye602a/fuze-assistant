@@ -119,10 +119,12 @@ fn run() -> Result<()> {
                 let atlas = reader.read(uploaded)?;
                 capture_ms.push(started.elapsed().as_secs_f64() * 1000.);
                 roi_bytes = atlas.title_width as usize * atlas.title_height as usize * 12;
+                PHASE.store(7, Ordering::Relaxed);
                 engine.run("gpu_inference_failed", |engine| {
                     engine.recognize_atlas(&atlas)
                 })?
             } else {
+                PHASE.store(7, Ordering::Relaxed);
                 engine.run("gpu_inference_failed", |engine| engine.recognize_bgra(&raw))?
             };
             #[cfg(not(windows))]
@@ -215,8 +217,24 @@ fn run() -> Result<()> {
     Ok(())
 }
 fn main() {
-    if run().is_err() {
-        eprintln!("fuze-ocr: phase={}", PHASE.load(Ordering::Relaxed));
+    if let Err(error) = run() {
+        let phase = PHASE.load(Ordering::Relaxed);
+        // Never serialize arbitrary engine/IO errors: they may include local paths or input.
+        let category = match error.to_string().as_str() {
+            "gpu-readback-busy" => "gpu-readback-busy",
+            "mapped-stride" => "mapped-stride",
+            "staging-missing" => "staging-missing",
+            "fixture-mismatch" => "fixture-mismatch",
+            _ => "prototype-failed",
+        };
+        // Preserve the completed mismatch report (including passed=false) for fallback policy.
+        if phase != 6 {
+            println!(
+                "{}",
+                serde_json::json!({"error":category,"phase":phase})
+            );
+        }
+        eprintln!("fuze-ocr: phase={phase}");
         std::process::exit(1);
     }
 }
