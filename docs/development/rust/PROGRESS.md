@@ -14,11 +14,12 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON export | External SGP with unambiguous region; image sharing; observation is not a claim |
 | Updates | Private credentials, differential reconstruction/full fallback, managed version switch and rollback | Publisher signing and production channel policy |
 | Local installation | M12 allowlisted offline installation, fixed launch entry, idempotence and pending health | Signed installer/bootstrap, uninstall/shortcut integration and end-to-end player acceptance |
-| Stage winrate | Data/manual reference retained; automatic ranking stays overall | Reliable actual-claim source required; no inference from levels/shards/forges/rerolls |
+| Stage winrate | M13 native manual reference: All/1-4, public source/patch/sample labels, isolated cache and explicit refresh; automatic ranking stays overall | Provider/live interaction acceptance and reliable actual-claim source for automatic ranking; no inference from levels/shards/forges/rerolls |
 | Public release | Private branch/PR workflow, sanitized CI artifacts | Full history, Actions, release-asset and redistribution-license audit after migration |
 
 ## Latest changes
 
+- [M13: native manual stage reference](M13.md)
 - [M12: independent local installation](M12.md)
 - [M11: live level scheduling, native preferences and reduced export](M11.md)
 - [M10: runtime continuity, health and bounded cleanup](M10.md)

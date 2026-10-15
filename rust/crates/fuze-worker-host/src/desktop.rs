@@ -2276,6 +2276,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                             u.champion_preview_ok = u.shown.selection.is_some()
                                 && window.render(std::path::Path::new(&path)).is_ok();
                         }
+                        if let (Some(window), Ok(path)) =
+                            (u.champions.as_mut(), std::env::var("FUZE_STAGE_PREVIEW"))
+                        {
+                            u.champion_preview_ok &= window
+                                .render_stage_fixture(std::path::Path::new(&path))
+                                .is_ok();
+                        }
                         if let Ok(path) = std::env::var("FUZE_DESKTOP_PREVIEW") {
                             u.preview_ok = snapshot(hwnd, &path, u).is_ok();
                         }

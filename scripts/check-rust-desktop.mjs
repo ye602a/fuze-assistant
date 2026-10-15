@@ -7,19 +7,21 @@ const folder=path.join(root,'rust/artifacts/preview',`fuze-rust-preview-${revisi
 await writeFile(path.join(root,'rust/artifacts/desktop.png'),Buffer.alloc(0))
 const child=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--desktop-smoke',path.join(folder,'preview.json')],{
  cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,
- env:{...process.env,FUZE_DESKTOP_PREVIEW:path.join(root,'rust/artifacts/desktop.png'),FUZE_CHAMPION_PREVIEW:path.join(root,'rust/artifacts/champion-select.png'),FUZE_SETTINGS_PREVIEW:path.join(root,'rust/artifacts/settings.png'),FUZE_HISTORY_PREVIEW:path.join(root,'rust/artifacts/history.png'),FUZE_JOURNAL_PREVIEW:path.join(root,'rust/artifacts/journal.png')}
+ env:{...process.env,FUZE_DESKTOP_PREVIEW:path.join(root,'rust/artifacts/desktop.png'),FUZE_CHAMPION_PREVIEW:path.join(root,'rust/artifacts/champion-select.png'),FUZE_STAGE_PREVIEW:path.join(root,'rust/artifacts/stage-reference.png'),FUZE_SETTINGS_PREVIEW:path.join(root,'rust/artifacts/settings.png'),FUZE_HISTORY_PREVIEW:path.join(root,'rust/artifacts/history.png'),FUZE_JOURNAL_PREVIEW:path.join(root,'rust/artifacts/journal.png')}
 })
 let report;try{report=JSON.parse(child.stdout?.trim())}catch{}
 if(child.status!==0||!report?.desktop_ready||!report.pause_resume_exit||!report.preview_rendered||!report.champion_preview||report.game_access!==false)throw new Error('Native desktop lifecycle failed')
 const png=await readFile(path.join(root,'rust/artifacts/desktop.png'))
 if(png.length<5000)throw new Error('Native desktop render missing')
+if((await readFile(path.join(root,'rust/artifacts/stage-reference.png'))).length<5000)throw new Error('Stage reference render missing')
+report.stage_reference_preview=true
 // Additional locales exercise the same owned, hidden windows; never read user preferences.
 report.locales=['zh-CN']
 for (const locale of ['zh-TW','en-US']) {
  const prefix=path.join(root,'rust/artifacts',`desktop-${locale}`)
  const localized=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--desktop-smoke',path.join(folder,'preview.json')],{
   cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,
-  env:{...process.env,FUZE_SMOKE_LOCALE:locale,FUZE_DESKTOP_PREVIEW:prefix+'.png',FUZE_CHAMPION_PREVIEW:prefix+'-champions.png',FUZE_SETTINGS_PREVIEW:prefix+'-settings.png',FUZE_RECORDS_PREVIEW:prefix+'-records.png',FUZE_HISTORY_PREVIEW:prefix+'-history.png',FUZE_JOURNAL_PREVIEW:prefix+'-journal.png'}
+  env:{...process.env,FUZE_SMOKE_LOCALE:locale,FUZE_DESKTOP_PREVIEW:prefix+'.png',FUZE_CHAMPION_PREVIEW:prefix+'-champions.png',FUZE_STAGE_PREVIEW:prefix+'-stages.png',FUZE_SETTINGS_PREVIEW:prefix+'-settings.png',FUZE_RECORDS_PREVIEW:prefix+'-records.png',FUZE_HISTORY_PREVIEW:prefix+'-history.png',FUZE_JOURNAL_PREVIEW:prefix+'-journal.png'}
  })
  let value;try{value=JSON.parse(localized.stdout?.trim())}catch{}
  if(localized.status!==0||!value?.desktop_ready||!value.pause_resume_exit||!value.preview_rendered||!value.champion_preview||value.game_access!==false)throw new Error(`Native desktop locale failed: ${locale}`)

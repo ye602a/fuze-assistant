@@ -121,6 +121,14 @@ fn wide(s: &str) -> Vec<u16> {
     crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
 struct State {
+    stage_service: crate::stage_reference::Service,
+    stage_reply: crate::stage_reference::Reply,
+    stage_panel: bool,
+    stage: usize,
+    stage_scroll: usize,
+    stage_allowed: bool,
+    stage_key: Option<(u32, String)>,
+    offline: bool,
     placement: crate::window_memory::Memory,
     view: Option<View>,
     dismissed: bool,
@@ -149,6 +157,14 @@ impl Window {
             };
             RegisterClassW(&wc);
             let mut state = Box::new(State {
+                stage_service: crate::stage_reference::Service::new(roots.clone(), offline)?,
+                stage_reply: Default::default(),
+                stage_panel: false,
+                stage: 0,
+                stage_scroll: 0,
+                stage_allowed: false,
+                stage_key: None,
+                offline,
                 placement: crate::window_memory::Memory::new("champions", offline),
                 view: None,
                 dismissed: false,
@@ -204,11 +220,20 @@ impl Window {
     pub fn update(&mut self, view: Option<View>, topmost: bool, hidden: bool, downloads: bool) {
         unsafe {
             let entering = self.state.view.is_none() && view.is_some();
-            let changed = self.state.view != view || self.state.downloads != downloads;
-            self.state.downloads = downloads;
             if entering {
                 self.state.dismissed = false;
             }
+            let allowed = view.is_some() && !hidden && !self.state.dismissed;
+            if self.state.stage_allowed != allowed {
+                self.state.stage_allowed = allowed;
+                self.state.stage_key = None;
+                if !allowed {
+                    self.state.stage_service.request(None);
+                    self.state.stage_reply = Default::default();
+                }
+            }
+            let changed = self.state.view != view || self.state.downloads != downloads;
+            self.state.downloads = downloads;
             if changed {
                 let previous = self
                     .state
@@ -240,6 +265,9 @@ impl Window {
                 }
                 InvalidateRect(self.hwnd, null(), 0);
             }
+            if allowed && self.state.stage_panel && self.state.stage_key.is_none() {
+                self.state.stage_request(false);
+            }
             if self.topmost != topmost {
                 SetWindowPos(
                     self.hwnd,
@@ -265,6 +293,44 @@ impl Window {
     }
     pub fn detail_ready(&self) -> bool {
         self.state.reply.detail.is_some()
+    }
+    pub fn render_stage_fixture(&mut self, path: &std::path::Path) -> Result<()> {
+        if !self.state.offline {
+            return Err("stage-fixture-only");
+        }
+        let previous = std::mem::take(&mut self.state.stage_reply);
+        let panel = self.state.stage_panel;
+        let stage = self.state.stage;
+        let mut rows: [Vec<crate::stage_reference::Row>; 5] = Default::default();
+        rows[1] = (1..=6)
+            .map(|id| crate::stage_reference::Row {
+                id,
+                win: 0.62 - id as f64 * 0.01,
+                pick: 0.13,
+                samples: 400 + id as u64 * 100,
+            })
+            .collect();
+        self.state.stage_reply = crate::stage_reference::Reply {
+            snapshot: Some(std::sync::Arc::new(crate::stage_reference::Snapshot {
+                schema: 1,
+                champion: self.state.selected,
+                patch: "16.20".into(),
+                date: "2026-10-15".into(),
+                data_path: "data/16.20-20261015-abcdef012345".into(),
+                fetched: crate::stage_reference::now(),
+                rows,
+            })),
+            issue: Some("stage-fixture"),
+            cached: true,
+            ..Default::default()
+        };
+        self.state.stage_panel = true;
+        self.state.stage = 1;
+        let result = self.render(path);
+        self.state.stage_reply = previous;
+        self.state.stage_panel = panel;
+        self.state.stage = stage;
+        result
     }
     pub fn render(&self, path: &std::path::Path) -> Result<()> {
         unsafe {
@@ -340,6 +406,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
     }
     match msg {
         WM_TIMER if w == 2 => {
+            if (*p).stage_panel {
+                if let Some(next) = (*p).stage_service.changed((*p).stage_reply.serial) {
+                    (*p).stage_reply = next;
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            }
             if let Some(next) = (*p).assets.changed(&(*p).reply) {
                 (*p).reply = next;
                 InvalidateRect(hwnd, null(), 0);
@@ -354,10 +426,28 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let mut r: RECT = zeroed();
             GetClientRect(hwnd, &mut r);
             let right = r.right * 3 / 5;
+            if (*p).stage_panel
+                && px >= right + x(12)
+                && px < r.right - x(16)
+                && py >= x(136)
+                && py < x(168)
+            {
+                let tab = ((px - right - x(12)) / ((r.right - right - x(28)) / 6).max(1)).min(5);
+                if tab == 5 {
+                    (*p).stage_request(true);
+                } else {
+                    (*p).stage = tab as usize;
+                    (*p).stage_scroll = 0;
+                }
+                InvalidateRect(hwnd, null(), 0);
+                return 0;
+            }
             if px >= right + x(12) && py >= x(92) && py < x(124) {
                 if let Some(detail) = &(*p).reply.detail {
                     let tab =
-                        ((px - right - x(12)) / ((r.right - right - x(28)) / 4).max(1)).min(3);
+                        ((px - right - x(12)) / ((r.right - right - x(28)) / 5).max(1)).min(4);
+                    (*p).stage_panel = tab == 4;
+                    (*p).stage_scroll = 0;
                     let prefixes = match tab {
                         1 => ["海克斯强化", "海克斯增幅", "Augments ·"],
                         2 => ["1–18", "1–18", "1–18"],
@@ -369,6 +459,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         .iter()
                         .position(|l| prefixes.iter().any(|prefix| l.text.starts_with(prefix)))
                         .unwrap_or(0);
+                    (*p).stage_request(false);
                     InvalidateRect(hwnd, null(), 0);
                 }
                 return 0;
@@ -398,6 +489,21 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_MOUSEWHEEL => {
             let delta = ((w >> 16) as u16 as i16) as i32;
+            if (*p).stage_panel {
+                let count = (*p)
+                    .stage_reply
+                    .snapshot
+                    .as_ref()
+                    .map(|s| s.visible((*p).stage).len())
+                    .unwrap_or(0);
+                (*p).stage_scroll = if delta > 0 {
+                    (*p).stage_scroll.saturating_sub(3)
+                } else {
+                    ((*p).stage_scroll + 3).min(count.saturating_sub(1))
+                };
+                InvalidateRect(hwnd, null(), 0);
+                return 0;
+            }
             let count = (*p)
                 .reply
                 .detail
@@ -425,6 +531,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             (*p).placement.remember(hwnd);
             (*p).dismissed = true;
             (*p).assets.request(None);
+            (*p).stage_allowed = false;
+            (*p).stage_key = None;
+            (*p).stage_service.request(None);
             KillTimer(hwnd, 2);
             ShowWindow(hwnd, SW_HIDE);
             0
@@ -631,8 +740,11 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
             x(22),
             pale,
         );
-        let tab_width = (full_right - left - x(16)) / 4;
-        for (i, name) in ["出装", "海克斯", "加点", "符文页"].iter().enumerate() {
+        let tab_width = (full_right - left - x(16)) / 5;
+        for (i, name) in ["出装", "海克斯", "加点", "符文页", "阶段参考"]
+            .iter()
+            .enumerate()
+        {
             let l = left + i as i32 * tab_width;
             fill(
                 dc,
@@ -654,59 +766,73 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
                 gold,
             );
         }
-        let mut top = x(136);
-        let mut index = state.scroll;
-        while let Some(line) = detail.lines.get(index) {
-            let width = (full_right - left - x(16)).max(1);
-            let chars = (width
-                / x(if v.version.starts_with("en-US@") {
-                    8
-                } else {
-                    14
-                })
-                .max(1))
-            .max(12) as usize;
-            let wrapped = wrap(&line.text, chars);
-            let icons = !line.icons.is_empty();
-            let height = (wrapped.len() as i32) * 23 + if icons { 37 } else { 7 };
-            if top + x(height) > r.bottom - x(44) {
-                break;
-            }
-            if icons {
-                for (i, url) in line.icons.iter().take(6).enumerate() {
-                    icon(dc, state, url, left + i as i32 * x(30), top, x(26));
-                }
-                top += x(30);
-            }
-            for chunk in wrapped {
-                label(
-                    &chunk,
+        if state.stage_panel {
+            draw_stage(
+                dc,
+                state,
+                RECT {
                     left,
-                    top,
-                    full_right - x(16),
-                    top + x(23),
-                    x(14),
-                    if icons { pale } else { dim },
-                );
-                top += x(23);
+                    top: x(136),
+                    right: full_right - x(16),
+                    bottom: r.bottom - x(44),
+                },
+                d,
+            );
+        } else {
+            let mut top = x(136);
+            let mut index = state.scroll;
+            while let Some(line) = detail.lines.get(index) {
+                let width = (full_right - left - x(16)).max(1);
+                let chars = (width
+                    / x(if v.version.starts_with("en-US@") {
+                        8
+                    } else {
+                        14
+                    })
+                    .max(1))
+                .max(12) as usize;
+                let wrapped = wrap(&line.text, chars);
+                let icons = !line.icons.is_empty();
+                let height = (wrapped.len() as i32) * 23 + if icons { 37 } else { 7 };
+                if top + x(height) > r.bottom - x(44) {
+                    break;
+                }
+                if icons {
+                    for (i, url) in line.icons.iter().take(6).enumerate() {
+                        icon(dc, state, url, left + i as i32 * x(30), top, x(26));
+                    }
+                    top += x(30);
+                }
+                for chunk in wrapped {
+                    label(
+                        &chunk,
+                        left,
+                        top,
+                        full_right - x(16),
+                        top + x(23),
+                        x(14),
+                        if icons { pale } else { dim },
+                    );
+                    top += x(23);
+                }
+                top += x(7);
+                index += 1;
             }
-            top += x(7);
-            index += 1;
+            label(
+                &format!(
+                    "{} · {} / {}",
+                    crate::i18n::text("滚轮浏览详情"),
+                    state.scroll + 1,
+                    detail.lines.len()
+                ),
+                left,
+                r.bottom - x(37),
+                full_right - x(16),
+                r.bottom - x(8),
+                x(12),
+                gold,
+            );
         }
-        label(
-            &format!(
-                "{} · {} / {}",
-                crate::i18n::text("滚轮浏览详情"),
-                state.scroll + 1,
-                detail.lines.len()
-            ),
-            left,
-            r.bottom - x(37),
-            full_right - x(16),
-            r.bottom - x(8),
-            x(12),
-            gold,
-        );
     } else {
         label(
             if state.selected == 0 {
@@ -735,6 +861,164 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
         r.right - x(20),
         r.bottom - x(8),
         x(12),
+        dim,
+    );
+}
+unsafe fn draw_stage(dc: HDC, state: &State, r: RECT, d: i32) {
+    use crate::desktop::{fill, rgb, text};
+    let x = |n| n * d / 96;
+    let t = crate::i18n::text;
+    let label = |s: &str, top: i32, size: i32, color| {
+        text(
+            dc,
+            s,
+            RECT {
+                left: r.left,
+                top,
+                right: r.right,
+                bottom: top + x(25),
+            },
+            x(size),
+            color,
+        )
+    };
+    let gold = rgb(205, 174, 108);
+    let dim = rgb(138, 167, 180);
+    let pale = rgb(222, 233, 234);
+    let width = (r.right - r.left) / 6;
+    for (i, name) in ["整体", "第1次", "第2次", "第3次", "第4次", "刷新"]
+        .iter()
+        .enumerate()
+    {
+        let l = r.left + i as i32 * width;
+        fill(
+            dc,
+            RECT {
+                left: l,
+                top: r.top,
+                right: l + width - x(4),
+                bottom: r.top + x(32),
+            },
+            if state.stage == i {
+                rgb(37, 69, 67)
+            } else {
+                rgb(24, 42, 54)
+            },
+        );
+        text(
+            dc,
+            name,
+            RECT {
+                left: l + x(4),
+                top: r.top + x(4),
+                right: l + width - x(4),
+                bottom: r.top + x(29),
+            },
+            x(13),
+            gold,
+        );
+    }
+    label("手动参考 · 不改变三卡整体胜率推荐", r.top + x(40), 13, gold);
+    label(
+        "阶段表示选择次序；不是已确认的领取轮次",
+        r.top + x(65),
+        12,
+        dim,
+    );
+    let Some(s) = &state.stage_reply.snapshot else {
+        label(
+            if state.stage_reply.issue == Some("stage-busy") {
+                "请求较频繁，请稍后刷新"
+            } else if state.stage_reply.issue.is_some() {
+                "参考数据暂不可用，可稍后刷新"
+            } else {
+                "正在读取阶段参考…"
+            },
+            r.top + x(105),
+            14,
+            dim,
+        );
+        return;
+    };
+    label(
+        &format!("ARAMKit · {} · {}", s.patch, s.date),
+        r.top + x(96),
+        14,
+        pale,
+    );
+    label(
+        "数据区服未确认 · 仅展示样本量 ≥ 200",
+        r.top + x(121),
+        12,
+        dim,
+    );
+    let local = state
+        .view
+        .as_ref()
+        .and_then(|v| v.version.split('@').nth(1))
+        .unwrap_or("");
+    let reference = local.split('.').take(2).collect::<Vec<_>>().join(".");
+    let notice = if state.stage_reply.issue == Some("stage-fixture") {
+        "离线示例数据"
+    } else if state.stage_reply.issue == Some("stage-loading") {
+        "正在刷新，继续显示已有数据"
+    } else if reference != s.patch {
+        "与本地数据补丁不同，仅作参考"
+    } else if state.stage_reply.issue.is_some() {
+        "刷新未完成，保留可用数据"
+    } else if s.stale(crate::stage_reference::now()) {
+        "缓存已过期，可手动刷新"
+    } else if state.stage_reply.cached {
+        "使用本地缓存"
+    } else {
+        "参考数据已更新"
+    };
+    label(notice, r.top + x(146), 13, gold);
+    let rows = s.visible(state.stage);
+    let mut y = r.top + x(182);
+    if rows.is_empty() {
+        label("此阶段暂无足够样本", y, 14, dim);
+    }
+    for row in rows.iter().skip(state.stage_scroll) {
+        if y + x(58) > r.bottom {
+            break;
+        }
+        let name = state
+            .stage_reply
+            .names
+            .get(&row.id)
+            .cloned()
+            .unwrap_or_else(|| format!("#{}", row.id));
+        label(&name, y, 16, pale);
+        label(
+            &format!(
+                "{} {:.1}%  ·  {} {:.1}%  ·  {} {}",
+                t("胜率"),
+                row.win * 100.,
+                t("选取率"),
+                row.pick * 100.,
+                t("样本"),
+                row.samples
+            ),
+            y + x(26),
+            13,
+            gold,
+        );
+        y += x(60);
+    }
+    label(
+        &format!(
+            "{} · {} / {}",
+            t("滚轮浏览详情"),
+            if rows.is_empty() {
+                0
+            } else {
+                state.stage_scroll + 1
+            },
+            rows.len()
+        ),
+        r.bottom + x(8),
+        12,
         dim,
     );
 }
@@ -793,7 +1077,46 @@ mod tests {
 }
 
 impl State {
+    fn stage_request(&mut self, refresh: bool) {
+        if !self.stage_panel || !self.stage_allowed || self.selected == 0 {
+            self.stage_service.request(None);
+            self.stage_reply = Default::default();
+            self.stage_key = None;
+            return;
+        }
+        let Some(v) = &self.view else { return };
+        let key = (self.selected, v.version.clone());
+        if !refresh && self.stage_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.stage_key = Some(key);
+        self.stage_scroll = 0;
+        if refresh
+            && self
+                .stage_reply
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.champion == self.selected)
+        {
+            self.stage_reply.issue = Some("stage-loading");
+        } else {
+            self.stage_reply = Default::default();
+        }
+        let locale = match v.version.split('@').next() {
+            Some("en-US") => fuze_data::Locale::EnUs,
+            Some("zh-TW") => fuze_data::Locale::ZhTw,
+            _ => fuze_data::Locale::ZhCn,
+        };
+        self.stage_service
+            .request(Some(crate::stage_reference::Request {
+                id: self.selected,
+                locale,
+                refresh,
+            }));
+    }
+
     fn request(&mut self) {
+        self.stage_request(false);
         self.reply = Default::default();
         self.assets.request(
             self.view
