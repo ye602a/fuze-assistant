@@ -348,9 +348,10 @@ impl Recognizer {
         // Prototype fixed single-line title geometry, not a generic text detector.
         for (i, slot) in slots.iter_mut().enumerate() {
             let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
-            shards[i] = selection::shard_title(&name, confidence);
+            let shard_name = selection::shard_title(&name, 1.0);
+            shards[i] = shard_name && confidence.is_finite() && confidence >= 0.9;
             let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
-            if confidence >= 0.75 && !shards[i] {
+            if confidence >= 0.75 && !shard_name {
                 if let Some(&id) = self.catalog.get(&normalized) {
                     *slot = Slot::Known {
                         id,
