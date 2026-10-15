@@ -72,7 +72,14 @@ fn run() -> Result<(), &'static str> {
     if !message("检查 Rust 开发频道更新？公开频道无需令牌。下载和安装均由你确认；不会操作游戏或 Electron 稳定版。",true){return Ok(());}
     let _lock = install::lock(&root)?;
     let session = if action == "--update-private" {
-        Session::private()?
+        match Session::private() {
+            Ok(session) => session,
+            Err("credential-unavailable") => {
+                update_credential::prompt()?;
+                Session::private()?
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         Session::public()
     };
