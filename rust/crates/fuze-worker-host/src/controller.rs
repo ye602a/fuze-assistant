@@ -233,6 +233,7 @@ impl Drop for Monitor {
 
 #[derive(Clone)]
 pub struct Config {
+    pub icon_downloads: bool,
     pub level_gate: bool,
     pub augment_overlay: bool,
     pub roots: Vec<fuze_data::Root>,
@@ -310,7 +311,11 @@ impl Config {
             Duration::from_secs(30),
             Some(Arc::new(catalog)),
         )?;
-        Pipeline::managed(worker, &data, champion)
+        let pipeline = Pipeline::managed(worker, &data, champion)?;
+        pipeline
+            .overlay
+            .locale(self.locale.unwrap_or(fuze_data::Locale::ZhCn).code())?;
+        Ok(pipeline)
     }
 }
 #[derive(Default)]
@@ -492,6 +497,10 @@ impl Controller {
                     .ok_or("lcu-context-missing")?
             };
             let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
+            if let Some(art) = pipeline.art.as_mut() {
+                art.download = self.config.icon_downloads;
+                art.poll(&pipeline.overlay);
+            }
             pipeline.phase(phase)?;
             if phase == Phase::Loading {
                 pipeline.capture_state = "prewarmed";

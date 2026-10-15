@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub(crate) art: Option<crate::overlay_art::Art>,
     retention: crate::retention::Retention,
     pub capture_state: &'static str,
     session: Session,
@@ -66,6 +67,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            art: crate::overlay_art::Art::new(data, !persist).ok(),
             retention: Default::default(),
             capture_state: "waiting",
             session,
@@ -255,6 +257,10 @@ impl Pipeline {
             "receiving"
         };
         shown.slots = display.slots;
+        if let Some(art) = self.art.as_mut() {
+            art.request(&shown.slots);
+            art.poll(&self.overlay);
+        }
         if !self.overlay.update_retained(
             shown,
             self.retention

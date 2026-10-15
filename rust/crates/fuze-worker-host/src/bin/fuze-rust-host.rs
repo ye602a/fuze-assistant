@@ -100,6 +100,7 @@ fn run() -> Result<(), &'static str> {
         });
     }
     let config = Config {
+        icon_downloads: false,
         level_gate: true,
         augment_overlay: true,
         roots,

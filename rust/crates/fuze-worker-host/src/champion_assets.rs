@@ -229,7 +229,7 @@ fn load(roots: &[Root], r: &Request) -> Result<Detail> {
     }
     data.champion_detail(r.id)
 }
-fn icon_path(url: &str) -> Result<&str> {
+pub(crate) fn icon_path(url: &str) -> Result<&str> {
     let p = url
         .strip_prefix("https://cdn.dtodo.cn")
         .ok_or("icon-origin")?;
@@ -248,7 +248,7 @@ fn icon_path(url: &str) -> Result<&str> {
     }
     Ok(p)
 }
-fn decode(bytes: &[u8]) -> Result<Picture> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<Picture> {
     let mut reader =
         image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
     let mut limits = image::Limits::default();

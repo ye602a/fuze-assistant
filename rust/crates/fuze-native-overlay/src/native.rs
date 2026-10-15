@@ -1,3 +1,8 @@
+#[path = "presentation.rs"]
+mod presentation;
+#[path = "review.rs"]
+mod review;
+thread_local! { static UI_LOCALE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) }; }
 use fuze_contract::{ContextGate, Slot, Snapshot};
 use std::{
     mem::{size_of, zeroed},
@@ -42,12 +47,24 @@ fn placement(hwnd: HWND, event: u8) {
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
 thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
 thread_local! { static RETAINED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+thread_local! { static DISMISSED: std::cell::Cell<Option<[Option<u32>; 3]>> = const { std::cell::Cell::new(None) }; }
+fn candidate_ids(snapshot: &Snapshot) -> [Option<u32>; 3] {
+    std::array::from_fn(|i| match snapshot.slots[i] {
+        Slot::Known { id, .. } => Some(id),
+        _ => None,
+    })
+}
+unsafe fn dismiss_current(hwnd: HWND) {
+    DISMISSED.with(|d| d.set(SNAPSHOT.with(|s| s.borrow().as_ref().map(candidate_ids))));
+    ShowWindow(hwnd, SW_HIDE);
+}
 thread_local! { static RETAIN_UNTIL: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) }; }
 const RETENTION_TIMER: usize = 0xf017;
 fn retention_expired() -> bool {
     RETAIN_UNTIL.with(|r| r.get().is_some_and(|at| std::time::Instant::now() >= at))
 }
 thread_local! {
+    static ICONS: std::cell::RefCell<std::collections::HashMap<u32, std::sync::Arc<Vec<u8>>>> = std::cell::RefCell::new(std::collections::HashMap::new());
     static STATS: std::cell::RefCell<std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>> = std::cell::RefCell::new(std::collections::HashMap::new());
     static SOURCE: std::cell::RefCell<Option<SourceImage>> = const { std::cell::RefCell::new(None) };
     static STATISTICS_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -148,182 +165,9 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
         return;
     }
     let snapshot = SNAPSHOT.with(|s| s.borrow().clone());
-    let slots = snapshot
-        .as_ref()
-        .map(|s| s.slots.clone())
-        .unwrap_or_else(|| std::array::from_fn(|_| Slot::Unreadable));
-    let version = snapshot
-        .as_ref()
-        .map(|s| s.dataset_version.as_str())
-        .unwrap_or("等待数据");
-    let t = |cn, tw, en| match version.split('@').next() {
-        Some("en-US") => en,
-        Some("zh-TW") => tw,
-        _ => cn,
-    };
-    let sx = w as f64 / 760.0;
-    let sy = h as f64 / 170.0;
-    let rect = |l: i32, t: i32, r: i32, b: i32| RECT {
-        left: (l as f64 * sx) as i32,
-        top: (t as f64 * sy) as i32,
-        right: (r as f64 * sx) as i32,
-        bottom: (b as f64 * sy) as i32,
-    };
-    fill(dc, rect(0, 0, 760, 170), rgb(5, 16, 25));
-    label(
-        dc,
-        if RETAINED.with(|r| r.get()) {
-            t(
-                "FUZE · 等待识别刷新，暂留上次结果 · 整体胜率",
-                "FUZE · 等待辨識更新，暫留上次結果 · 整體勝率",
-                "FUZE · Updating: previous results / Overall rates",
-            )
-        } else {
-            t(
-                "FUZE · 整体胜率参考 / 实际领取轮次未确认",
-                "FUZE · 整體勝率參考 / 實際領取輪次未確認",
-                "FUZE · Overall win rates / Claim round unconfirmed",
-            )
-        },
-        rect(12, 3, 580, 25),
-        (12.0 * sy) as i32,
-        rgb(198, 173, 112),
-    );
-    label(
-        dc,
-        version,
-        rect(600, 3, 715, 25),
-        (11.0 * sy) as i32,
-        rgb(145, 174, 184),
-    );
-    label(
-        dc,
-        "×",
-        rect(730, 2, 754, 25),
-        (16.0 * sy) as i32,
-        rgb(198, 173, 112),
-    );
-    for i in 0..3 {
-        let x = 12 + i * 248;
-        fill(dc, rect(x, 30, x + 240, 160), rgb(101, 85, 51));
-        fill(dc, rect(x + 1, 31, x + 239, 159), rgb(13, 32, 44));
-        fill(dc, rect(x + 10, 46, x + 57, 93), rgb(33, 64, 77));
-        label(
-            dc,
-            "◇",
-            rect(x + 20, 48, x + 53, 88),
-            (26.0 * sy) as i32,
-            rgb(221, 190, 118),
-        );
-        let (name, rate, pick, progress) = match &slots[i as usize] {
-            Slot::Known {
-                name, confidence, ..
-            } => (
-                name.as_str(),
-                t("已识别", "已辨識", "Recognized"),
-                t(
-                    "识别置信度 · 无统计数据",
-                    "辨識信心度 · 無統計資料",
-                    "OCR confidence · No statistics",
-                ),
-                *confidence as f64,
-            ),
-            Slot::Unreadable => (
-                t("此位置未识别", "此位置未辨識", "Unreadable slot"),
-                t("等待补全", "等待補全", "Waiting"),
-                t(
-                    "可能被遮挡或正在刷新",
-                    "可能被遮擋或正在刷新",
-                    "Possibly covered or rerolling",
-                ),
-                0.0,
-            ),
-        };
-        let recommendation = match &slots[i as usize] {
-            Slot::Known { id, .. } => STATS.with(|s| s.borrow().get(id).cloned()),
-            _ => None,
-        };
-        let rate_text = recommendation.as_ref().map(|r| {
-            r.win_rate
-                .map(|v| format!("{} {:.1}%", t("胜率", "勝率", "Win"), v * 100.))
-                .unwrap_or(t("暂无胜率", "暫無勝率", "No win rate").into())
-        });
-        let pick_text = recommendation.as_ref().map(|r| {
-            r.pick_rate
-                .map(|v| {
-                    format!(
-                        "{} {:.1}% / {}",
-                        t("选取", "選取", "Pick"),
-                        v * 100.,
-                        t("整体", "整體", "Overall")
-                    )
-                })
-                .unwrap_or(format!(
-                    "{} -- / {}",
-                    t("选取", "選取", "Pick"),
-                    t("整体", "整體", "Overall")
-                ))
-        });
-        let missing_statistics = STATISTICS_MODE.with(|s| s.get())
-            && recommendation.is_none()
-            && matches!(&slots[i as usize], Slot::Known { .. });
-        let rate_text = if missing_statistics {
-            Some(t("暂无胜率", "暫無勝率", "No win rate").into())
-        } else {
-            rate_text
-        };
-        let pick_text = if missing_statistics {
-            Some(t("暂无统计", "暫無統計", "No statistics").into())
-        } else {
-            pick_text
-        };
-        let progress = if missing_statistics { 0. } else { progress };
-        let progress = recommendation
-            .as_ref()
-            .map(|r| r.score.unwrap_or(0.))
-            .unwrap_or(progress);
-        let rate = rate_text.as_deref().unwrap_or(rate);
-        let pick = pick_text.as_deref().unwrap_or(pick);
-        if let Some(r) = &recommendation {
-            label(
-                dc,
-                &format!("{} / {} / {}", r.origin, r.region, r.patch),
-                rect(x + 10, 120, x + 230, 132),
-                (9.0 * sy) as i32,
-                rgb(145, 174, 184),
-            );
-        }
-        label(
-            dc,
-            name,
-            rect(x + 65, 40, x + 230, 65),
-            (16.0 * sy) as i32,
-            rgb(240, 224, 187),
-        );
-        label(
-            dc,
-            rate,
-            rect(x + 65, 66, x + 232, 94),
-            (19.0 * sy) as i32,
-            rgb(126, 211, 207),
-        );
-        label(
-            dc,
-            pick,
-            rect(x + 10, 99, x + 230, 121),
-            (12.0 * sy) as i32,
-            rgb(166, 185, 194),
-        );
-        fill(dc, rect(x + 10, 133, x + 230, 144), rgb(32, 51, 62));
-        if progress > 0.0 {
-            fill(
-                dc,
-                rect(x + 10, 133, x + 10 + (220.0 * progress) as i32, 144),
-                rgb(195, 164, 94),
-            );
-        }
-    }
+    presentation::draw(dc, w, h, snapshot.as_ref());
 }
+
 unsafe extern "system" fn procedure(
     hwnd: HWND,
     message: u32,
@@ -367,7 +211,8 @@ unsafe extern "system" fn procedure(
             let x = (lparam as u16) as i16 as i32;
             let y = ((lparam >> 16) as u16) as i16 as i32;
             if x >= bounds.right * 730 / 760 && y >= 0 && y <= bounds.bottom * 25 / 170 {
-                DestroyWindow(hwnd);
+                // Dismiss these cards, not the worker's window/message thread.
+                dismiss_current(hwnd);
             }
             0
         }
@@ -649,6 +494,9 @@ pub fn run() -> Result<()> {
     }
     SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
     RETAINED.with(|r| r.set(retained_smoke));
+    if smoke {
+        review::prepare()?;
+    }
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let foreground = GetForegroundWindow();
@@ -736,6 +584,8 @@ pub fn run() -> Result<()> {
             memory.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
             let memory_ok = GetProcessMemoryInfo(GetCurrentProcess(), &mut memory, memory.cb) != 0;
             let unchanged = foreground == GetForegroundWindow();
+            dismiss_current(hwnd);
+            let dismiss_keeps_window = IsWindow(hwnd) != 0 && IsWindowVisible(hwnd) == 0;
             DestroyWindow(hwnd);
             UnregisterClassW(class.as_ptr(), instance);
             render?;
@@ -746,9 +596,15 @@ pub fn run() -> Result<()> {
             }
             println!(
                 "{}",
-                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false,"own_window_capture":capture,"wgc":wgc})
+                serde_json::json!({"hidden":hidden,"no_activate":no_activate,"tool_window":tool_window,"topmost_style":topmost,"foreground_unchanged":unchanged,"dismiss_keeps_window":dismiss_keeps_window,"paint_events":PAINTS.load(Ordering::Relaxed),"idle_cpu_ms_500ms":idle_cpu_ms,"working_set_bytes":memory.WorkingSetSize,"capture_screen":false,"game_access":false,"own_window_capture":capture,"wgc":wgc})
             );
-            if !hidden || !no_activate || !tool_window || !topmost || !unchanged {
+            if !hidden
+                || !no_activate
+                || !tool_window
+                || !topmost
+                || !unchanged
+                || !dismiss_keeps_window
+            {
                 return Err("window-invariant".into());
             }
         } else {
@@ -792,9 +648,13 @@ pub struct HiddenOverlay {
     cancellation: Cancellation,
     hwnd: isize,
     tx: std::sync::mpsc::SyncSender<OverlayCommand>,
+    pending_icons: std::sync::Arc<
+        std::sync::Mutex<Option<std::collections::HashMap<u32, std::sync::Arc<Vec<u8>>>>>,
+    >,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 enum OverlayCommand {
+    Locale(u8, std::sync::mpsc::SyncSender<bool>),
     Visible(bool, std::sync::mpsc::SyncSender<bool>),
     Update(
         Snapshot,
@@ -875,6 +735,8 @@ impl HiddenOverlay {
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ui_flag = flag.clone();
+        let pending_icons = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let ui_icons = pending_icons.clone();
         let thread = std::thread::spawn(move || unsafe {
             SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             PLACEMENT.with(|p| *p.borrow_mut() = geometry);
@@ -967,6 +829,14 @@ impl HiddenOverlay {
                     SNAPSHOT.with(|s| *s.borrow_mut() = None);
                     ShowWindow(hwnd, SW_HIDE);
                     InvalidateRect(hwnd, null(), 0);
+                } else if message.message == WM_APP + 4 {
+                    let icons = ui_icons.lock().ok().and_then(|mut value| value.take());
+                    if !ui_flag.load(Ordering::Acquire) {
+                        if let Some(icons) = icons {
+                            ICONS.with(|s| *s.borrow_mut() = icons);
+                            InvalidateRect(hwnd, null(), 0);
+                        }
+                    }
                 } else if message.message == WM_APP + 2 {
                     PULSE.with(|p| p.set(p.get().wrapping_add(1)));
                     InvalidateRect(hwnd, null(), 0);
@@ -974,11 +844,15 @@ impl HiddenOverlay {
                 } else if message.message == WM_APP + 1 {
                     if let Ok(command) = rx.try_recv() {
                         let (accepted, ack) = match command {
+                            OverlayCommand::Locale(locale, ack) => {
+                                UI_LOCALE.with(|value| value.set(locale));
+                                (true, ack)
+                            }
                             OverlayCommand::Visible(visible, ack) => {
                                 let accepted = !ui_flag.load(Ordering::Acquire)
                                     && (!visible || !retention_expired());
                                 if accepted {
-                                    if visible {
+                                    if visible && DISMISSED.with(|d| d.get().is_none()) {
                                         SetWindowPos(
                                             hwnd,
                                             HWND_TOPMOST,
@@ -1002,6 +876,13 @@ impl HiddenOverlay {
                                     && !snapshot.selection_confirmed
                                     && gate.accept(&snapshot);
                                 if accepted {
+                                    DISMISSED.with(|d| {
+                                        if d.get()
+                                            .is_some_and(|ids| ids != candidate_ids(&snapshot))
+                                        {
+                                            d.set(None);
+                                        }
+                                    });
                                     RETAINED.with(|r| r.set(retained.is_some()));
                                     RETAIN_UNTIL.with(|r| r.set(retained));
                                     KillTimer(hwnd, RETENTION_TIMER);
@@ -1024,6 +905,8 @@ impl HiddenOverlay {
                             OverlayCommand::Reset(next, dataset, ack) => {
                                 let accepted = next > current_generation;
                                 if accepted {
+                                    DISMISSED.with(|d| d.set(None));
+                                    ICONS.with(|s| s.borrow_mut().clear());
                                     KillTimer(hwnd, RETENTION_TIMER);
                                     RETAIN_UNTIL.with(|r| r.set(None));
                                     RETAINED.with(|r| r.set(false));
@@ -1068,6 +951,7 @@ impl HiddenOverlay {
             cancellation: Cancellation { flag, hwnd },
             hwnd,
             tx,
+            pending_icons,
             thread: Some(thread),
         })
     }
@@ -1086,6 +970,15 @@ impl HiddenOverlay {
     pub fn update(&self, snapshot: Snapshot) -> std::result::Result<bool, &'static str> {
         self.update_retained(snapshot, None)
     }
+    pub fn locale(&self, locale: &str) -> std::result::Result<bool, &'static str> {
+        let value = match locale {
+            "zh-TW" => 1,
+            "en-US" => 2,
+            _ => 0,
+        };
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(OverlayCommand::Locale(value, tx), rx)
+    }
     pub fn update_retained(
         &self,
         snapshot: Snapshot,
@@ -1098,11 +991,30 @@ impl HiddenOverlay {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Visible(visible, tx), rx)
     }
+    pub fn icons(
+        &self,
+        icons: std::collections::HashMap<u32, std::sync::Arc<Vec<u8>>>,
+    ) -> std::result::Result<bool, &'static str> {
+        if icons.len() > 3 || icons.values().any(|p| p.len() != 48 * 48 * 4) {
+            return Err("overlay-icons-invalid");
+        }
+        let mut pending = self.pending_icons.lock().map_err(|_| "overlay-closed")?;
+        let notify = pending.is_none();
+        *pending = Some(icons);
+        if notify && unsafe { PostMessageW(self.hwnd as HWND, WM_APP + 4, 0, 0) } == 0 {
+            *pending = None;
+            return Err("overlay-closed");
+        }
+        Ok(true)
+    }
     pub fn reset(
         &self,
         generation: u64,
         dataset: String,
     ) -> std::result::Result<bool, &'static str> {
+        if let Ok(mut pending) = self.pending_icons.lock() {
+            *pending = None;
+        }
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Reset(generation, dataset, tx), rx)
     }

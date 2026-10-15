@@ -45,6 +45,8 @@ pub mod local_records;
 #[cfg(windows)]
 pub mod managed_install;
 #[cfg(windows)]
+mod overlay_art;
+#[cfg(windows)]
 pub mod pipeline;
 #[cfg(windows)]
 pub mod preferences;

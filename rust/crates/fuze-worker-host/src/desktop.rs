@@ -2181,6 +2181,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                                 && window.render(std::path::Path::new(&path)).is_ok();
                         }
                         if let (Some(window), Ok(path)) =
+                            (u.champions.as_mut(), std::env::var("FUZE_POPUP_REVIEW"))
+                        {
+                            u.champion_preview_ok &=
+                                window.review(std::path::Path::new(&path)).is_ok();
+                        }
+                        if let (Some(window), Ok(path)) =
                             (u.champions.as_mut(), std::env::var("FUZE_SIDE_PREVIEW"))
                         {
                             u.champion_preview_ok &= window
@@ -2580,7 +2586,9 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 || !ui.shown.done
                 || (std::env::var_os("FUZE_DESKTOP_PREVIEW").is_some() && !ui.preview_ok)
                 || (ui.tray_registered && (!ui.tray_recovered || !ui.tray_removed))
-                || (std::env::var_os("FUZE_CHAMPION_PREVIEW").is_some() && !ui.champion_preview_ok)
+                || ((std::env::var_os("FUZE_CHAMPION_PREVIEW").is_some()
+                    || std::env::var_os("FUZE_POPUP_REVIEW").is_some())
+                    && !ui.champion_preview_ok)
             {
                 return Err("desktop-smoke-lifecycle");
             }

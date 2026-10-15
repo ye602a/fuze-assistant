@@ -445,7 +445,17 @@ fn main() {
             | "worker-timeout"
             | "worker-not-ready"
             | "postgame-not-idle"
-            | "source-dimensions" => text.as_str(),
+            | "source-dimensions"
+            | "statistics-fixture-mismatch"
+            | "loading-started-capture"
+            | "loading-worker-not-reused"
+            | "fixture-selection-kind"
+            | "duplicate-accepted"
+            | "unchanged-title-inferred-again"
+            | "retention-timer-start"
+            | "retention-timer-expiry"
+            | "partial-or-context"
+            | "cancelled-update-accepted" => text.as_str(),
             _ => "host-failed",
         };
         if code != "fixture-mismatch" && text != "reported-capture-start" {

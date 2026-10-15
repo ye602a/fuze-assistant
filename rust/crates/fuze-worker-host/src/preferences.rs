@@ -73,6 +73,7 @@ impl Preferences {
         }
         config.level_gate = self.level_gate;
         config.augment_overlay = self.augment_overlay;
+        config.icon_downloads = self.icon_downloads;
         config.backend.clone_from(&self.backend);
         config.locale = locale;
         Ok(())

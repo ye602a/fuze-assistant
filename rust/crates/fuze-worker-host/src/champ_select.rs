@@ -1,5 +1,7 @@
 //! Read-only champion overview; no LCU requests, account data, pick actions or per-paint IO.
 use crate::Result;
+#[path = "champ_presentation.rs"]
+mod presentation;
 use fuze_lcu::context::Selection;
 use std::{
     collections::HashMap,
@@ -19,6 +21,7 @@ pub struct Hero {
     pub icon: String,
     pub win: Option<f64>,
     pub pick: Option<f64>,
+    pub games: Option<u64>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
@@ -83,6 +86,7 @@ impl Catalog {
                             .into(),
                         win: rate("winRate"),
                         pick: rate("pickRate"),
+                        games: r["stats"]["games"].as_u64(),
                     },
                 )
                 .is_some()
@@ -104,6 +108,7 @@ impl Catalog {
                 icon: String::new(),
                 win: None,
                 pick: None,
+                games: None,
             })
         };
         let mut bench: Vec<_> = selection.bench[..selection.count]
@@ -144,6 +149,8 @@ struct State {
     selected: u32,
     downloads: bool,
     scroll: usize,
+    page_scroll: i32,
+    active_tab: usize,
     assets: crate::champion_assets::Service,
     reply: crate::champion_assets::Reply,
 }
@@ -197,6 +204,8 @@ impl Window {
                 selected: 0,
                 downloads: true,
                 scroll: 0,
+                page_scroll: 0,
+                active_tab: 0,
                 assets: crate::champion_assets::Service::new(roots, offline)?,
                 reply: Default::default(),
             });
@@ -209,10 +218,10 @@ impl Window {
                     "符择 · 选人参考"
                 })
                 .as_ptr(),
-                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME | if side { 0 } else { WS_VSCROLL },
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                if side { 460 } else { 1280 },
+                if side { 460 } else { 480 },
                 780,
                 null_mut(),
                 null_mut(),
@@ -235,7 +244,7 @@ impl Window {
                     null_mut(),
                     monitor.rcWork.left,
                     monitor.rcWork.top,
-                    ((if side { 460 } else { 1280 }) * d / 96)
+                    ((if side { 460 } else { 480 }) * d / 96)
                         .min(monitor.rcWork.right - monitor.rcWork.left),
                     (780 * d / 96).min(monitor.rcWork.bottom - monitor.rcWork.top),
                     SWP_NOACTIVATE | SWP_NOZORDER,
@@ -290,6 +299,9 @@ impl Window {
                 }
                 self.state.view = view;
                 self.state.request();
+                if !self.state.side {
+                    presentation::scroll(self.hwnd, &mut self.state, 0);
+                }
                 if self.state.view.is_some() && !self.state.dismissed {
                     SetTimer(self.hwnd, 2, 250, None);
                 } else {
@@ -326,6 +338,88 @@ impl Window {
     pub fn detail_ready(&self) -> bool {
         self.state.reply.detail.is_some()
     }
+    /// Explicit offline visual review; never inspects user caches or sends game/input events.
+    pub fn review(&mut self, directory: &std::path::Path) -> Result<()> {
+        if !self.state.offline {
+            return Err("fixture-only");
+        }
+        std::fs::create_dir_all(directory).map_err(|_| "fixture-directory")?;
+        if let Some(root) = std::env::var_os("FUZE_POPUP_REVIEW_ART") {
+            let root = std::path::PathBuf::from(root);
+            let urls: Vec<_> = self
+                .state
+                .view
+                .iter()
+                .flat_map(|v| v.team.iter().chain(&v.bench).map(|h| h.icon.clone()))
+                .chain(
+                    self.state
+                        .reply
+                        .detail
+                        .iter()
+                        .flat_map(|d| d.lines.iter().flat_map(|l| l.icons.clone())),
+                )
+                .take(96)
+                .collect();
+            for url in urls {
+                let Ok(relative) = crate::champion_assets::icon_path(&url) else {
+                    continue;
+                };
+                let file = root.join(relative.trim_start_matches('/'));
+                if std::fs::metadata(&file).is_ok_and(|m| m.len() <= 512 * 1024) {
+                    if let Ok(bytes) = std::fs::read(file) {
+                        if let Ok(image) = crate::champion_assets::decode(&bytes) {
+                            self.state
+                                .reply
+                                .icons
+                                .insert(url, std::sync::Arc::new(image));
+                        }
+                    }
+                }
+            }
+        }
+        self.render(&directory.join("champion.png"))?;
+        let scroll = self.state.page_scroll;
+        let tab = self.state.active_tab;
+        unsafe {
+            self.state.page_scroll = presentation::layout(self.hwnd, &self.state).hero_top;
+            self.render(&directory.join("champion-detail.png"))?;
+            // The same callback used by the window validates content coordinates after scrolling.
+            let layout = presentation::layout(self.hwnd, &self.state);
+            let x = (16 + (layout.width - 32) / 2 + 8) * layout.dpi / 96;
+            let y = (40 + layout.tabs_top - self.state.page_scroll + 8) * layout.dpi / 96;
+            presentation::click(self.hwnd, &mut self.state, x, y);
+            if self.state.active_tab != 1 {
+                return Err("fixture-tab-hit");
+            }
+            self.render(&directory.join("champion-build.png"))?;
+            self.state.active_tab = tab;
+            self.state.page_scroll = scroll;
+            let mut bounds: RECT = zeroed();
+            GetWindowRect(self.hwnd, &mut bounds);
+            SetWindowPos(
+                self.hwnd,
+                null_mut(),
+                0,
+                0,
+                380,
+                560,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            self.render(&directory.join("champion-compact.png"))?;
+            SetWindowPos(
+                self.hwnd,
+                null_mut(),
+                0,
+                0,
+                bounds.right - bounds.left,
+                bounds.bottom - bounds.top,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        self.render_side_fixture(&directory.join("side.png"))?;
+        self.render_stage_fixture(&directory.join("stage.png"))?;
+        Ok(())
+    }
     pub fn render_side_fixture(&mut self, path: &std::path::Path) -> Result<()> {
         if !self.state.offline {
             return Err("fixture-only");
@@ -351,7 +445,7 @@ impl Window {
                 std::ptr::null_mut(),
                 0,
                 0,
-                1280,
+                480,
                 780,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
@@ -364,6 +458,8 @@ impl Window {
         }
         let previous = std::mem::take(&mut self.state.stage_reply);
         let panel = self.state.stage_panel;
+        let active_tab = self.state.active_tab;
+        let page_scroll = self.state.page_scroll;
         let stage = self.state.stage;
         let mut rows: [Vec<crate::stage_reference::Row>; 5] = Default::default();
         rows[1] = (1..=6)
@@ -389,10 +485,14 @@ impl Window {
             ..Default::default()
         };
         self.state.stage_panel = true;
+        self.state.active_tab = 0;
+        self.state.page_scroll = unsafe { presentation::layout(self.hwnd, &self.state).hero_top };
         self.state.stage = 1;
         let result = self.render(path);
         self.state.stage_reply = previous;
         self.state.stage_panel = panel;
+        self.state.active_tab = active_tab;
+        self.state.page_scroll = page_scroll;
         self.state.stage = stage;
         result
     }
@@ -465,9 +565,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
     if p.is_null() {
         return DefWindowProcW(hwnd, msg, w, l);
     }
-    if let Some(v) = (*p).view.as_ref() {
-        crate::i18n::set(v.version.split('@').next().unwrap_or("zh-CN"));
-    }
     match msg {
         WM_TIMER if w == 2 => {
             if (*p).stage_panel {
@@ -478,81 +575,70 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             }
             if let Some(next) = (*p).assets.changed(&(*p).reply) {
                 (*p).reply = next;
+                if !(*p).side {
+                    presentation::scroll(hwnd, &mut *p, 0);
+                }
                 InvalidateRect(hwnd, null(), 0);
             }
             0
         }
-        WM_LBUTTONUP if !(*p).side => {
-            let px = (l as u16 as i16) as i32;
-            let py = ((l >> 16) as u16 as i16) as i32;
-            let d = GetDpiForWindow(hwnd).max(96) as i32;
-            let x = |v| v * d / 96;
-            let mut r: RECT = zeroed();
-            GetClientRect(hwnd, &mut r);
-            let right = r.right * 3 / 5;
-            if (*p).stage_panel
-                && px >= right + x(12)
-                && px < r.right - x(16)
-                && py >= x(136)
-                && py < x(168)
-            {
-                let tab = ((px - right - x(12)) / ((r.right - right - x(28)) / 6).max(1)).min(5);
-                if tab == 5 {
-                    (*p).stage_request(true);
-                } else {
-                    (*p).stage = tab as usize;
-                    (*p).stage_scroll = 0;
-                }
-                InvalidateRect(hwnd, null(), 0);
-                return 0;
-            }
-            if px >= right + x(12) && py >= x(92) && py < x(124) {
-                if let Some(detail) = &(*p).reply.detail {
-                    let tab =
-                        ((px - right - x(12)) / ((r.right - right - x(28)) / 5).max(1)).min(4);
-                    (*p).stage_panel = tab == 4;
-                    (*p).stage_scroll = 0;
-                    let prefixes = match tab {
-                        1 => ["海克斯强化", "海克斯增幅", "Augments ·"],
-                        2 => ["1–18", "1–18", "1–18"],
-                        3 => ["符文页", "符文頁", "Runes:"],
-                        _ => ["路线", "路線", "Build "],
-                    };
-                    (*p).scroll = detail
-                        .lines
-                        .iter()
-                        .position(|l| prefixes.iter().any(|prefix| l.text.starts_with(prefix)))
-                        .unwrap_or(0);
-                    (*p).stage_request(false);
-                    InvalidateRect(hwnd, null(), 0);
-                }
-                return 0;
-            }
-            if let Some(v) = &(*p).view {
-                let hit = if py >= x(52) && py < x(154) && px >= x(20) && px < right - x(20) {
-                    v.team
-                        .get(((px - x(20)) / ((right - x(40)) / 5).max(1)) as usize)
-                } else if py >= x(214) && py < r.bottom - x(46) && px >= x(20) && px < right - x(20)
-                {
-                    let rh = ((r.bottom - x(260)) / 5).max(x(62));
-                    v.bench.get(
-                        (((py - x(214)) / rh) * 4 + (px - x(20)) / ((right - x(40)) / 4).max(1))
-                            as usize,
-                    )
-                } else {
-                    None
-                };
-                if let Some(h) = hit.filter(|h| h.id > 0) {
-                    (*p).selected = h.id;
-                    (*p).scroll = 0;
-                    (*p).request();
-                    InvalidateRect(hwnd, null(), 0);
-                }
-            }
+        WM_LBUTTONUP => {
+            presentation::click(
+                hwnd,
+                &mut *p,
+                (l as u16 as i16) as i32,
+                ((l >> 16) as u16 as i16) as i32,
+            );
             0
+        }
+        WM_VSCROLL if !(*p).side => {
+            let mut info: SCROLLINFO = zeroed();
+            info.cbSize = std::mem::size_of::<SCROLLINFO>() as u32;
+            info.fMask = SIF_ALL;
+            GetScrollInfo(hwnd, SB_VERT, &mut info);
+            let delta = match w as u16 as i32 {
+                SB_LINEUP => -32,
+                SB_LINEDOWN => 32,
+                SB_PAGEUP => -(info.nPage as i32),
+                SB_PAGEDOWN => info.nPage as i32,
+                SB_THUMBTRACK => info.nTrackPos - (*p).page_scroll,
+                _ => 0,
+            };
+            presentation::scroll(hwnd, &mut *p, delta);
+            0
+        }
+        WM_NCHITTEST => {
+            let hit = DefWindowProcW(hwnd, msg, w, l);
+            if hit == HTCLIENT as isize {
+                let mut pt = POINT {
+                    x: (l as u16 as i16) as i32,
+                    y: ((l >> 16) as u16 as i16) as i32,
+                };
+                ScreenToClient(hwnd, &mut pt);
+                let view = presentation::layout(hwnd, &*p);
+                if pt.y < 40 * view.dpi / 96 && pt.x < (view.width - 40) * view.dpi / 96 {
+                    return HTCAPTION as isize;
+                }
+            }
+            hit
         }
         WM_MOUSEWHEEL => {
             let delta = ((w >> 16) as u16 as i16) as i32;
+            if !(*p).side {
+                let layout = presentation::layout(hwnd, &*p);
+                let mut point = POINT {
+                    x: (l as u16 as i16) as i32,
+                    y: ((l >> 16) as u16 as i16) as i32,
+                };
+                ScreenToClient(hwnd, &mut point);
+                let y = point.y * 96 / layout.dpi - 40 + (*p).page_scroll;
+                let stage_rows =
+                    (*p).stage_panel && y >= layout.detail_top + 120 && y < layout.detail_top + 488;
+                if !stage_rows {
+                    presentation::scroll(hwnd, &mut *p, if delta > 0 { -72 } else { 72 });
+                    return 0;
+                }
+            }
             if (*p).stage_panel {
                 let count = (*p)
                     .stage_reply
@@ -574,7 +660,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 .as_ref()
                 .map(|d| {
                     if (*p).side {
-                        side_lines(d).len()
+                        side_lines(d)
+                            .iter()
+                            .filter(|row| !presentation::source_line(&row.text))
+                            .count()
                     } else {
                         d.lines.len()
                     }
@@ -611,6 +700,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
         WM_ERASEBKGND => 1,
         WM_SIZE => {
+            if !(*p).side {
+                presentation::scroll(hwnd, &mut *p, 0);
+            }
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -634,9 +726,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
             GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
             m.ptMinTrackSize = POINT {
-                x: ((if (*p).side { 360 } else { 1080 }) * d / 96)
+                x: ((if (*p).side { 360 } else { 380 }) * d / 96)
                     .min(info.rcWork.right - info.rcWork.left),
-                y: ((if (*p).side { 400 } else { 650 }) * d / 96)
+                y: ((if (*p).side { 400 } else { 440 }) * d / 96)
                     .min(info.rcWork.bottom - info.rcWork.top),
             };
             0
@@ -669,7 +761,8 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
     GetClientRect(hwnd, &mut r);
     let dpi = GetDpiForWindow(hwnd).max(96) as i32;
     let x = |v| v * dpi / 96;
-    fill(dc, r, rgb(6, 17, 26));
+    fill(dc, r, rgb(17, 30, 46));
+    presentation::header(hwnd, dc, state);
     let line = |s: &str, top, size, color| {
         text(
             dc,
@@ -684,7 +777,6 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
             color,
         )
     };
-    line("局内海克斯参考 · 整体胜率", x(14), 20, rgb(205, 174, 108));
     line(
         "实际领取轮次未确认；与三卡识别独立",
         x(48),
@@ -694,7 +786,11 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
     if let Some(detail) = &state.reply.detail {
         line(&detail.title, x(82), 17, rgb(222, 233, 234));
         let mut top = x(125);
-        for row in side_lines(detail).iter().skip(state.scroll) {
+        for row in side_lines(detail)
+            .iter()
+            .filter(|row| !presentation::source_line(&row.text))
+            .skip(state.scroll)
+        {
             let chunks = wrap(
                 &row.text,
                 ((r.right - x(70))
@@ -705,15 +801,35 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
                     }))
                 .max(8) as usize,
             );
-            let height = x((chunks.len() as i32 * 23 + 12).max(42));
+            let height = x((chunks.len() as i32 * 23 + 18).max(63));
             if top + height > r.bottom - x(52) {
                 break;
             }
+            fill(
+                dc,
+                RECT {
+                    left: x(16),
+                    top,
+                    right: r.right - x(16),
+                    bottom: top + height - x(8),
+                },
+                rgb(43, 64, 87),
+            );
+            fill(
+                dc,
+                RECT {
+                    left: x(17),
+                    top: top + 1,
+                    right: r.right - x(17),
+                    bottom: top + height - x(8) - 1,
+                },
+                rgb(26, 43, 62),
+            );
             let left = if let Some(url) = row.icons.first() {
-                icon(dc, state, url, x(16), top, x(32));
-                x(57)
+                icon(dc, state, url, x(24), top + x(8), x(36));
+                x(70)
             } else {
-                x(16)
+                x(24)
             };
             for (i, chunk) in chunks.iter().enumerate() {
                 text(
@@ -721,9 +837,9 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
                     chunk,
                     RECT {
                         left,
-                        top: top + x(i as i32 * 23),
-                        right: r.right - x(16),
-                        bottom: top + x(i as i32 * 23 + 23),
+                        top: top + x(i as i32 * 23 + 5),
+                        right: r.right - x(24),
+                        bottom: top + x(i as i32 * 23 + 28),
                     },
                     x(if row.icons.is_empty() { 12 } else { 15 }),
                     rgb(176, 211, 215),
@@ -759,291 +875,9 @@ unsafe fn draw_side(hwnd: HWND, dc: HDC, state: &State) {
 unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
     if state.side {
         draw_side(hwnd, dc, state);
-        return;
-    }
-    use crate::desktop::{fill, rgb, text};
-    let mut r: RECT = zeroed();
-    GetClientRect(hwnd, &mut r);
-    let d = GetDpiForWindow(hwnd).max(96) as i32;
-    let x = |v| v * d / 96;
-    fill(dc, r, rgb(6, 17, 26));
-    let full_right = r.right;
-    r.right = r.right * 3 / 5;
-    let Some(v) = &state.view else { return };
-    let label = |s: &str, l, t, rr, b, size, color| {
-        text(
-            dc,
-            s,
-            RECT {
-                left: l,
-                top: t,
-                right: rr,
-                bottom: b,
-            },
-            size,
-            color,
-        )
-    };
-    let gold = rgb(205, 174, 108);
-    let pale = rgb(222, 233, 234);
-    let dim = rgb(138, 167, 180);
-    label(
-        "我方阵容",
-        x(20),
-        x(12),
-        r.right - x(20),
-        x(44),
-        x(22),
-        gold,
-    );
-    let width = (r.right - x(40)) / 5;
-    for (i, h) in v.team.iter().enumerate() {
-        let l = x(20) + i as i32 * width;
-        fill(
-            dc,
-            RECT {
-                left: l,
-                top: x(52),
-                right: l + width - x(8),
-                bottom: x(154),
-            },
-            if v.local_slot == Some(i) {
-                rgb(37, 69, 67)
-            } else {
-                rgb(24, 42, 54)
-            },
-        );
-        label(
-            if v.local_slot == Some(i) {
-                "你 · 已选择"
-            } else {
-                "队友 · 已选择"
-            },
-            l + x(10),
-            x(59),
-            l + width - x(12),
-            x(85),
-            x(12),
-            gold,
-        );
-        icon(dc, state, &h.icon, l + x(8), x(88), x(28));
-        label(
-            &h.name,
-            l + x(42),
-            x(86),
-            l + width - x(12),
-            x(118),
-            x(18),
-            pale,
-        );
-        label(
-            &rate(h.win, "胜率"),
-            l + x(10),
-            x(119),
-            l + width - x(12),
-            x(145),
-            x(13),
-            dim,
-        );
-    }
-    label(
-        "备选英雄 · 按整体胜率排序",
-        x(20),
-        x(168),
-        r.right - x(20),
-        x(202),
-        x(20),
-        gold,
-    );
-    if v.bench.is_empty() {
-        label(
-            "当前没有可选备选英雄；客户端变化后自动刷新",
-            x(20),
-            x(214),
-            r.right - x(20),
-            x(250),
-            x(15),
-            dim,
-        );
-    }
-    let width = (r.right - x(40)) / 4;
-    let row_height = ((r.bottom - x(260)) / 5).max(x(62));
-    for (i, h) in v.bench.iter().enumerate() {
-        let l = x(20) + (i % 4) as i32 * width;
-        let t = x(214) + (i / 4) as i32 * row_height;
-        fill(
-            dc,
-            RECT {
-                left: l,
-                top: t,
-                right: l + width - x(8),
-                bottom: t + row_height - x(8),
-            },
-            rgb(13, 30, 41),
-        );
-        icon(dc, state, &h.icon, l + x(8), t + x(6), x(26));
-        label(
-            &h.name,
-            l + x(39),
-            t + x(5),
-            l + width - x(12),
-            t + x(31),
-            x(17),
-            pale,
-        );
-        label(
-            &format!("{} · {}", rate(h.win, "胜"), rate(h.pick, "选")),
-            l + x(10),
-            t + x(31),
-            l + width - x(12),
-            t + x(55),
-            x(12),
-            rgb(120, 214, 199),
-        );
-    }
-    let left = r.right + x(12);
-    label(
-        "英雄详情 · 点击左侧卡片查看",
-        left,
-        x(12),
-        full_right - x(16),
-        x(44),
-        x(20),
-        gold,
-    );
-    if let Some(detail) = &state.reply.detail {
-        label(
-            &detail.title,
-            left,
-            x(52),
-            full_right - x(16),
-            x(89),
-            x(22),
-            pale,
-        );
-        let tab_width = (full_right - left - x(16)) / 5;
-        for (i, name) in ["出装", "海克斯", "加点", "符文页", "阶段参考"]
-            .iter()
-            .enumerate()
-        {
-            let l = left + i as i32 * tab_width;
-            fill(
-                dc,
-                RECT {
-                    left: l,
-                    top: x(92),
-                    right: l + tab_width - x(4),
-                    bottom: x(124),
-                },
-                rgb(24, 42, 54),
-            );
-            label(
-                name,
-                l + x(8),
-                x(94),
-                l + tab_width - x(4),
-                x(122),
-                x(14),
-                gold,
-            );
-        }
-        if state.stage_panel {
-            draw_stage(
-                dc,
-                state,
-                RECT {
-                    left,
-                    top: x(136),
-                    right: full_right - x(16),
-                    bottom: r.bottom - x(44),
-                },
-                d,
-            );
-        } else {
-            let mut top = x(136);
-            let mut index = state.scroll;
-            while let Some(line) = detail.lines.get(index) {
-                let width = (full_right - left - x(16)).max(1);
-                let chars = (width
-                    / x(if v.version.starts_with("en-US@") {
-                        8
-                    } else {
-                        14
-                    })
-                    .max(1))
-                .max(12) as usize;
-                let wrapped = wrap(&line.text, chars);
-                let icons = !line.icons.is_empty();
-                let height = (wrapped.len() as i32) * 23 + if icons { 37 } else { 7 };
-                if top + x(height) > r.bottom - x(44) {
-                    break;
-                }
-                if icons {
-                    for (i, url) in line.icons.iter().take(6).enumerate() {
-                        icon(dc, state, url, left + i as i32 * x(30), top, x(26));
-                    }
-                    top += x(30);
-                }
-                for chunk in wrapped {
-                    label(
-                        &chunk,
-                        left,
-                        top,
-                        full_right - x(16),
-                        top + x(23),
-                        x(14),
-                        if icons { pale } else { dim },
-                    );
-                    top += x(23);
-                }
-                top += x(7);
-                index += 1;
-            }
-            label(
-                &format!(
-                    "{} · {} / {}",
-                    crate::i18n::text("滚轮浏览详情"),
-                    state.scroll + 1,
-                    detail.lines.len()
-                ),
-                left,
-                r.bottom - x(37),
-                full_right - x(16),
-                r.bottom - x(8),
-                x(12),
-                gold,
-            );
-        }
     } else {
-        label(
-            if state.selected == 0 {
-                "等待选择英雄"
-            } else if state.reply.error.is_some() {
-                "本地详情不可用；可暂停后更新数据"
-            } else {
-                "正在读取本地详情…"
-            },
-            left,
-            x(105),
-            full_right - x(16),
-            x(140),
-            x(15),
-            dim,
-        );
+        presentation::draw(hwnd, dc, state);
     }
-    label(
-        &format!(
-            "{} · {}",
-            v.version,
-            crate::i18n::text("仅供参考，请在游戏中选择")
-        ),
-        x(20),
-        r.bottom - x(37),
-        r.right - x(20),
-        r.bottom - x(8),
-        x(12),
-        dim,
-    );
 }
 unsafe fn draw_stage(dc: HDC, state: &State, r: RECT, d: i32) {
     use crate::desktop::{fill, rgb, text};
@@ -1337,6 +1171,8 @@ pub(crate) unsafe fn draw_icon(
         info.bmiHeader.biHeight = -48;
         info.bmiHeader.biPlanes = 1;
         info.bmiHeader.biBitCount = 32;
+        let stretch = SetStretchBltMode(dc, HALFTONE);
+        SetBrushOrgEx(dc, 0, 0, null_mut());
         StretchDIBits(
             dc,
             left,
@@ -1352,6 +1188,7 @@ pub(crate) unsafe fn draw_icon(
             DIB_RGB_COLORS,
             SRCCOPY,
         );
+        SetStretchBltMode(dc, stretch);
     } else {
         use crate::desktop::{fill, rgb, text};
         let r = RECT {
