@@ -75,6 +75,7 @@ dependencies = [
  "serde",
  "serde_json",
  "windows",
+ "windows-sys",
 ]
 
 [[package]]
@@ -143,6 +144,7 @@ dependencies = [
  "fuze-capture",
  "fuze-contract",
  "fuze-data",
+ "fuze-lcu",
  "fuze-native-overlay",
  "fuze-runtime",
  "image",

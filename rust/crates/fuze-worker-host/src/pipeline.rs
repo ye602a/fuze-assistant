@@ -1,5 +1,5 @@
 //! Session-scoped control-thread host shared by offline GPU input and real owned-window WGC.
-//! No game discovery/attachment or automatic startup. UI has its own message thread.
+//! Game attachment is explicit; no automatic startup. UI has its own message thread.
 use crate::{recovery::Supervisor, Result};
 use fuze_capture::native::{FrameStatus, OwnedWindowStream};
 use fuze_contract::{
@@ -23,6 +23,9 @@ pub struct Pipeline {
     epoch: Instant,
     closed: bool,
     capture_failure: Option<serde_json::Value>,
+    next_capture_at: u64,
+    pub busy_frames: u64,
+    busy_streak: u8,
 }
 pub struct Delivery {
     pub snapshot: Snapshot,
@@ -49,6 +52,9 @@ impl Pipeline {
             epoch: Instant::now(),
             closed: false,
             capture_failure: None,
+            next_capture_at: 0,
+            busy_frames: 0,
+            busy_streak: 0,
         })
     }
     pub fn cancellation(&self) -> fuze_native_overlay::native::Cancellation {
@@ -96,6 +102,31 @@ impl Pipeline {
     }
     pub fn capture_failure(&self) -> Option<&serde_json::Value> {
         self.capture_failure.as_ref()
+    }
+    pub fn has_capture(&self) -> bool {
+        self.capture.is_some()
+    }
+    pub fn capture_game(&mut self, target: fuze_capture::target::GameWindow) -> Result<()> {
+        if self.closed || self.overlay.cancellation().cancelled() || self.wake_at().is_none() {
+            return Err("capture-phase");
+        }
+        self.capture = None;
+        let cleanup = self.session.capture_replaced()?;
+        if !self
+            .overlay
+            .reset(cleanup.generation, self.dataset.clone())?
+        {
+            return Err("overlay-reset");
+        }
+        self.capture_failure = None;
+        match OwnedWindowStream::start_game(target) {
+            Ok(stream) => self.capture = Some(stream),
+            Err(error) => {
+                self.capture_failure = Some(fuze_capture::native::failure_details(&*error));
+                return Err("capture-start");
+            }
+        }
+        Ok(())
     }
     pub fn capture_owned(&mut self, hwnd: isize, visible_ci: bool) -> Result<()> {
         if self.closed || self.wake_at().is_none() {
@@ -171,7 +202,7 @@ impl Pipeline {
         if self.cancel_if_requested()? {
             return Ok(None);
         }
-        if !self.wake_at().is_some_and(|at| self.now() >= at) {
+        if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
             return Ok(None);
         }
         let Some(mut capture) = self.capture.take() else {
@@ -182,6 +213,7 @@ impl Pipeline {
             .map_err(|_| "capture-frame")?
         {
             FrameStatus::Ready => {
+                self.busy_streak = 0;
                 let key = FrameKey {
                     epoch: capture.generation,
                     sequence: capture.sequence,
@@ -199,7 +231,25 @@ impl Pipeline {
                 }
                 Ok(None)
             }
-            FrameStatus::Timeout | FrameStatus::Duplicate => Ok(None),
+            FrameStatus::Busy => {
+                self.busy_frames = self.busy_frames.saturating_add(1);
+                self.busy_streak = self.busy_streak.saturating_add(1);
+                self.next_capture_at = self.now().saturating_add(100);
+                if self.busy_streak >= 5 {
+                    self.busy_streak = 0;
+                    return Err("capture-frame");
+                }
+                Ok(None)
+            }
+            FrameStatus::Suspended => {
+                self.overlay.visible(false)?;
+                self.next_capture_at = self.now().saturating_add(500);
+                Ok(None)
+            }
+            FrameStatus::Timeout | FrameStatus::Duplicate => {
+                self.next_capture_at = self.now().saturating_add(100);
+                Ok(None)
+            }
         })();
         // Returned inference failures retain the capture stream; a capture failure stops it.
         if self.closed {

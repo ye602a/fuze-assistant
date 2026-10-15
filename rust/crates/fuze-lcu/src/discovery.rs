@@ -34,6 +34,7 @@ struct Candidate {
     process: Handle,
     pid: u32,
     credentials: Credentials,
+    root: PathBuf,
 }
 impl Candidate {
     fn alive(&self) -> bool {
@@ -104,6 +105,7 @@ fn discover() -> Result<Option<Candidate>> {
                                         process,
                                         pid: row.th32ProcessID,
                                         credentials,
+                                        root: image.parent().ok_or(Error::Discovery)?.to_path_buf(),
                                     };
                                     if candidate.alive() {
                                         if found.is_some() {
@@ -136,6 +138,7 @@ struct Connected {
     process: Handle,
     pid: u32,
     client: ReadOnlyClient,
+    root: PathBuf,
 }
 /// Own this on a dedicated control/IO thread. `poll` is synchronous, bounded per WinHTTP
 /// operation, not hard-cancellable. Caller schedules `wake_at`; no UI/OCR thread invocation.
@@ -143,6 +146,7 @@ pub struct AutoClient {
     connection: Option<Connected>,
     retry: Reconnect,
     epoch: Instant,
+    context: Option<crate::context::Context>,
 }
 impl Default for AutoClient {
     fn default() -> Self {
@@ -150,10 +154,17 @@ impl Default for AutoClient {
             connection: None,
             retry: Reconnect::default(),
             epoch: Instant::now(),
+            context: None,
         }
     }
 }
 impl AutoClient {
+    pub fn context(&self) -> Option<crate::context::Context> {
+        self.context
+    }
+    pub fn game_root(&self) -> Option<&std::path::Path> {
+        self.connection.as_ref().map(|c| c.root.as_path())
+    }
     pub fn wake_at(&self) -> Option<u64> {
         self.retry.wake_at()
     }
@@ -161,6 +172,7 @@ impl AutoClient {
         self.epoch.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
     pub fn pause(&mut self) {
+        self.context = None;
         self.connection = None;
         self.retry.pause();
     }
@@ -171,6 +183,7 @@ impl AutoClient {
         if !self.retry.due(self.now_ms()) {
             return self.retry.state();
         }
+        self.context = None;
         let result = (|| {
             if let Some(c) = &self.connection {
                 if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
@@ -185,14 +198,16 @@ impl AutoClient {
                     process: c.process,
                     pid: c.pid,
                     client: ReadOnlyClient::new(c.credentials)?,
+                    root: c.root,
                 });
             }
             let c = self.connection.as_ref().ok_or(Error::Discovery)?;
-            let phase = c.client.phase(c.pid)?;
+            let context = c.client.context(c.pid)?;
             if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
                 return Err(Error::Discovery);
             }
-            Ok(Some(phase))
+            self.context = Some(context);
+            Ok(Some(context.phase))
         })();
         if result.is_err() {
             self.connection = None;

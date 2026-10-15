@@ -1,4 +1,5 @@
-//! Fixed loopback HTTPS only. No arbitrary URL, proxy, redirect, write method or account payload.
+//! Fixed loopback HTTPS only. No arbitrary URL, proxy, redirect or write method.
+//! Temporary identity responses are reduced to local hero context, never logged or returned.
 use super::{basic, parse_phase, status, wipe, Credentials, Endpoint, Error, Result};
 use fuze_runtime::session::Phase;
 use std::{
@@ -63,6 +64,29 @@ pub struct ReadOnlyClient {
     credentials: Credentials,
 }
 impl ReadOnlyClient {
+    pub fn context(&self, current_pid: u32) -> Result<crate::context::Context> {
+        let phase = self.phase(current_pid)?;
+        if !matches!(
+            phase,
+            Phase::ChampSelect | Phase::Loading | Phase::InProgress
+        ) {
+            return Ok(crate::context::Context::idle(phase));
+        }
+        let (_, mut flow) = self.request(current_pid, Endpoint::Gameflow)?;
+        let endpoint = if phase == Phase::ChampSelect {
+            Endpoint::ChampSelect
+        } else {
+            Endpoint::SummonerIdentity
+        };
+        let result = (|| {
+            let (_, mut player) = self.request(current_pid, endpoint)?;
+            let result = crate::context::parse(phase, &flow, &player);
+            wipe(&mut player);
+            result
+        })();
+        wipe(&mut flow);
+        result
+    }
     pub fn new(credentials: Credentials) -> Result<Self> {
         unsafe {
             let session = Handle::new(WinHttpOpen(
@@ -152,12 +176,17 @@ impl ReadOnlyClient {
                 return Ok((code, Vec::new()));
             }
             let started = Instant::now();
-            let mut body = Vec::new();
-            for _ in 0..129 {
+            let limit = if matches!(endpoint, Endpoint::Phase) {
+                128
+            } else {
+                256 * 1024
+            };
+            let mut body = Vec::with_capacity(limit);
+            for _ in 0..=limit.div_ceil(4096) {
                 if started.elapsed() > Duration::from_secs(2) {
                     return Err(Error::Transport);
                 }
-                let mut buffer = [0u8; 129];
+                let mut buffer = [0u8; 4096];
                 let mut read = 0u32;
                 ok(WinHttpReadData(
                     request.0,
@@ -168,7 +197,7 @@ impl ReadOnlyClient {
                 if read == 0 {
                     return Ok((code, body));
                 }
-                if body.len() + read as usize > 128 {
+                if body.len() + read as usize > limit {
                     return Err(Error::ResponseLimit);
                 }
                 body.extend_from_slice(&buffer[..read as usize]);

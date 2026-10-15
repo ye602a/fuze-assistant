@@ -686,6 +686,7 @@ pub struct HiddenOverlay {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 enum OverlayCommand {
+    Visible(bool, std::sync::mpsc::SyncSender<bool>),
     Update(Snapshot, std::sync::mpsc::SyncSender<bool>),
     Reset(u64, String, std::sync::mpsc::SyncSender<bool>),
 }
@@ -835,6 +836,7 @@ impl HiddenOverlay {
             while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
                 if message.message == WM_APP + 3 {
                     SNAPSHOT.with(|s| *s.borrow_mut() = None);
+                    ShowWindow(hwnd, SW_HIDE);
                     InvalidateRect(hwnd, null(), 0);
                 } else if message.message == WM_APP + 2 {
                     PULSE.with(|p| p.set(p.get().wrapping_add(1)));
@@ -843,6 +845,25 @@ impl HiddenOverlay {
                 } else if message.message == WM_APP + 1 {
                     if let Ok(command) = rx.try_recv() {
                         let (accepted, ack) = match command {
+                            OverlayCommand::Visible(visible, ack) => {
+                                let accepted = !ui_flag.load(Ordering::Acquire);
+                                if accepted {
+                                    if visible {
+                                        SetWindowPos(
+                                            hwnd,
+                                            HWND_TOPMOST,
+                                            20,
+                                            20,
+                                            0,
+                                            0,
+                                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                                        );
+                                    } else {
+                                        ShowWindow(hwnd, SW_HIDE);
+                                    }
+                                }
+                                (accepted, ack)
+                            }
                             OverlayCommand::Update(snapshot, ack) => {
                                 let accepted = !ui_flag.load(Ordering::Acquire)
                                     && !snapshot.selection_confirmed
@@ -862,6 +883,7 @@ impl HiddenOverlay {
                                     }
                                     current_dataset = dataset.clone();
                                     SNAPSHOT.with(|s| *s.borrow_mut() = None);
+                                    ShowWindow(hwnd, SW_HIDE);
                                 }
                                 (accepted, ack)
                             }
@@ -913,6 +935,10 @@ impl HiddenOverlay {
     pub fn update(&self, snapshot: Snapshot) -> std::result::Result<bool, &'static str> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Update(snapshot, tx), rx)
+    }
+    pub fn visible(&self, visible: bool) -> std::result::Result<bool, &'static str> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(OverlayCommand::Visible(visible, tx), rx)
     }
     pub fn reset(
         &self,

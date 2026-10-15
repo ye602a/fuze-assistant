@@ -1,5 +1,5 @@
-//! Bounded WGC probe for a hidden window owned by this process, plus GPU ROI readback.
-//! No capture picker, desktop capture, foreign HWND, image encoder, or polling loop.
+//! Bounded WGC for owned test windows or validated game targets, plus GPU ROI readback.
+//! No capture picker, desktop capture, image encoder or input simulation.
 use std::{
     sync::mpsc::sync_channel,
     time::{Duration, Instant},
@@ -29,6 +29,15 @@ use windows::{
     },
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Debug)]
+pub struct ReadbackBusy;
+impl std::fmt::Display for ReadbackBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("gpu-readback-busy")
+    }
+}
+impl std::error::Error for ReadbackBusy {}
 
 #[path = "fixture.rs"]
 mod fixture;
@@ -227,7 +236,7 @@ impl RoiReader {
                     Ok(()) => break,
                     Err(error) if error.code() == DXGI_ERROR_WAS_STILL_DRAWING => {
                         if Instant::now() >= deadline {
-                            return Err("gpu-readback-busy".into());
+                            return Err(Box::new(ReadbackBusy));
                         }
                         std::thread::sleep(Duration::from_millis(1));
                     }

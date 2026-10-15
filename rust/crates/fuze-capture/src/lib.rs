@@ -1,5 +1,7 @@
-//! Isolated native prototype. No desktop/process enumeration or foreign-window capture API.
+//! Bounded native capture. Game attachment requires metadata-validated target discovery.
 #[cfg(windows)]
 pub mod adapter;
 #[cfg(windows)]
 pub mod native;
+#[cfg(windows)]
+pub mod target;

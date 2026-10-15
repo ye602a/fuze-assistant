@@ -1,6 +1,7 @@
 //! Read-only LCU boundary. Nothing runs at import; caller supplies freshly observed credentials.
 use fuze_runtime::session::Phase;
 use std::fmt;
+pub mod context;
 #[cfg(windows)]
 pub mod discovery;
 pub mod reconnect;
@@ -113,12 +114,17 @@ impl Credentials {
 pub(crate) enum Endpoint {
     Phase,
     SummonerStatus,
+    SummonerIdentity,
+    Gameflow,
+    ChampSelect,
 }
 impl Endpoint {
     pub(crate) fn path(self) -> &'static str {
         match self {
             Self::Phase => "/lol-gameflow/v1/gameflow-phase",
-            Self::SummonerStatus => "/lol-summoner/v1/current-summoner",
+            Self::SummonerStatus | Self::SummonerIdentity => "/lol-summoner/v1/current-summoner",
+            Self::Gameflow => "/lol-gameflow/v1/session",
+            Self::ChampSelect => "/lol-champ-select/v1/session",
         }
     }
 }

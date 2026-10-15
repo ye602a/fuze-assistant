@@ -39,6 +39,8 @@ pub enum FrameStatus {
     Timeout,
     Resized,
     Duplicate,
+    Busy,
+    Suspended,
 }
 struct Frame(Direct3D11CaptureFrame);
 impl Drop for Frame {
@@ -47,9 +49,10 @@ impl Drop for Frame {
     }
 }
 
-/// Serialized, bounded stream. This prototype cannot attach to another process's window.
+/// Serialized, bounded stream. Foreign windows require an opaque validated GameWindow.
 /// Visible self-window testing is allowed only by an explicit CI mode.
 pub struct OwnedWindowStream {
+    target: Option<crate::target::GameWindow>,
     capture: Capture,
     reader: RoiReader,
     winrt: IDirect3DDevice,
@@ -65,7 +68,6 @@ pub struct OwnedWindowStream {
 }
 impl OwnedWindowStream {
     pub fn start(handle: isize, visible_ci: bool) -> Result<Self> {
-        let apartment = Apartment::new()?;
         let hwnd = HWND(handle as *mut _);
         unsafe {
             let mut pid = 0;
@@ -77,6 +79,17 @@ impl OwnedWindowStream {
                 return Err("window-ownership-or-visibility".into());
             }
         }
+        Self::start_validated(handle, None)
+    }
+    pub fn start_game(target: crate::target::GameWindow) -> Result<Self> {
+        if !target.valid() || target.minimized() {
+            return Err("game-window-unavailable".into());
+        }
+        Self::start_validated(target.handle(), Some(target))
+    }
+    fn start_validated(handle: isize, target: Option<crate::target::GameWindow>) -> Result<Self> {
+        let apartment = Apartment::new()?;
+        let hwnd = HWND(handle as *mut _);
         if !step("is_supported", GraphicsCaptureSession::IsSupported())? {
             return Err("wgc-unsupported".into());
         }
@@ -126,6 +139,7 @@ impl OwnedWindowStream {
         );
         step("start_capture", capture.session.StartCapture())?;
         Ok(Self {
+            target,
             capture,
             reader: RoiReader::new(&device),
             winrt,
@@ -142,11 +156,19 @@ impl OwnedWindowStream {
     }
     pub fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
         self.ready = false;
+        if let Some(target) = &self.target {
+            if !target.valid() {
+                return Err("source-window-closed".into());
+            }
+            if target.minimized() || !target.foreground() {
+                return Ok(FrameStatus::Suspended);
+            }
+        }
         // Ownership is rechecked before consuming frames if the source HWND was destroyed/reused.
         unsafe {
             let mut pid = 0;
             GetWindowThreadProcessId(HWND(self.handle as *mut _), Some(&mut pid));
-            if pid != GetCurrentProcessId() {
+            if self.target.is_none() && pid != GetCurrentProcessId() {
                 return Err("source-window-closed".into());
             }
         }
@@ -195,7 +217,13 @@ impl OwnedWindowStream {
         }
         let access: IDirect3DDxgiInterfaceAccess = frame.0.Surface()?.cast()?;
         let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
-        self.reader.read(&texture, &rects)?;
+        if let Err(error) = self.reader.read(&texture, &rects) {
+            if error.is::<ReadbackBusy>() {
+                self.last_timestamp = Some(stamp);
+                return Ok(FrameStatus::Busy);
+            }
+            return Err(error);
+        }
         self.sequence = self
             .sequence
             .checked_add(1)
