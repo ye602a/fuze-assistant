@@ -106,8 +106,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             .ok()
             .map(|d| format!("可用 {}", d.identity()))
     };
+    let initial_available = available();
     if let Ok(mut s) = shared.status.lock() {
-        s.available = available();
+        s.available = initial_available;
     }
     let mut controller = Controller::new(config);
     let mut monitor = None;
@@ -141,8 +142,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     })
                 })
             };
+            let refreshed_available = available();
             if let Ok(mut s) = shared.status.lock() {
-                s.available = available();
+                s.available = refreshed_available;
                 s.update_error = result.as_ref().err().copied();
                 s.notice = Some(if result.is_ok() {
                     "推荐数据已校验；下次开始识别时使用最新完整版本。"
