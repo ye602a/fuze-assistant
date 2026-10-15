@@ -7,6 +7,7 @@ pub mod context;
 #[cfg(windows)]
 pub mod discovery;
 pub mod events;
+pub mod history;
 pub mod locale;
 pub mod reconnect;
 #[cfg(windows)]
@@ -124,6 +125,9 @@ pub(crate) enum Endpoint {
     Gameflow,
     ChampSelect,
     Locale,
+    History,
+    Authorization,
+    ChatMe,
 }
 impl Endpoint {
     pub(crate) fn path(self) -> &'static str {
@@ -133,6 +137,11 @@ impl Endpoint {
             Self::Gameflow => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
             Self::Locale => "/riotclient/region-locale",
+            Self::History => {
+                "/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=49"
+            }
+            Self::Authorization => "/lol-rso-auth/v1/authorization",
+            Self::ChatMe => "/lol-chat/v1/me",
         }
     }
 }

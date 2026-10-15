@@ -2,6 +2,8 @@
 
 ## 当前增量状态（M7c）
 
+M8: [account history and selective import](M8.md).
+
 M7c: [desktop continuity and local observations](M7C.md).
 
 以下为当前增量结论；后面的表格保留早期里程碑背景，不代表当前待办清单。正式入口仍为 Electron，Rust 未替换稳定版。
@@ -14,10 +16,12 @@ M7c: [desktop continuity and local observations](M7C.md).
 | 原生设置与选人 | M7b：本地英雄详情/出装/加点/海克斯统计、限额图标缓存、五人阵容与备选一览；新增更新频道、图标下载、暂停快捷键和目录回退设置 | 源数据无符文页；M7c 已接三语言主界面/选人和三卡文案、主窗口/选人位置记忆、白名单旧设置导入；独立更新器本地化仍待补 |
 | 数据更新 | 三语言本地优先、完整验证后事务激活、旧版本保留 | 缓存容量与长期清理策略待补 |
 | 私有更新 / 差分 / 回滚 | M6b + M7a：凭据管理、真实网络验收、独立安装、健康失败与进程启动失败回滚 | 开发手动更新；生产签名、安装器、启动后健康与容量回收未完成 |
-| 战绩 / 个人记录 | M7c 本机 OCR 观察片段、默认关闭、有界留存 | 在线战绩、账号隔离与旧战绩迁移未完成 |
+| 战绩 / 个人记录 | M8：暂停时手动查询 LCU 最近 50 场，账号＋区服隔离、离线快照、旧战绩预览后确认导入；M7c 匿名观察记录保持独立 | 国服接口实测、外部 SGP、旧观察日志迁移和更完整的详情展示仍待补 |
 | 实际领取轮次 | 保持未知 | 继续整体胜率，不根据等级或弹窗推测领取 |
 
 本轮验证细节与限制见 [M7b](M7B.md)，私有更新验证见 [M7a](M7A.md)。依赖顺序继续 #27 → #28 → #29 → #30 → #31 → #32 → #33 → M7b；在整个 Rust 迁移完成前仓库保持私有。
+
+M8 adds manual LCU history, account/platform-isolated local results, offline snapshots and preview/confirm legacy result import. Real Tencent history access and external SGP coverage are not validated. See M8 for exact boundaries.
 
 ## 早期里程碑记录
 

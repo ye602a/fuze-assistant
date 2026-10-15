@@ -21,6 +21,52 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    [
+        "浏览已存账号（离线）",
+        "瀏覽已存帳號（離線）",
+        "Saved accounts (offline)",
+    ],
+    ["胜利", "勝利", "Win"],
+    ["失败", "失敗", "Loss"],
+    ["重开", "重開", "Remake"],
+    ["上一页", "上一頁", "Previous"],
+    ["下一页", "下一頁", "Next"],
+    ["识别观察记录", "辨識觀察記錄", "OCR observations"],
+    ["账号战绩", "帳號戰績", "Account match history"],
+    ["刷新最近 50 场", "重新整理最近 50 場", "Refresh latest 50"],
+    ["预览旧战绩导入", "預覽舊戰績匯入", "Preview legacy import"],
+    [
+        "确认导入匹配记录",
+        "確認匯入匹配記錄",
+        "Confirm matching import",
+    ],
+    [
+        "暂停时手动查询客户端最近 50 场，仅保留海克斯大乱斗。",
+        "暫停時手動查詢用戶端最近 50 場，僅保留海克斯大亂鬥。",
+        "Manual refresh while paused. Mayhem only; current client's latest 50 matches.",
+    ],
+    [
+        "下方为查询快照；刷新确认当前账号。查询失败不删除本地缓存。",
+        "下方為查詢快照；重新整理確認目前帳號。查詢失敗不刪除本機快取。",
+        "Saved snapshot; refresh to verify current account. Failed queries keep disk cache.",
+    ],
+    [
+        "匹配账号导入预览",
+        "匹配帳號匯入預覽",
+        "Matching import preview",
+    ],
+    [
+        "正在核实账号与战绩…",
+        "正在核實帳號與戰績…",
+        "Checking account and history...",
+    ],
+    ["缓存快照", "快取快照", "Cached snapshot"],
+    ["最近查询快照", "最近查詢快照", "Latest query snapshot"],
+    [
+        "暂无已验证的战绩记录。",
+        "暫無已驗證的戰績記錄。",
+        "No verified records to display.",
+    ],
     ["软件更新", "軟體更新", "App update"],
     ["本机识别记录", "本機辨識記錄", "Local OCR observations"],
     ["本机记录", "本機記錄", "Records"],

@@ -36,6 +36,49 @@ struct Candidate {
     credentials: Credentials,
     root: PathBuf,
 }
+/// Explicit user-requested history IO only; retains the discovered process handle.
+pub struct HistorySession {
+    process: Handle,
+    pid: u32,
+    client: ReadOnlyClient,
+}
+impl HistorySession {
+    pub fn open(manual: Option<&std::path::Path>) -> crate::history::Result<Self> {
+        let c = discover(manual)
+            .map_err(|_| "history-discovery-failed")?
+            .ok_or("history-client-unavailable")?;
+        if !c.alive() {
+            return Err("history-client-unavailable");
+        }
+        let client = ReadOnlyClient::new(c.credentials).map_err(|_| "history-connect-failed")?;
+        Ok(Self {
+            process: c.process,
+            pid: c.pid,
+            client,
+        })
+    }
+    pub fn owner(&self) -> crate::history::Result<crate::history::Owner> {
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("history-client-unavailable");
+        }
+        self.client.history_owner(self.pid)
+    }
+    pub fn rows(
+        &self,
+        owner: &crate::history::Owner,
+    ) -> crate::history::Result<Vec<crate::history::Match>> {
+        // The host brackets this request with owner()/phase verification.
+        // Parsing independently rejects any participant belonging to a different owner.
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("history-client-unavailable");
+        }
+        let result = self.client.history_rows(self.pid, owner);
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+            return Err("history-client-unavailable");
+        }
+        result
+    }
+}
 impl Candidate {
     fn alive(&self) -> bool {
         // A retained kernel handle binds the original process even if its PID is later reused.

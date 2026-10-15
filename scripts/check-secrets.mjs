@@ -7,7 +7,7 @@ import { lstat, readFile, readdir } from 'node:fs/promises'
 export function inspectUpload(name, buffer) {
   const file = name.replaceAll('\\', '/').replace(/^\//, '')
   const findings = []
-  if (/(^|\/)(?:\.env(?:\..*)?|\.netrc|id_rsa|id_ed25519|personal-history-v1\.json|augment-journal-v1\.json|observations\.json|window-(?:main|champions)\.json)$/.test(file)
+  if (/(^|\/)(?:\.env(?:\..*)?|\.netrc|id_rsa|id_ed25519|personal-history-v1\.json|augment-journal-v1\.json|observations\.json|account-history\.json|window-(?:main|champions)\.json)$/.test(file)
     && !file.endsWith('.example')) findings.push({ file, line: 0, rule: 'private-file' })
   if (/(?:^|\/)(?:aramgg_client-data|FuzeRustPreview|user-profile|\.runtime|release-smoke)\//.test(file)
     || /\.(?:pfx|p12|key|keystore|log)$/i.test(file)) findings.push({ file, line: 0, rule: 'runtime-or-key-file' })

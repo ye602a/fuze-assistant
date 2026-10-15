@@ -99,6 +99,7 @@ name = "fuze-lcu"
 version = "0.1.0"
 dependencies = [
  "fuze-runtime",
+ "serde",
  "serde_json",
  "windows",
  "windows-sys",
