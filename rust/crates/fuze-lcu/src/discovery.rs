@@ -86,7 +86,9 @@ fn discover() -> Result<Option<Candidate>> {
                         }) {
                             let lock = image.with_file_name("lockfile");
                             let credentials = (|| {
-                                let mut secret = Secret(Vec::new());
+                                // Reserve the complete bounded read up front: reallocating a
+                                // partially read secret would leave an unwiped old allocation.
+                                let mut secret = Secret(Vec::with_capacity(1025));
                                 File::open(lock)
                                     .map_err(|_| Error::Discovery)?
                                     .take(1025)
