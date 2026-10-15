@@ -100,6 +100,8 @@ fn run() -> Result<(), &'static str> {
         });
     }
     let config = Config {
+        level_gate: true,
+        augment_overlay: true,
         roots,
         locale,
         worker: resolve(input.worker),

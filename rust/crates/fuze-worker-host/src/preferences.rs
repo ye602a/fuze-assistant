@@ -9,6 +9,8 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
+    pub level_gate: bool,
+    pub augment_overlay: bool,
     pub schema: u32,
     pub backend: String,
     pub locale: String,
@@ -24,6 +26,8 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            level_gate: true,
+            augment_overlay: true,
             schema: 1,
             backend: "auto".into(),
             locale: "auto".into(),
@@ -67,6 +71,8 @@ impl Preferences {
         if let Some(locale) = locale {
             fuze_data::prepare(&config.roots, locale, fuze_data::Scope::Champions)?;
         }
+        config.level_gate = self.level_gate;
+        config.augment_overlay = self.augment_overlay;
         config.backend.clone_from(&self.backend);
         config.locale = locale;
         Ok(())
@@ -75,10 +81,17 @@ impl Preferences {
 pub fn path() -> Result<PathBuf> {
     Ok(
         PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("preferences-root")?)
-            .join("FuzeRustPreview/preferences.json"),
+            .join("FuzeRustPreview/preferences-v2.json"),
     )
 }
 pub fn read(path: &Path) -> Result<Preferences> {
+    let legacy;
+    let path = if !path.exists() && path.file_name().is_some_and(|n| n == "preferences-v2.json") {
+        legacy = path.with_file_name("preferences.json");
+        legacy.as_path()
+    } else {
+        path
+    };
     if !path.exists() {
         return Ok(Preferences::default());
     }

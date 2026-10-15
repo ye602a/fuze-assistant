@@ -28,6 +28,15 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["导出当前对局（匿名）", "匯出匿名對局", "Export anonymous match"],
+    ["匿名导出已保存到本机。", "匿名匯出已儲存於本機。", "Anonymous export saved locally."],
+    ["不含账号、区服、时间与对局标识。", "不含帳號、區服、時間與對局識別碼。", "No account, region, timestamps or match IDs."],
+    ["等级辅助调度", "等級輔助排程", "Level-aware scheduling"],
+    ["显示三卡推荐", "顯示三卡推薦", "Show three-card suggestions"],
+    ["当前等级", "目前等級", "Current level"],
+    ["仅辅助调度，推荐仍用整体胜率", "僅輔助排程，推薦仍使用整體勝率", "Scheduling hint only; overall win rates"],
+    ["等级暂不可用，继续低频检测；不会停止识别。", "等級暫時不可用，繼續低頻偵測。", "Level unavailable; periodic recognition remains active."],
+    ["等级调度已关闭，使用常规检测。", "等級排程已關閉，使用一般偵測。", "Level scheduling is off; regular recognition remains active."],
     ["符择 · Rust 更新", "符擇 · Rust 更新", "FUZE · Rust update"],
     ["取消", "取消", "Cancel"],
     ["正在取消 · 等待当前请求结束，旧版本保留", "正在取消 · 等待目前請求結束，保留舊版", "Cancelling · Waiting for the current request; previous version retained"],

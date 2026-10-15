@@ -256,3 +256,134 @@ impl ReadOnlyClient {
         }
     }
 }
+
+/// Live Client Data uses a separate fixed loopback endpoint, never LCU credentials.
+/// Only a level survives parsing; no identities are materialized or returned.
+pub fn active_player_level() -> Result<u8> {
+    struct Body(Vec<u8>);
+    impl Drop for Body {
+        fn drop(&mut self) {
+            wipe(&mut self.0);
+        }
+    }
+    unsafe {
+        let session = Handle::new(WinHttpOpen(
+            wide("Fuze-level-local").as_ptr(),
+            WINHTTP_ACCESS_TYPE_NO_PROXY,
+            null(),
+            null(),
+            0,
+        ))?;
+        ok(WinHttpSetTimeouts(session.0, 300, 300, 300, 300))?;
+        let connection = Handle::new(WinHttpConnect(
+            session.0,
+            wide("127.0.0.1").as_ptr(),
+            2999,
+            0,
+        ))?;
+        let request = Handle::new(WinHttpOpenRequest(
+            connection.0,
+            wide("GET").as_ptr(),
+            wide("/liveclientdata/activeplayer").as_ptr(),
+            null(),
+            null(),
+            null(),
+            WINHTTP_FLAG_SECURE,
+        ))?;
+        option(
+            &request,
+            WINHTTP_OPTION_REDIRECT_POLICY,
+            WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
+        )?;
+        option(
+            &request,
+            WINHTTP_OPTION_DISABLE_FEATURE,
+            WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_AUTHENTICATION,
+        )?;
+        option(
+            &request,
+            WINHTTP_OPTION_SECURITY_FLAGS,
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID,
+        )?;
+        ok(WinHttpSendRequest(request.0, null(), 0, null(), 0, 0, 0))?;
+        ok(WinHttpReceiveResponse(request.0, null_mut()))?;
+        let mut code = 0u32;
+        let mut size = 4u32;
+        ok(WinHttpQueryHeaders(
+            request.0,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            null(),
+            (&mut code as *mut u32).cast(),
+            &mut size,
+            null_mut(),
+        ))?;
+        if code != 200 {
+            return Err(Error::HttpStatus);
+        }
+        let started = Instant::now();
+        let mut body = Body(Vec::with_capacity(4096));
+        for _ in 0..17 {
+            if started.elapsed() > Duration::from_millis(900) {
+                return Err(Error::Transport);
+            }
+            let mut buffer = Body(vec![0; 4096]);
+            let mut read = 0;
+            ok(WinHttpReadData(
+                request.0,
+                buffer.0.as_mut_ptr().cast(),
+                4096,
+                &mut read,
+            ))?;
+            if read == 0 {
+                return parse_active_player_level(&body.0);
+            }
+            if body.0.len() + read as usize > 65536 {
+                return Err(Error::ResponseLimit);
+            }
+            body.0.extend_from_slice(&buffer.0[..read as usize]);
+        }
+        Err(Error::ResponseLimit)
+    }
+}
+
+pub fn parse_active_player_level(body: &[u8]) -> Result<u8> {
+    #[derive(serde::Deserialize)]
+    struct Level {
+        level: u8,
+    }
+    if body.len() > 65536 {
+        return Err(Error::ResponseLimit);
+    }
+    let value: Level = serde_json::from_slice(body).map_err(|_| Error::HttpStatus)?;
+    (1..=30)
+        .contains(&value.level)
+        .then_some(value.level)
+        .ok_or(Error::HttpStatus)
+}
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+    #[test]
+    fn only_integer_level_survives_untrusted_response() {
+        assert_eq!(
+            parse_active_player_level(
+                br#"{"level":7,"summonerName":"fixture-private","nested":{"identity":"discard"}}"#
+            ),
+            Ok(7)
+        );
+        for body in [
+            br#"{"level":0}"#.as_slice(),
+            br#"{"level":31}"#,
+            br#"{"level":"7"}"#,
+            br#"{"level":7.5}"#,
+            br#"{}"#,
+            br#"{"level":3,"level":7}"#,
+        ] {
+            assert!(parse_active_player_level(body).is_err());
+        }
+        assert_eq!(
+            parse_active_player_level(&vec![b' '; 65537]),
+            Err(Error::ResponseLimit)
+        );
+    }
+}

@@ -101,6 +101,13 @@ impl Pipeline {
             self.session.wake_at(self.now())
         }
     }
+    pub fn clear_level(&mut self) {
+        self.session.clear_level();
+    }
+    pub fn level_sample(&mut self, level: u8, age: u64) {
+        self.session
+            .update_level(level, self.now().saturating_sub(age));
+    }
     pub fn level(&mut self, level: u8) {
         self.session.update_level(level, self.now());
     }

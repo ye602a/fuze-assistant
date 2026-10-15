@@ -37,6 +37,15 @@ fn convert(value: &Value, current: &Preferences) -> Result<Preferences> {
         .into();
         count += 1;
     }
+    for (group, key, target) in [
+        ("ocr", "levelGateEnabled", &mut next.level_gate),
+        ("augments", "showTopOverlay", &mut next.augment_overlay),
+    ] {
+        if let Some(v) = field(group, key)? {
+            *target = v.as_bool().ok_or("legacy-settings-type")?;
+            count += 1;
+        }
+    }
     for (key, target) in [
         ("showDetails", &mut next.champ_select),
         ("pinDuringChampSelect", &mut next.champ_topmost),

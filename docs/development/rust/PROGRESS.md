@@ -1,3 +1,7 @@
+# Latest update: M11
+
+[M11](M11.md) connects actual level telemetry to scheduling, adds two native preferences and explicit reduced local match export. See its remaining-work section; older milestone tables below are historical, not the current completion checklist. Stable entry remains unchanged.
+
 # Rust 替换进度（2026-10-15）
 
 ## 当前增量状态（M7c）

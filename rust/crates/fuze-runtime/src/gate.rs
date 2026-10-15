@@ -34,6 +34,9 @@ pub struct LevelGate {
     last_absent: bool,
 }
 impl LevelGate {
+    pub fn clear_level(&mut self) {
+        self.level = None;
+    }
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -143,6 +146,19 @@ impl LevelGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lost_telemetry_returns_to_watchdog_without_changing_selection() {
+        let mut g = LevelGate::default();
+        g.update_level(1, 0);
+        g.record_capture(0);
+        assert_eq!(g.decision(100).interval_ms, 8000);
+        g.clear_level();
+        assert_eq!(g.decision(1500).interval_ms, 1500);
+        assert!(g.decision(1500).capture);
+        g.observe(Selection::StatShard, 1600);
+        g.clear_level();
+        assert_eq!(g.decision(1700).interval_ms, 250);
+    }
     #[test]
     fn telemetry_expiry_wakes_before_later_watchdog_and_preview_does_not_consume_probe() {
         let mut g = LevelGate::default();

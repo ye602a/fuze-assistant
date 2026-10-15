@@ -202,6 +202,8 @@ impl Drop for Monitor {
 
 #[derive(Clone)]
 pub struct Config {
+    pub level_gate: bool,
+    pub augment_overlay: bool,
     pub roots: Vec<fuze_data::Root>,
     pub locale: Option<fuze_data::Locale>,
     pub worker: PathBuf,
@@ -302,8 +304,10 @@ pub struct PipelineStatus {
     pub dataset: Option<String>,
     pub error: Option<&'static str>,
     pub frame_age: Option<u64>,
+    pub level: Option<u8>,
 }
 pub struct Controller {
+    level_reader: Option<crate::live_level::Reader>,
     records: crate::local_records::Journal,
     last_frame: Option<Instant>,
     last_error: Option<&'static str>,
@@ -335,6 +339,11 @@ impl Controller {
             dataset: self.pipeline.as_ref().map(|p| p.dataset().to_owned()),
             error: self.last_error,
             frame_age: self.last_frame.map(|t| t.elapsed().as_secs()),
+            level: self
+                .level_reader
+                .as_ref()
+                .and_then(|r| r.sample())
+                .map(|s| s.0),
         }
     }
     pub fn suspend(&mut self) {
@@ -352,6 +361,7 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            level_reader: None,
             records: Default::default(),
             config,
             last_frame: None,
@@ -363,6 +373,9 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
+        if let Some(reader) = &self.level_reader {
+            reader.enable(false);
+        }
         self.records.finish();
         self.last_frame = None;
         if let Some(p) = self.pipeline.take() {
@@ -422,10 +435,22 @@ impl Controller {
                 latest.cancellation = Some(pipeline.cancellation());
                 self.pipeline = Some(pipeline);
             }
+            if self.config.level_gate && self.level_reader.is_none() {
+                self.level_reader = crate::live_level::Reader::start().ok();
+            }
+            let sample = self.level_reader.as_ref().and_then(|r| {
+                r.enable(self.config.level_gate);
+                r.sample()
+            });
             let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
             if !pipeline.has_capture() {
                 let target = fuze_capture::target::discover(&root)?.ok_or("game-window-waiting")?;
                 pipeline.capture_game(target)?;
+            }
+            if let Some((level, at)) = sample {
+                pipeline.level_sample(level, at.elapsed().as_millis() as u64);
+            } else {
+                pipeline.clear_level();
             }
             if let Some(delivery) = pipeline.tick_wgc()? {
                 self.records
@@ -435,7 +460,9 @@ impl Controller {
                     .slots
                     .iter()
                     .any(|s| matches!(s, fuze_contract::Slot::Known { .. }));
-                pipeline.overlay.visible(known)?;
+                pipeline
+                    .overlay
+                    .visible(known && self.config.augment_overlay)?;
                 self.last_frame = Some(Instant::now());
                 self.last_error = None;
                 self.retry.failures = 0;

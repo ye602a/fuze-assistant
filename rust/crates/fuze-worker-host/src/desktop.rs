@@ -37,6 +37,10 @@ const HISTORY_PREVIEW: u8 = 7;
 const HISTORY_CONFIRM: u8 = 8;
 const HISTORY_OFFLINE: u8 = 9;
 const JOURNAL_PREVIEW: u8 = 10;
+const EXPORT: u8 = 11;
+const EXPORT_MATCH: usize = 222;
+const LEVEL_GATE: usize = 223;
+const AUGMENT_OVERLAY: usize = 224;
 const JOURNAL_IMPORT: usize = 220;
 const JOURNAL_VIEW: usize = 221;
 const HISTORY_PAGE: usize = 213;
@@ -102,6 +106,7 @@ struct Shared {
     pending: Mutex<Option<crate::preferences::Preferences>>,
     import_path: Mutex<Option<std::path::PathBuf>>,
     import_game: Mutex<Option<u64>>,
+    export: Mutex<Option<crate::record_export::Request>>,
 }
 impl Shared {
     fn request(&self, mode: u8) {
@@ -261,6 +266,32 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 status.pipeline = PipelineStatus::default();
                 status.selection = None;
             }
+        } else if desired == EXPORT {
+            controller.suspend();
+            let result = if fixture {
+                Err("export-fixture-disabled")
+            } else {
+                shared
+                    .export
+                    .lock()
+                    .ok()
+                    .and_then(|mut r| r.take())
+                    .ok_or("export-missing")
+                    .and_then(crate::record_export::save)
+            };
+            if let Ok(mut s) = shared.status.lock() {
+                s.notice = Some(if result.is_ok() {
+                    "匿名导出已保存到本机。"
+                } else {
+                    result.unwrap_err()
+                });
+            }
+            let _ = shared.desired.compare_exchange(
+                EXPORT,
+                PAUSED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
         } else if [
             HISTORY,
             HISTORY_PREVIEW,
@@ -651,6 +682,9 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
         RECORDS,
         HIDE,
         QUIT,
+        EXPORT_MATCH,
+        LEVEL_GATE,
+        AUGMENT_OVERLAY,
         201,
         202,
         203,
@@ -855,6 +889,26 @@ fn cycle<'a>(current: &str, values: &[&'a str]) -> &'a str {
     values[(values.iter().position(|s| *s == current).unwrap_or(0) + 1) % values.len()]
 }
 unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
+    let export = GetDlgItem(hwnd, EXPORT_MATCH as i32);
+    ShowWindow(
+        export,
+        if u.records && u.history {
+            SW_SHOWNA
+        } else {
+            SW_HIDE
+        },
+    );
+    EnableWindow(
+        export,
+        i32::from(
+            !u.smoke
+                && u.desired == PAUSED
+                && u.shown.mode == PAUSED
+                && u.shown.history.pending == 0
+                && u.shown.history.rows.get(u.history_offset).is_some(),
+        ),
+    );
+    SetWindowTextW(export, wide("导出当前对局（匿名）").as_ptr());
     let view = GetDlgItem(hwnd, JOURNAL_VIEW as i32);
     ShowWindow(
         view,
@@ -1041,10 +1095,13 @@ unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
         }
         .into(),
         yes(u.draft.pause_hotkey).into(),
+        yes(u.draft.level_gate).into(),
+        yes(u.draft.augment_overlay).into(),
         "保存设置".into(),
     ];
     for (i, label) in labels.iter().enumerate() {
-        let child = GetDlgItem(hwnd, 201 + i as i32);
+        let id = [201, 202, 203, 204, 205, 206, 207, 208, 223, 224, 209][i];
+        let child = GetDlgItem(hwnd, id);
         SetWindowTextW(child, wide(label).as_ptr());
         ShowWindow(child, if u.settings { SW_SHOWNA } else { SW_HIDE });
         EnableWindow(
@@ -1111,19 +1168,21 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
             "后台下载公共图标",
             "软件更新频道",
             "暂停快捷键 Ctrl+Shift+F8",
+            "等级辅助调度",
+            "显示三卡推荐",
         ]
         .iter()
         .enumerate()
         {
-            let t = 148 + (i / 2) as i32 * 67;
-            let l = x(28) + (i % 2) as i32 * (r.right / 2);
+            let t = 148 + (i / 3) as i32 * 67;
+            let l = x(28) + (i % 3) as i32 * (r.right / 3);
             text(
                 dc,
                 label,
                 RECT {
                     left: l,
                     top: y(t),
-                    right: l + r.right / 2 - x(40),
+                    right: l + r.right / 3 - x(40),
                     bottom: y(t + 24),
                 },
                 x(14),
@@ -1170,8 +1229,8 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
             );
             text(
                 dc,
-                "下方为查询快照；刷新确认当前账号。查询失败不删除本地缓存。",
-                rect(28, 180, r.right - x(28), 208),
+                u.shown.notice.unwrap_or("不含账号、区服、时间与对局标识。"),
+                rect(342, 180, r.right - x(28), 208),
                 x(13),
                 dim,
             );
@@ -1535,6 +1594,19 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         format!("{}: {e:?}", crate::i18n::text("连接错误分类"))
     } else if u.placement.failed() {
         "window-placement-save-failed".into()
+    } else if let Some(level) = u.shown.pipeline.level {
+        format!(
+            "{} {level} · {}",
+            crate::i18n::text("当前等级"),
+            crate::i18n::text("仅辅助调度，推荐仍用整体胜率")
+        )
+    } else if u.shown.pipeline.dataset.is_some() {
+        crate::i18n::text(if u.shown.preferences.level_gate {
+            "等级暂不可用，继续低频检测；不会停止识别。"
+        } else {
+            "等级调度已关闭，使用常规检测。"
+        })
+        .into()
     } else if let Some(age) = u.shown.pipeline.frame_age {
         format!("{}: {age}", crate::i18n::text("上次识别（秒）"))
     } else {
@@ -1629,7 +1701,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
             m.ptMinTrackSize = POINT {
                 x: (860 * d / 96).min(info.rcWork.right - info.rcWork.left),
-                y: (620 * d / 96).min(info.rcWork.bottom - info.rcWork.top),
+                y: (660 * d / 96).min(info.rcWork.bottom - info.rcWork.top),
             };
             0
         }
@@ -1637,6 +1709,14 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let mut r: RECT = zeroed();
             GetClientRect(hwnd, &mut r);
             let d = GetDpiForWindow(hwnd).max(96) as i32;
+            MoveWindow(
+                GetDlgItem(hwnd, EXPORT_MATCH as i32),
+                28 * d / 96,
+                180 * d / 96,
+                300 * d / 96,
+                28 * d / 96,
+                1,
+            );
             MoveWindow(
                 GetDlgItem(hwnd, JOURNAL_VIEW as i32),
                 28 * d / 96,
@@ -1710,16 +1790,23 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     1,
                 );
             }
-            for i in 0..9 {
+            for i in 0..11 {
                 MoveWindow(
-                    GetDlgItem(hwnd, 201 + i),
-                    if i == 8 {
+                    GetDlgItem(
+                        hwnd,
+                        [201, 202, 203, 204, 205, 206, 207, 208, 223, 224, 209][i as usize],
+                    ),
+                    if i == 10 {
                         r.right / 2
                     } else {
-                        28 * d / 96 + (i % 2) * (r.right / 2)
+                        28 * d / 96 + (i % 3) * (r.right / 3)
                     },
-                    (if i == 8 { 418 } else { 174 + (i / 2) * 67 }) * d / 96,
-                    r.right / 2 - 56 * d / 96,
+                    (if i == 10 { 418 } else { 174 + (i / 3) * 67 }) * d / 96,
+                    if i == 10 {
+                        r.right / 2 - 56 * d / 96
+                    } else {
+                        r.right / 3 - 40 * d / 96
+                    },
                     38 * d / 96,
                     1,
                 );
@@ -1869,6 +1956,29 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     u.settings = false;
                     settings_controls(hwnd, u);
                 }
+                EXPORT_MATCH
+                    if !u.smoke
+                        && u.records
+                        && u.history
+                        && u.desired == PAUSED
+                        && u.shown.mode == PAUSED
+                        && u.shown.history.pending == 0 =>
+                {
+                    if let Some(row) = u.shown.history.rows.get(u.history_offset) {
+                        if let Ok(bytes) = crate::record_export::encode(
+                            row,
+                            u.observation(),
+                            u.shown.history.cached,
+                        ) {
+                            if let Some(path) = crate::record_export::choose(hwnd) {
+                                if let Ok(mut request) = u.shared.export.lock() {
+                                    *request = Some(crate::record_export::Request { path, bytes });
+                                }
+                                u.shared.request(EXPORT);
+                            }
+                        }
+                    }
+                }
                 RECORD_TOGGLE if u.records && u.desired == PAUSED && u.shown.mode == PAUSED => {
                     let mut p = u.shown.preferences.clone();
                     p.local_records = !p.local_records;
@@ -1896,6 +2006,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                             GetDlgItem(hwnd, 210),
                             wide(&u.draft.manual_directory).as_ptr(),
                         );
+                    }
+                    settings_controls(hwnd, u);
+                }
+                LEVEL_GATE | AUGMENT_OVERLAY
+                    if u.settings && u.desired == PAUSED && u.shown.mode == PAUSED =>
+                {
+                    if w & 0xffff == LEVEL_GATE {
+                        u.draft.level_gate = !u.draft.level_gate;
+                    } else {
+                        u.draft.augment_overlay = !u.draft.augment_overlay;
                     }
                     settings_controls(hwnd, u);
                 }
@@ -2292,6 +2412,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         pending: Mutex::new(None),
         import_path: Mutex::new(None),
         import_game: Mutex::new(None),
+        export: Mutex::new(None),
     });
     let mut champion_roots = config.roots.clone();
     if !smoke {
@@ -2402,6 +2523,9 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
             );
         }
         for id in (201..=209).chain([
+            EXPORT_MATCH,
+            LEVEL_GATE,
+            AUGMENT_OVERLAY,
             IMPORT_SETTINGS,
             RECORD_TOGGLE,
             HISTORY_PAGE,

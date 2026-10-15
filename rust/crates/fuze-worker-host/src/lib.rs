@@ -31,6 +31,8 @@ mod job;
 #[cfg(windows)]
 pub mod legacy_preferences;
 #[cfg(windows)]
+pub mod live_level;
+#[cfg(windows)]
 pub mod local_records;
 #[cfg(windows)]
 pub mod managed_install;
@@ -40,6 +42,8 @@ pub mod pipeline;
 pub mod preferences;
 #[cfg(windows)]
 pub mod private_update;
+#[cfg(windows)]
+pub mod record_export;
 pub mod recovery;
 #[cfg(windows)]
 pub mod update_channel;
