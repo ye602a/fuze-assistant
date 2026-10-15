@@ -116,9 +116,9 @@ impl Journal {
             self.saved.segments.remove(0);
         }
         if let Some(path) = &self.path {
-            if crate::preferences::save_json(path, &self.saved).is_err() {
-                self.error = Some("records-write");
-            }
+            self.error = crate::preferences::save_json(path, &self.saved)
+                .err()
+                .map(|_| "records-write");
         }
     }
 }
