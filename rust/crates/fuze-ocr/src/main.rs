@@ -229,10 +229,7 @@ fn main() {
         };
         // Preserve the completed mismatch report (including passed=false) for fallback policy.
         if phase != 6 {
-            println!(
-                "{}",
-                serde_json::json!({"error":category,"phase":phase})
-            );
+            println!("{}", serde_json::json!({"error":category,"phase":phase}));
         }
         eprintln!("fuze-ocr: phase={phase}");
         std::process::exit(1);
