@@ -1,3 +1,4 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
 //! Explicit, finite developer entry point. Never invoked by offline CI or the stable app.
 #[cfg(windows)]
 fn run() -> Result<(), &'static str> {
@@ -19,12 +20,31 @@ fn run() -> Result<(), &'static str> {
         dictionary: PathBuf,
         backend: String,
     }
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        let exe = std::env::current_exe().map_err(|_| "config-path")?;
+        args = vec![
+            "--desktop".into(),
+            exe.with_file_name("preview.json")
+                .to_string_lossy()
+                .into_owned(),
+        ];
+    }
+    if args.len() == 2 && args[0] == "--prepare-data" {
+        let versions =
+            fuze_worker_host::data_update::refresh(std::path::Path::new(&args[1]), &|| false)?;
+        println!(
+            "{}",
+            serde_json::json!({"data_ready":true,"versions":versions,"game_access":false})
+        );
+        return Ok(());
+    }
+    let desktop = args.len() == 2 && ["--desktop", "--desktop-smoke"].contains(&args[0].as_str());
     let check = args.len() == 2 && args[0] == "--check-bundle";
-    if !check && (args.len() != 3 || args[0] != "--live-control") {
+    if !check && !desktop && (args.len() != 3 || args[0] != "--live-control") {
         return Err("usage-live-control-config-seconds");
     }
-    let seconds = if check {
+    let seconds = if check || desktop {
         0
     } else {
         args[2]
@@ -81,6 +101,9 @@ fn run() -> Result<(), &'static str> {
         dictionary: resolve(input.dictionary),
         backend: input.backend,
     };
+    if desktop {
+        return fuze_worker_host::desktop::run(config, args[0] == "--desktop-smoke");
+    }
     if check {
         config.check_bundle()?;
         println!(
@@ -116,6 +139,9 @@ fn main() {
     #[cfg(windows)]
     if let Err(error) = run() {
         eprintln!("fuze-host: {error}");
+        if std::env::args().len() == 1 || std::env::args().nth(1).as_deref() == Some("--desktop") {
+            fuze_worker_host::desktop::startup_error(error);
+        }
         std::process::exit(1);
     }
     #[cfg(not(windows))]

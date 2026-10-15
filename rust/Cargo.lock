@@ -142,6 +142,7 @@ dependencies = [
 name = "fuze-worker-host"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "fuze-capture",
  "fuze-contract",
  "fuze-data",

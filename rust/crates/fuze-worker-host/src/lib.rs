@@ -12,10 +12,18 @@ pub type Result<T> = std::result::Result<T, &'static str>;
 #[cfg(windows)]
 pub mod controller;
 #[cfg(windows)]
+pub mod data_update;
+#[cfg(windows)]
+pub mod desktop;
+#[cfg(windows)]
 mod job;
 #[cfg(windows)]
 pub mod pipeline;
+#[cfg(windows)]
+pub mod private_update;
 pub mod recovery;
+#[cfg(windows)]
+pub mod update_io;
 pub struct Worker {
     child: Child,
     send: Option<SyncSender<Request>>,

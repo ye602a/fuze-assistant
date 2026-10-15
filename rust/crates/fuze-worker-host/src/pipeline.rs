@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub capture_state: &'static str,
     session: Session,
     pub worker: Supervisor,
     pub overlay: HiddenOverlay,
@@ -44,6 +45,7 @@ impl Pipeline {
             data.recommendations(champion)?,
         )?;
         Ok(Self {
+            capture_state: "waiting",
             session,
             worker,
             overlay,
@@ -68,6 +70,9 @@ impl Pipeline {
         self.worker.stop()?;
         self.closed = true;
         Ok(true)
+    }
+    pub fn dataset(&self) -> &str {
+        &self.dataset
     }
     pub fn now(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
@@ -120,7 +125,10 @@ impl Pipeline {
         }
         self.capture_failure = None;
         match OwnedWindowStream::start_game(target) {
-            Ok(stream) => self.capture = Some(stream),
+            Ok(stream) => {
+                self.capture = Some(stream);
+                self.capture_state = "waiting-frame";
+            }
             Err(error) => {
                 self.capture_failure = Some(fuze_capture::native::failure_details(&*error));
                 return Err("capture-start");
@@ -142,7 +150,10 @@ impl Pipeline {
         }
         self.capture_failure = None;
         match OwnedWindowStream::start(hwnd, visible_ci) {
-            Ok(stream) => self.capture = Some(stream),
+            Ok(stream) => {
+                self.capture = Some(stream);
+                self.capture_state = "waiting-frame";
+            }
             Err(error) => {
                 self.capture_failure = Some(fuze_capture::native::failure_details(&*error));
                 return Err("capture-start");
@@ -213,6 +224,7 @@ impl Pipeline {
             .map_err(|_| "capture-frame")?
         {
             FrameStatus::Ready => {
+                self.capture_state = "receiving";
                 self.busy_streak = 0;
                 let key = FrameKey {
                     epoch: capture.generation,
@@ -222,6 +234,7 @@ impl Pipeline {
                 self.recognize(key, &atlas)
             }
             FrameStatus::Resized => {
+                self.capture_state = "resizing";
                 let cleanup = self.session.capture_replaced()?;
                 if !self
                     .overlay
@@ -232,6 +245,7 @@ impl Pipeline {
                 Ok(None)
             }
             FrameStatus::Busy => {
+                self.capture_state = "gpu-busy";
                 self.busy_frames = self.busy_frames.saturating_add(1);
                 self.busy_streak = self.busy_streak.saturating_add(1);
                 self.next_capture_at = self.now().saturating_add(100);
@@ -242,11 +256,13 @@ impl Pipeline {
                 Ok(None)
             }
             FrameStatus::Suspended => {
+                self.capture_state = "suspended";
                 self.overlay.visible(false)?;
                 self.next_capture_at = self.now().saturating_add(500);
                 Ok(None)
             }
             FrameStatus::Timeout | FrameStatus::Duplicate => {
+                self.capture_state = "waiting-frame";
                 self.next_capture_at = self.now().saturating_add(100);
                 Ok(None)
             }
@@ -256,6 +272,7 @@ impl Pipeline {
             return result;
         }
         if matches!(result, Err("capture-frame" | "capture-atlas")) {
+            self.capture_state = "recovering";
             let cleanup = self.session.capture_replaced()?;
             self.overlay
                 .reset(cleanup.generation, self.dataset.clone())?;

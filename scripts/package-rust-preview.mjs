@@ -43,9 +43,9 @@ for(const locale of ['zh-CN','zh-TW','en-US']) {
 }
 await copy(path.join(root,'THANKS.md'),'THANKS.md')
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
-await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nfuze-rust-host.exe --live-control preview.json 3600\r\npause\r\n')
-await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nfuze-rust-host.exe --check-bundle preview.json\r\npause\r\n')
-await text('README.txt',`FUZE Rust 开发测试包 ${revision}\r\n\r\n这是独立开发预览，不是正式稳定版。请不要与稳定版同时识别。\r\n解压到普通目录，Check-preview.cmd 只进行离线自检；Start-preview.cmd 才会连接本机 LOL 并开始最长一小时的只读识别。关闭控制台可结束测试。\r\n默认自动识别语言和选择 OCR 后端；不会安装、开机自启、修改游戏或写入稳定版配置。\r\n本包没有正式主界面/托盘、快捷暂停、完整设置、在线更新、最新数据下载或战绩界面。使用随源码保存的数据，补丁新鲜度未保证。实际领取轮次未确认，推荐仅使用整体统计。\r\n本机游戏实战、独占全屏、多屏及权限兼容仍待验证。不要提交账号、令牌、游戏截图或原始日志。来源说明见 THANKS.md。\r\n`)
+await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-rust-host.exe --desktop preview.json\r\n')
+await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
+await text('README.txt',`FUZE Rust 开发测试包 ${revision}\r\n\r\n这是独立开发预览，不替换稳定版。请不要与稳定版同时识别。\r\n解压后运行 Start-preview.cmd 或双击 fuze-rust-host.exe。原生主界面默认暂停；点击开始识别才连接本机客户端。\r\n暂停立即取消旧推荐，后台清理截图/OCR后显示已暂停；关闭窗口收起到托盘，退出按钮或托盘菜单结束程序。托盘不可用时关闭窗口直接退出。\r\n暂停状态可手动更新推荐数据。只下载公开数据，校验完整后启用；独立缓存为 LOCALAPPDATA/FuzeRustPreview/client-data，不修改稳定版。\r\n实际 OCR 后端由 worker 回报；连接、截图、语言错误分别显示。实际领取轮次未确认，推荐继续使用整体胜率。\r\n需要系统具备 x64 Visual C++ 运行库，当前包仍依赖 VCRUNTIME140.dll；不自动安装运行库。\r\n私有频道差分更新目前只有下载策略和重建核心，尚无原生发布通道、令牌管理和安装入口；不会下载或安装 Electron 更新。\r\n完整偏好设置、战绩和选人界面尚未全部迁移。真实国服、独占全屏、多屏及长期运行仍待验证。\r\n不要提交账号、令牌、游戏截图或原始日志。来源说明见 THANKS.md。\r\n`)
 await text('build.json',JSON.stringify({revision,channel:'rust-development-preview',runtime:JSON.parse(await readFile(path.join(root,'node_modules/onnxruntime-node/package.json'),'utf8')).version,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})

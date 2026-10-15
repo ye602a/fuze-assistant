@@ -1,10 +1,12 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events]
     paths:
       - 'rust/**'
       - 'scripts/package-rust-preview.mjs'
+      - 'scripts/check-rust-desktop.mjs'
+      - 'scripts/prepare-rust-data.mjs'
       - 'scripts/check-rust-prototypes.mjs'
       - 'scripts/rust-prototype-tools.mjs'
       - 'scripts/compare-rust-ocr.mjs'
@@ -65,10 +67,14 @@ jobs:
           exit $LASTEXITCODE
       - name: Assemble and self-check isolated Rust preview
         run: |
-          npm run prepare:client-data
+          node scripts/prepare-rust-data.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-preview.mjs
           exit $LASTEXITCODE
+      - name: Native desktop pause and exit (own window only)
+        env:
+          FUZE_RUST_CI_TRAY: '1'
+        run: node scripts/check-rust-desktop.mjs
       - name: Upload isolated development preview (not a stable installer)
         uses: actions/upload-artifact@v4
         with:
@@ -85,6 +91,8 @@ jobs:
         with:
           name: rust-prototype-evidence
           path: |
+            rust/artifacts/desktop-validation.json
+            rust/artifacts/desktop.png
             rust/artifacts/preview-validation.json
             rust/artifacts/validation.json
             rust/artifacts/native-overlay.png

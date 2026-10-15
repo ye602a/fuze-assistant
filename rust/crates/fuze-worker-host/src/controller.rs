@@ -44,16 +44,54 @@ impl Observation {
     }
 }
 /// No live discovery happens until start is explicitly called by a host entry point.
+#[derive(Clone)]
+pub struct MonitorControl {
+    wake: Option<thread::Thread>,
+    enabled: Arc<AtomicBool>,
+    latest: Arc<Mutex<Observation>>,
+}
+impl MonitorControl {
+    pub fn enable(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+        if let Some(wake) = self.wake.as_ref() {
+            wake.unpark();
+        }
+        if !enabled {
+            if let Ok(mut latest) = self.latest.lock() {
+                if let Some(c) = latest.cancellation.take() {
+                    c.cancel();
+                }
+                latest.publish(None, None);
+                latest.state = fuze_lcu::reconnect::State::Paused;
+            }
+        }
+    }
+}
 pub struct Monitor {
+    control: MonitorControl,
     latest: Arc<Mutex<Observation>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 impl Monitor {
+    pub fn control(&self) -> MonitorControl {
+        self.control.clone()
+    }
     pub fn state(&self) -> Option<fuze_lcu::reconnect::State> {
-        self.latest.lock().ok().map(|s| s.state)
+        self.latest.lock().ok().map(|s| {
+            if matches!(s.state, fuze_lcu::reconnect::State::Connected(_))
+                && s.updated.elapsed() >= Duration::from_secs(8)
+            {
+                fuze_lcu::reconnect::State::Retry(fuze_lcu::Error::Transport)
+            } else {
+                s.state
+            }
+        })
     }
     pub fn start() -> Result<Self> {
+        Self::start_enabled(true)
+    }
+    pub fn start_enabled(initial: bool) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
@@ -63,19 +101,41 @@ impl Monitor {
             updated: Instant::now(),
             cancellation: None,
         }));
+        let enabled = Arc::new(AtomicBool::new(initial));
+        let mut control = MonitorControl {
+            wake: None,
+            enabled: enabled.clone(),
+            latest: latest.clone(),
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let (shared, stopped) = (latest.clone(), stop.clone());
         let thread = thread::Builder::new()
             .name("fuze-lcu-control".into())
             .spawn(move || {
                 let mut client = AutoClient::default();
+                let mut was_enabled = true;
                 while !stopped.load(Ordering::Acquire) {
+                    if !enabled.load(Ordering::Acquire) {
+                        if was_enabled {
+                            client.pause();
+                        }
+                        was_enabled = false;
+                        thread::park_timeout(Duration::from_secs(1));
+                        continue;
+                    }
+                    if !was_enabled {
+                        client.resume();
+                        was_enabled = true;
+                    }
                     {
                         let state = client.poll();
                         let context = client.context();
                         let root = client.game_root().map(PathBuf::from);
                         let locale = client.locale();
                         if let Ok(mut latest) = shared.lock() {
+                            if !enabled.load(Ordering::Acquire) {
+                                continue;
+                            }
                             latest.set_locale(locale);
                             latest.publish(context, root);
                             if let Some(verified) = client.verified_at() {
@@ -94,7 +154,9 @@ impl Monitor {
                 client.pause();
             })
             .map_err(|_| "lcu-thread-start")?;
+        control.wake = Some(thread.thread().clone());
         Ok(Self {
+            control,
             latest,
             stop,
             thread: Some(thread),
@@ -210,7 +272,17 @@ impl Retry {
         );
     }
 }
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct PipelineStatus {
+    pub capture: &'static str,
+    pub backend: Option<fuze_contract::wire::ActiveBackend>,
+    pub dataset: Option<String>,
+    pub error: Option<&'static str>,
+    pub frame_age: Option<u64>,
+}
 pub struct Controller {
+    last_frame: Option<Instant>,
+    last_error: Option<&'static str>,
     config: Config,
     pipeline: Option<Pipeline>,
     revision: u64,
@@ -218,6 +290,24 @@ pub struct Controller {
     epoch: Instant,
 }
 impl Controller {
+    pub fn status(&self) -> PipelineStatus {
+        PipelineStatus {
+            capture: self
+                .pipeline
+                .as_ref()
+                .map(|p| p.capture_state)
+                .unwrap_or("waiting"),
+            backend: self.pipeline.as_ref().and_then(|p| p.worker.backend()),
+            dataset: self.pipeline.as_ref().map(|p| p.dataset().to_owned()),
+            error: self.last_error,
+            frame_age: self.last_frame.map(|t| t.elapsed().as_secs()),
+        }
+    }
+    pub fn suspend(&mut self) {
+        self.clear();
+        self.last_error = None;
+        self.retry = Retry::default();
+    }
     pub fn idle_wait(&self) -> Duration {
         let now = self.epoch.elapsed().as_millis() as u64;
         if self.pipeline.is_none() || now < self.retry.next {
@@ -229,6 +319,8 @@ impl Controller {
     pub fn new(config: Config) -> Self {
         Self {
             config,
+            last_frame: None,
+            last_error: None,
             pipeline: None,
             revision: u64::MAX,
             retry: Retry::default(),
@@ -236,6 +328,7 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
+        self.last_frame = None;
         if let Some(p) = self.pipeline.take() {
             p.cancellation().cancel();
             drop(p);
@@ -256,6 +349,7 @@ impl Controller {
         if revision != self.revision {
             self.clear();
             self.revision = revision;
+            self.last_error = None;
             self.retry = Retry::default();
         }
         let active = context.filter(|c| {
@@ -304,6 +398,8 @@ impl Controller {
                     .iter()
                     .any(|s| matches!(s, fuze_contract::Slot::Known { .. }));
                 pipeline.overlay.visible(known)?;
+                self.last_frame = Some(Instant::now());
+                self.last_error = None;
                 self.retry.failures = 0;
             }
             Ok(())
@@ -311,6 +407,7 @@ impl Controller {
         match result {
             Ok(()) => Ok(()),
             Err(error) => {
+                self.last_error = Some(error);
                 self.retry.fail(self.epoch.elapsed().as_millis() as u64);
                 if !matches!(
                     error,
