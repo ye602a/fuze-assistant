@@ -468,6 +468,8 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         ("正在更新推荐数据", rgb(22, 47, 66))
     } else if u.desired == EXIT {
         ("正在退出 · 释放识别资源", rgb(72, 54, 32))
+    } else if u.shown.mode == DATA && u.desired != DATA {
+        ("正在取消更新 · 等待当前请求结束", rgb(72, 54, 32))
     } else if u.desired == PAUSED && u.shown.mode != PAUSED {
         ("正在暂停 · 清理画面与 OCR", rgb(72, 54, 32))
     } else if u.desired == PAUSED && u.shown.update_error.is_some() {
@@ -603,6 +605,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         u.tray = tray(hwnd, u.icon, true);
         u.tray_recovered = u.tray;
         EnableWindow(GetDlgItem(hwnd, HIDE as i32), i32::from(u.tray));
+        InvalidateRect(hwnd, null(), 0);
         return 0;
     }
     match msg {
@@ -721,7 +724,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 }
                 _ => {}
             }
-            u.desired = u.shared.desired.load(Ordering::Acquire);
+            // The timer must observe this transition even if background cleanup is blocked.
             InvalidateRect(hwnd, null(), 0);
             0
         }
