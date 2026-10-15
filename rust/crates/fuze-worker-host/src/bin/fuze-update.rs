@@ -92,19 +92,22 @@ fn run() -> Result<(), &'static str> {
             return Err("install-close-preview-first");
         }
         let _lock = install::lock(&root)?;
+        fuze_worker_host::app_registration::preflight(&root)?;
         fuze_worker_host::install_entries::uninstall(
             &root,
             &fuze_worker_host::install_entries::programs()?,
         )?;
-        message("Rust 程序与快捷方式已移除。用户数据、令牌、未识别文件和安装锁文件保留。Electron 稳定版未改动。", false);
+        fuze_worker_host::app_registration::remove(&root)?;
+        message("Rust 程序、快捷方式与应用登记已移除。用户数据、令牌、未识别文件和安装锁文件保留。Electron 稳定版未改动。", false);
         return Ok(());
     }
     if action == "--install-local" {
-        if !message("将当前 Rust 测试包安装到独立用户目录？无需管理员权限，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", true) { return Ok(()); }
+        if !message("将当前 Rust 测试包安装到独立用户目录？无需管理员权限，将登记到 Windows 已安装应用，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", true) { return Ok(()); }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
         let _lock = install::lock(&root)?;
+        fuze_worker_host::app_registration::preflight(&root)?;
         let state = install::read(&root)?;
         let repairing_pending =
             state.pending && state.current.as_ref() == Some(&install::bundled_version(&bundled)?);
@@ -118,9 +121,10 @@ fn run() -> Result<(), &'static str> {
             &bundled,
             &fuze_worker_host::install_entries::programs()?,
         )?;
+        fuze_worker_host::app_registration::register(&root)?;
         message(
             if changed {
-                "安装完成。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
+                "安装完成，已登记到 Windows 已安装应用。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
             } else {
                 "当前版本已安装，启动入口已检查。没有重复安装或启动程序。"
             },
@@ -129,7 +133,9 @@ fn run() -> Result<(), &'static str> {
         return Ok(());
     }
     if action == "--launch" {
-        return install::launch(&root, &bundled);
+        let result = install::launch(&root, &bundled);
+        let _ = fuze_worker_host::app_registration::refresh(&root);
+        return result;
     }
     if action == "--rollback" {
         if install::desktop_running() {
@@ -137,6 +143,7 @@ fn run() -> Result<(), &'static str> {
         }
         let _lock = install::lock(&root)?;
         install::rollback(&root)?;
+        fuze_worker_host::app_registration::refresh(&root)?;
         message("已切回上一版，下次启动生效。", false);
         return Ok(());
     }
@@ -281,6 +288,7 @@ fn run() -> Result<(), &'static str> {
             return Err("install-close-preview-first");
         }
         install::activate(&root, &release.manifest, &|_| Ok(()))?;
+        fuze_worker_host::app_registration::refresh(&root)?;
         message("Rust 更新已准备好。下次使用 Start-preview.cmd 启动新版；验证失败自动回到上一版。没有重启任何程序。",false);
         Ok(())
     })();

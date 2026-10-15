@@ -77,17 +77,26 @@ fn owned(root: &Path, path: &Path, name: &str) -> Result<()> {
 pub fn create(root: &Path, bundle: &Path, folder: &Path) -> Result<()> {
     install::safe_dir(root)?;
     install::safe_dir(folder)?;
+    // Upgrade the receipt-owned launcher too: older launchers cannot refresh ARP after rollback.
+    let launcher = root.join("fuze-launcher.exe");
+    owned(root, &launcher, "launcher")?;
+    let source = bundle.join("fuze-update.exe");
+    regular(&source)?;
+    let bytes = crate::update_channel::bounded(&source, 32 * 1024 * 1024)?;
+    let digest = crate::update_io::digest(&bytes, false)?;
+    if crate::update_channel::bounded(&receipt(root, "launcher"), 32)? != digest {
+        replace_owned(root, &launcher, &bytes)?;
+        replace_owned(root, &receipt(root, "launcher"), &digest)?;
+    }
     let maintenance = root.join("fuze-maintenance.exe");
     if maintenance.exists() {
         owned(root, &maintenance, "maintenance")?;
+        if crate::update_channel::bounded(&receipt(root, "maintenance"), 32)? != digest {
+            replace_owned(root, &maintenance, &bytes)?;
+            replace_owned(root, &receipt(root, "maintenance"), &digest)?;
+        }
     } else {
-        let source = bundle.join("fuze-update.exe");
-        regular(&source)?;
-        let bytes = crate::update_channel::bounded(&source, 32 * 1024 * 1024)?;
-        write_new(
-            &receipt(root, "maintenance"),
-            &crate::update_io::digest(&bytes, false)?,
-        )?;
+        write_new(&receipt(root, "maintenance"), &digest)?;
         write_new(&maintenance, &bytes)?;
     }
     let _com = Com::new()?;
@@ -122,6 +131,37 @@ pub fn create(root: &Path, bundle: &Path, folder: &Path) -> Result<()> {
         })();
         let _ = fs::remove_file(&temporary);
         result?;
+    }
+    Ok(())
+}
+fn replace_owned(root: &Path, destination: &Path, bytes: &[u8]) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    regular(destination)?;
+    let temporary = root.join(format!(
+        "maintenance-{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "setup-clock")?
+            .as_nanos()
+    ));
+    write_new(&temporary, bytes)?;
+    let wide = |p: &Path| {
+        p.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    if unsafe {
+        MoveFileExW(
+            wide(&temporary).as_ptr(),
+            wide(destination).as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err("setup-maintenance-in-use");
     }
     Ok(())
 }
@@ -239,6 +279,22 @@ mod tests {
         let install = fs::canonicalize(install).unwrap();
         create(&install, &source, &programs).unwrap();
         create(&install, &source, &programs).unwrap();
+        fs::write(
+            source.join("fuze-update.exe"),
+            b"new-maintenance-not-executed",
+        )
+        .unwrap();
+        create(&install, &source, &programs).unwrap();
+        assert_eq!(
+            fs::read(install.join("fuze-maintenance.exe")).unwrap(),
+            b"new-maintenance-not-executed"
+        );
+        owned(
+            &install,
+            &install.join("fuze-maintenance.exe"),
+            "maintenance",
+        )
+        .unwrap();
         {
             let _com = Com::new().unwrap();
             unsafe {

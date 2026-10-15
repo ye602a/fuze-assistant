@@ -95,6 +95,7 @@ pub unsafe fn choose(hwnd: windows_sys::Win32::Foundation::HWND) -> Option<PathB
 pub fn png(
     bytes: &[u8],
     public_detail: Option<&fuze_data::champion_detail::Detail>,
+    pictures: Option<&crate::champion_assets::Reply>,
 ) -> Result<Vec<u8>> {
     use crate::desktop::{fill, rgb, text};
     use windows_sys::Win32::{Foundation::RECT, Graphics::Gdi::*};
@@ -155,8 +156,8 @@ pub fn png(
         let mut info: BITMAPINFO = std::mem::zeroed();
         info.bmiHeader = BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: 1000,
-            biHeight: -560,
+            biWidth: 1200,
+            biHeight: -980,
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB,
@@ -181,8 +182,8 @@ pub fn png(
             RECT {
                 left: 0,
                 top: 0,
-                right: 1000,
-                bottom: 560,
+                right: 1200,
+                bottom: 980,
             },
             rgb(6, 19, 29),
         );
@@ -192,19 +193,19 @@ pub fn png(
                 left: 36,
                 top: 30,
                 right: 42,
-                bottom: 525,
+                bottom: 945,
             },
             rgb(195, 164, 94),
         );
-        for (i, line) in lines.iter().enumerate() {
-            let top = 42 + i as i32 * 62;
+        for (i, line) in lines.iter().enumerate().filter(|(i, _)| *i < 4 || *i >= 6) {
+            let top = [32, 104, 158, 218, 0, 0, 886, 924][i];
             text(
                 dc,
                 line,
                 RECT {
-                    left: 62,
+                    left: if i == 1 || i == 2 { 190 } else { 62 },
                     top,
-                    right: 970,
+                    right: 1170,
                     bottom: top + 50,
                 },
                 if i < 3 { 30 } else { 19 },
@@ -215,8 +216,103 @@ pub fn png(
                 },
             );
         }
+        let empty = crate::champion_assets::Reply::default();
+        let pictures = pictures.unwrap_or(&empty);
+        if let Some(url) = public_detail
+            .and_then(|d| d.lines.first())
+            .and_then(|l| l.icons.first())
+        {
+            crate::champ_select::draw_icon(dc, pictures, url, 62, 104, 100);
+        } else {
+            crate::champ_select::draw_icon(dc, pictures, "", 62, 104, 100);
+        }
+        for (section, key, label, top) in
+            [(1, "items", "装备", 282), (2, "augments", "结算强化", 578)]
+        {
+            text(
+                dc,
+                label,
+                RECT {
+                    left: 62,
+                    top,
+                    right: 1160,
+                    bottom: top + 34,
+                },
+                24,
+                rgb(221, 190, 118),
+            );
+            let entries = r[key].as_array().map(|v| v.as_slice()).unwrap_or(&[]);
+            let public_line = public_detail.and_then(|d| d.lines.get(section));
+            let labels = public_line
+                .map(|l| l.text.split(" · ").collect::<Vec<_>>())
+                .unwrap_or_default();
+            if entries.is_empty() {
+                text(
+                    dc,
+                    "--",
+                    RECT {
+                        left: 62,
+                        top: top + 50,
+                        right: 300,
+                        bottom: top + 90,
+                    },
+                    24,
+                    rgb(138, 167, 180),
+                );
+            }
+            for (index, id) in entries.iter().take(12).enumerate() {
+                let left = 62 + (index % 6) as i32 * 184;
+                let y = top + 44 + (index / 6) as i32 * 116;
+                fill(
+                    dc,
+                    RECT {
+                        left,
+                        top: y,
+                        right: left + 174,
+                        bottom: y + 108,
+                    },
+                    rgb(16, 35, 46),
+                );
+                let url = public_line
+                    .and_then(|l| l.icons.get(index))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                crate::champ_select::draw_icon(dc, pictures, url, left + 61, y + 6, 52);
+                let fallback = format!("#{}", id.as_u64().unwrap_or(0));
+                let name = if labels.len() == entries.len() {
+                    labels[index]
+                } else {
+                    &fallback
+                };
+                let columns = if crate::i18n::locale() == "en-US" {
+                    17
+                } else {
+                    10
+                };
+                let chars: Vec<_> = name.chars().take(160).collect();
+                for (n, chunk) in chars.chunks(columns).take(2).enumerate() {
+                    let mut line: String = chunk.iter().collect();
+                    if n == 1 && chars.len() > columns * 2 {
+                        line.pop();
+                        line.push('…');
+                    }
+                    text(
+                        dc,
+                        &line,
+                        RECT {
+                            left: left + 8,
+                            top: y + 61 + n as i32 * 20,
+                            right: left + 166,
+                            bottom: y + 81 + n as i32 * 20,
+                        },
+                        15,
+                        rgb(179, 214, 216),
+                    );
+                }
+            }
+        }
         GdiFlush();
-        let mut rgba = std::slice::from_raw_parts(pixels as *const u8, 1000 * 560 * 4).to_vec();
+        let mut rgba = std::slice::from_raw_parts(pixels as *const u8, 1200 * 980 * 4).to_vec();
         for p in rgba.chunks_exact_mut(4) {
             p.swap(0, 2);
             p[3] = 255;
@@ -224,7 +320,7 @@ pub fn png(
         SelectObject(dc, old);
         DeleteObject(bitmap);
         DeleteDC(dc);
-        let image = image::RgbaImage::from_raw(1000, 560, rgba).ok_or("export-image")?;
+        let image = image::RgbaImage::from_raw(1200, 980, rgba).ok_or("export-image")?;
         let mut output = std::io::Cursor::new(Vec::new());
         image
             .write_to(&mut output, image::ImageFormat::Png)
@@ -251,6 +347,94 @@ fn ids(value: &serde_json::Value) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn share_icons_are_memory_only_and_maximum_slots_fit_all_locales() {
+        use fuze_data::champion_detail::{Detail, Line};
+        let row = fuze_lcu::history::Match {
+            game_id: 987654321,
+            created: 123456789,
+            duration: 1620,
+            champion: 21,
+            kills: 16,
+            deaths: 5,
+            assists: 28,
+            result: "win".into(),
+            items: (1001..1013).collect(),
+            augments: (1..13).collect(),
+        };
+        let bytes = encode(&row, None, true).unwrap();
+        let mut pictures = crate::champion_assets::Reply::default();
+        let urls: Vec<_> = (0..13).map(|i| format!("fixture:{i}")).collect();
+        for (i, url) in urls.iter().enumerate() {
+            let mut bgra = vec![0u8; 48 * 48 * 4];
+            for y in 0..48 {
+                for x in 0..48 {
+                    let offset = (y * 48 + x) * 4;
+                    let bright = (x as i32 - 24).abs() + (y as i32 - 24).abs() < 18;
+                    let color = if bright {
+                        [90, 190, 225, 255]
+                    } else {
+                        [70 + i as u8 * 7, 45, 20, 255]
+                    };
+                    bgra[offset..offset + 4].copy_from_slice(&color);
+                }
+            }
+            pictures.icons.insert(
+                url.clone(),
+                std::sync::Arc::new(crate::champion_assets::Picture { bgra }),
+            );
+        }
+        for locale in ["zh-CN", "zh-TW", "en-US"] {
+            crate::i18n::set(locale);
+            let name = if locale == "en-US" {
+                "Long synthetic augment name"
+            } else {
+                "合成强化名称用于检查换行"
+            };
+            let names = (1..=12)
+                .map(|i| format!("{name} {i}"))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let detail = Detail {
+                title: if locale == "en-US" {
+                    "Synthetic champion".into()
+                } else {
+                    "合成英雄 · 测试数据".into()
+                },
+                lines: vec![
+                    Line {
+                        text: String::new(),
+                        icons: vec![urls[0].clone()],
+                    },
+                    Line {
+                        text: names.clone(),
+                        icons: urls[1..].to_vec(),
+                    },
+                    Line {
+                        text: names,
+                        icons: urls[1..].to_vec(),
+                    },
+                ],
+            };
+            let png = png(&bytes, Some(&detail), Some(&pictures)).unwrap();
+            let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+            assert_eq!(decoded.dimensions(), (1200, 980));
+            assert_ne!(decoded.get_pixel(112, 154), decoded.get_pixel(0, 0));
+            assert_ne!(
+                decoded.get_pixel(62 + 5 * 184 + 80, 578 + 44 + 116 + 30),
+                decoded.get_pixel(0, 0)
+            );
+            if let Some(path) = std::env::var_os("FUZE_SHARE_FIXTURE") {
+                save(Request {
+                    path: PathBuf::from(path).with_file_name(format!("share-icons-{locale}.png")),
+                    bytes: png,
+                })
+                .unwrap();
+            }
+        }
+        crate::i18n::set("zh-CN");
+        assert_eq!(pictures.icons.len(), 13);
+    }
+    #[test]
     fn reduced_export_keeps_partial_slots_without_identity_or_claim_inference() {
         let row = fuze_lcu::history::Match {
             game_id: 99887766,
@@ -276,9 +460,9 @@ mod tests {
             }],
         };
         let bytes = encode(&row, Some(&observation), true).unwrap();
-        let picture = png(&bytes, None).unwrap();
+        let picture = png(&bytes, None, None).unwrap();
         assert!(picture.starts_with(b"\x89PNG\r\n\x1a\n"));
-        assert_eq!(image::load_from_memory(&picture).unwrap().width(), 1000);
+        assert_eq!(image::load_from_memory(&picture).unwrap().width(), 1200);
         if let Some(path) = std::env::var_os("FUZE_SHARE_FIXTURE") {
             save(Request {
                 path: path.into(),

@@ -1989,6 +1989,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                                                 .details
                                                 .get(u.history_offset)
                                                 .map(|d| d.as_ref()),
+                                            Some(&u.history_reply),
                                         ) {
                                             Ok(bytes) => bytes,
                                             Err(_) => return 0,
