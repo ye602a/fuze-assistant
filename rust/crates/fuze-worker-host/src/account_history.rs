@@ -14,9 +14,16 @@ struct Account {
     key: String,
     platform: String,
     rows: Vec<Match>,
+    #[serde(default)]
+    observations: Vec<fuze_lcu::history::Observation>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
+    pub augment_names: std::sync::Arc<std::collections::HashMap<u32, String>>,
+    pub observations: std::sync::Arc<Vec<fuze_lcu::history::Observation>>,
+    pub details: std::sync::Arc<Vec<std::sync::Arc<fuze_data::champion_detail::Detail>>>,
+    pub asset_version: String,
+    pub journal_preview: bool,
     pub account: String,
     pub platform: String,
     pub rows: std::sync::Arc<Vec<Match>>,
@@ -27,6 +34,7 @@ pub struct View {
 pub struct Import {
     owner: Owner,
     rows: Vec<Match>,
+    observation: Option<fuze_lcu::history::Observation>,
 }
 fn key(owner: &Owner) -> Result<String> {
     let mut material = owner.cache_material();
@@ -52,6 +60,7 @@ pub fn offline(path: &Path, index: usize) -> Result<View> {
         account: a.key[..8].into(),
         platform: a.platform.clone(),
         rows: a.rows.clone().into(),
+        observations: a.observations.clone().into(),
         cached: true,
         ..Default::default()
     })
@@ -73,6 +82,8 @@ fn read(path: &Path) -> Result<Saved> {
                     != Some(&a.platform)
                 || a.rows.len() > 500
                 || a.rows.iter().any(|m| !m.valid())
+                || a.observations.len() > 100
+                || a.observations.iter().any(|o| !o.valid())
         })
     {
         return Err("history-cache-invalid");
@@ -94,11 +105,13 @@ fn merge(path: &Path, owner: &Owner, rows: Vec<Match>, importing: bool) -> Resul
     }
     let key = key(owner)?;
     let mut saved = read(path)?;
-    let old = saved
+    let previous = saved
         .accounts
         .iter()
         .position(|a| a.key == key)
-        .map(|i| saved.accounts.remove(i).rows)
+        .map(|i| saved.accounts.remove(i));
+    let (old, observations) = previous
+        .map(|a| (a.rows, a.observations))
         .unwrap_or_default();
     let (first, second) = if importing { (old, rows) } else { (rows, old) };
     let mut ids = std::collections::HashSet::new();
@@ -115,6 +128,7 @@ fn merge(path: &Path, owner: &Owner, rows: Vec<Match>, importing: bool) -> Resul
             key,
             platform: owner.platform().into(),
             rows: merged.clone(),
+            observations,
         },
     );
     saved.accounts.truncate(5);
@@ -152,6 +166,14 @@ fn refresh_from(session: &impl Source, path: &Path) -> View {
         if session.owner()? != owner {
             return Err("history-account-changed");
         }
+        let owner_key = key(&owner)?;
+        view.observations = read(path)?
+            .accounts
+            .into_iter()
+            .find(|a| a.key == owner_key)
+            .map(|a| a.observations)
+            .unwrap_or_default()
+            .into();
         match result {
             Ok(rows) => {
                 view.rows = merge(path, &owner, rows, false)?.into();
@@ -177,7 +199,26 @@ pub fn preview(manual: Option<&Path>, source: &Path) -> Result<Import> {
     if session.owner()? != owner {
         return Err("history-account-changed");
     }
-    Ok(Import { owner, rows })
+    Ok(Import {
+        owner,
+        rows,
+        observation: None,
+    })
+}
+pub fn preview_journal(manual: Option<&Path>, source: &Path, game: u64) -> Result<Import> {
+    let session = fuze_lcu::discovery::HistorySession::open(manual)?;
+    let owner = session.owner()?;
+    let bytes = crate::update_channel::bounded(source, 4 * 1024 * 1024)?;
+    let value = serde_json::from_slice(&bytes).map_err(|_| "journal-schema")?;
+    let observation = fuze_lcu::history::legacy_observations(&owner, &value, game)?;
+    if session.owner()? != owner {
+        return Err("history-account-changed");
+    }
+    Ok(Import {
+        owner,
+        rows: vec![],
+        observation: Some(observation),
+    })
 }
 impl Import {
     pub fn view(&self) -> View {
@@ -186,7 +227,18 @@ impl Import {
                 .map(|k| k[..8].to_owned())
                 .unwrap_or_default(),
             platform: self.owner.platform().into(),
-            pending: self.rows.len(),
+            pending: if self.observation.is_some() {
+                1
+            } else {
+                self.rows.len()
+            },
+            journal_preview: self.observation.is_some(),
+            observations: self
+                .observation
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into(),
             ..View::default()
         }
     }
@@ -195,8 +247,20 @@ impl Import {
         if session.owner()? != self.owner {
             return Err("history-account-changed");
         }
+        if let Some(observation) = self.observation {
+            return save_observation(path, &self.owner, observation);
+        }
         let rows = merge(path, &self.owner, self.rows, true)?;
+        let owner_key = key(&self.owner)?;
+        let observations = read(path)?
+            .accounts
+            .into_iter()
+            .find(|a| a.key == owner_key)
+            .map(|a| a.observations)
+            .unwrap_or_default()
+            .into();
         Ok(View {
+            observations,
             account: key(&self.owner)?[..8].into(),
             platform: self.owner.platform().into(),
             rows: rows.into(),
@@ -205,9 +269,74 @@ impl Import {
         })
     }
 }
+fn save_observation(
+    path: &Path,
+    owner: &Owner,
+    observation: fuze_lcu::history::Observation,
+) -> Result<View> {
+    if !observation.valid() {
+        return Err("journal-schema");
+    }
+    let key = key(owner)?;
+    let mut saved = read(path)?;
+    let index = saved
+        .accounts
+        .iter()
+        .position(|a| a.key == key)
+        .ok_or("journal-history-required")?;
+    let account = &mut saved.accounts[index];
+    if !account
+        .rows
+        .iter()
+        .any(|r| r.game_id == observation.game_id)
+    {
+        return Err("journal-history-required");
+    }
+    if !account
+        .observations
+        .iter()
+        .any(|o| o.game_id == observation.game_id)
+    {
+        account.observations.insert(0, observation);
+        account.observations.truncate(100);
+        crate::preferences::save_json(path, &saved)?;
+    }
+    offline(path, index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn journal_is_account_bound_idempotent_and_survives_history_refresh() {
+        let dir = std::env::temp_dir().join(format!("fuze-journal-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fixture.json");
+        let a = owner("fixture-account-A", "HN1");
+        let b = owner("fixture-account-B", "HN1");
+        merge(&path, &a, vec![row(1)], false).unwrap();
+        let observation = fuze_lcu::history::Observation {
+            game_id: 1,
+            interrupted: true,
+            capped: false,
+            events: vec![fuze_lcu::history::ObservedCards {
+                cards: [Some(1), None, Some(3)],
+                level: Some(11),
+                partial: true,
+                kind: "changed".into(),
+            }],
+        };
+        assert!(save_observation(&path, &b, observation.clone()).is_err());
+        let view = save_observation(&path, &a, observation.clone()).unwrap();
+        assert_eq!(view.observations.len(), 1);
+        let bytes = std::fs::read(&path).unwrap();
+        save_observation(&path, &a, observation).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        merge(&path, &a, vec![row(2)], false).unwrap();
+        assert_eq!(offline(&path, 0).unwrap().observations.len(), 1);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+    }
     fn owner(id: &str, platform: &str) -> Owner {
         Owner::from_values(&serde_json::json!({"puuid":id,"platformId":platform}), &[]).unwrap()
     }

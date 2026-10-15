@@ -9,6 +9,17 @@ use std::{
 };
 pub mod champion_detail;
 pub mod recommendations;
+#[cfg(test)]
+mod history_scope_tests {
+    #[test]
+    fn history_prepares_only_display_catalogues() {
+        let manifest = serde_json::json!({"files":{"augments.json":{},"champions.json":{},"items.json":{},"champion-shards/index.json":{},"champion-shards/1.json":{}}});
+        let files = super::required(&manifest, super::Scope::History).unwrap();
+        assert_eq!(files.len(), 3);
+        assert!(files.contains_key("items.json"));
+        assert!(!files.keys().any(|p| p.starts_with("champion-shards/")));
+    }
+}
 pub type Result<T> = std::result::Result<T, &'static str>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Locale {
@@ -29,6 +40,7 @@ impl Locale {
 pub enum Scope {
     Ocr,
     Champions,
+    History,
     Champion(u32),
     Detail(u32),
     Full,
@@ -223,8 +235,11 @@ fn catalog(value: &Value) -> Result<HashMap<String, u32>> {
 }
 fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
     let mut files = BTreeMap::from([("augments.json".into(), 0)]);
-    if scope == Scope::Champions {
+    if matches!(scope, Scope::Champions | Scope::History) {
         files.insert("champions.json".into(), 0);
+    }
+    if scope == Scope::History {
+        files.insert("items.json".into(), 0);
     }
     if scope == Scope::Full {
         for p in ["champions.json", "items.json", "champion-shards/index.json"] {
@@ -241,6 +256,7 @@ fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
         safe_path(path)?;
         if path == "augments.json"
             || scope == Scope::Champions && path == "champions.json"
+            || scope == Scope::History && ["champions.json", "items.json"].contains(&path)
             || scope == Scope::Full
                 && (["champions.json", "items.json"].contains(&path)
                     || path.starts_with("champion-shards/"))

@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates, feat/rust-install-validation-ui, feat/rust-champion-detail, feat/rust-desktop-continuity]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates, feat/rust-install-validation-ui, feat/rust-champion-detail, feat/rust-desktop-continuity, feat/rust-account-history]
     paths:
       - 'rust/**'
       - 'scripts/package-rust-preview.mjs'

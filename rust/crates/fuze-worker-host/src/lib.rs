@@ -21,6 +21,8 @@ pub mod controller;
 pub mod data_update;
 #[cfg(windows)]
 pub mod desktop;
+#[cfg(windows)]
+pub mod history_detail;
 pub mod i18n;
 #[cfg(windows)]
 mod job;

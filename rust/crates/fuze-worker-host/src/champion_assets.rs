@@ -9,6 +9,7 @@ use std::{
 };
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
+    pub presentation: Option<Arc<Detail>>,
     pub version: String,
     pub id: u32,
     pub icons: Vec<String>,
@@ -73,19 +74,25 @@ impl Service {
                             .unwrap_or(true)
                     };
                     let key = (req.version.clone(), req.id);
-                    let detail = details
-                        .get(&key)
-                        .cloned()
-                        .map(Ok)
-                        .unwrap_or_else(|| load(&roots, &req).map(Arc::new));
+                    let detail = if let Some(d) = &req.presentation {
+                        Ok(d.clone())
+                    } else {
+                        details
+                            .get(&key)
+                            .cloned()
+                            .map(Ok)
+                            .unwrap_or_else(|| load(&roots, &req).map(Arc::new))
+                    };
                     if cancelled() {
                         continue;
                     }
                     if let Ok(d) = &detail {
-                        if details.len() >= 32 {
-                            details.clear();
+                        if req.presentation.is_none() {
+                            if details.len() >= 32 {
+                                details.clear();
+                            }
+                            details.insert(key, d.clone());
                         }
-                        details.insert(key, d.clone());
                     }
                     let mut reply = Reply {
                         key: Some(req.clone()),
@@ -351,6 +358,7 @@ mod tests {
             assert!(icon_path(s).is_err());
         }
         assert!(icon_path("https://cdn.dtodo.cn/hextech/item-icons/1.png").is_ok());
+        assert!(icon_path("https://cdn.dtodo.cn/hextech/champion-icons/21.png").is_ok());
     }
     #[test]
     fn stale_publication_cannot_replace_new_selection() {

@@ -36,6 +36,9 @@ const HISTORY: u8 = 6;
 const HISTORY_PREVIEW: u8 = 7;
 const HISTORY_CONFIRM: u8 = 8;
 const HISTORY_OFFLINE: u8 = 9;
+const JOURNAL_PREVIEW: u8 = 10;
+const JOURNAL_IMPORT: usize = 220;
+const JOURNAL_VIEW: usize = 221;
 const HISTORY_PAGE: usize = 213;
 const HISTORY_REFRESH: usize = 214;
 const HISTORY_IMPORT: usize = 215;
@@ -98,6 +101,7 @@ struct Shared {
     monitor: Mutex<Option<MonitorControl>>,
     pending: Mutex<Option<crate::preferences::Preferences>>,
     import_path: Mutex<Option<std::path::PathBuf>>,
+    import_game: Mutex<Option<u64>>,
 }
 impl Shared {
     fn request(&self, mode: u8) {
@@ -172,7 +176,53 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             .map(|d| d.identity())
     };
     let initial_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+    let mut fixture_history = crate::account_history::View::default();
+    if fixture {
+        fixture_history = crate::account_history::View {
+            account: "demo0001".into(),
+            platform: "HN1".into(),
+            cached: true,
+            rows: (1..=8)
+                .map(|id| fuze_lcu::history::Match {
+                    game_id: id,
+                    created: 1709164800000,
+                    duration: 900,
+                    champion: 21,
+                    kills: 8,
+                    deaths: 3,
+                    assists: 15,
+                    result: "win".into(),
+                    items: vec![1001, 3089, 3157],
+                    augments: vec![1],
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            observations: vec![fuze_lcu::history::Observation {
+                game_id: 1,
+                interrupted: true,
+                capped: false,
+                events: (0..8)
+                    .map(|_| fuze_lcu::history::ObservedCards {
+                        cards: [Some(1), None, Some(3)],
+                        level: Some(11),
+                        partial: true,
+                        kind: "changed".into(),
+                    })
+                    .collect(),
+            }]
+            .into(),
+            ..Default::default()
+        };
+        crate::history_detail::populate(
+            &mut fixture_history,
+            &roots,
+            config.locale.unwrap_or(fuze_data::Locale::ZhCn),
+        );
+    }
     if let Ok(mut s) = shared.status.lock() {
+        if fixture {
+            s.history = fixture_history;
+        }
         s.available = initial_available;
         s.preferences = preferences.clone();
         s.ui_locale = match preferences.locale.as_str() {
@@ -211,7 +261,15 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 status.pipeline = PipelineStatus::default();
                 status.selection = None;
             }
-        } else if [HISTORY, HISTORY_PREVIEW, HISTORY_CONFIRM, HISTORY_OFFLINE].contains(&desired) {
+        } else if [
+            HISTORY,
+            HISTORY_PREVIEW,
+            HISTORY_CONFIRM,
+            HISTORY_OFFLINE,
+            JOURNAL_PREVIEW,
+        ]
+        .contains(&desired)
+        {
             controller.suspend();
             if let Ok(mut s) = shared.status.lock() {
                 s.mode = desired;
@@ -225,6 +283,26 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 }
                 let path = crate::account_history::path()?;
                 match desired {
+                    JOURNAL_PREVIEW => {
+                        history_import = None;
+                        let source = shared
+                            .import_path
+                            .lock()
+                            .ok()
+                            .and_then(|mut p| p.take())
+                            .ok_or("journal-source-required")?;
+                        let game = shared
+                            .import_game
+                            .lock()
+                            .ok()
+                            .and_then(|mut p| p.take())
+                            .ok_or("journal-game-required")?;
+                        let pending =
+                            crate::account_history::preview_journal(manual, &source, game)?;
+                        let view = pending.view();
+                        history_import = Some(pending);
+                        Ok(view)
+                    }
                     HISTORY_OFFLINE => {
                         history_import = None;
                         let view = crate::account_history::offline(&path, history_account_index)?;
@@ -254,11 +332,18 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         .confirm(manual, &path),
                 }
             })();
+            let mut view = result.unwrap_or_else(|e| crate::account_history::View {
+                error: Some(e),
+                ..Default::default()
+            });
+            let history_locale = match shared.status().ui_locale.as_str() {
+                "en-US" => fuze_data::Locale::EnUs,
+                "zh-TW" => fuze_data::Locale::ZhTw,
+                _ => fuze_data::Locale::ZhCn,
+            };
+            crate::history_detail::populate(&mut view, &roots, history_locale);
             if let Ok(mut s) = shared.status.lock() {
-                s.history = result.unwrap_or_else(|e| crate::account_history::View {
-                    error: Some(e),
-                    ..Default::default()
-                });
+                s.history = view;
             }
             let _ = shared.desired.compare_exchange(
                 desired,
@@ -302,7 +387,18 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 Ok::<(), &'static str>(())
             })();
             let data = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+            let mut history = shared.status().history;
+            if result.is_ok() {
+                crate::history_detail::populate(
+                    &mut history,
+                    &roots,
+                    config.locale.unwrap_or(fuze_data::Locale::ZhCn),
+                );
+            }
             if let Ok(mut s) = shared.status.lock() {
+                if result.is_ok() {
+                    s.history = history;
+                }
                 s.preferences = preferences.clone();
                 s.ui_locale = match preferences.locale.as_str() {
                     "auto" => "zh-CN",
@@ -574,6 +670,8 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
         HISTORY_PREV,
         HISTORY_NEXT,
         HISTORY_SAVED,
+        JOURNAL_IMPORT,
+        JOURNAL_VIEW,
     ] {
         let child = GetDlgItem(hwnd, id as i32);
         if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
@@ -696,6 +794,10 @@ fn explain(error: Option<&str>) -> &'static str {
     }
 }
 struct Ui {
+    journal: bool,
+    journal_offset: usize,
+    history_assets: crate::champion_assets::Service,
+    history_reply: crate::champion_assets::Reply,
     history_offset: usize,
     history: bool,
     records: bool,
@@ -722,6 +824,16 @@ struct Ui {
     smoke_step: u8,
     smoke_pass: bool,
 }
+impl Ui {
+    fn observation(&self) -> Option<&fuze_lcu::history::Observation> {
+        let h = &self.shown.history;
+        if h.journal_preview {
+            return h.observations.first();
+        }
+        let game = h.rows.get(self.history_offset)?.game_id;
+        h.observations.iter().find(|o| o.game_id == game)
+    }
+}
 unsafe fn tray(hwnd: HWND, icon: HICON, add: bool) -> bool {
     let mut n: NOTIFYICONDATAW = zeroed();
     n.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
@@ -742,6 +854,44 @@ fn cycle<'a>(current: &str, values: &[&'a str]) -> &'a str {
     values[(values.iter().position(|s| *s == current).unwrap_or(0) + 1) % values.len()]
 }
 unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
+    let view = GetDlgItem(hwnd, JOURNAL_VIEW as i32);
+    ShowWindow(
+        view,
+        if u.records && u.history {
+            SW_SHOWNA
+        } else {
+            SW_HIDE
+        },
+    );
+    EnableWindow(view, i32::from(u.journal || u.observation().is_some()));
+    SetWindowTextW(
+        view,
+        wide(if u.journal {
+            "返回战绩详情"
+        } else {
+            "查看候选观察（非领取）"
+        })
+        .as_ptr(),
+    );
+    let journal = GetDlgItem(hwnd, JOURNAL_IMPORT as i32);
+    ShowWindow(
+        journal,
+        if u.records && u.history {
+            SW_SHOWNA
+        } else {
+            SW_HIDE
+        },
+    );
+    EnableWindow(
+        journal,
+        i32::from(
+            !u.smoke
+                && u.desired == PAUSED
+                && u.shown.mode == PAUSED
+                && u.shown.history.rows.get(u.history_offset).is_some(),
+        ),
+    );
+    SetWindowTextW(journal, wide("导入此局旧观察").as_ptr());
     let saved = GetDlgItem(hwnd, HISTORY_SAVED as i32);
     ShowWindow(
         saved,
@@ -757,11 +907,24 @@ unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
     );
     SetWindowTextW(saved, wide("浏览已存账号（离线）").as_ptr());
     for (id, label, enabled) in [
-        (HISTORY_PREV, "上一页", u.history_offset > 0),
+        (
+            HISTORY_PREV,
+            "上一页",
+            if u.journal {
+                u.journal_offset > 0
+            } else {
+                u.history_offset > 0
+            },
+        ),
         (
             HISTORY_NEXT,
             "下一页",
-            u.history_offset + 6 < u.shown.history.rows.len(),
+            if u.journal {
+                u.observation()
+                    .is_some_and(|o| u.journal_offset + 5 < o.events.len())
+            } else {
+                u.history_offset + 1 < u.shown.history.rows.len()
+            },
         ),
     ] {
         let child = GetDlgItem(hwnd, id as i32);
@@ -1018,7 +1181,9 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
                     h.platform,
                     h.pending
                 )
-            } else if [HISTORY, HISTORY_PREVIEW, HISTORY_CONFIRM].contains(&u.desired) {
+            } else if [HISTORY, HISTORY_PREVIEW, HISTORY_CONFIRM, JOURNAL_PREVIEW]
+                .contains(&u.desired)
+            {
                 crate::i18n::text("正在核实账号与战绩…").into()
             } else {
                 format!(
@@ -1034,32 +1199,157 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
                 )
             };
             text(dc, &state, rect(28, 210, r.right - x(28), 239), x(14), gold);
-            for (i, row) in h.rows.iter().skip(u.history_offset).take(6).enumerate() {
-                let line = format!(
-                    "#{}  {}   K/D/A {}/{}/{}   {}s",
-                    row.champion,
-                    crate::i18n::text(match row.result.as_str() {
-                        "win" => "胜利",
-                        "loss" => "失败",
-                        _ => "重开",
-                    }),
-                    row.kills,
-                    row.deaths,
-                    row.assists,
-                    row.duration
-                );
+            if !h.asset_version.is_empty() {
                 text(
                     dc,
-                    &line,
-                    rect(
-                        28,
-                        248 + i as i32 * 32,
-                        r.right - x(28),
-                        278 + i as i32 * 32,
+                    &format!(
+                        "{} {}",
+                        crate::i18n::text("当前图标词典（非历史补丁）："),
+                        h.asset_version
                     ),
-                    x(16),
-                    pale,
+                    rect(342, 521, r.right - x(28), 546),
+                    x(12),
+                    dim,
                 );
+            }
+            if u.journal {
+                text(
+                    dc,
+                    "候选观察不代表实际领取；变化或再次出现不证明刷新。",
+                    rect(28, 244, r.right - x(28), 273),
+                    x(15),
+                    gold,
+                );
+                if let Some(o) = u.observation() {
+                    for (i, event) in o.events.iter().skip(u.journal_offset).take(5).enumerate() {
+                        let cards = event.cards.map(|c| {
+                            c.map(|id| {
+                                h.augment_names
+                                    .get(&id)
+                                    .cloned()
+                                    .unwrap_or_else(|| format!("#{id}"))
+                            })
+                            .unwrap_or("--".into())
+                        });
+                        let line = format!(
+                            "{} · Lv {} · {} | {} | {} · {}{}",
+                            u.journal_offset + i + 1,
+                            event.level.map(|v| v.to_string()).unwrap_or("--".into()),
+                            cards[0],
+                            cards[1],
+                            cards[2],
+                            crate::i18n::text(match event.kind.as_str() {
+                                "first" => "首次观察",
+                                "changed" => "候选变化",
+                                _ => "再次出现",
+                            }),
+                            if event.partial { " *" } else { "" }
+                        );
+                        text(
+                            dc,
+                            &line,
+                            rect(
+                                28,
+                                279 + i as i32 * 27,
+                                r.right - x(28),
+                                304 + i as i32 * 27,
+                            ),
+                            x(14),
+                            pale,
+                        );
+                    }
+                    text(
+                        dc,
+                        &format!(
+                            "{} {} · {} {} · {}",
+                            crate::i18n::text("中断"),
+                            o.interrupted,
+                            crate::i18n::text("达到记录上限"),
+                            o.capped,
+                            crate::i18n::text("* 含缺失卡位；未记录的事件不补造。")
+                        ),
+                        rect(28, 416, r.right - x(28), 437),
+                        x(12),
+                        dim,
+                    );
+                }
+                return;
+            }
+            if let Some(row) = h.rows.get(u.history_offset) {
+                let detail = h.details.get(u.history_offset);
+                let title = detail
+                    .map(|d| d.title.clone())
+                    .unwrap_or_else(|| format!("#{}", row.champion));
+                let result = crate::i18n::text(match row.result.as_str() {
+                    "win" => "胜利",
+                    "loss" => "失败",
+                    _ => "重开",
+                });
+                let line = format!(
+                    "{} / {}  {}  {}  K/D/A {}/{}/{}",
+                    u.history_offset + 1,
+                    h.rows.len(),
+                    title,
+                    result,
+                    row.kills,
+                    row.deaths,
+                    row.assists
+                );
+                let icon = detail
+                    .and_then(|d| d.lines.first())
+                    .and_then(|l| l.icons.first())
+                    .map(String::as_str)
+                    .unwrap_or("");
+                crate::champ_select::draw_icon(dc, &u.history_reply, icon, x(28), x(248), x(48));
+                text(dc, &line, rect(90, 245, r.right - x(28), 275), x(18), pale);
+                text(
+                    dc,
+                    &format!(
+                        "{} | {}:{:02}",
+                        crate::history_detail::date(row.created),
+                        row.duration / 60,
+                        row.duration % 60
+                    ),
+                    rect(90, 277, r.right - x(28), 302),
+                    x(14),
+                    dim,
+                );
+                for (index, label) in [(1, "装备"), (2, "战绩强化")] {
+                    let top = if index == 1 { 308 } else { 368 };
+                    text(dc, label, rect(28, top, x(105), top + 30), x(14), gold);
+                    if let Some(line) = detail.and_then(|d| d.lines.get(index)) {
+                        for (i, url) in line.icons.iter().take(12).enumerate() {
+                            crate::champ_select::draw_icon(
+                                dc,
+                                &u.history_reply,
+                                url,
+                                x(110 + i as i32 * 40),
+                                x(top),
+                                x(30),
+                            );
+                        }
+                        text(
+                            dc,
+                            &line.text,
+                            rect(110, top + 31, r.right - x(28), top + 51),
+                            x(12),
+                            dim,
+                        );
+                    } else {
+                        let ids = if index == 1 {
+                            &row.items
+                        } else {
+                            &row.augments
+                        };
+                        text(
+                            dc,
+                            &format!("{:?}", ids),
+                            rect(110, top, r.right - x(28), top + 30),
+                            x(14),
+                            dim,
+                        );
+                    }
+                }
             }
             if h.rows.is_empty() && h.pending == 0 {
                 text(
@@ -1345,6 +1635,22 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             GetClientRect(hwnd, &mut r);
             let d = GetDpiForWindow(hwnd).max(96) as i32;
             MoveWindow(
+                GetDlgItem(hwnd, JOURNAL_VIEW as i32),
+                28 * d / 96,
+                521 * d / 96,
+                300 * d / 96,
+                28 * d / 96,
+                1,
+            );
+            MoveWindow(
+                GetDlgItem(hwnd, JOURNAL_IMPORT as i32),
+                580 * d / 96,
+                483 * d / 96,
+                (r.right - 608 * d / 96).max(1),
+                32 * d / 96,
+                1,
+            );
+            MoveWindow(
                 GetDlgItem(hwnd, HISTORY_SAVED as i32),
                 340 * d / 96,
                 483 * d / 96,
@@ -1472,6 +1778,31 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_COMMAND => {
             match w & 0xffff {
+                JOURNAL_VIEW if u.records && u.history => {
+                    u.journal = !u.journal;
+                    u.journal_offset = 0;
+                    settings_controls(hwnd, u);
+                }
+                JOURNAL_IMPORT
+                    if u.records
+                        && u.history
+                        && !u.smoke
+                        && u.desired == PAUSED
+                        && u.shown.mode == PAUSED =>
+                {
+                    if let Some(row) = u.shown.history.rows.get(u.history_offset) {
+                        let game = row.game_id;
+                        if let Some(path) = crate::legacy_preferences::choose(hwnd) {
+                            if let Ok(mut p) = u.shared.import_path.lock() {
+                                *p = Some(path);
+                            }
+                            if let Ok(mut g) = u.shared.import_game.lock() {
+                                *g = Some(game);
+                            }
+                            u.shared.request(JOURNAL_PREVIEW);
+                        }
+                    }
+                }
                 HISTORY_SAVED
                     if u.records
                         && u.history
@@ -1482,11 +1813,24 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     u.shared.request(HISTORY_OFFLINE);
                 }
                 HISTORY_PREV | HISTORY_NEXT if u.records && u.history => {
+                    if u.journal {
+                        u.journal_offset = if w & 0xffff == HISTORY_PREV {
+                            u.journal_offset.saturating_sub(5)
+                        } else {
+                            (u.journal_offset + 5).min(
+                                u.observation()
+                                    .map(|o| o.events.len().saturating_sub(1) / 5 * 5)
+                                    .unwrap_or(0),
+                            )
+                        };
+                        settings_controls(hwnd, u);
+                        InvalidateRect(hwnd, null(), 0);
+                        return 0;
+                    }
                     u.history_offset = if w & 0xffff == HISTORY_PREV {
-                        u.history_offset.saturating_sub(6)
+                        u.history_offset.saturating_sub(1)
                     } else {
-                        (u.history_offset + 6)
-                            .min(u.shown.history.rows.len().saturating_sub(1) / 6 * 6)
+                        (u.history_offset + 1).min(u.shown.history.rows.len().saturating_sub(1))
                     };
                     settings_controls(hwnd, u);
                 }
@@ -1693,6 +2037,32 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             0
         }
         WM_TIMER => {
+            let request = if u.records
+                && u.history
+                && !u.journal
+                && u.desired == PAUSED
+                && (u.smoke || IsWindowVisible(hwnd) != 0)
+            {
+                u.shown
+                    .history
+                    .rows
+                    .get(u.history_offset)
+                    .zip(u.shown.history.details.get(u.history_offset))
+                    .map(|(row, detail)| crate::champion_assets::Request {
+                        version: u.shown.history.asset_version.clone(),
+                        id: row.champion,
+                        icons: vec![],
+                        download: u.shown.preferences.icon_downloads,
+                        presentation: Some(detail.clone()),
+                    })
+            } else {
+                None
+            };
+            u.history_assets.request(request);
+            if let Some(reply) = u.history_assets.changed(&u.history_reply) {
+                u.history_reply = reply;
+                InvalidateRect(hwnd, null(), 0);
+            }
             let next = u.shared.status();
             let desired = u.shared.desired.load(Ordering::Acquire);
             if next != u.shown || desired != u.desired {
@@ -1717,6 +2087,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 }
                 if next.history != u.shown.history {
                     u.history_offset = 0;
+                    u.journal = next.history.journal_preview;
+                    u.journal_offset = 0;
                 }
                 u.shown = next;
                 crate::i18n::set(&u.shown.ui_locale);
@@ -1809,30 +2181,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         if let Ok(path) = std::env::var("FUZE_HISTORY_PREVIEW") {
                             u.records = true;
                             u.history = true;
-                            u.shown.history = crate::account_history::View {
-                                account: "demo0001".into(),
-                                platform: "HN1".into(),
-                                cached: true,
-                                rows: (1..=8)
-                                    .map(|id| fuze_lcu::history::Match {
-                                        game_id: id,
-                                        created: id,
-                                        duration: 900,
-                                        champion: 21,
-                                        kills: 8,
-                                        deaths: 3,
-                                        assists: 15,
-                                        result: "win".into(),
-                                        items: vec![1001],
-                                        augments: vec![1],
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .into(),
-                                ..Default::default()
-                            };
                             settings_controls(hwnd, u);
                             if snapshot(hwnd, &path, u).is_err() {
                                 u.preview_ok = false;
+                            }
+                            if let Ok(journal) = std::env::var("FUZE_JOURNAL_PREVIEW") {
+                                u.journal = true;
+                                settings_controls(hwnd, u);
+                                if snapshot(hwnd, &journal, u).is_err() {
+                                    u.preview_ok = false;
+                                }
+                                u.journal = false;
                             }
                             u.records = false;
                             u.history = false;
@@ -1922,6 +2281,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         monitor: Mutex::new(None),
         pending: Mutex::new(None),
         import_path: Mutex::new(None),
+        import_game: Mutex::new(None),
     });
     let mut champion_roots = config.roots.clone();
     if !smoke {
@@ -1955,6 +2315,10 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         let icon = app_icon();
         let mut ui = Box::new(Ui {
+            journal: false,
+            journal_offset: 0,
+            history_assets: crate::champion_assets::Service::new(champion_roots.clone(), smoke)?,
+            history_reply: Default::default(),
             records: false,
             history: false,
             history_offset: 0,
@@ -2036,6 +2400,8 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
             HISTORY_PREV,
             HISTORY_NEXT,
             HISTORY_SAVED,
+            JOURNAL_IMPORT,
+            JOURNAL_VIEW,
         ]) {
             CreateWindowExW(
                 0,

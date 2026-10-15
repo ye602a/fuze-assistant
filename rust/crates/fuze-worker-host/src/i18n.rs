@@ -21,6 +21,39 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["首次观察", "首次觀察", "First observed"],
+    ["候选变化", "候選變化", "Candidates changed"],
+    ["再次出现", "再次出現", "Reappeared"],
+    [
+        "当前图标词典（非历史补丁）：",
+        "目前圖示詞典（非歷史版本）：",
+        "Current asset catalogue (not historical patch):",
+    ],
+    [
+        "导入此局旧观察",
+        "匯入此局舊觀察",
+        "Import this match's observations",
+    ],
+    ["返回战绩详情", "返回戰績詳情", "Back to match details"],
+    [
+        "查看候选观察（非领取）",
+        "查看候選觀察（非領取）",
+        "Candidate observations (not claims)",
+    ],
+    [
+        "候选观察不代表实际领取；变化或再次出现不证明刷新。",
+        "候選觀察不代表實際領取；變化或再次出現不證明刷新。",
+        "Observations are not claims; changes or reappearance do not prove rerolls.",
+    ],
+    ["中断", "中斷", "Interrupted"],
+    ["达到记录上限", "達到記錄上限", "Capped"],
+    [
+        "* 含缺失卡位；未记录的事件不补造。",
+        "* 含缺失卡位；未記錄的事件不補造。",
+        "* Missing slots; unrecorded events are not reconstructed.",
+    ],
+    ["装备", "裝備", "Items"],
+    ["战绩强化", "戰績增幅", "Result augments"],
     [
         "浏览已存账号（离线）",
         "瀏覽已存帳號（離線）",

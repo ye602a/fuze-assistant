@@ -230,10 +230,121 @@ pub fn legacy(owner: &Owner, v: &Value) -> Result<Vec<Match>> {
     }
     Ok(out)
 }
+/// Candidate observations only. No chosen card, claim count or stage inference exists here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Observation {
+    pub game_id: u64,
+    pub interrupted: bool,
+    pub capped: bool,
+    pub events: Vec<ObservedCards>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedCards {
+    pub cards: [Option<u32>; 3],
+    pub level: Option<u32>,
+    pub partial: bool,
+    pub kind: String,
+}
+impl Observation {
+    pub fn valid(&self) -> bool {
+        self.game_id > 0
+            && self.game_id <= 9_007_199_254_740_991
+            && self.events.len() <= 80
+            && self.events.iter().all(|e| {
+                e.cards.iter().flatten().all(|id| *id > 0)
+                    && e.level.is_none_or(|l| (1..=30).contains(&l))
+                    && ["first", "changed", "reappeared"].contains(&e.kind.as_str())
+            })
+    }
+}
+pub fn legacy_observations(owner: &Owner, v: &Value, game_id: u64) -> Result<Observation> {
+    if v["version"] != 1 {
+        return Err("journal-schema");
+    }
+    let sessions = v["sessions"]
+        .as_array()
+        .filter(|a| a.len() <= 100)
+        .ok_or("journal-schema")?;
+    let selected: Vec<_> = sessions
+        .iter()
+        .filter(|s| owner.matches_legacy(&s["owner"]) && s["gameId"].as_u64() == Some(game_id))
+        .collect();
+    if selected.len() != 1 {
+        return Err("journal-owner-or-game-mismatch");
+    }
+    let s = selected[0];
+    let events = s["events"]
+        .as_array()
+        .filter(|a| a.len() <= 80)
+        .ok_or("journal-schema")?
+        .iter()
+        .map(|e| {
+            let slots = e["cards"]
+                .as_array()
+                .filter(|a| a.len() == 3)
+                .ok_or("journal-schema")?;
+            let mut cards = [None; 3];
+            for (i, v) in slots.iter().enumerate() {
+                if !v.is_null() {
+                    cards[i] = Some(small(&v["id"])?);
+                }
+            }
+            let level = if e["level"].is_null() {
+                None
+            } else {
+                Some(small(&e["level"])?)
+            };
+            Ok(ObservedCards {
+                cards,
+                level,
+                partial: e["partial"] == true || cards.iter().any(Option::is_none),
+                kind: e["kind"].as_str().ok_or("journal-schema")?.into(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let out = Observation {
+        game_id,
+        events,
+        interrupted: s["interrupted"] == true || s["endedAt"].is_null(),
+        capped: s["capped"] == true,
+    };
+    if !out.valid() {
+        return Err("journal-schema");
+    }
+    Ok(out)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn journal_selects_owner_and_game_without_claim_inference() {
+        let o = Owner::from_values(
+            &json!({"puuid":"fixture-account-A","platformId":"HN1"}),
+            &[],
+        )
+        .unwrap();
+        let mut v = json!({"version":1,"sessions":[
+            {"gameId":1,"owner":{"puuid":"fixture-account-B","platformId":"HN1"},"events":[{}]},
+            {"gameId":2,"owner":{"puuid":"fixture-account-A","platformId":"HN1"},"events":[{}]},
+            {"gameId":1,"owner":{"puuid":"fixture-account-A","platformId":"HN1","playerName":"discarded"},"endedAt":null,"capped":true,
+            "events":[{"kind":"changed","level":11,"cards":[{"id":1},null,{"id":3}],"observedAt":123,"chosen":3},
+                      {"kind":"reappeared","level":11,"cards":[{"id":1},null,{"id":3}]}]}
+        ]});
+        let result = legacy_observations(&o, &v, 1).unwrap();
+        assert_eq!(result.events.len(), 2);
+        assert_eq!(result.events[0].cards, [Some(1), None, Some(3)]);
+        assert!(result.interrupted && result.capped && result.events[0].partial);
+        let json = serde_json::to_string(&result).unwrap();
+        for key in ["puuid", "playerName", "chosen", "observedAt", "claim"] {
+            assert!(!json.contains(key));
+        }
+        assert!(legacy_observations(&o, &v, 3).is_err());
+        v["sessions"][2]["events"][0]["cards"] = json!([{"id":1},{"id":2}]);
+        assert!(legacy_observations(&o, &v, 1).is_err());
+    }
     #[test]
     fn legacy_import_only_selects_exact_account_and_region() {
         let owner = Owner::from_values(

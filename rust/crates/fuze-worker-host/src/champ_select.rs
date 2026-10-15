@@ -800,6 +800,7 @@ impl State {
                 .as_ref()
                 .filter(|_| self.selected > 0 && !self.dismissed)
                 .map(|v| crate::champion_assets::Request {
+                    presentation: None,
                     download: self.downloads,
                     version: v.version.clone(),
                     id: self.selected,
@@ -815,7 +816,17 @@ impl State {
     }
 }
 unsafe fn icon(dc: HDC, state: &State, url: &str, left: i32, top: i32, size: i32) {
-    if let Some(pic) = state.reply.icons.get(url) {
+    draw_icon(dc, &state.reply, url, left, top, size);
+}
+pub(crate) unsafe fn draw_icon(
+    dc: HDC,
+    reply: &crate::champion_assets::Reply,
+    url: &str,
+    left: i32,
+    top: i32,
+    size: i32,
+) {
+    if let Some(pic) = reply.icons.get(url) {
         let mut info: BITMAPINFO = zeroed();
         info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
         info.bmiHeader.biWidth = 48;
