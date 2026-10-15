@@ -38,9 +38,9 @@ fn ok(value: i32) -> Result<()> {
 fn option(handle: &Handle, name: u32, value: u32) -> Result<()> {
     ok(unsafe { WinHttpSetOption(handle.0, name, (&value as *const u32).cast(), 4) })
 }
-struct Header(Vec<u16>);
+pub(crate) struct Header(pub(crate) Vec<u16>);
 impl Header {
-    fn new(c: &Credentials) -> Self {
+    pub(crate) fn new(c: &Credentials) -> Self {
         let mut encoded = basic(&c.secret);
         let mut header: Vec<u16> = "Authorization: Basic ".encode_utf16().collect();
         header.extend(encoded.iter().map(|b| *b as u16));
@@ -64,6 +64,15 @@ pub struct ReadOnlyClient {
     credentials: Credentials,
 }
 impl ReadOnlyClient {
+    pub fn websocket(&self) -> Result<crate::websocket::Socket> {
+        crate::websocket::Socket::connect(&self.credentials)
+    }
+    pub fn locale(&self, pid: u32) -> Result<crate::locale::Locale> {
+        let (_, mut body) = self.request(pid, Endpoint::Locale)?;
+        let result = crate::locale::parse(&body);
+        wipe(&mut body);
+        result
+    }
     pub fn context(&self, current_pid: u32) -> Result<crate::context::Context> {
         let phase = self.phase(current_pid)?;
         if !matches!(

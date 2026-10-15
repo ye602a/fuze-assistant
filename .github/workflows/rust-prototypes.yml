@@ -1,9 +1,10 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller]
     paths:
       - 'rust/**'
+      - 'scripts/package-rust-preview.mjs'
       - 'scripts/check-rust-prototypes.mjs'
       - 'scripts/rust-prototype-tools.mjs'
       - 'scripts/compare-rust-ocr.mjs'
@@ -62,6 +63,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
+      - name: Assemble and self-check isolated Rust preview
+        run: |
+          npm run prepare:client-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/package-rust-preview.mjs
+          exit $LASTEXITCODE
+      - name: Upload isolated development preview (not a stable installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-development-preview
+          path: |
+            rust/artifacts/preview/*.zip
+            rust/artifacts/preview/*.sha256
+          retention-days: 7
       - name: Scan upload content
         run: npm run security:check
       - name: Upload sanitized prototype reports
@@ -70,6 +85,7 @@ jobs:
         with:
           name: rust-prototype-evidence
           path: |
+            rust/artifacts/preview-validation.json
             rust/artifacts/validation.json
             rust/artifacts/native-overlay.png
             rust/artifacts/comparison.json

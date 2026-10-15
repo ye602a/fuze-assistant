@@ -1,12 +1,18 @@
 //! Read-only LCU boundary. Nothing runs at import; caller supplies freshly observed credentials.
 use fuze_runtime::session::Phase;
 use std::fmt;
+#[cfg(windows)]
+mod command_line;
 pub mod context;
 #[cfg(windows)]
 pub mod discovery;
+pub mod events;
+pub mod locale;
 pub mod reconnect;
 #[cfg(windows)]
 pub mod transport;
+#[cfg(windows)]
+pub mod websocket;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Error {
     AuthInput,
@@ -117,6 +123,7 @@ pub(crate) enum Endpoint {
     SummonerIdentity,
     Gameflow,
     ChampSelect,
+    Locale,
 }
 impl Endpoint {
     pub(crate) fn path(self) -> &'static str {
@@ -125,6 +132,7 @@ impl Endpoint {
             Self::SummonerStatus | Self::SummonerIdentity => "/lol-summoner/v1/current-summoner",
             Self::Gameflow => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
+            Self::Locale => "/riotclient/region-locale",
         }
     }
 }

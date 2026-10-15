@@ -23,6 +23,11 @@ impl Default for Reconnect {
     }
 }
 impl Reconnect {
+    pub fn refresh_at(&mut self, at: u64) {
+        if self.state != State::Paused {
+            self.next = Some(at);
+        }
+    }
     pub fn due(&self, now: u64) -> bool {
         self.next.is_some_and(|at| now >= at)
     }

@@ -13,6 +13,7 @@ use std::{
 };
 
 struct Observation {
+    locale: Option<fuze_lcu::locale::Locale>,
     state: fuze_lcu::reconnect::State,
     context: Option<Context>,
     root: Option<PathBuf>,
@@ -21,6 +22,15 @@ struct Observation {
     cancellation: Option<fuze_native_overlay::native::Cancellation>,
 }
 impl Observation {
+    fn set_locale(&mut self, locale: Option<fuze_lcu::locale::Locale>) {
+        if self.locale != locale {
+            self.locale = locale;
+            if let Some(c) = self.cancellation.take() {
+                c.cancel();
+            }
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
     fn publish(&mut self, context: Option<Context>, root: Option<PathBuf>) {
         if self.context != context || self.root != root {
             if let Some(c) = self.cancellation.take() {
@@ -45,6 +55,7 @@ impl Monitor {
     }
     pub fn start() -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
+            locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: None,
             root: None,
@@ -59,12 +70,17 @@ impl Monitor {
             .spawn(move || {
                 let mut client = AutoClient::default();
                 while !stopped.load(Ordering::Acquire) {
-                    if client.wake_at().is_some_and(|at| client.now_ms() >= at) {
+                    {
                         let state = client.poll();
                         let context = client.context();
                         let root = client.game_root().map(PathBuf::from);
+                        let locale = client.locale();
                         if let Ok(mut latest) = shared.lock() {
+                            latest.set_locale(locale);
                             latest.publish(context, root);
+                            if let Some(verified) = client.verified_at() {
+                                latest.updated = verified;
+                            }
                             latest.state = state;
                         }
                     }
@@ -102,7 +118,7 @@ impl Drop for Monitor {
 
 pub struct Config {
     pub roots: Vec<fuze_data::Root>,
-    pub locale: fuze_data::Locale,
+    pub locale: Option<fuze_data::Locale>,
     pub worker: PathBuf,
     pub ort: PathBuf,
     pub model: PathBuf,
@@ -110,12 +126,57 @@ pub struct Config {
     pub backend: String,
 }
 impl Config {
-    fn prepare(&self, champion: u32) -> Result<Pipeline> {
-        let data = fuze_data::prepare(
-            &self.roots,
-            self.locale,
-            fuze_data::Scope::Champion(champion),
-        )?;
+    /// Packaged-path check only. No discovery, LCU, windows, capture, or user cache reads.
+    pub fn check_bundle(&self) -> Result<()> {
+        for file in [&self.worker, &self.ort, &self.model, &self.dictionary] {
+            let size = std::fs::metadata(file)
+                .map_err(|_| "bundle-file-missing")?
+                .len();
+            if size == 0 || size > 128 * 1024 * 1024 {
+                return Err("bundle-file-limit");
+            }
+        }
+        let roots: Vec<_> = self
+            .roots
+            .iter()
+            .filter(|r| r.source == fuze_data::Source::Bundled)
+            .map(|r| fuze_data::Root {
+                path: r.path.clone(),
+                source: r.source,
+            })
+            .collect();
+        for locale in [
+            fuze_data::Locale::ZhCn,
+            fuze_data::Locale::ZhTw,
+            fuze_data::Locale::EnUs,
+        ] {
+            let data = fuze_data::prepare(&roots, locale, fuze_data::Scope::Full)?;
+            if locale == fuze_data::Locale::ZhCn {
+                let catalog = fuze_contract::wire::encode_catalog(data.catalog())
+                    .map_err(|_| "catalog-encode")?;
+                let args = vec![
+                    self.ort.to_string_lossy().into(),
+                    self.model.to_string_lossy().into(),
+                    self.dictionary.to_string_lossy().into(),
+                    "-".into(),
+                    "cpu".into(),
+                ];
+                let mut worker = Supervisor::start_with_catalog(
+                    &self.worker,
+                    &args,
+                    Duration::from_secs(30),
+                    Some(Arc::new(catalog)),
+                )?;
+                worker.stop()?;
+                if !worker.reaped() {
+                    return Err("bundle-worker-not-reaped");
+                }
+            }
+        }
+        Ok(())
+    }
+    fn prepare(&self, champion: u32, locale: fuze_data::Locale) -> Result<Pipeline> {
+        let data = fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Champion(champion))?;
         let catalog =
             fuze_contract::wire::encode_catalog(data.catalog()).map_err(|_| "catalog-encode")?;
         let args = vec![
@@ -182,13 +243,14 @@ impl Controller {
     }
     /// One bounded unit of work; caller yields between ticks and never runs this on UI.
     pub fn tick(&mut self, monitor: &Monitor) -> Result<()> {
-        let (context, root, revision, fresh) = {
+        let (context, root, revision, fresh, detected_locale) = {
             let latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
             (
                 latest.context,
                 latest.root.clone(),
                 latest.revision,
                 latest.updated.elapsed() < Duration::from_secs(8),
+                latest.locale,
             )
         };
         if revision != self.revision {
@@ -204,14 +266,22 @@ impl Controller {
             return Ok(());
         };
         let now = self.epoch.elapsed().as_millis() as u64;
+        let locale = self.config.locale.or_else(|| {
+            detected_locale.map(|l| match l {
+                fuze_lcu::locale::Locale::ZhCn => fuze_data::Locale::ZhCn,
+                fuze_lcu::locale::Locale::ZhTw => fuze_data::Locale::ZhTw,
+                fuze_lcu::locale::Locale::EnUs => fuze_data::Locale::EnUs,
+            })
+        });
         if now < self.retry.next {
             return Ok(());
         }
         let result: Result<()> = (|| {
             if self.pipeline.is_none() {
-                let pipeline = self
-                    .config
-                    .prepare(context.champion.ok_or("champion-missing")?)?;
+                let pipeline = self.config.prepare(
+                    context.champion.ok_or("champion-missing")?,
+                    locale.ok_or("locale-unavailable")?,
+                )?;
                 let mut latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
                 // Loading model/data may overlap a phase or hero change; never attach that stale host.
                 if latest.revision != revision || latest.updated.elapsed() >= Duration::from_secs(8)
@@ -281,6 +351,7 @@ mod tests {
         };
         let first = context(8, 1);
         let mut observation = Observation {
+            locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: Some(first),
             root: None,
@@ -309,10 +380,23 @@ mod tests {
             assert!(!window.update(snapshot(2)).unwrap());
         }
         assert_eq!(observation.revision, 4);
+        let window = HiddenOverlay::start(1, "zh-CN@fixture-v1".into()).unwrap();
+        let cancellation = window.cancellation();
+        observation.cancellation = Some(cancellation.clone());
+        observation.set_locale(None);
+        assert!(!cancellation.cancelled());
+        observation.set_locale(Some(fuze_lcu::locale::Locale::EnUs));
+        assert!(cancellation.cancelled());
+        assert_eq!(observation.revision, 5);
+        observation.set_locale(Some(fuze_lcu::locale::Locale::EnUs));
+        assert_eq!(observation.revision, 5);
+        observation.set_locale(None);
+        assert_eq!(observation.revision, 6);
     }
     #[test]
     fn latest_observation_drops_old_context_and_backoff_is_bounded() {
         let mut observation = Observation {
+            locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
             context: None,
             root: None,

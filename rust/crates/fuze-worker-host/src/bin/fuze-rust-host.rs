@@ -20,14 +20,19 @@ fn run() -> Result<(), &'static str> {
         backend: String,
     }
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 3 || args[0] != "--live-control" {
+    let check = args.len() == 2 && args[0] == "--check-bundle";
+    if !check && (args.len() != 3 || args[0] != "--live-control") {
         return Err("usage-live-control-config-seconds");
     }
-    let seconds = args[2]
-        .parse::<u64>()
-        .ok()
-        .filter(|v| (1..=3600).contains(v))
-        .ok_or("duration-invalid")?;
+    let seconds = if check {
+        0
+    } else {
+        args[2]
+            .parse::<u64>()
+            .ok()
+            .filter(|v| (1..=3600).contains(v))
+            .ok_or("duration-invalid")?
+    };
     let mut bytes = Vec::new();
     std::fs::File::open(&args[1])
         .map_err(|_| "config-read")?
@@ -38,34 +43,51 @@ fn run() -> Result<(), &'static str> {
         return Err("config-limit");
     }
     let input: Input = serde_json::from_slice(&bytes).map_err(|_| "config-invalid")?;
+    let config_path = std::fs::canonicalize(&args[1]).map_err(|_| "config-read")?;
+    let directory = config_path.parent().ok_or("config-path")?;
+    let resolve = |path: PathBuf| {
+        if path.is_absolute() {
+            path
+        } else {
+            directory.join(path)
+        }
+    };
     let locale = match input.locale.as_str() {
-        "zh-CN" => fuze_data::Locale::ZhCn,
-        "zh-TW" => fuze_data::Locale::ZhTw,
-        "en-US" => fuze_data::Locale::EnUs,
+        "auto" => None,
+        "zh-CN" => Some(fuze_data::Locale::ZhCn),
+        "zh-TW" => Some(fuze_data::Locale::ZhTw),
+        "en-US" => Some(fuze_data::Locale::EnUs),
         _ => return Err("locale-invalid"),
     };
     if !["cpu", "auto", "dml", "dml-strict"].contains(&input.backend.as_str()) {
         return Err("backend-invalid");
     }
     let mut roots = vec![fuze_data::Root {
-        path: input.bundled_data,
+        path: resolve(input.bundled_data),
         source: fuze_data::Source::Bundled,
     }];
     if let Some(path) = input.cache_data {
         roots.push(fuze_data::Root {
-            path,
+            path: resolve(path),
             source: fuze_data::Source::Cache,
         });
     }
     let config = Config {
         roots,
         locale,
-        worker: input.worker,
-        ort: input.ort,
-        model: input.model,
-        dictionary: input.dictionary,
+        worker: resolve(input.worker),
+        ort: resolve(input.ort),
+        model: resolve(input.model),
+        dictionary: resolve(input.dictionary),
         backend: input.backend,
     };
+    if check {
+        config.check_bundle()?;
+        println!(
+            "{{\"bundle_ready\":true,\"locales\":3,\"worker_reaped\":true,\"game_access\":false}}"
+        );
+        return Ok(());
+    }
     let monitor = Monitor::start()?;
     let mut controller = Controller::new(config);
     let started = Instant::now();

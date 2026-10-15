@@ -1,5 +1,5 @@
 //! Explicit opt-in native discovery; never invoked by offline prototypes or tests.
-//! Only process metadata and its adjacent lockfile. No command-line dump, memory reads or shell.
+//! Process metadata, adjacent lockfile, then PID-scoped WMI command arguments. No dumps, memory reads or shell.
 use crate::{
     reconnect::{Reconnect, State},
     transport::ReadOnlyClient,
@@ -43,6 +43,98 @@ impl Candidate {
     }
 }
 fn discover() -> Result<Option<Candidate>> {
+    match discover_lockfile() {
+        Ok(Some(c)) => Ok(Some(c)),
+        Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
+        previous => match discover_command() {
+            Ok(None) => previous,
+            other => other,
+        },
+    }
+}
+fn discover_command() -> Result<Option<Candidate>> {
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(Error::Discovery);
+        }
+        let snapshot = Handle(snapshot);
+        let mut row: PROCESSENTRY32W = zeroed();
+        row.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snapshot.0, &mut row) == 0 {
+            return Err(Error::Discovery);
+        }
+        let mut found = None;
+        let mut denied = false;
+        loop {
+            let end = row
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(row.szExeFile.len());
+            if String::from_utf16_lossy(&row.szExeFile[..end])
+                .eq_ignore_ascii_case("LeagueClientUx.exe")
+            {
+                let p = OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    0,
+                    row.th32ProcessID,
+                );
+                if p.is_null() {
+                    denied = true;
+                } else {
+                    let process = Handle(p);
+                    let mut path = vec![0u16; 32768];
+                    let mut length = path.len() as u32;
+                    if QueryFullProcessImageNameW(p, 0, path.as_mut_ptr(), &mut length) == 0 {
+                        denied = true;
+                    } else {
+                        let image =
+                            PathBuf::from(String::from_utf16_lossy(&path[..length as usize]));
+                        if !image.file_name().is_some_and(|s| {
+                            s.to_string_lossy()
+                                .eq_ignore_ascii_case("LeagueClientUx.exe")
+                        }) {
+                            return Err(Error::Discovery);
+                        }
+                        let root = image.parent().ok_or(Error::Discovery)?.to_path_buf();
+                        if !root.join("LeagueClient.exe").is_file() {
+                            return Err(Error::Discovery);
+                        }
+                        match crate::command_line::credentials(row.th32ProcessID) {
+                            Ok(credentials) => {
+                                let candidate = Candidate {
+                                    process,
+                                    pid: row.th32ProcessID,
+                                    credentials,
+                                    root,
+                                };
+                                if candidate.alive() {
+                                    if found.is_some() {
+                                        return Err(Error::AmbiguousClient);
+                                    }
+                                    found = Some(candidate);
+                                }
+                            }
+                            Err(_) => denied = true,
+                        }
+                    }
+                }
+            }
+            if Process32NextW(snapshot.0, &mut row) == 0 {
+                if GetLastError() != ERROR_NO_MORE_FILES {
+                    return Err(Error::Discovery);
+                }
+                break;
+            }
+        }
+        if denied {
+            return Err(Error::Discovery);
+        }
+        Ok(found)
+    }
+}
+fn discover_lockfile() -> Result<Option<Candidate>> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -135,6 +227,8 @@ fn discover() -> Result<Option<Candidate>> {
     }
 }
 struct Connected {
+    socket: Option<crate::websocket::Socket>,
+    socket_retry: u64,
     process: Handle,
     pid: u32,
     client: ReadOnlyClient,
@@ -143,6 +237,10 @@ struct Connected {
 /// Own this on a dedicated control/IO thread. `poll` is synchronous, bounded per WinHTTP
 /// operation, not hard-cancellable. Caller schedules `wake_at`; no UI/OCR thread invocation.
 pub struct AutoClient {
+    locale: Option<crate::locale::Locale>,
+    dirty: bool,
+    last_read: u64,
+    verified_at: Option<Instant>,
     connection: Option<Connected>,
     retry: Reconnect,
     epoch: Instant,
@@ -151,6 +249,10 @@ pub struct AutoClient {
 impl Default for AutoClient {
     fn default() -> Self {
         Self {
+            locale: None,
+            dirty: false,
+            last_read: 0,
+            verified_at: None,
             connection: None,
             retry: Reconnect::default(),
             epoch: Instant::now(),
@@ -159,6 +261,18 @@ impl Default for AutoClient {
     }
 }
 impl AutoClient {
+    pub fn verified_at(&self) -> Option<Instant> {
+        self.verified_at
+    }
+    pub fn locale(&self) -> Option<crate::locale::Locale> {
+        self.locale
+    }
+    pub fn event_observed(&self) -> bool {
+        self.connection
+            .as_ref()
+            .and_then(|c| c.socket.as_ref())
+            .is_some_and(|s| s.event_observed)
+    }
     pub fn context(&self) -> Option<crate::context::Context> {
         self.context
     }
@@ -172,7 +286,9 @@ impl AutoClient {
         self.epoch.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
     pub fn pause(&mut self) {
+        self.locale = None;
         self.context = None;
+        self.verified_at = None;
         self.connection = None;
         self.retry.pause();
     }
@@ -180,10 +296,30 @@ impl AutoClient {
         self.retry.resume(self.now_ms());
     }
     pub fn poll(&mut self) -> State {
+        let now = self.now_ms();
+        if let Some(connection) = &mut self.connection {
+            if let Some(socket) = &mut connection.socket {
+                match socket.poll() {
+                    Ok(dirty) => self.dirty |= dirty,
+                    Err(_) => {
+                        connection.socket = None;
+                        connection.socket_retry = now.saturating_add(30000);
+                        self.dirty = true;
+                    }
+                }
+            }
+        }
+        if self.dirty {
+            self.retry
+                .refresh_at(now.max(self.last_read.saturating_add(100)));
+        }
         if !self.retry.due(self.now_ms()) {
             return self.retry.state();
         }
         self.context = None;
+        self.verified_at = None;
+        self.locale = None;
+        self.dirty = false;
         let result = (|| {
             if let Some(c) = &self.connection {
                 if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
@@ -195,24 +331,38 @@ impl AutoClient {
                     return Ok(None);
                 };
                 self.connection = Some(Connected {
+                    socket: None,
+                    socket_retry: 0,
                     process: c.process,
                     pid: c.pid,
                     client: ReadOnlyClient::new(c.credentials)?,
                     root: c.root,
                 });
             }
-            let c = self.connection.as_ref().ok_or(Error::Discovery)?;
+            let now = self.now_ms();
+            let c = self.connection.as_mut().ok_or(Error::Discovery)?;
             let context = c.client.context(c.pid)?;
+            let locale = c.client.locale(c.pid).ok();
             if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
                 return Err(Error::Discovery);
             }
             self.context = Some(context);
+            self.verified_at = Some(Instant::now());
+            self.locale = locale;
+            if c.socket.is_none() && now >= c.socket_retry {
+                c.socket = c.client.websocket().ok();
+                c.socket_retry = now.saturating_add(30000);
+            }
             Ok(Some(context.phase))
         })();
         if result.is_err() {
             self.connection = None;
         } // Drops credentials; rediscover on next backoff.
         self.retry.finish(result, self.now_ms());
+        self.last_read = self.now_ms();
+        if self.event_observed() && matches!(self.retry.state(), State::Connected(_)) {
+            self.retry.refresh_at(self.last_read.saturating_add(5000));
+        }
         self.retry.state()
     }
 }
