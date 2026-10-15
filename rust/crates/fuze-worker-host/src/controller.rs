@@ -304,6 +304,7 @@ pub struct PipelineStatus {
     pub frame_age: Option<u64>,
 }
 pub struct Controller {
+    records: crate::local_records::Journal,
     last_frame: Option<Instant>,
     last_error: Option<&'static str>,
     config: Config,
@@ -313,6 +314,16 @@ pub struct Controller {
     epoch: Instant,
 }
 impl Controller {
+    pub fn enable_local_records(&mut self) {
+        if let Some(root) = std::env::var_os("LOCALAPPDATA") {
+            self.records = crate::local_records::Journal::open(
+                std::path::PathBuf::from(root).join("FuzeRustPreview/observations.json"),
+            );
+        }
+    }
+    pub fn records(&self) -> (Vec<crate::local_records::Row>, Option<&'static str>) {
+        (self.records.recent(), self.records.error)
+    }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
             capture: self
@@ -341,6 +352,7 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            records: Default::default(),
             config,
             last_frame: None,
             last_error: None,
@@ -351,6 +363,7 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
+        self.records.finish();
         self.last_frame = None;
         if let Some(p) = self.pipeline.take() {
             p.cancellation().cancel();
@@ -415,6 +428,8 @@ impl Controller {
                 pipeline.capture_game(target)?;
             }
             if let Some(delivery) = pipeline.tick_wgc()? {
+                self.records
+                    .observe(context.champion.unwrap_or(0), &delivery.snapshot.slots);
                 let known = delivery
                     .snapshot
                     .slots

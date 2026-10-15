@@ -129,6 +129,11 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
         .as_ref()
         .map(|s| s.dataset_version.as_str())
         .unwrap_or("等待数据");
+    let t = |cn, tw, en| match version.split('@').next() {
+        Some("en-US") => en,
+        Some("zh-TW") => tw,
+        _ => cn,
+    };
     let sx = w as f64 / 760.0;
     let sy = h as f64 / 170.0;
     let rect = |l: i32, t: i32, r: i32, b: i32| RECT {
@@ -140,14 +145,18 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
     fill(dc, rect(0, 0, 760, 170), rgb(5, 16, 25));
     label(
         dc,
-        "FUZE · Rust 原型 · 离线识别 / 未确认选择界面",
+        t(
+            "FUZE · 整体胜率参考 / 实际领取轮次未确认",
+            "FUZE · 整體勝率參考 / 實際領取輪次未確認",
+            "FUZE · Overall win rates / Claim round unconfirmed",
+        ),
         rect(12, 3, 580, 25),
         (12.0 * sy) as i32,
         rgb(198, 173, 112),
     );
     label(
         dc,
-        &format!("数据 {version}"),
+        version,
         rect(600, 3, 715, 25),
         (11.0 * sy) as i32,
         rgb(145, 174, 184),
@@ -176,11 +185,24 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
                 name, confidence, ..
             } => (
                 name.as_str(),
-                "已识别",
-                "识别置信度 · 胜率待接入",
+                t("已识别", "已辨識", "Recognized"),
+                t(
+                    "识别置信度 · 无统计数据",
+                    "辨識信心度 · 無統計資料",
+                    "OCR confidence · No statistics",
+                ),
                 *confidence as f64,
             ),
-            Slot::Unreadable => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
+            Slot::Unreadable => (
+                t("此位置未识别", "此位置未辨識", "Unreadable slot"),
+                t("等待补全", "等待補全", "Waiting"),
+                t(
+                    "可能被遮挡或正在刷新",
+                    "可能被遮擋或正在刷新",
+                    "Possibly covered or rerolling",
+                ),
+                0.0,
+            ),
         };
         let recommendation = match &slots[i as usize] {
             Slot::Known { id, .. } => STATS.with(|s| s.borrow().get(id).cloned()),
@@ -188,24 +210,35 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
         };
         let rate_text = recommendation.as_ref().map(|r| {
             r.win_rate
-                .map(|v| format!("\u{80dc}\u{7387} {:.1}%", v * 100.))
-                .unwrap_or("\u{6682}\u{65e0}\u{80dc}\u{7387}".into())
+                .map(|v| format!("{} {:.1}%", t("胜率", "勝率", "Win"), v * 100.))
+                .unwrap_or(t("暂无胜率", "暫無勝率", "No win rate").into())
         });
         let pick_text = recommendation.as_ref().map(|r| {
             r.pick_rate
-                .map(|v| format!("\u{9009}\u{53d6} {:.1}% / \u{6574}\u{4f53}", v * 100.))
-                .unwrap_or("\u{9009}\u{53d6} -- / \u{6574}\u{4f53}".into())
+                .map(|v| {
+                    format!(
+                        "{} {:.1}% / {}",
+                        t("选取", "選取", "Pick"),
+                        v * 100.,
+                        t("整体", "整體", "Overall")
+                    )
+                })
+                .unwrap_or(format!(
+                    "{} -- / {}",
+                    t("选取", "選取", "Pick"),
+                    t("整体", "整體", "Overall")
+                ))
         });
         let missing_statistics = STATISTICS_MODE.with(|s| s.get())
             && recommendation.is_none()
             && matches!(&slots[i as usize], Slot::Known { .. });
         let rate_text = if missing_statistics {
-            Some("\u{6682}\u{65e0}\u{80dc}\u{7387}".into())
+            Some(t("暂无胜率", "暫無勝率", "No win rate").into())
         } else {
             rate_text
         };
         let pick_text = if missing_statistics {
-            Some("\u{6682}\u{65e0}\u{7edf}\u{8ba1}".into())
+            Some(t("暂无统计", "暫無統計", "No statistics").into())
         } else {
             pick_text
         };

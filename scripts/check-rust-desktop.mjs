@@ -13,5 +13,17 @@ let report;try{report=JSON.parse(child.stdout?.trim())}catch{}
 if(child.status!==0||!report?.desktop_ready||!report.pause_resume_exit||!report.preview_rendered||!report.champion_preview||report.game_access!==false)throw new Error('Native desktop lifecycle failed')
 const png=await readFile(path.join(root,'rust/artifacts/desktop.png'))
 if(png.length<5000)throw new Error('Native desktop render missing')
+// Additional locales exercise the same owned, hidden windows; never read user preferences.
+report.locales=['zh-CN']
+for (const locale of ['zh-TW','en-US']) {
+ const prefix=path.join(root,'rust/artifacts',`desktop-${locale}`)
+ const localized=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--desktop-smoke',path.join(folder,'preview.json')],{
+  cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,
+  env:{...process.env,FUZE_SMOKE_LOCALE:locale,FUZE_DESKTOP_PREVIEW:prefix+'.png',FUZE_CHAMPION_PREVIEW:prefix+'-champions.png',FUZE_SETTINGS_PREVIEW:prefix+'-settings.png',FUZE_RECORDS_PREVIEW:prefix+'-records.png'}
+ })
+ let value;try{value=JSON.parse(localized.stdout?.trim())}catch{}
+ if(localized.status!==0||!value?.desktop_ready||!value.pause_resume_exit||!value.preview_rendered||!value.champion_preview||value.game_access!==false)throw new Error(`Native desktop locale failed: ${locale}`)
+ report.locales.push(locale)
+}
 await writeFile(path.join(root,'rust/artifacts/desktop-validation.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify(report))

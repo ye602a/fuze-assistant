@@ -32,6 +32,9 @@ pub struct Catalog {
     version: String,
 }
 impl Catalog {
+    pub fn identity(&self) -> &str {
+        &self.version
+    }
     pub fn load(roots: &[fuze_data::Root], locale: fuze_data::Locale) -> Result<Self> {
         let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Champions)?;
         Self::parse(
@@ -115,9 +118,10 @@ impl Catalog {
     }
 }
 fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(Some(0)).collect()
+    crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
 struct State {
+    placement: crate::window_memory::Memory,
     view: Option<View>,
     dismissed: bool,
     selected: u32,
@@ -145,6 +149,7 @@ impl Window {
             };
             RegisterClassW(&wc);
             let mut state = Box::new(State {
+                placement: crate::window_memory::Memory::new("champions", offline),
                 view: None,
                 dismissed: false,
                 selected: 0,
@@ -188,6 +193,7 @@ impl Window {
                     SWP_NOACTIVATE | SWP_NOZORDER,
                 );
             }
+            state.placement.restore(hwnd);
             Ok(Self {
                 hwnd,
                 state,
@@ -329,6 +335,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
     if p.is_null() {
         return DefWindowProcW(hwnd, msg, w, l);
     }
+    if let Some(v) = (*p).view.as_ref() {
+        crate::i18n::set(v.version.split('@').next().unwrap_or("zh-CN"));
+    }
     match msg {
         WM_TIMER if w == 2 => {
             if let Some(next) = (*p).assets.changed(&(*p).reply) {
@@ -349,16 +358,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 if let Some(detail) = &(*p).reply.detail {
                     let tab =
                         ((px - right - x(12)) / ((r.right - right - x(28)) / 4).max(1)).min(3);
-                    let prefix = match tab {
-                        1 => "海克斯强化",
-                        2 => "1–18",
-                        3 => "符文页",
-                        _ => "路线",
+                    let prefixes = match tab {
+                        1 => ["海克斯强化", "海克斯增幅", "Augments ·"],
+                        2 => ["1–18", "1–18", "1–18"],
+                        3 => ["符文页", "符文頁", "Runes:"],
+                        _ => ["路线", "路線", "Build "],
                     };
                     (*p).scroll = detail
                         .lines
                         .iter()
-                        .position(|l| l.text.starts_with(prefix))
+                        .position(|l| prefixes.iter().any(|prefix| l.text.starts_with(prefix)))
                         .unwrap_or(0);
                     InvalidateRect(hwnd, null(), 0);
                 }
@@ -403,7 +412,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             InvalidateRect(hwnd, null(), 0);
             0
         }
+        WM_EXITSIZEMOVE => {
+            (*p).placement.remember(hwnd);
+            0
+        }
+        WM_DISPLAYCHANGE => {
+            (*p).placement.recover(hwnd);
+            (*p).placement.remember(hwnd);
+            0
+        }
         WM_CLOSE => {
+            (*p).placement.remember(hwnd);
             (*p).dismissed = true;
             (*p).assets.request(None);
             KillTimer(hwnd, 2);
@@ -639,11 +658,17 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
         let mut index = state.scroll;
         while let Some(line) = detail.lines.get(index) {
             let width = (full_right - left - x(16)).max(1);
-            let chars = (width / x(14).max(1)).max(12) as usize;
-            let text: Vec<char> = line.text.chars().collect();
+            let chars = (width
+                / x(if v.version.starts_with("en-US@") {
+                    8
+                } else {
+                    14
+                })
+                .max(1))
+            .max(12) as usize;
+            let wrapped = wrap(&line.text, chars);
             let icons = !line.icons.is_empty();
-            let height =
-                (text.len().div_ceil(chars).min(3) as i32) * 23 + if icons { 37 } else { 7 };
+            let height = (wrapped.len() as i32) * 23 + if icons { 37 } else { 7 };
             if top + x(height) > r.bottom - x(44) {
                 break;
             }
@@ -653,9 +678,9 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
                 }
                 top += x(30);
             }
-            for chunk in text.chunks(chars).take(3) {
+            for chunk in wrapped {
                 label(
-                    &chunk.iter().collect::<String>(),
+                    &chunk,
                     left,
                     top,
                     full_right - x(16),
@@ -670,7 +695,8 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
         }
         label(
             &format!(
-                "滚轮浏览详情 · {} / {}",
+                "{} · {} / {}",
+                crate::i18n::text("滚轮浏览详情"),
                 state.scroll + 1,
                 detail.lines.len()
             ),
@@ -699,7 +725,11 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
         );
     }
     label(
-        &format!("数据 {} · 仅供参考，请在游戏中选择", v.version),
+        &format!(
+            "{} · {}",
+            v.version,
+            crate::i18n::text("仅供参考，请在游戏中选择")
+        ),
         x(20),
         r.bottom - x(37),
         r.right - x(20),
@@ -709,9 +739,36 @@ unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
     );
 }
 fn rate(value: Option<f64>, name: &str) -> String {
+    let name = crate::i18n::text(name);
     value
         .map(|v| format!("{name} {:.1}%", v * 100.0))
         .unwrap_or(format!("{name} --"))
+}
+fn wrap(text: &str, columns: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut start = 0;
+    let mut lines = Vec::new();
+    while start < chars.len() && lines.len() < 3 {
+        let mut end = (start + columns).min(chars.len());
+        if end < chars.len() {
+            if let Some(space) = (start + columns / 2..end)
+                .rev()
+                .find(|i| chars[*i].is_whitespace())
+            {
+                end = space;
+            }
+        }
+        let mut line: String = chars[start..end].iter().collect();
+        if lines.len() == 2 && end < chars.len() {
+            line.push('…');
+        }
+        lines.push(line);
+        start = end;
+        while start < chars.len() && chars[start].is_whitespace() {
+            start += 1;
+        }
+    }
+    lines
 }
 #[cfg(test)]
 mod tests {

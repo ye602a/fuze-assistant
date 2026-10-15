@@ -19,8 +19,13 @@ pub mod controller;
 pub mod data_update;
 #[cfg(windows)]
 pub mod desktop;
+pub mod i18n;
 #[cfg(windows)]
 mod job;
+#[cfg(windows)]
+pub mod legacy_preferences;
+#[cfg(windows)]
+pub mod local_records;
 #[cfg(windows)]
 pub mod managed_install;
 #[cfg(windows)]
@@ -40,6 +45,8 @@ pub mod update_io;
 pub mod update_progress;
 #[cfg(windows)]
 pub mod update_validation;
+#[cfg(windows)]
+pub mod window_memory;
 pub struct Worker {
     child: Child,
     send: Option<SyncSender<Request>>,

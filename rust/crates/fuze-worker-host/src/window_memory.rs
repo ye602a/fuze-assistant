@@ -1,0 +1,233 @@
+//! Own-window geometry only. Startup read, coalesced background writes, no per-frame IO.
+use crate::Result;
+use serde::{Deserialize, Serialize};
+use std::{
+    mem::{size_of, zeroed},
+    path::PathBuf,
+    ptr::null_mut,
+    sync::{Arc, Condvar, Mutex},
+    thread,
+};
+use windows_sys::Win32::{
+    Foundation::*,
+    Graphics::Gdi::*,
+    UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::*},
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Geometry {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    dpi: u32,
+}
+impl Geometry {
+    fn valid(self) -> bool {
+        self.x.abs_diff(0) <= 100_000
+            && self.y.abs_diff(0) <= 100_000
+            && (100..=32_768).contains(&self.width)
+            && (100..=32_768).contains(&self.height)
+            && (48..=768).contains(&self.dpi)
+    }
+    fn fit(self, work: RECT, dpi: u32) -> Self {
+        let dpi = dpi.clamp(48, 768);
+        let width = (self.width as i64 * dpi as i64 / self.dpi.max(1) as i64)
+            .clamp(1, (work.right - work.left).max(1) as i64) as i32;
+        let height = (self.height as i64 * dpi as i64 / self.dpi.max(1) as i64)
+            .clamp(1, (work.bottom - work.top).max(1) as i64) as i32;
+        Self {
+            x: self.x.clamp(work.left, work.right - width),
+            y: self.y.clamp(work.top, work.bottom - height),
+            width,
+            height,
+            dpi,
+        }
+    }
+}
+#[derive(Default)]
+struct Pending {
+    next: Option<Geometry>,
+    stop: bool,
+}
+pub struct Memory {
+    initial: Option<Geometry>,
+    last: Option<Geometry>,
+    shared: Arc<(Mutex<Pending>, Condvar)>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+impl Memory {
+    pub fn new(name: &str, offline: bool) -> Self {
+        let path = if offline {
+            None
+        } else {
+            std::env::var_os("LOCALAPPDATA").map(|p| {
+                PathBuf::from(p)
+                    .join("FuzeRustPreview")
+                    .join(format!("window-{name}.json"))
+            })
+        };
+        let initial = path
+            .as_ref()
+            .and_then(|p| crate::update_channel::bounded(p, 1024).ok())
+            .and_then(|b| serde_json::from_slice::<Geometry>(&b).ok())
+            .filter(|v| v.valid());
+        let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
+        let worker = path.and_then(|path| {
+            let shared = shared.clone();
+            thread::Builder::new()
+                .name("fuze-window-save".into())
+                .spawn(move || loop {
+                    let (lock, wake) = &*shared;
+                    let Ok(mut state) = lock.lock() else { break };
+                    while state.next.is_none() && !state.stop {
+                        state = match wake.wait(state) {
+                            Ok(s) => s,
+                            Err(_) => return,
+                        };
+                    }
+                    let next = state.next.take();
+                    let stop = state.stop;
+                    drop(state);
+                    if let Some(next) = next {
+                        let _ = save(&path, next);
+                    }
+                    if stop {
+                        break;
+                    }
+                })
+                .ok()
+        });
+        Self {
+            initial,
+            last: initial,
+            shared,
+            worker,
+        }
+    }
+    pub unsafe fn restore(&self, hwnd: HWND) {
+        if let Some(g) = self.initial {
+            let r = RECT {
+                left: g.x,
+                top: g.y,
+                right: g.x + g.width,
+                bottom: g.y + g.height,
+            };
+            let mut info: MONITORINFO = zeroed();
+            info.cbSize = size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &mut info) != 0 {
+                // Move to the intended monitor first; then use its effective window DPI.
+                let first = g.fit(info.rcWork, g.dpi);
+                position(hwnd, first);
+                position(hwnd, g.fit(info.rcWork, GetDpiForWindow(hwnd).max(96)));
+            }
+        } else {
+            self.recover(hwnd);
+        }
+    }
+    pub unsafe fn recover(&self, hwnd: HWND) {
+        if IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
+            return;
+        }
+        if let Some(g) = read_window(hwnd) {
+            let mut info: MONITORINFO = zeroed();
+            info.cbSize = size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info) != 0 {
+                position(hwnd, g.fit(info.rcWork, g.dpi));
+            }
+        }
+    }
+    pub unsafe fn remember(&mut self, hwnd: HWND) {
+        if self.worker.is_none() || IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
+            return;
+        }
+        let next = read_window(hwnd);
+        if next.is_none() || self.last == next {
+            return;
+        }
+        if let Ok(mut p) = self.shared.0.lock() {
+            p.next = next;
+            self.last = next;
+            self.shared.1.notify_one();
+        }
+    }
+}
+impl Drop for Memory {
+    fn drop(&mut self) {
+        if let Ok(mut p) = self.shared.0.lock() {
+            p.stop = true;
+            self.shared.1.notify_one();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+unsafe fn read_window(hwnd: HWND) -> Option<Geometry> {
+    let mut r: RECT = zeroed();
+    if GetWindowRect(hwnd, &mut r) == 0 {
+        return None;
+    }
+    let g = Geometry {
+        x: r.left,
+        y: r.top,
+        width: r.right - r.left,
+        height: r.bottom - r.top,
+        dpi: GetDpiForWindow(hwnd).max(96),
+    };
+    g.valid().then_some(g)
+}
+unsafe fn position(hwnd: HWND, g: Geometry) {
+    SetWindowPos(
+        hwnd,
+        null_mut(),
+        g.x,
+        g.y,
+        g.width,
+        g.height,
+        SWP_NOACTIVATE | SWP_NOZORDER,
+    );
+}
+fn save(path: &std::path::Path, g: Geometry) -> Result<()> {
+    crate::preferences::save_json(path, &g)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn removed_monitor_negative_origin_and_dpi_changes() {
+        let work = RECT {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1040,
+        };
+        let g = Geometry {
+            x: 4000,
+            y: 2000,
+            width: 1200,
+            height: 800,
+            dpi: 96,
+        }
+        .fit(work, 144);
+        assert_eq!((g.x, g.y, g.width, g.height), (-1800, 0, 1800, 1040));
+        let g = Geometry {
+            x: -1800,
+            y: 40,
+            width: 900,
+            height: 600,
+            dpi: 144,
+        }
+        .fit(work, 96);
+        assert_eq!((g.x, g.y, g.width, g.height), (-1800, 40, 600, 400));
+        assert!(!Geometry {
+            x: i32::MIN,
+            y: 0,
+            width: 900,
+            height: 600,
+            dpi: 96
+        }
+        .valid());
+    }
+}

@@ -19,6 +19,7 @@ pub struct Preferences {
     pub icon_downloads: bool,
     pub pause_hotkey: bool,
     pub manual_directory: String,
+    pub local_records: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -33,6 +34,7 @@ impl Default for Preferences {
             icon_downloads: true,
             pause_hotkey: false,
             manual_directory: String::new(),
+            local_records: false,
         }
     }
 }
@@ -86,6 +88,7 @@ pub fn read(path: &Path) -> Result<Preferences> {
     Ok(value)
 }
 pub fn save(path: &Path, value: &Preferences) -> Result<()> {
+    value.validate()?;
     if !value.manual_directory.is_empty()
         && !Path::new(&value.manual_directory)
             .join("LeagueClient.exe")
@@ -93,11 +96,14 @@ pub fn save(path: &Path, value: &Preferences) -> Result<()> {
     {
         return Err("preferences-directory-client-missing");
     }
+    save_json(path, value)
+}
+/// Atomic writes shared by isolated preferences, geometry and reduced local records.
+pub(crate) fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
-    value.validate()?;
     let parent = path.parent().ok_or("preferences-root")?;
     safe_dir(parent)?;
     let tmp = parent.join(format!(
