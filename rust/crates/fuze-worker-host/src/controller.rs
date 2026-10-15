@@ -311,7 +311,10 @@ impl Config {
             Duration::from_secs(30),
             Some(Arc::new(catalog)),
         )?;
-        let pipeline = Pipeline::managed(worker, &data, champion)?;
+        let mut pipeline = Pipeline::managed(worker, &data, champion)?;
+        if self.augment_overlay {
+            pipeline.art = crate::overlay_art::Art::new(&data, false).ok();
+        }
         pipeline
             .overlay
             .locale(self.locale.unwrap_or(fuze_data::Locale::ZhCn).code())?;

@@ -1,4 +1,4 @@
-# Rust migration status - 2026-10-15
+# Rust migration status - 2026-10-16
 
 This is the current checklist. Earlier milestone documents are historical evidence, not a second list of current blockers. The stable application remains Electron/Vue. Rust is an isolated development preview and the repository remains private.
 
@@ -7,8 +7,8 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Capture / OCR / three-card overlay | Native WGC host, persistent worker, exact title reuse, CPU/DirectML recovery, narrow three-title shard classification, bounded reroll retention, loading prewarm, partial slots, public statistics and stale-result rejection | Full popup geometry/absence proof, real shard/forge fixtures, Tencent sessions and target GPU timing |
 | Client integration | Process-first discovery, command-line fallback, WebSocket/reconnect, phase/hero changes and automatic language | Real client reconnect and region-specific acceptance |
 | Scheduling | M11 connects the actual local level endpoint; expiry, cancellation generations and ordinary fallback | Gameplay timing; levels never prove actual claims |
-| Main UI / tray / settings | Three languages, pause/exit, tray, safe defaults, legacy import, directory fallback, OCR/backend and module status | Final player interaction review and optional legacy controls |
-| Champion view | Five-player team, ranked available heroes, details, items and bounded public icon cache | Complete rune-page source and optional write actions are absent |
+| Main UI / tray / settings | Restored Chinese sidebar/status/four-module/three-card structure; three languages, pause/exit, tray, safe defaults, legacy import, directory fallback, OCR/backend and module status | Final player interaction review and optional legacy controls |
+| Champion view | Restored vertical team/bench/hero/statistics/two-tab popup; details, items and bounded public icon cache, scrolled hit coordinates and compact layout | Rune-page source and optional write actions are absent; original rarity filters, hover descriptions and guide links remain separate UI work |
 | Window continuity | Main, champion and augment geometry; monitor clamping and health handshake | Physical multi-monitor/DPI/fullscreen acceptance |
 | Data / cleanup | Local-first locale isolation, explicit pause-only transactional update, bounded retirement preserving current/previous/unknown files | Background refresh parity and long-term usage; interrupted staging is preserved |
 | History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON / local PNG export | External SGP with unambiguous region; player acceptance; observation is not a claim |
@@ -19,6 +19,8 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Secondary augment panel | M14 explicit tray entry, active supported champion, local overall rates and bounded icon cache; hidden on pause/disconnect | Actual gameplay/fullscreen acceptance; no inferred acquisition stage |
 
 ## Latest changes
+
+- [Chinese workbench restoration](../../../rust/docs/WORKBENCH_RESTORATION.md) and [champion / in-game popup restoration](../../../rust/docs/POPUP_RESTORATION.md): actual hidden Win32 renders compared with retained Vue components, existing public artwork, bounded nonblocking three-card image delivery. PR #46's CI-only WGC failure is not declared resolved by local visual checks.
 
 - [M17: title classification, reroll retention and loading prewarm](M17_SELECTION_PREWARM.md)
 

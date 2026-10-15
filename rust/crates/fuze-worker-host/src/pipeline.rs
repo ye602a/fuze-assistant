@@ -67,7 +67,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
-            art: crate::overlay_art::Art::new(data, !persist).ok(),
+            art: None,
             retention: Default::default(),
             capture_state: "waiting",
             session,

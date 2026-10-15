@@ -2,16 +2,16 @@
 
 完整状态见 [替换进度](../docs/development/rust/PROGRESS.md)。正式入口仍为 Electron/Vue；Rust 模块及测试工具不被稳定安装包引用。
 
-最新进度：[M2b 持久 OCR worker](../docs/development/rust/M2B.md)、[M2c 故障恢复](../docs/development/rust/M2C.md)、[M3a 本地数据](../docs/development/rust/M3A.md)、[M4a 只读 LCU](../docs/development/rust/M4A.md)。WGC 可见自有窗口测试仅在 CI 显式运行，不能当作游戏验收；退出问题及防护见 [WGC shutdown](../docs/development/rust/WGC_SHUTDOWN.md)。
+最新界面进度：[中文工作台复原](docs/WORKBENCH_RESTORATION.md)、[中文选人与局内浮窗复原](docs/POPUP_RESTORATION.md)。识别链路见 [M17 分类、刷新保留和加载预热](../docs/development/rust/M17_SELECTION_PREWARM.md)。WGC 可见自有窗口测试仅在 CI 显式运行，不能当作游戏验收；退出问题及防护见 [WGC shutdown](../docs/development/rust/WGC_SHUTDOWN.md)。
 
-目标是最终全 Rust 应用，本目录包含 M0、M1a 与 M1b 隔离原型。先读 [迁移清单](../docs/development/rust/PLAN.md)、[接口契约](../docs/development/rust/CONTRACT.md)、[验收标准](../docs/development/rust/ACCEPTANCE.md)、[M0 验证结果](../docs/development/rust/RESULTS.md)、[M1a 后端和原始画面验证](../docs/development/rust/M1A.md) 与 [M1b 显卡、固定尺寸和原生采集](../docs/development/rust/M1B.md)。
+目标是最终全 Rust 应用。本目录已包含独立宿主、原生界面、更新和安装维护代码；早期原型文档是历史记录，当前缺口以替换进度表为准。设计边界见 [迁移清单](../docs/development/rust/PLAN.md)、[接口契约](../docs/development/rust/CONTRACT.md) 和 [验收标准](../docs/development/rust/ACCEPTANCE.md)。
 
 - fuze-contract：三槽位、未知轮次、会话/版本/序号接纳规则。
 - fuze-runtime：会话失效、等级节能、单在途任务与最新帧决策。
-- fuze-worker-host：持久子进程、有限二进制像素管道、一次 CPU 恢复和 Windows Job。离线工具串联标题回读/OCR/Session；不是完整 UI 事件循环。
-- fuze-data：明确根目录的只读准备、语言隔离、不可变快照激活。无远程下载或指针写入。
-- fuze-lcu：只读 loopback GET 与凭据/阶段解析。没有自动入口，未连接真实客户端，不含进程发现/WebSocket 连接。
-- fuze-capture：DXGI 适配器映射、生成纹理的三 ROI 回读、受限自有隐藏窗口 WGC 探针；本机 WGC 取帧尚未验证，不是游戏截图服务。
+- fuze-worker-host：持久子进程、有限二进制像素管道、一次 CPU 恢复和 Windows Job；生产预览宿主串联阶段监听、游戏窗口捕获、OCR、推荐、原生主界面/托盘/设置/战绩、数据更新及安装维护。显式离线 smoke 入口与生产入口隔离。
+- fuze-data：明确根目录的只读准备、语言隔离、不可变快照激活。事务式下载、更新和有界清理由宿主模块承担。
+- fuze-lcu：只读 loopback 接口、进程与命令行凭据发现、WebSocket、重连、阶段/英雄变化、账号隔离的历史解析。凭据只在进程内使用，不输出身份或认证 URL。
+- fuze-capture：DXGI 适配器映射、原生 WGC 生命周期、三标题 ROI 回读与异常恢复；CI 自有窗口证据不等于本机腾讯对局实测。
 - fuze-ocr：真实 ONNX CPU / DirectML 标题识别、BGRA ROI、CTC 解码、严格名称匹配和一次性 CPU 回退。固定单行区域限制明确，不是完整截图识别替代品。
 - fuze-native-overlay：纯 Rust Win32/GDI 绘制。默认无可见窗口；隐藏 smoke 只绘制与采集自己创建的窗口，报告 PrintWindow / WM_PRINTCLIENT 的实际结果。--show 由用户主动运行演示，不抢焦点，无常驻刷新计时器。未自动在游戏上方验证。
 
