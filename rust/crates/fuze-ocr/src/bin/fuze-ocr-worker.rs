@@ -60,6 +60,7 @@ fn run() -> fuze_ocr::Result<()> {
         },
     )?;
     let mut last = None;
+    let mut reuse = fuze_ocr::reuse::TitleReuse::default();
     while let Some(request) = Request::read(&mut input)? {
         let id = request.id;
         if last.is_some_and(|old: wire::Identity| {
@@ -68,19 +69,35 @@ fn run() -> fuze_ocr::Result<()> {
             return Err("worker-stale-request".into());
         }
         last = Some(id);
-        let atlas = request.atlas()?;
-        let result = engine.run("gpu_inference_failed", |e| e.recognize_atlas(&atlas));
-        match result {
-            Ok(result) => wire::write_reply(
+        if let Some(slots) = reuse.get(&request) {
+            wire::write_reply(
                 &mut out,
                 &Reply::Result {
                     id,
-                    slots: result.slots,
-                    ocr_ms: result.elapsed_ms,
+                    slots,
+                    ocr_ms: 0.0,
                     backend: backend(&engine),
                     fallback_count: engine.status().fallback_count,
                 },
-            )?,
+            )?;
+            continue;
+        }
+        let atlas = request.atlas()?;
+        let result = engine.run("gpu_inference_failed", |e| e.recognize_atlas(&atlas));
+        match result {
+            Ok(result) => {
+                reuse.remember(request, result.slots.clone());
+                wire::write_reply(
+                    &mut out,
+                    &Reply::Result {
+                        id,
+                        slots: result.slots,
+                        ocr_ms: result.elapsed_ms,
+                        backend: backend(&engine),
+                        fallback_count: engine.status().fallback_count,
+                    },
+                )?;
+            }
             Err(_) => {
                 wire::write_reply(&mut out, &Reply::Failed { id })?;
                 return Err("worker-inference-failed".into());

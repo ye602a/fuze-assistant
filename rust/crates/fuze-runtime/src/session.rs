@@ -185,7 +185,7 @@ impl Session {
         false
     }
     fn note_failure(&mut self, now: u64) {
-        // At most three failed jobs per context; no perpetual create/crash/recreate loop.
+        // At most three consecutive failed jobs per context; success ends a failure streak.
         self.failures = self.failures.saturating_add(1);
         let delay = match self.failures {
             1 => 500,
@@ -277,6 +277,8 @@ impl Session {
             return None;
         }
         self.gate.observe(selection, now);
+        self.failures = 0;
+        self.retry_at = 0;
         Some(snapshot)
     }
 }
@@ -284,6 +286,27 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_success_resets_intermittent_failures_but_consecutive_failures_still_stop() {
+        let mut s = Session::new("zh-CN@v1".into()).unwrap();
+        s.update_phase(Phase::InProgress).unwrap();
+        for round in 0..4 {
+            let now = round * 5000;
+            let failed = s.begin(key(round * 2 + 1), now).unwrap();
+            assert!(s.fail(failed, now));
+            let recovered = s.begin(key(round * 2 + 2), now + 1500).unwrap();
+            assert!(s
+                .finish(recovered, blank(), Selection::Unknown, now + 1501)
+                .is_some());
+            assert!(!s.faulted());
+        }
+        for (sequence, now) in [(9, 20000), (10, 22000), (11, 25000)] {
+            let failed = s.begin(key(sequence), now).unwrap();
+            assert!(s.fail(failed, now));
+        }
+        assert!(s.faulted());
+        assert!(s.wake_at(40000).is_none());
+    }
     #[test]
     fn locale_is_part_of_context_and_unrecognized_phase_cannot_enable_capture() {
         assert!(Session::new("v1".into()).is_err());

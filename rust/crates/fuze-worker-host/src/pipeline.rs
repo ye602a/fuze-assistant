@@ -98,7 +98,9 @@ impl Pipeline {
         if self.closed {
             None
         } else {
-            self.session.wake_at(self.now())
+            self.session
+                .wake_at(self.now())
+                .map(|at| at.max(self.next_capture_at))
         }
     }
     pub fn clear_level(&mut self) {
@@ -216,10 +218,15 @@ impl Pipeline {
             self.session.fail(ticket, self.now());
             return Err("worker-result");
         };
-        let Some(snapshot) = self
-            .session
-            .finish(ticket, slots, Selection::Unknown, self.now())
-        else {
+        let selection = if slots
+            .iter()
+            .any(|slot| matches!(slot, fuze_contract::Slot::Known { .. }))
+        {
+            Selection::Candidate
+        } else {
+            Selection::Unknown
+        };
+        let Some(snapshot) = self.session.finish(ticket, slots, selection, self.now()) else {
             return Ok(None);
         };
         if !self.overlay.update(snapshot.clone())? {

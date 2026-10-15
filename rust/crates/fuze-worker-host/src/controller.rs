@@ -369,7 +369,13 @@ impl Controller {
         if self.pipeline.is_none() || now < self.retry.next {
             Duration::from_millis(1000)
         } else {
-            Duration::from_millis(100)
+            // Respect the OCR gate, while checking LCU phase/level changes at least once a second.
+            let delay = self
+                .pipeline
+                .as_ref()
+                .and_then(|p| p.wake_at().map(|at| at.saturating_sub(p.now())))
+                .unwrap_or(1000);
+            Duration::from_millis(delay.clamp(20, 1000))
         }
     }
     pub fn new(config: Config) -> Self {

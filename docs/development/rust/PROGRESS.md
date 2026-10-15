@@ -4,13 +4,13 @@ This is the current checklist. Earlier milestone documents are historical eviden
 
 | Area | Implemented | Remaining acceptance or development |
 | --- | --- | --- |
-| Capture / OCR / three-card overlay | Native WGC host, persistent worker, CPU/DirectML paths, recovery, partial slots, public statistics and stale-result rejection | Real Tencent games, repeated sessions and GPU timing on target machines |
+| Capture / OCR / three-card overlay | Native WGC host, persistent worker, exact title reuse, CPU/DirectML recovery, partial slots, public statistics and stale-result rejection | Popup/shard classifier, reroll retention, loading-phase prewarm; real Tencent sessions and target GPU timing |
 | Client integration | Process-first discovery, command-line fallback, WebSocket/reconnect, phase/hero changes and automatic language | Real client reconnect and region-specific acceptance |
 | Scheduling | M11 connects the actual local level endpoint; expiry, cancellation generations and ordinary fallback | Gameplay timing; levels never prove actual claims |
 | Main UI / tray / settings | Three languages, pause/exit, tray, safe defaults, legacy import, directory fallback, OCR/backend and module status | Final player interaction review and optional legacy controls |
 | Champion view | Five-player team, ranked available heroes, details, items and bounded public icon cache | Complete rune-page source and optional write actions are absent |
 | Window continuity | Main, champion and augment geometry; monitor clamping and health handshake | Physical multi-monitor/DPI/fullscreen acceptance |
-| Data / cleanup | Local-first locale isolation, transactional update, bounded retirement preserving current/previous/unknown files | Long-term real usage; interrupted staging is preserved |
+| Data / cleanup | Local-first locale isolation, explicit pause-only transactional update, bounded retirement preserving current/previous/unknown files | Background refresh parity and long-term usage; interrupted staging is preserved |
 | History / records | Account isolation, cached failure fallback, match detail/icons, selective old record import, explicit reduced JSON / local PNG export | External SGP with unambiguous region; player acceptance; observation is not a claim |
 | Updates | Private credentials, differential reconstruction/full fallback, managed version switch and rollback | Publisher signing and production channel policy |
 | Local installation | M15 per-user Windows Apps registration and owned maintenance refresh; M14 shortcuts / conservative uninstall; M12 offline installation | Signed installer/bootstrap, runtime prerequisites and end-to-end player acceptance |
@@ -19,6 +19,8 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Secondary augment panel | M14 explicit tray entry, active supported champion, local overall rates and bounded icon cache; hidden on pause/disconnect | Actual gameplay/fullscreen acceptance; no inferred acquisition stage |
 
 ## Latest changes
+
+- [M16: complete flow audit against Electron and scheduling / inference fixes](M16_FLOW_AUDIT.md)
 
 - [M15: Windows Apps registration, share icons and test-package readiness](M15.md)
 

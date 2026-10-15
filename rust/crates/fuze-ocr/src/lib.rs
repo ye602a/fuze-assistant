@@ -11,6 +11,7 @@ use std::{collections::HashMap, path::Path, time::Instant};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub mod backend;
 mod metrics;
+pub mod reuse;
 use backend::Backend;
 pub struct PreparedTitle {
     pub width: usize,

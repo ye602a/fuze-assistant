@@ -264,7 +264,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
         } else {
             Some(reader.upload(&bytes, image.width(), image.height())?)
         };
-        for _ in 0..3 {
+        for repeat in 0..3 {
             pipeline.level(3);
             if let Some(wake) = pipeline.wake_at() {
                 std::thread::sleep(Duration::from_millis(wake.saturating_sub(pipeline.now())));
@@ -309,6 +309,9 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             }
             if pipeline.overlay.update(delivery.snapshot.clone())? {
                 return Err("duplicate-accepted".into());
+            }
+            if !wgc && repeat > 0 && delivery.ocr_ms != 0.0 {
+                return Err("unchanged-title-inferred-again".into());
             }
             reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"roi_bytes":delivery.roi_bytes,"ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"matched":true}));
             last = Some(delivery.snapshot);

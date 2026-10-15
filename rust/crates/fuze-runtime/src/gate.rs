@@ -1,6 +1,8 @@
 //! Scheduling hints are deliberately separate from proof of a formal reward claim.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Selection {
+    // OCR matched one or more titles; this is not proof of the popup type or a claim.
+    Candidate,
     Augment,
     StatShard,
     Unknown,
@@ -50,6 +52,18 @@ impl LevelGate {
         self.level = Some((level, now));
     }
     pub fn observe(&mut self, selection: Selection, now: u64) {
+        if selection == Selection::Unknown {
+            // Missing titles must neither start a fast window nor consume a reward window.
+            self.observed = None;
+            self.last_absent = false;
+            if self.visible {
+                let since = *self.absent_since.get_or_insert(now);
+                if now.saturating_sub(since) >= 6000 {
+                    self.visible = false;
+                }
+            }
+            return;
+        }
         self.last_absent = selection == Selection::Absent;
         if selection != Selection::Absent {
             self.visible = true;
@@ -146,6 +160,26 @@ impl LevelGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unreadable_frames_do_not_enable_fast_capture_or_consume_a_formal_window() {
+        let mut gate = LevelGate::default();
+        gate.update_level(1, 0);
+        gate.observe(Selection::Unknown, 0);
+        assert_eq!(gate.decision(0).mode, Mode::Saving);
+        gate.clear_level();
+        gate.observe(Selection::Unknown, 1);
+        assert_eq!(gate.decision(1).mode, Mode::Fallback);
+        gate.update_level(3, 2);
+        gate.observe(Selection::Candidate, 2);
+        assert_eq!(gate.decision(2).mode, Mode::Selection);
+        gate.observe(Selection::Unknown, 3);
+        assert_eq!(gate.decision(100).mode, Mode::Selection);
+        gate.observe(Selection::Unknown, 6003);
+        assert_eq!(gate.decision(6003).mode, Mode::Pending);
+        assert_eq!(gate.finished_windows, 0);
+        gate.observe(Selection::Candidate, 6004);
+        assert_eq!(gate.decision(6004).mode, Mode::Selection);
+    }
     #[test]
     fn lost_telemetry_returns_to_watchdog_without_changing_selection() {
         let mut g = LevelGate::default();
