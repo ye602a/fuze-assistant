@@ -2253,6 +2253,9 @@ pub fn startup_error(error: &str) {
     }
 }
 pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
+    // Older launchers only understand READY_1. Upgrade health is negotiated, not forced.
+    let health_v2 =
+        managed && (smoke || std::env::var("FUZE_MANAGED_HEALTH_PROTOCOL").as_deref() == Ok("2"));
     struct Instance(HANDLE);
     impl Drop for Instance {
         fn drop(&mut self) {
@@ -2471,7 +2474,14 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         if managed {
             use std::io::Write;
-            println!("FUZE_DESKTOP_READY_2");
+            println!(
+                "{}",
+                if health_v2 {
+                    "FUZE_DESKTOP_READY_2"
+                } else {
+                    "FUZE_DESKTOP_READY_1"
+                }
+            );
             let _ = std::io::stdout().flush();
         }
         let health_started = Instant::now();
@@ -2486,7 +2496,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            if managed
+            if health_v2
                 && !health_sent
                 && health_started.elapsed() >= Duration::from_secs(3)
                 && !worker.is_finished()
@@ -2498,7 +2508,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 health_sent = true;
             }
         };
-        if managed && !health_sent {
+        if health_v2 && !health_sent {
             use std::io::Write;
             println!("FUZE_DESKTOP_CLOSED_2");
             let _ = std::io::stdout().flush();

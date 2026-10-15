@@ -302,6 +302,7 @@ pub fn check_bundle(directory: &Path) -> Result<()> {
         .arg("--check-bundle")
         .arg(directory.join("preview.json"))
         .current_dir(directory)
+        .env("FUZE_MANAGED_HEALTH_PROTOCOL", "2")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
