@@ -328,6 +328,7 @@ impl Retry {
 }
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PipelineStatus {
+    pub recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
     pub capture: &'static str,
     pub backend: Option<fuze_contract::wire::ActiveBackend>,
     pub dataset: Option<String>,
@@ -336,6 +337,7 @@ pub struct PipelineStatus {
     pub level: Option<u8>,
 }
 pub struct Controller {
+    recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
     level_reader: Option<crate::live_level::Reader>,
     records: crate::local_records::Journal,
     last_frame: Option<Instant>,
@@ -359,6 +361,7 @@ impl Controller {
     }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
+            recent: self.recent.clone(),
             capture: self
                 .pipeline
                 .as_ref()
@@ -396,6 +399,7 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            recent: None,
             level_reader: None,
             records: Default::default(),
             config,
@@ -408,6 +412,7 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
+        self.recent = None;
         if let Some(reader) = &self.level_reader {
             reader.enable(false);
         }
@@ -513,6 +518,15 @@ impl Controller {
                 pipeline.clear_level();
             }
             if let Some(delivery) = pipeline.tick_wgc()? {
+                if delivery.title_kind == fuze_contract::wire::TitleKind::Candidate
+                    && delivery
+                        .snapshot
+                        .slots
+                        .iter()
+                        .any(|s| matches!(s, fuze_contract::Slot::Known { .. }))
+                {
+                    self.recent = Some(std::sync::Arc::new(delivery.snapshot.slots.clone()));
+                }
                 self.records
                     .observe(context.champion.unwrap_or(0), &delivery.snapshot.slots);
                 pipeline

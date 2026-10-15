@@ -26,6 +26,8 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::{HiDpi::*, Shell::*, WindowsAndMessaging::*},
 };
+#[path = "desktop_workbench.rs"]
+mod workbench;
 const PAUSED: u8 = 0;
 const RUNNING: u8 = 1;
 const EXIT: u8 = 2;
@@ -581,7 +583,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     // Only change interface language after that locale's catalogue is ready.
                     if let Some(c) = champion_catalog.as_ref() {
                         if let Some(locale) = c.identity().split('@').next() {
-                            s.ui_locale = locale.into();
+                            if preferences.locale != "auto" {
+                                s.ui_locale = locale.into();
+                            }
                         }
                         s.available = Some(c.identity().into());
                     }
@@ -632,7 +636,7 @@ unsafe fn app_icon() -> Option<HICON> {
     let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
     for i in 0..count {
         let e = bytes.get(6 + i * 16..22 + i * 16)?;
-        if e[0] != 32 {
+        if e[0] != 64 {
             continue;
         }
         let length = u32::from_le_bytes(e[8..12].try_into().ok()?) as usize;
@@ -643,8 +647,8 @@ unsafe fn app_icon() -> Option<HICON> {
             length as u32,
             1,
             0x30000,
-            32,
-            32,
+            64,
+            64,
             LR_DEFAULTCOLOR,
         );
         if !icon.is_null() {
@@ -681,6 +685,7 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
     draw(hwnd, memory, ui);
     // Native hidden-window render; never captures the desktop or another application.
     for id in [
+        workbench::HOME,
         TOGGLE,
         UPDATE_DATA,
         UPDATE_APP,
@@ -837,6 +842,8 @@ fn explain(error: Option<&str>) -> &'static str {
     }
 }
 struct Ui {
+    layout_page: std::cell::Cell<u8>,
+    scroll: i32,
     health_wait: Option<Instant>,
     journal: bool,
     journal_offset: usize,
@@ -1076,19 +1083,20 @@ unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
         format!(
             "{}  · {}",
             match u.draft.backend.as_str() {
-                "cpu" => "CPU",
-                "dml" => "DirectML",
+                "cpu" => crate::i18n::text("处理器"),
+                "dml" => crate::i18n::text("显卡加速"),
                 _ => crate::i18n::text("自动"),
             },
             crate::i18n::text("点击切换")
         ),
         format!(
             "{}  · {}",
-            if u.draft.locale == "auto" {
-                crate::i18n::text("跟随客户端")
-            } else {
-                &u.draft.locale
-            },
+            crate::i18n::text(match u.draft.locale.as_str() {
+                "zh-CN" => "简体中文",
+                "zh-TW" => "繁体中文",
+                "en-US" => "英语",
+                _ => "跟随客户端",
+            }),
             crate::i18n::text("点击切换")
         ),
         yes(u.draft.champ_select).into(),
@@ -1121,107 +1129,46 @@ unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
             i32::from(u.desired == PAUSED && u.shown.mode == PAUSED),
         );
     }
-    SetWindowTextW(
-        GetDlgItem(hwnd, SETTINGS as i32),
-        wide(if u.settings {
-            "返回工作台"
-        } else {
-            "偏好设置"
-        })
-        .as_ptr(),
-    );
+    SetWindowTextW(GetDlgItem(hwnd, SETTINGS as i32), wide("偏好设置").as_ptr());
+    let page = if u.settings {
+        1
+    } else if u.records {
+        2
+    } else {
+        0
+    };
+    if u.layout_page.replace(page) != page {
+        SendMessageW(hwnd, WM_SIZE, 0, 0);
+    }
 }
 unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
-    let mut r: RECT = zeroed();
-    GetClientRect(hwnd, &mut r);
-    let scale = GetDpiForWindow(hwnd).max(96) as i32;
+    workbench::shell(hwnd, dc, u);
+    let saved = SaveDC(dc);
+    let mut client: RECT = zeroed();
+    GetClientRect(hwnd, &mut client);
+    IntersectClipRect(dc, workbench::rail(hwnd), 0, client.right, client.bottom);
+    SetViewportOrgEx(dc, workbench::rail(hwnd), -u.scroll, null_mut());
+    workbench::page(hwnd, dc, u);
+    if u.records {
+        draw_records(hwnd, dc, u);
+    }
+    RestoreDC(dc, saved);
+    u.paints += 1;
+}
+unsafe fn draw_records(hwnd: HWND, dc: HDC, u: &mut Ui) {
+    let r = workbench::bounds(hwnd, u);
+    let scale = workbench::dpi(hwnd);
     let x = |v: i32| v * scale / 96;
-    let y = |v: i32| v * r.bottom.min(582 * scale / 96) / 582;
+    let y = |v: i32| v * scale / 96;
     let rect = |l, t, rr, b| RECT {
         left: x(l),
         top: y(t),
         right: rr,
         bottom: y(b),
     };
-    fill(dc, r, rgb(6, 17, 26));
     let gold = rgb(205, 174, 108);
     let pale = rgb(221, 232, 233);
-    let dim = rgb(134, 162, 176);
-    text(
-        dc,
-        "符择  /  F U Z E",
-        rect(28, 18, r.right - x(28), 62),
-        x(27),
-        gold,
-    );
-    text(
-        dc,
-        "对局工作台 · Rust 开发预览",
-        rect(28, 65, r.right - x(28), 96),
-        x(16),
-        dim,
-    );
-    if u.settings {
-        fill(dc, rect(27, 476, r.right - x(27), 506), rgb(76, 94, 100));
-        fill(dc, rect(28, 477, r.right - x(28), 505), rgb(15, 30, 41));
-        text(
-            dc,
-            "偏好设置 · 暂停识别后保存",
-            rect(28, 105, r.right - x(28), 150),
-            x(24),
-            gold,
-        );
-        for (i, label) in [
-            "OCR 后端",
-            "识别与推荐数据语言",
-            "显示选人参考",
-            "选人窗口置顶",
-            "关闭主界面",
-            "后台下载公共图标",
-            "软件更新频道",
-            "暂停快捷键 Ctrl+Shift+F8",
-            "等级辅助调度",
-            "显示三卡推荐",
-        ]
-        .iter()
-        .enumerate()
-        {
-            let t = 148 + (i / 3) as i32 * 67;
-            let l = x(28) + (i % 3) as i32 * (r.right / 3);
-            text(
-                dc,
-                label,
-                RECT {
-                    left: l,
-                    top: y(t),
-                    right: l + r.right / 3 - x(40),
-                    bottom: y(t + 24),
-                },
-                x(14),
-                pale,
-            );
-        }
-        text(
-            dc,
-            "高级目录回退（可留空，仅自动发现失败后使用）",
-            rect(28, 449, r.right - x(28), 474),
-            x(13),
-            dim,
-        );
-        text(dc, "", rect(28, 475, r.right - x(28), 500), x(13), dim);
-        text(
-            dc,
-            if !u.hotkey_ok {
-                "快捷键已被占用；仍可使用按钮或托盘暂停。"
-            } else {
-                u.shown.notice.unwrap_or("更改在下次开始识别时生效。")
-            },
-            rect(28, 507, r.right - x(28), 528),
-            x(13),
-            dim,
-        );
-        return;
-    }
+    let dim = rgb(151, 176, 187);
     if u.records {
         if u.history {
             let h = &u.shown.history;
@@ -1496,147 +1443,6 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         }
         return;
     }
-    let error = u.shown.pipeline.error.is_some()
-        || u.shown.update_error.is_some()
-        || matches!(u.shown.connection, Some(Connection::Retry(_)));
-    let (title, color) = if u.desired == DATA {
-        ("正在更新推荐数据", rgb(22, 47, 66))
-    } else if u.desired == EXIT {
-        ("正在退出 · 释放识别资源", rgb(72, 54, 32))
-    } else if u.shown.mode == DATA && u.desired != DATA {
-        ("正在取消更新 · 等待当前请求结束", rgb(72, 54, 32))
-    } else if u.desired == PAUSED && u.shown.mode != PAUSED {
-        ("正在暂停 · 清理画面与 OCR", rgb(72, 54, 32))
-    } else if u.desired == PAUSED && u.shown.update_error.is_some() {
-        ("更新未完成 · 已保留本地数据", rgb(72, 34, 40))
-    } else if u.desired == PAUSED {
-        ("已暂停 · 点击开始识别", rgb(45, 49, 60))
-    } else if error {
-        ("需要关注 · 正在恢复", rgb(72, 34, 40))
-    } else if u.shown.pipeline.capture == "suspended" {
-        ("游戏未在前台 · 截图已暂停", rgb(22, 47, 66))
-    } else if u.shown.pipeline.frame_age.is_some_and(|v| v < 5) {
-        ("识别运行中", rgb(24, 64, 57))
-    } else {
-        ("等待就绪 · 按对局状态自动识别", rgb(22, 47, 66))
-    };
-    fill(dc, rect(28, 112, r.right - x(28), 205), color);
-    text(dc, title, rect(46, 123, r.right - x(46), 164), x(25), pale);
-    text(
-        dc,
-        u.shown
-            .notice
-            .unwrap_or_else(|| explain(u.shown.pipeline.error)),
-        rect(46, 167, r.right - x(46), 195),
-        x(14),
-        pale,
-    );
-    let backend = match u.shown.pipeline.backend {
-        Some(fuze_contract::wire::ActiveBackend::Cpu) => "CPU · 实际运行后端",
-        Some(fuze_contract::wire::ActiveBackend::DirectMl) => "DirectML · 实际运行后端",
-        None => "待初始化 · 进入对局后启动",
-    };
-    let values = [
-        (
-            "客户端连接",
-            if u.desired == PAUSED {
-                "检测已暂停"
-            } else {
-                connection(u.shown.connection)
-            },
-        ),
-        (
-            "游戏画面",
-            if u.desired == PAUSED {
-                "未截图"
-            } else {
-                capture(&u.shown.pipeline)
-            },
-        ),
-        ("OCR 引擎", backend),
-        (
-            "推荐数据",
-            u.shown
-                .pipeline
-                .dataset
-                .as_deref()
-                .or(u.shown.available.as_deref())
-                .unwrap_or("待选择客户端语言 · 未加载"),
-        ),
-    ];
-    let width = (r.right - x(68)) / 2;
-    for (i, (name, value)) in values.iter().enumerate() {
-        let l = x(28) + (i % 2) as i32 * (width + x(12));
-        let top = 225 + (i / 2) as i32 * 98;
-        let rr = RECT {
-            left: l,
-            top: y(top),
-            right: l + width,
-            bottom: y(top + 85),
-        };
-        fill(dc, rr, rgb(14, 31, 42));
-        text(
-            dc,
-            name,
-            RECT {
-                left: l + x(16),
-                top: y(top + 8),
-                right: l + width - x(12),
-                bottom: y(top + 32),
-            },
-            x(14),
-            gold,
-        );
-        text(
-            dc,
-            value,
-            RECT {
-                left: l + x(16),
-                top: y(top + 36),
-                right: l + width - x(12),
-                bottom: y(top + 73),
-            },
-            x(16),
-            pale,
-        );
-    }
-    let detail = if let Some(e) = u.shown.pipeline.error.or(u.shown.update_error) {
-        format!("{}: {e}", crate::i18n::text("错误分类"))
-    } else if let Some(Connection::Retry(e)) = u.shown.connection {
-        format!("{}: {e:?}", crate::i18n::text("连接错误分类"))
-    } else if u.placement.failed() {
-        "window-placement-save-failed".into()
-    } else if let Some(level) = u.shown.pipeline.level {
-        format!(
-            "{} {level} · {}",
-            crate::i18n::text("当前等级"),
-            crate::i18n::text("仅辅助调度，推荐仍用整体胜率")
-        )
-    } else if u.shown.pipeline.dataset.is_some() {
-        crate::i18n::text(if u.shown.preferences.level_gate {
-            "等级暂不可用，继续低频检测；不会停止识别。"
-        } else {
-            "等级调度已关闭，使用常规检测。"
-        })
-        .into()
-    } else if let Some(age) = u.shown.pipeline.frame_age {
-        format!("{}: {age}", crate::i18n::text("上次识别（秒）"))
-    } else {
-        "尚无本次运行的识别结果；等待阶段不代表故障。".into()
-    };
-    text(dc, &detail, rect(28, 428, r.right - x(28), 461), x(14), dim);
-    text(
-        dc,
-        if u.tray {
-            "关闭窗口后留在托盘；结束运行请点“退出”。"
-        } else {
-            "托盘不可用：关闭窗口将退出，避免留下不可见进程。"
-        },
-        rect(28, 465, r.right - x(28), 495),
-        x(13),
-        dim,
-    );
-    u.paints += 1;
 }
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if msg == WM_NCCREATE {
@@ -1668,36 +1474,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             0
         }
         WM_DRAWITEM => {
-            let d = &*(l as *const DRAWITEMSTRUCT);
-            fill(
-                d.hDC,
-                d.rcItem,
-                if d.itemState & ODS_DISABLED != 0 {
-                    rgb(36, 42, 48)
-                } else if d.itemState & ODS_SELECTED != 0 {
-                    rgb(112, 89, 47)
-                } else {
-                    rgb(185, 154, 91)
-                },
-            );
-            let mut caption = [0u16; 64];
-            let n = GetWindowTextW(d.hwndItem, caption.as_mut_ptr(), 64);
-            let mut r = d.rcItem;
-            r.left += 14;
-            text(
-                d.hDC,
-                &String::from_utf16_lossy(&caption[..n as usize]),
-                r,
-                16 * GetDpiForWindow(hwnd).max(96) as i32 / 96,
-                if d.itemState & ODS_DISABLED != 0 {
-                    rgb(145, 157, 165)
-                } else {
-                    rgb(7, 20, 29)
-                },
-            );
-            if d.itemState & ODS_FOCUS != 0 {
-                DrawFocusRect(d.hDC, &d.rcItem);
-            }
+            workbench::button(hwnd, u, &*(l as *const DRAWITEMSTRUCT));
             1
         }
         WM_PRINTCLIENT => {
@@ -1712,16 +1489,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             info.cbSize = size_of::<MONITORINFO>() as u32;
             GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
             m.ptMinTrackSize = POINT {
-                x: (860 * d / 96).min(info.rcWork.right - info.rcWork.left),
-                y: (660 * d / 96).min(info.rcWork.bottom - info.rcWork.top),
+                x: (1080 * d / 96).min(info.rcWork.right - info.rcWork.left),
+                y: (700 * d / 96).min(info.rcWork.bottom - info.rcWork.top),
             };
             0
         }
         WM_SIZE => {
-            let mut r: RECT = zeroed();
-            GetClientRect(hwnd, &mut r);
+            workbench::configure_scroll(hwnd, u);
+            let r = workbench::bounds(hwnd, u);
             let d = GetDpiForWindow(hwnd).max(96) as i32;
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, EXPORT_MATCH as i32),
                 28 * d / 96,
                 180 * d / 96,
@@ -1729,7 +1507,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 28 * d / 96,
                 1,
             );
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, JOURNAL_VIEW as i32),
                 28 * d / 96,
                 521 * d / 96,
@@ -1737,7 +1516,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 28 * d / 96,
                 1,
             );
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, JOURNAL_IMPORT as i32),
                 580 * d / 96,
                 483 * d / 96,
@@ -1745,7 +1525,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 32 * d / 96,
                 1,
             );
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, HISTORY_SAVED as i32),
                 340 * d / 96,
                 483 * d / 96,
@@ -1754,7 +1535,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 1,
             );
             for (i, id) in [HISTORY_PREV, HISTORY_NEXT].iter().enumerate() {
-                MoveWindow(
+                workbench::place(
+                    hwnd,
                     GetDlgItem(hwnd, *id as i32),
                     (28 + i as i32 * 150) * d / 96,
                     483 * d / 96,
@@ -1772,7 +1554,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             .iter()
             .enumerate()
             {
-                MoveWindow(
+                workbench::place(
+                    hwnd,
                     GetDlgItem(hwnd, *id as i32),
                     28 * d / 96 + i as i32 * ((r.right - 56 * d / 96) / 4),
                     443 * d / 96,
@@ -1781,29 +1564,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     1,
                 );
             }
-            for (i, id) in [
-                TOGGLE,
-                UPDATE_DATA,
-                UPDATE_APP,
-                SETTINGS,
-                RECORDS,
-                HIDE,
-                QUIT,
-            ]
-            .iter()
-            .enumerate()
-            {
-                MoveWindow(
-                    GetDlgItem(hwnd, *id as i32),
-                    28 * d / 96 + i as i32 * ((r.right - 56 * d / 96) / 7),
-                    r.bottom - 60 * d / 96,
-                    ((r.right - 56 * d / 96) / 7 - 10 * d / 96).max(1),
-                    38 * d / 96,
-                    1,
-                );
-            }
             for i in 0..11 {
-                MoveWindow(
+                workbench::place(
+                    hwnd,
                     GetDlgItem(
                         hwnd,
                         [201, 202, 203, 204, 205, 206, 207, 208, 223, 224, 209][i as usize],
@@ -1823,7 +1586,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     1,
                 );
             }
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, IMPORT_SETTINGS as i32),
                 28 * d / 96,
                 418 * d / 96,
@@ -1831,7 +1595,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 38 * d / 96,
                 1,
             );
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, RECORD_TOGGLE as i32),
                 28 * d / 96,
                 477 * d / 96,
@@ -1839,7 +1604,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 32 * d / 96,
                 1,
             );
-            MoveWindow(
+            workbench::place(
+                hwnd,
                 GetDlgItem(hwnd, 210),
                 28 * d / 96,
                 477 * d / 96,
@@ -1847,7 +1613,34 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 28 * d / 96,
                 1,
             );
+            workbench::navigation(hwnd, u);
             InvalidateRect(hwnd, null(), 0);
+            0
+        }
+        WM_MOUSEWHEEL => {
+            workbench::scroll(
+                hwnd,
+                u,
+                -((w >> 16) as i16 as i32) * workbench::dpi(hwnd) / 96,
+            );
+            0
+        }
+        WM_VSCROLL => {
+            let mut info: SCROLLINFO = zeroed();
+            info.cbSize = size_of::<SCROLLINFO>() as u32;
+            info.fMask = SIF_ALL;
+            GetScrollInfo(hwnd, SB_VERT, &mut info);
+            let delta = match (w & 0xffff) as i32 {
+                SB_LINEUP => -40,
+                SB_LINEDOWN => 40,
+                SB_PAGEUP => -(info.nPage as i32),
+                SB_PAGEDOWN => info.nPage as i32,
+                SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos - u.scroll,
+                SB_TOP => -u.scroll,
+                SB_BOTTOM => info.nMax - u.scroll,
+                _ => 0,
+            };
+            workbench::scroll(hwnd, u, delta);
             0
         }
         WM_EXITSIZEMOVE => {
@@ -1879,6 +1672,33 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             0
         }
         WM_COMMAND => {
+            // Native keyboard tabbing must reveal controls below the fold.
+            if (w >> 16 == BN_SETFOCUS as usize || w >> 16 == EN_SETFOCUS as usize) && l != 0 {
+                let child = l as HWND;
+                let mut rect: RECT = zeroed();
+                GetWindowRect(child, &mut rect);
+                let mut p = POINT {
+                    x: rect.left,
+                    y: rect.top,
+                };
+                ScreenToClient(hwnd, &mut p);
+                let mut client: RECT = zeroed();
+                GetClientRect(hwnd, &mut client);
+                if p.x >= workbench::rail(hwnd) {
+                    let bottom = p.y + rect.bottom - rect.top;
+                    let delta = if p.y < 0 {
+                        p.y - 12
+                    } else if bottom > client.bottom {
+                        bottom - client.bottom + 12
+                    } else {
+                        0
+                    };
+                    if delta != 0 {
+                        workbench::scroll(hwnd, u, delta);
+                    }
+                }
+                return 0;
+            }
             match w & 0xffff {
                 JOURNAL_VIEW if u.records && u.history => {
                     u.journal = !u.journal;
@@ -1963,8 +1783,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         });
                     }
                 }
+                workbench::HOME => {
+                    u.records = false;
+                    u.settings = false;
+                    u.scroll = 0;
+                    settings_controls(hwnd, u);
+                }
                 RECORDS => {
-                    u.records = !u.records;
+                    u.scroll = 0;
+                    u.records = true;
+                    u.history = true;
                     u.settings = false;
                     settings_controls(hwnd, u);
                 }
@@ -2027,9 +1855,11 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     }
                 }
                 SETTINGS => {
+                    u.scroll = 0;
                     u.records = false;
-                    u.settings = !u.settings;
-                    if u.settings {
+                    let opening = !u.settings;
+                    u.settings = true;
+                    if opening {
                         u.draft = u.shown.preferences.clone();
                         SetWindowTextW(
                             GetDlgItem(hwnd, 210),
@@ -2149,6 +1979,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 _ => {}
             }
             // The timer must observe this transition even if background cleanup is blocked.
+            if [workbench::HOME, SETTINGS, RECORDS].contains(&(w & 0xffff)) {
+                SendMessageW(hwnd, WM_SIZE, 0, 0);
+            }
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -2275,7 +2108,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 for (id, label) in [
                     (UPDATE_DATA, "更新推荐数据"),
                     (UPDATE_APP, "软件更新"),
-                    (RECORDS, "本机记录"),
+                    (workbench::HOME, "对局助手"),
+                    (RECORDS, "战绩查询"),
                     (HIDE, "收起到托盘"),
                     (QUIT, "退出"),
                 ] {
@@ -2362,6 +2196,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         }
                         if let Ok(path) = std::env::var("FUZE_DESKTOP_PREVIEW") {
                             u.preview_ok = snapshot(hwnd, &path, u).is_ok();
+                        }
+                        if let Ok(path) = std::env::var("FUZE_WORKBENCH_REVIEW") {
+                            u.preview_ok &= workbench::review(hwnd, u, &path).is_ok();
                         }
                         PostMessageW(hwnd, WM_COMMAND, TOGGLE, 0);
                         u.smoke_step = 2;
@@ -2530,6 +2367,8 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         let icon = app_icon();
         let mut ui = Box::new(Ui {
+            layout_page: std::cell::Cell::new(255),
+            scroll: 0,
             health_wait: (managed && smoke).then(Instant::now),
             journal: false,
             journal_offset: 0,
@@ -2567,12 +2406,12 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         let hwnd = CreateWindowExW(
             0,
             class.as_ptr(),
-            wide("符择 FUZE · Rust").as_ptr(),
-            WS_OVERLAPPEDWINDOW,
+            wide("符择 FUZE · 独立测试版").as_ptr(),
+            WS_OVERLAPPEDWINDOW | WS_VSCROLL,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            960,
-            660,
+            1160,
+            840,
             null_mut(),
             null_mut(),
             instance,
@@ -2586,11 +2425,12 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         ui.placement.restore(hwnd);
         for (id, label) in [
+            (workbench::HOME, "\u{5bf9}\u{5c40}\u{52a9}\u{624b}"),
             (TOGGLE, "开始识别"),
             (UPDATE_DATA, "更新推荐数据"),
             (UPDATE_APP, "软件更新"),
             (SETTINGS, "偏好设置"),
-            (RECORDS, "本机记录"),
+            (RECORDS, "战绩查询"),
             (HIDE, "收起到托盘"),
             (QUIT, "退出"),
         ] {
@@ -2598,7 +2438,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 0,
                 wide("BUTTON").as_ptr(),
                 wide(label).as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32 | BS_NOTIFY as u32,
                 0,
                 0,
                 0,
@@ -2629,7 +2469,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 0,
                 wide("BUTTON").as_ptr(),
                 wide("").as_ptr(),
-                WS_CHILD | WS_TABSTOP | BS_OWNERDRAW as u32,
+                WS_CHILD | WS_TABSTOP | BS_OWNERDRAW as u32 | BS_NOTIFY as u32,
                 0,
                 0,
                 0,
