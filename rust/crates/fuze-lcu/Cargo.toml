@@ -7,4 +7,4 @@ publish.workspace = true
 fuze-runtime = { path = "../fuze-runtime" }
 serde_json.workspace = true
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.59.0", features = ["Win32_Foundation", "Win32_Networking_WinHttp"] }
+windows-sys = { version = "=0.59.0", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

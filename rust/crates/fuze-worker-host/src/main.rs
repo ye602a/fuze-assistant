@@ -170,7 +170,7 @@ struct Sample {
 }
 #[cfg(windows)]
 fn fixtures(args: &[String]) -> Result<()> {
-    if args.len() != 7 {
+    if args.len() != 8 {
         return Err("fixture-arguments".into());
     }
     let root = fs::canonicalize(&args[5])?;
@@ -182,22 +182,36 @@ fn fixtures(args: &[String]) -> Result<()> {
     if samples.is_empty() || samples.len() > 32 {
         return Err("sample-limit".into());
     }
-    let mut session = Session::new("zh-CN@fixture-v1".into())?;
+    let prepared = fuze_data::prepare(
+        &[fuze_data::Root {
+            path: args[7].clone().into(),
+            source: fuze_data::Source::Bundled,
+        }],
+        fuze_data::Locale::ZhCn,
+        fuze_data::Scope::Ocr,
+    )?;
+    let catalog = std::sync::Arc::new(wire::encode_catalog(prepared.catalog())?);
+    let dataset = prepared.identity();
+    let mut session = Session::new(dataset.clone())?;
     session.update_phase(Phase::Loading)?;
     let startup = Instant::now();
-    let mut worker = Supervisor::start(
+    let mut worker = Supervisor::start_with_catalog(
         Path::new(&args[0]),
         &[
             args[1].clone(),
             args[2].clone(),
             args[3].clone(),
-            args[4].clone(),
+            "-".into(),
             args[6].clone(),
         ],
         Duration::from_secs(30),
+        Some(catalog),
     )?;
     let startup_ms = startup.elapsed().as_secs_f64() * 1000.;
     session.update_phase(Phase::InProgress)?;
+    let overlay =
+        fuze_native_overlay::native::HiddenOverlay::start(session.generation(), dataset.clone())?;
+    let mut last_snapshot = None;
     let epoch = Instant::now();
     let now = || epoch.elapsed().as_millis() as u64;
     let mut reader = fuze_capture::native::GpuFixtureReader::new()?;
@@ -267,20 +281,42 @@ fn fixtures(args: &[String]) -> Result<()> {
             if actual != expected {
                 return Err("fixture-mismatch".into());
             }
+            if !overlay.update(snapshot.clone())? || overlay.update(snapshot.clone())? {
+                return Err("overlay-delivery-or-duplicate".into());
+            }
+            last_snapshot = Some(snapshot);
             reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"roi_bytes":roi_bytes,"total_ms":total_ms,"ocr_ms":ocr_ms,"matched":true}));
         }
     }
-    // A context reset clears pending output; a real UI must consume Cleanup.
+    // Exercise partial positions and context rejection on the same persistent window.
+    let mut partial = last_snapshot.clone().ok_or("missing-final-snapshot")?;
+    partial.sequence += 1;
+    let mut wrong_dataset = partial.clone();
+    wrong_dataset.dataset_version = "zh-CN@0.0.0".into();
+    if overlay.update(wrong_dataset)? {
+        return Err("overlay-cross-dataset".into());
+    }
+    partial.slots[1] = Slot::Unreadable;
+    if !overlay.update(partial)? {
+        return Err("overlay-partial-update".into());
+    }
+    // Consume cleanup on the same window before stopping the integration.
     let cleanup = session
         .update_phase(Phase::PostGame)?
         .ok_or("cleanup-missing")?;
     worker.stop()?;
+    if !overlay.reset(cleanup.generation, dataset.clone())?
+        || overlay.update(last_snapshot.ok_or("missing-final-snapshot")?)?
+    {
+        return Err("overlay-cleanup-or-stale".into());
+    }
+    drop(overlay);
     if !cleanup.clear_overlay || !cleanup.stop_capture || session.wake_at(now()).is_some() {
         return Err("postgame-not-idle".into());
     }
     println!(
         "{}",
-        serde_json::json!({"passed":true,"startup_ms":startup_ms,"backend":worker.backend(),"fallback_count":u8::from(worker.recovered()),"worker_launches":worker.launches(),"worker_reaped":worker.reaped(),"frames":reports,"actual_stage":null,"selection_confirmed":false,"game_access":false})
+        serde_json::json!({"passed":true,"overlay_updates":reports.len()+1,"partial_slot_updated":true,"overlay_cleared":true,"stale_and_duplicate_rejected":true,"dataset_version":prepared.version(),"startup_ms":startup_ms,"backend":worker.backend(),"fallback_count":u8::from(worker.recovered()),"worker_launches":worker.launches(),"worker_reaped":worker.reaped(),"frames":reports,"actual_stage":null,"selection_confirmed":false,"game_access":false})
     );
     Ok(())
 }

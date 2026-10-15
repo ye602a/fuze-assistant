@@ -141,6 +141,8 @@ version = "0.1.0"
 dependencies = [
  "fuze-capture",
  "fuze-contract",
+ "fuze-data",
+ "fuze-native-overlay",
  "fuze-runtime",
  "image",
  "serde",

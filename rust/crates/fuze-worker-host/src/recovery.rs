@@ -14,11 +14,20 @@ pub struct Supervisor {
     stopped: bool,
     timeout: Duration,
     launches: u8,
+    catalog: Option<std::sync::Arc<Vec<u8>>>,
 }
 impl Supervisor {
     /// The last argument is the backend. Auto uses explicit DML in the child so only this
     /// supervisor owns fallback; worker and host cannot each consume a separate retry.
     pub fn start(executable: &Path, args: &[String], timeout: Duration) -> Result<Self> {
+        Self::start_with_catalog(executable, args, timeout, None)
+    }
+    pub fn start_with_catalog(
+        executable: &Path,
+        args: &[String],
+        timeout: Duration,
+        catalog: Option<std::sync::Arc<Vec<u8>>>,
+    ) -> Result<Self> {
         let mode = args.last().ok_or("worker-backend")?;
         if !["auto", "cpu", "dml", "dml-strict"].contains(&mode.as_str()) {
             return Err("worker-backend");
@@ -33,6 +42,7 @@ impl Supervisor {
             stopped: false,
             timeout,
             launches: 0,
+            catalog,
         };
         if automatic {
             *s.args.last_mut().unwrap() = "dml".into();
@@ -48,7 +58,12 @@ impl Supervisor {
     }
     fn launch(&mut self) -> Result<()> {
         self.launches += 1;
-        self.worker = Some(Worker::start(&self.executable, &self.args, self.timeout)?);
+        self.worker = Some(Worker::start_with_catalog(
+            &self.executable,
+            &self.args,
+            self.timeout,
+            self.catalog.clone(),
+        )?);
         Ok(())
     }
     fn recover(&mut self) -> Result<()> {

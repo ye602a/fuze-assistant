@@ -156,3 +156,57 @@ mod tests {
         assert!(read_reply(&mut &(u32::MAX.to_le_bytes())[..]).is_err());
     }
 }
+
+const MAX_CATALOG: usize = 2 * 1024 * 1024;
+fn valid_catalog(catalog: &std::collections::HashMap<String, u32>) -> bool {
+    !catalog.is_empty()
+        && catalog.len() <= 10000
+        && catalog.iter().all(|(name, id)| {
+            *id > 0
+                && !name.is_empty()
+                && name.chars().count() <= 80
+                && !name.chars().any(char::is_control)
+        })
+}
+/// Serialized once at startup; retained across the one CPU fallback, never per frame.
+pub fn encode_catalog(catalog: &std::collections::HashMap<String, u32>) -> io::Result<Vec<u8>> {
+    if !valid_catalog(catalog) {
+        return Err(invalid());
+    }
+    let bytes = serde_json::to_vec(catalog).map_err(|_| invalid())?;
+    if bytes.len() > MAX_CATALOG {
+        return Err(invalid());
+    }
+    Ok(bytes)
+}
+pub fn read_catalog(input: &mut impl Read) -> io::Result<std::collections::HashMap<String, u32>> {
+    let mut size = [0u8; 4];
+    input.read_exact(&mut size)?;
+    let size = u32::from_le_bytes(size) as usize;
+    if size == 0 || size > MAX_CATALOG {
+        return Err(invalid());
+    }
+    let mut bytes = vec![0; size];
+    input.read_exact(&mut bytes)?;
+    let catalog = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    if !valid_catalog(&catalog) {
+        return Err(invalid());
+    }
+    Ok(catalog)
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+    #[test]
+    fn startup_catalog_roundtrip_rejects_oversize_and_truncation() {
+        let catalog = std::collections::HashMap::from([("fixture".into(), 42)]);
+        let bytes = encode_catalog(&catalog).unwrap();
+        let mut packet = (bytes.len() as u32).to_le_bytes().to_vec();
+        packet.extend(bytes);
+        assert_eq!(read_catalog(&mut packet.as_slice()).unwrap(), catalog);
+        assert!(read_catalog(&mut &packet[..packet.len() - 1]).is_err());
+        assert!(read_catalog(&mut &((MAX_CATALOG + 1) as u32).to_le_bytes()[..]).is_err());
+        assert!(encode_catalog(&std::collections::HashMap::from([("bad".into(), 0)])).is_err());
+    }
+}

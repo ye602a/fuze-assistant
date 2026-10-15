@@ -25,6 +25,20 @@ pub struct Worker {
 }
 impl Worker {
     pub fn start(executable: &Path, args: &[String], timeout: Duration) -> Result<Self> {
+        Self::start_with_catalog(executable, args, timeout, None)
+    }
+    pub fn start_with_catalog(
+        executable: &Path,
+        args: &[String],
+        timeout: Duration,
+        catalog: Option<std::sync::Arc<Vec<u8>>>,
+    ) -> Result<Self> {
+        if catalog
+            .as_ref()
+            .is_some_and(|b| b.is_empty() || b.len() > 2 * 1024 * 1024)
+        {
+            return Err("worker-catalog-limit");
+        }
         let mut command = Command::new(executable);
         command
             .args(args)
@@ -53,11 +67,17 @@ impl Worker {
             .name("fuze-ocr-pipe".into())
             .spawn(move || {
                 // The worker cannot initialize its model until ownership is established.
-                if input
-                    .write_all(b"FZH1")
-                    .and_then(|_| input.flush())
-                    .is_err()
-                {
+                let startup = (|| -> std::io::Result<()> {
+                    if let Some(bytes) = catalog {
+                        input.write_all(b"FZH2")?;
+                        input.write_all(&(bytes.len() as u32).to_le_bytes())?;
+                        input.write_all(&bytes)?;
+                    } else {
+                        input.write_all(b"FZH1")?;
+                    }
+                    input.flush()
+                })();
+                if startup.is_err() {
                     let _ = results.send(Err("worker-start-gate"));
                     return;
                 }

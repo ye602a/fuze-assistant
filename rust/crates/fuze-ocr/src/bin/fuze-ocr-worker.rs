@@ -4,19 +4,20 @@ use std::{collections::HashMap, fs, io, io::Read, path::PathBuf};
 fn run() -> fuze_ocr::Result<()> {
     let mut gate = [0u8; 4];
     io::stdin().lock().read_exact(&mut gate)?;
-    if &gate != b"FZH1" {
+    if &gate != b"FZH1" && &gate != b"FZH2" {
         return Err("worker-parent-gate".into());
     }
+    let supplied_catalog = if &gate == b"FZH2" {
+        Some(wire::read_catalog(&mut io::stdin().lock())?)
+    } else {
+        None
+    };
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 5 {
         return Err("worker-arguments".into());
     }
     // Only public model/catalog paths and backend are arguments. No credentials or account data.
-    for (file, limit) in [
-        (&args[1], 64 * 1024 * 1024),
-        (&args[2], 2 * 1024 * 1024),
-        (&args[3], 2 * 1024 * 1024),
-    ] {
+    for (file, limit) in [(&args[1], 64 * 1024 * 1024), (&args[2], 2 * 1024 * 1024)] {
         if fs::metadata(file)?.len() > limit {
             return Err("worker-input-limit".into());
         }
@@ -26,7 +27,14 @@ fn run() -> fuze_ocr::Result<()> {
         .with_name("fuze-private-worker")
         .commit()?;
     let dictionary: Vec<String> = serde_json::from_slice(&fs::read(&args[2])?)?;
-    let catalog: HashMap<String, u32> = serde_json::from_slice(&fs::read(&args[3])?)?;
+    let catalog: HashMap<String, u32> = if let Some(catalog) = supplied_catalog {
+        catalog
+    } else {
+        if fs::metadata(&args[3])?.len() > 2 * 1024 * 1024 {
+            return Err("worker-input-limit".into());
+        }
+        serde_json::from_slice(&fs::read(&args[3])?)?
+    };
     let mut engine = ResilientRecognizer::new(
         &PathBuf::from(&args[1]),
         dictionary,

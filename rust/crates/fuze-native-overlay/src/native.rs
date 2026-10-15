@@ -3,10 +3,7 @@ use std::{
     mem::{size_of, zeroed},
     path::PathBuf,
     ptr::{null, null_mut},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -15,12 +12,14 @@ use windows_sys::Win32::{
     System::{
         LibraryLoader::GetModuleHandleW,
         ProcessStatus::*,
-        Threading::{GetCurrentProcess, GetProcessHandleCount, GetProcessTimes},
+        Threading::{
+            GetCurrentProcess, GetCurrentThreadId, GetProcessHandleCount, GetProcessTimes,
+        },
     },
     UI::{HiDpi::*, WindowsAndMessaging::*},
 };
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
-static SNAPSHOT: OnceLock<Snapshot> = OnceLock::new();
+thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -66,6 +65,15 @@ unsafe fn label(dc: HDC, value: &str, rect: RECT, size: i32, color: u32) {
     DeleteObject(font);
 }
 unsafe fn draw(dc: HDC, w: i32, h: i32) {
+    let snapshot = SNAPSHOT.with(|s| s.borrow().clone());
+    let slots = snapshot
+        .as_ref()
+        .map(|s| s.slots.clone())
+        .unwrap_or_else(|| std::array::from_fn(|_| Slot::Unreadable));
+    let version = snapshot
+        .as_ref()
+        .map(|s| s.dataset_version.as_str())
+        .unwrap_or("等待数据");
     let sx = w as f64 / 760.0;
     let sy = h as f64 / 170.0;
     let rect = |l: i32, t: i32, r: i32, b: i32| RECT {
@@ -84,7 +92,7 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
     );
     label(
         dc,
-        "数据 fixture-v1",
+        &format!("数据 {version}"),
         rect(600, 3, 715, 25),
         (11.0 * sy) as i32,
         rgb(145, 174, 184),
@@ -108,18 +116,17 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
             (26.0 * sy) as i32,
             rgb(221, 190, 118),
         );
-        let (name, rate, pick, progress) =
-            match &SNAPSHOT.get().expect("validated snapshot").slots[i as usize] {
-                Slot::Known {
-                    name, confidence, ..
-                } => (
-                    name.as_str(),
-                    "已识别",
-                    "识别置信度 · 胜率待接入",
-                    *confidence as f64,
-                ),
-                Slot::Unreadable => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
-            };
+        let (name, rate, pick, progress) = match &slots[i as usize] {
+            Slot::Known {
+                name, confidence, ..
+            } => (
+                name.as_str(),
+                "已识别",
+                "识别置信度 · 胜率待接入",
+                *confidence as f64,
+            ),
+            Slot::Unreadable => ("此位置未识别", "等待补全", "可能被遮挡或正在刷新", 0.0),
+        };
         label(
             dc,
             name,
@@ -434,7 +441,7 @@ pub fn run() -> Result<()> {
     if !gate.accept(&snapshot) || snapshot.selection_confirmed {
         return Err("invalid-offline-context".into());
     }
-    SNAPSHOT.set(snapshot).map_err(|_| "duplicate-context")?;
+    SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let foreground = GetForegroundWindow();
@@ -553,4 +560,217 @@ pub fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Event-driven hidden overlay used by the integrated host. No timers, foreign HWNDs or input.
+/// OCR waits stay on the caller's control thread, never on this window's message thread.
+pub struct HiddenOverlay {
+    hwnd: isize,
+    tx: std::sync::mpsc::SyncSender<OverlayCommand>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+enum OverlayCommand {
+    Update(Snapshot, std::sync::mpsc::SyncSender<bool>),
+    Reset(u64, String, std::sync::mpsc::SyncSender<bool>),
+}
+impl HiddenOverlay {
+    pub fn start(generation: u64, dataset: String) -> std::result::Result<Self, &'static str> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || unsafe {
+            let instance = GetModuleHandleW(null());
+            let class = wide(&format!("FuzeIntegrated-{}", GetCurrentThreadId()));
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(procedure),
+                hInstance: instance,
+                lpszClassName: class.as_ptr(),
+                ..zeroed()
+            };
+            if RegisterClassW(&wc) == 0 {
+                let _ = ready_tx.send(0isize);
+                return;
+            }
+            let hwnd = CreateWindowExW(
+                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                class.as_ptr(),
+                wide("FUZE Rust integrated hidden overlay").as_ptr(),
+                WS_POPUP,
+                0,
+                0,
+                760,
+                170,
+                null_mut(),
+                null_mut(),
+                instance,
+                null(),
+            );
+            if hwnd.is_null() {
+                let _ = ready_tx.send(0isize);
+                UnregisterClassW(class.as_ptr(), instance);
+                return;
+            }
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+            let Some(surface) = Surface::new() else {
+                let _ = ready_tx.send(0isize);
+                DestroyWindow(hwnd);
+                UnregisterClassW(class.as_ptr(), instance);
+                return;
+            };
+            if ready_tx.send(hwnd as isize).is_err() {
+                DestroyWindow(hwnd);
+                UnregisterClassW(class.as_ptr(), instance);
+                return;
+            }
+            let mut current_generation = generation;
+            let mut gate = ContextGate::new(generation, dataset);
+            let mut message: MSG = zeroed();
+            while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
+                if message.message == WM_APP + 1 {
+                    if let Ok(command) = rx.try_recv() {
+                        let (accepted, ack) = match command {
+                            OverlayCommand::Update(snapshot, ack) => {
+                                let accepted =
+                                    !snapshot.selection_confirmed && gate.accept(&snapshot);
+                                if accepted {
+                                    SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
+                                }
+                                (accepted, ack)
+                            }
+                            OverlayCommand::Reset(next, dataset, ack) => {
+                                let accepted = next > current_generation;
+                                if accepted {
+                                    current_generation = next;
+                                    gate = ContextGate::new(next, dataset);
+                                    SNAPSHOT.with(|s| *s.borrow_mut() = None);
+                                }
+                                (accepted, ack)
+                            }
+                        };
+                        if accepted {
+                            InvalidateRect(hwnd, null(), 0);
+                            if !surface.paint() {
+                                let _ = ack.send(false);
+                                continue;
+                            }
+                        }
+                        let _ = ack.send(accepted);
+                    }
+                } else {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+            if IsWindow(hwnd) != 0 {
+                DestroyWindow(hwnd);
+            }
+            SNAPSHOT.with(|s| *s.borrow_mut() = None);
+            UnregisterClassW(class.as_ptr(), instance);
+        });
+        let hwnd = ready_rx.recv().map_err(|_| "overlay-start")?;
+        if hwnd == 0 {
+            let _ = thread.join();
+            return Err("overlay-start");
+        }
+        Ok(Self {
+            hwnd,
+            tx,
+            thread: Some(thread),
+        })
+    }
+    fn send(
+        &self,
+        command: OverlayCommand,
+        ack: std::sync::mpsc::Receiver<bool>,
+    ) -> std::result::Result<bool, &'static str> {
+        self.tx.try_send(command).map_err(|_| "overlay-busy")?;
+        if unsafe { PostMessageW(self.hwnd as HWND, WM_APP + 1, 0, 0) } == 0 {
+            return Err("overlay-closed");
+        }
+        ack.recv_timeout(std::time::Duration::from_secs(2))
+            .map_err(|_| "overlay-timeout")
+    }
+    pub fn update(&self, snapshot: Snapshot) -> std::result::Result<bool, &'static str> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(OverlayCommand::Update(snapshot, tx), rx)
+    }
+    pub fn reset(
+        &self,
+        generation: u64,
+        dataset: String,
+    ) -> std::result::Result<bool, &'static str> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(OverlayCommand::Reset(generation, dataset, tx), rx)
+    }
+}
+impl Drop for HiddenOverlay {
+    fn drop(&mut self) {
+        unsafe {
+            PostMessageW(self.hwnd as HWND, WM_CLOSE, 0, 0);
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+// One reusable owned bitmap per UI thread. This is drawing, never desktop capture.
+struct Surface {
+    dc: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+    pixels: *mut u8,
+}
+impl Surface {
+    unsafe fn new() -> Option<Self> {
+        let dc = CreateCompatibleDC(null_mut());
+        if dc.is_null() {
+            return None;
+        }
+        let mut info: BITMAPINFO = zeroed();
+        info.bmiHeader = BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: 760,
+            biHeight: -170,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..zeroed()
+        };
+        let mut pixels = null_mut();
+        let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut pixels, null_mut(), 0);
+        if bitmap.is_null() {
+            DeleteDC(dc);
+            return None;
+        }
+        let previous = SelectObject(dc, bitmap);
+        Some(Self {
+            dc,
+            bitmap,
+            previous,
+            pixels: pixels.cast(),
+        })
+    }
+    unsafe fn paint(&self) -> bool {
+        draw(self.dc, 760, 170);
+        GdiFlush();
+        let bytes = std::slice::from_raw_parts(self.pixels.add((169 * 760 + 380) * 4), 3);
+        bytes == [25, 16, 5]
+    }
+}
+impl Drop for Surface {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.previous);
+            DeleteObject(self.bitmap);
+            DeleteDC(self.dc);
+        }
+    }
 }

@@ -2,10 +2,15 @@
 use fuze_runtime::session::Phase;
 use std::fmt;
 #[cfg(windows)]
+pub mod discovery;
+pub mod reconnect;
+#[cfg(windows)]
 pub mod transport;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Error {
     AuthInput,
+    Discovery,
+    AmbiguousClient,
     Unauthorized,
     NotFound,
     HttpStatus,
