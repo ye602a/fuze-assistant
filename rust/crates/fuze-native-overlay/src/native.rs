@@ -773,7 +773,12 @@ impl HiddenOverlay {
                 return;
             }
             let hwnd = CreateWindowExW(
-                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                WS_EX_NOACTIVATE
+                    | if visible {
+                        WS_EX_APPWINDOW
+                    } else {
+                        WS_EX_TOOLWINDOW
+                    },
                 class.as_ptr(),
                 wide("FUZE Rust integrated hidden overlay").as_ptr(),
                 WS_POPUP,
