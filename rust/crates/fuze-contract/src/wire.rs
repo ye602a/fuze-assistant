@@ -101,6 +101,8 @@ pub enum Reply {
     Result {
         id: Identity,
         slots: [Slot; 3],
+        #[serde(default)]
+        title_kind: TitleKind,
         ocr_ms: f64,
         backend: ActiveBackend,
         fallback_count: u8,
@@ -108,6 +110,15 @@ pub enum Reply {
     Failed {
         id: Identity,
     },
+}
+/// Evidence from the three fixed title regions; no full-screen or actual-claim assertion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleKind {
+    #[default]
+    Unknown,
+    Candidate,
+    StatShard,
 }
 pub fn write_reply(out: &mut impl Write, reply: &Reply) -> io::Result<()> {
     let bytes = serde_json::to_vec(reply).map_err(|_| invalid())?;

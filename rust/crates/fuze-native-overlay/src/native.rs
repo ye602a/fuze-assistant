@@ -41,6 +41,12 @@ fn placement(hwnd: HWND, event: u8) {
 }
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
 thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
+thread_local! { static RETAINED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+thread_local! { static RETAIN_UNTIL: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) }; }
+const RETENTION_TIMER: usize = 0xf017;
+fn retention_expired() -> bool {
+    RETAIN_UNTIL.with(|r| r.get().is_some_and(|at| std::time::Instant::now() >= at))
+}
 thread_local! {
     static STATS: std::cell::RefCell<std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>> = std::cell::RefCell::new(std::collections::HashMap::new());
     static SOURCE: std::cell::RefCell<Option<SourceImage>> = const { std::cell::RefCell::new(None) };
@@ -166,11 +172,19 @@ unsafe fn draw(dc: HDC, w: i32, h: i32) {
     fill(dc, rect(0, 0, 760, 170), rgb(5, 16, 25));
     label(
         dc,
-        t(
-            "FUZE · 整体胜率参考 / 实际领取轮次未确认",
-            "FUZE · 整體勝率參考 / 實際領取輪次未確認",
-            "FUZE · Overall win rates / Claim round unconfirmed",
-        ),
+        if RETAINED.with(|r| r.get()) {
+            t(
+                "FUZE · 等待识别刷新，暂留上次结果 · 整体胜率",
+                "FUZE · 等待辨識更新，暫留上次結果 · 整體勝率",
+                "FUZE · Updating: previous results / Overall rates",
+            )
+        } else {
+            t(
+                "FUZE · 整体胜率参考 / 实际领取轮次未确认",
+                "FUZE · 整體勝率參考 / 實際領取輪次未確認",
+                "FUZE · Overall win rates / Claim round unconfirmed",
+            )
+        },
         rect(12, 3, 580, 25),
         (12.0 * sy) as i32,
         rgb(198, 173, 112),
@@ -362,6 +376,13 @@ unsafe extern "system" fn procedure(
             let mut bounds: RECT = zeroed();
             GetClientRect(hwnd, &mut bounds);
             draw(wparam as HDC, bounds.right, bounds.bottom);
+            0
+        }
+        WM_TIMER if wparam == RETENTION_TIMER => {
+            if retention_expired() {
+                KillTimer(hwnd, RETENTION_TIMER);
+                ShowWindow(hwnd, SW_HIDE);
+            }
             0
         }
         WM_PAINT => {
@@ -605,7 +626,8 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
 }
 pub fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let smoke = args.first().is_some_and(|v| v == "--smoke");
+    let retained_smoke = args.first().is_some_and(|v| v == "--smoke-retained");
+    let smoke = retained_smoke || args.first().is_some_and(|v| v == "--smoke");
     let ci_capture = args.first().is_some_and(|v| v == "--wgc-ci");
     if ci_capture
         && !(std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
@@ -626,6 +648,7 @@ pub fn run() -> Result<()> {
         return Err("invalid-offline-context".into());
     }
     SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
+    RETAINED.with(|r| r.set(retained_smoke));
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let foreground = GetForegroundWindow();
@@ -773,7 +796,11 @@ pub struct HiddenOverlay {
 }
 enum OverlayCommand {
     Visible(bool, std::sync::mpsc::SyncSender<bool>),
-    Update(Snapshot, std::sync::mpsc::SyncSender<bool>),
+    Update(
+        Snapshot,
+        Option<std::time::Instant>,
+        std::sync::mpsc::SyncSender<bool>,
+    ),
     Reset(u64, String, std::sync::mpsc::SyncSender<bool>),
 }
 impl HiddenOverlay {
@@ -948,7 +975,8 @@ impl HiddenOverlay {
                     if let Ok(command) = rx.try_recv() {
                         let (accepted, ack) = match command {
                             OverlayCommand::Visible(visible, ack) => {
-                                let accepted = !ui_flag.load(Ordering::Acquire);
+                                let accepted = !ui_flag.load(Ordering::Acquire)
+                                    && (!visible || !retention_expired());
                                 if accepted {
                                     if visible {
                                         SetWindowPos(
@@ -969,11 +997,26 @@ impl HiddenOverlay {
                                 }
                                 (accepted, ack)
                             }
-                            OverlayCommand::Update(snapshot, ack) => {
+                            OverlayCommand::Update(snapshot, retained, ack) => {
                                 let accepted = !ui_flag.load(Ordering::Acquire)
                                     && !snapshot.selection_confirmed
                                     && gate.accept(&snapshot);
                                 if accepted {
+                                    RETAINED.with(|r| r.set(retained.is_some()));
+                                    RETAIN_UNTIL.with(|r| r.set(retained));
+                                    KillTimer(hwnd, RETENTION_TIMER);
+                                    if let Some(deadline) = retained {
+                                        let delay = deadline
+                                            .saturating_duration_since(std::time::Instant::now())
+                                            .as_millis()
+                                            .clamp(1, 2500)
+                                            as u32;
+                                        if SetTimer(hwnd, RETENTION_TIMER, delay, None) == 0 {
+                                            RETAIN_UNTIL
+                                                .with(|r| r.set(Some(std::time::Instant::now())));
+                                            ShowWindow(hwnd, SW_HIDE); // Timer failure must never leave stale content visible.
+                                        }
+                                    }
                                     SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
                                 }
                                 (accepted, ack)
@@ -981,6 +1024,9 @@ impl HiddenOverlay {
                             OverlayCommand::Reset(next, dataset, ack) => {
                                 let accepted = next > current_generation;
                                 if accepted {
+                                    KillTimer(hwnd, RETENTION_TIMER);
+                                    RETAIN_UNTIL.with(|r| r.set(None));
+                                    RETAINED.with(|r| r.set(false));
                                     current_generation = next;
                                     gate = ContextGate::new(next, dataset.clone());
                                     if current_dataset != dataset {
@@ -1038,8 +1084,15 @@ impl HiddenOverlay {
             .map_err(|_| "overlay-timeout")
     }
     pub fn update(&self, snapshot: Snapshot) -> std::result::Result<bool, &'static str> {
+        self.update_retained(snapshot, None)
+    }
+    pub fn update_retained(
+        &self,
+        snapshot: Snapshot,
+        retained: Option<std::time::Instant>,
+    ) -> std::result::Result<bool, &'static str> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        self.send(OverlayCommand::Update(snapshot, tx), rx)
+        self.send(OverlayCommand::Update(snapshot, retained, tx), rx)
     }
     pub fn visible(&self, visible: bool) -> std::result::Result<bool, &'static str> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);

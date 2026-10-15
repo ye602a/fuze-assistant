@@ -12,6 +12,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn loading_handoff(old: Context, new: Context) -> bool {
+    old.phase == Phase::Loading
+        && new.phase == Phase::InProgress
+        && old.supported
+        && new.supported
+        && old.champion.is_some()
+        && old.champion == new.champion
+        && old.same_game(&new)
+}
+
 struct Observation {
     locale: Option<fuze_lcu::locale::Locale>,
     state: fuze_lcu::reconnect::State,
@@ -33,10 +43,18 @@ impl Observation {
     }
     fn publish(&mut self, context: Option<Context>, root: Option<PathBuf>) {
         if self.context != context || self.root != root {
-            if let Some(c) = self.cancellation.take() {
-                c.cancel();
+            // Only the forward loading -> playing handoff may retain the warmed worker.
+            let handoff = self.root == root
+                && self
+                    .context
+                    .zip(context)
+                    .is_some_and(|(old, new)| loading_handoff(old, new));
+            if !handoff {
+                if let Some(c) = self.cancellation.take() {
+                    c.cancel();
+                }
+                self.revision = self.revision.saturating_add(1);
             }
-            self.revision = self.revision.saturating_add(1);
             self.context = context;
             self.root = root;
         }
@@ -292,9 +310,7 @@ impl Config {
             Duration::from_secs(30),
             Some(Arc::new(catalog)),
         )?;
-        let mut pipeline = Pipeline::managed(worker, &data, champion)?;
-        pipeline.phase(Phase::InProgress)?;
-        Ok(pipeline)
+        Pipeline::managed(worker, &data, champion)
     }
 }
 #[derive(Default)]
@@ -421,7 +437,10 @@ impl Controller {
             self.retry = Retry::default();
         }
         let active = context.filter(|c| {
-            fresh && c.phase == Phase::InProgress && c.supported && c.champion.is_some()
+            fresh
+                && matches!(c.phase, Phase::Loading | Phase::InProgress)
+                && c.supported
+                && c.champion.is_some()
         });
         let (Some(context), Some(root)) = (active, root) else {
             self.clear();
@@ -454,6 +473,28 @@ impl Controller {
                 latest.cancellation = Some(pipeline.cancellation());
                 self.pipeline = Some(pipeline);
             }
+            // Re-read after model warm-up: the phase may have advanced without replacing the worker.
+            let phase = {
+                let latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
+                if latest.revision != revision || latest.updated.elapsed() >= Duration::from_secs(8)
+                {
+                    self.clear();
+                    return Ok(());
+                }
+                latest
+                    .context
+                    .map(|c| c.phase)
+                    .ok_or("lcu-context-missing")?
+            };
+            let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
+            pipeline.phase(phase)?;
+            if phase == Phase::Loading {
+                pipeline.capture_state = "prewarmed";
+                return Ok(()); // No window discovery, capture or level requests during loading.
+            }
+            if phase != Phase::InProgress {
+                return Ok(());
+            }
             if self.config.level_gate && self.level_reader.is_none() {
                 self.level_reader = crate::live_level::Reader::start().ok();
             }
@@ -474,14 +515,9 @@ impl Controller {
             if let Some(delivery) = pipeline.tick_wgc()? {
                 self.records
                     .observe(context.champion.unwrap_or(0), &delivery.snapshot.slots);
-                let known = delivery
-                    .snapshot
-                    .slots
-                    .iter()
-                    .any(|s| matches!(s, fuze_contract::Slot::Known { .. }));
                 pipeline
                     .overlay
-                    .visible(known && self.config.augment_overlay)?;
+                    .visible(delivery.display_visible && self.config.augment_overlay)?;
                 self.last_frame = Some(Instant::now());
                 self.last_error = None;
                 self.retry.failures = 0;
@@ -519,6 +555,45 @@ impl Drop for Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn loading_handoff_reuses_only_same_game_hero_root_and_locale() {
+        let context = |phase, hero, game| {
+            let name = if phase == Phase::Loading {
+                "GameStart"
+            } else {
+                "InProgress"
+            };
+            let flow = format!(
+                r#"{{"phase":"{name}","gameData":{{"queue":{{"id":2400}},"gameId":{game},"teamOne":[{{"summonerId":7,"championId":{hero}}}],"teamTwo":[]}}}}"#
+            );
+            fuze_lcu::context::parse(phase, flow.as_bytes(), br#"{"summonerId":7}"#).unwrap()
+        };
+        let loading = context(Phase::Loading, 8, 1);
+        let playing = context(Phase::InProgress, 8, 1);
+        assert!(loading_handoff(loading, playing));
+        assert!(!loading_handoff(playing, loading));
+        assert!(!loading_handoff(loading, context(Phase::InProgress, 9, 1)));
+        assert!(!loading_handoff(loading, context(Phase::InProgress, 8, 2)));
+        let window =
+            fuze_native_overlay::native::HiddenOverlay::start(1, "zh-CN@fixture-v1".into())
+                .unwrap();
+        let cancellation = window.cancellation();
+        let mut observation = Observation {
+            locale: None,
+            state: fuze_lcu::reconnect::State::Waiting,
+            context: Some(loading),
+            root: Some(PathBuf::from("fixture-root")),
+            revision: 1,
+            updated: Instant::now(),
+            cancellation: Some(cancellation.clone()),
+        };
+        observation.publish(Some(playing), Some(PathBuf::from("fixture-root")));
+        assert_eq!(observation.revision, 1);
+        assert!(!cancellation.cancelled());
+        observation.publish(Some(playing), Some(PathBuf::from("changed-root")));
+        assert_eq!(observation.revision, 2);
+        assert!(cancellation.cancelled());
+    }
     #[test]
     fn hero_game_and_disconnect_cancel_old_window_without_live_discovery() {
         use fuze_contract::{ActualStage, Slot, Snapshot};

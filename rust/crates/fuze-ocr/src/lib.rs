@@ -12,6 +12,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub mod backend;
 mod metrics;
 pub mod reuse;
+pub mod selection;
 use backend::Backend;
 pub struct PreparedTitle {
     pub width: usize,
@@ -29,6 +30,7 @@ pub struct Recognizer {
 #[derive(Serialize)]
 pub struct FrameResult {
     pub slots: [Slot; 3],
+    pub title_kind: fuze_contract::wire::TitleKind,
     pub elapsed_ms: f64,
     pub selection_confirmed: bool,
 }
@@ -342,11 +344,13 @@ impl Recognizer {
     ) -> Result<FrameResult> {
         let started = Instant::now();
         let mut slots = [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable];
+        let mut shards = [false; 3];
         // Prototype fixed single-line title geometry, not a generic text detector.
         for (i, slot) in slots.iter_mut().enumerate() {
             let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
+            shards[i] = selection::shard_title(&name, confidence);
             let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
-            if confidence >= 0.75 {
+            if confidence >= 0.75 && !shards[i] {
                 if let Some(&id) = self.catalog.get(&normalized) {
                     *slot = Slot::Known {
                         id,
@@ -357,6 +361,7 @@ impl Recognizer {
             }
         }
         Ok(FrameResult {
+            title_kind: selection::classify(&slots, shards),
             slots,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
             selection_confirmed: false,

@@ -53,6 +53,7 @@ pub mod private_update;
 #[cfg(windows)]
 pub mod record_export;
 pub mod recovery;
+mod retention;
 #[cfg(windows)]
 pub mod update_channel;
 #[cfg(windows)]

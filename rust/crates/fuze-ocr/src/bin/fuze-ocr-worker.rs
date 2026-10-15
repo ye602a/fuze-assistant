@@ -69,12 +69,13 @@ fn run() -> fuze_ocr::Result<()> {
             return Err("worker-stale-request".into());
         }
         last = Some(id);
-        if let Some(slots) = reuse.get(&request) {
+        if let Some((slots, title_kind)) = reuse.get(&request) {
             wire::write_reply(
                 &mut out,
                 &Reply::Result {
                     id,
                     slots,
+                    title_kind,
                     ocr_ms: 0.0,
                     backend: backend(&engine),
                     fallback_count: engine.status().fallback_count,
@@ -86,12 +87,13 @@ fn run() -> fuze_ocr::Result<()> {
         let result = engine.run("gpu_inference_failed", |e| e.recognize_atlas(&atlas));
         match result {
             Ok(result) => {
-                reuse.remember(request, result.slots.clone());
+                reuse.remember(request, result.slots.clone(), result.title_kind);
                 wire::write_reply(
                     &mut out,
                     &Reply::Result {
                         id,
                         slots: result.slots,
+                        title_kind: result.title_kind,
                         ocr_ms: result.elapsed_ms,
                         backend: backend(&engine),
                         fallback_count: engine.status().fallback_count,

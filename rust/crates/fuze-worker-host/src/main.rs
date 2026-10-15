@@ -48,6 +48,7 @@ fn probe(mode: &str, backend: &str) -> Result<()> {
     wire::write_reply(
         &mut io::stdout().lock(),
         &Reply::Result {
+            title_kind: fuze_contract::wire::TitleKind::Unknown,
             id,
             slots: std::array::from_fn(|_| Slot::Unreadable),
             ocr_ms: 0.,
@@ -220,7 +221,14 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
     )?;
     let startup_ms = startup.elapsed().as_secs_f64() * 1000.;
     let mut pipeline = Pipeline::new(worker, &prepared, 8)?;
+    if pipeline.has_capture() || pipeline.wake_at().is_some() {
+        return Err("loading-started-capture".into());
+    }
+    let warmed_launches = pipeline.worker.launches();
     pipeline.phase(Phase::InProgress)?;
+    if pipeline.worker.launches() != warmed_launches || pipeline.worker.backend().is_none() {
+        return Err("loading-worker-not-reused".into());
+    }
     let mut reader = fuze_capture::native::GpuFixtureReader::new()?;
     let mut reports = Vec::new();
     let mut last = None;
@@ -318,6 +326,14 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             let expected: Vec<Option<u32>> = (0..3)
                 .map(|i| sample.expected_ids.get(i).copied())
                 .collect();
+            let expected_kind = if expected.iter().any(Option::is_some) {
+                wire::TitleKind::Candidate
+            } else {
+                wire::TitleKind::Unknown
+            };
+            if delivery.title_kind != expected_kind || delivery.snapshot.selection_confirmed {
+                return Err("fixture-selection-kind".into());
+            }
             if actual != expected {
                 println!(
                     "{}",
@@ -331,7 +347,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             if !wgc && repeat > 0 && delivery.ocr_ms != 0.0 {
                 return Err("unchanged-title-inferred-again".into());
             }
-            reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"roi_bytes":delivery.roi_bytes,"ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"matched":true}));
+            reports.push(serde_json::json!({"sample":sample_index,"sequence":sequence,"title_kind":delivery.title_kind,"retained":delivery.retained,"display_visible":delivery.display_visible,"roi_bytes":delivery.roi_bytes,"ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"matched":true}));
             last = Some(delivery.snapshot);
         }
         // Replacing source closes the old stream before the window is destroyed.
@@ -344,6 +360,29 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
         }
     }
     let previous = last.ok_or("missing-result")?;
+    if wgc {
+        // This branch is CI-visible-only, just like the owned source window above.
+        // The UI timer must expire independently of host polling or the OCR worker.
+        let timed = HiddenOverlay::start(1, previous.dataset_version.clone())?;
+        let mut snapshot = previous.clone();
+        snapshot.generation = 1;
+        snapshot.sequence = 1;
+        if !timed.update_retained(snapshot, Some(Instant::now() + Duration::from_millis(2500)))?
+            || !timed.visible(true)?
+        {
+            return Err("retention-timer-start".into());
+        }
+        std::thread::sleep(Duration::from_millis(2700));
+        if unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(
+                timed.owned_handle() as windows_sys::Win32::Foundation::HWND
+            )
+        } != 0
+            || timed.visible(true)?
+        {
+            return Err("retention-timer-expiry".into());
+        }
+    }
     let mut partial = previous.clone();
     partial.sequence += 1;
     partial.slots[1] = Slot::Unreadable;
@@ -368,7 +407,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
     }
     println!(
         "{}",
-        serde_json::json!({"passed":true,"source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"frames":reports,"capture_start_retries":capture_start_retries,"overlay_updates":sequence+u64::from(!wgc),"partial_slot_updated":!wgc,"statistics_loaded":stats.len(),"statistics_scope":"overall","dataset_version":prepared.version(),"overlay_cleared":true,"stale_and_duplicate_rejected":true,"worker_reaped":pipeline.worker.reaped(),"worker_launches":pipeline.worker.launches(),"backend":pipeline.worker.backend(),"startup_ms":startup_ms,"actual_stage":null,"selection_confirmed":false,"game_access":false})
+        serde_json::json!({"passed":true,"source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"frames":reports,"capture_start_retries":capture_start_retries,"overlay_updates":sequence+u64::from(!wgc),"partial_slot_updated":!wgc,"statistics_loaded":stats.len(),"statistics_scope":"overall","dataset_version":prepared.version(),"overlay_cleared":true,"stale_and_duplicate_rejected":true,"worker_reaped":pipeline.worker.reaped(),"worker_launches":pipeline.worker.launches(),"backend":pipeline.worker.backend(),"startup_ms":startup_ms,"retention_timer_checked":wgc,"loading_worker_reused":true,"loading_capture_started":false,"actual_stage":null,"selection_confirmed":false,"game_access":false})
     );
     Ok(())
 }

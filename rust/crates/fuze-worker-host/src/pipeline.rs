@@ -4,7 +4,7 @@ use crate::{recovery::Supervisor, Result};
 use fuze_capture::native::{FrameStatus, OwnedWindowStream};
 use fuze_contract::{
     titles::Atlas,
-    wire::{Identity, Reply, Request},
+    wire::{Identity, Reply, Request, TitleKind},
     Snapshot,
 };
 use fuze_data::Prepared;
@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    retention: crate::retention::Retention,
     pub capture_state: &'static str,
     session: Session,
     pub worker: Supervisor,
@@ -29,6 +30,9 @@ pub struct Pipeline {
     busy_streak: u8,
 }
 pub struct Delivery {
+    pub title_kind: TitleKind,
+    pub display_visible: bool,
+    pub retained: bool,
     pub snapshot: Snapshot,
     pub roi_bytes: usize,
     pub ocr_ms: f64,
@@ -62,6 +66,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            retention: Default::default(),
             capture_state: "waiting",
             session,
             worker,
@@ -98,9 +103,12 @@ impl Pipeline {
         if self.closed {
             None
         } else {
-            self.session
-                .wake_at(self.now())
-                .map(|at| at.max(self.next_capture_at))
+            self.session.wake_at(self.now()).map(|at| {
+                let at = at.max(self.next_capture_at);
+                self.retention
+                    .deadline()
+                    .map_or(at, |deadline| at.min(deadline))
+            })
         }
     }
     pub fn clear_level(&mut self) {
@@ -115,6 +123,7 @@ impl Pipeline {
     }
     pub fn phase(&mut self, phase: Phase) -> Result<()> {
         if let Some(cleanup) = self.session.update_phase(phase)? {
+            self.retention = Default::default();
             if cleanup.stop_capture {
                 self.capture = None;
             }
@@ -142,6 +151,7 @@ impl Pipeline {
             return Err("capture-phase");
         }
         self.capture = None;
+        self.retention = Default::default();
         let cleanup = self.session.capture_replaced()?;
         if !self
             .overlay
@@ -167,6 +177,7 @@ impl Pipeline {
             return Err("capture-phase");
         }
         self.capture = None;
+        self.retention = Default::default();
         let cleanup = self.session.capture_replaced()?;
         if !self
             .overlay
@@ -214,25 +225,48 @@ impl Pipeline {
             self.session.fail(ticket, self.now());
             return Ok(None);
         }
-        let Reply::Result { slots, ocr_ms, .. } = reply else {
+        let Reply::Result {
+            slots,
+            title_kind,
+            ocr_ms,
+            ..
+        } = reply
+        else {
             self.session.fail(ticket, self.now());
             return Err("worker-result");
         };
-        let selection = if slots
-            .iter()
-            .any(|slot| matches!(slot, fuze_contract::Slot::Known { .. }))
-        {
-            Selection::Candidate
-        } else {
-            Selection::Unknown
+        let selection = match title_kind {
+            TitleKind::StatShard => Selection::StatShard,
+            TitleKind::Candidate => Selection::Candidate,
+            TitleKind::Unknown => Selection::Unknown,
         };
         let Some(snapshot) = self.session.finish(ticket, slots, selection, self.now()) else {
             return Ok(None);
         };
-        if !self.overlay.update(snapshot.clone())? {
+        let display = self
+            .retention
+            .apply(&snapshot.slots, title_kind, self.now());
+        let mut shown = snapshot.clone();
+        self.capture_state = if title_kind == TitleKind::StatShard {
+            "stat-shards"
+        } else if display.retained {
+            "retaining"
+        } else {
+            "receiving"
+        };
+        shown.slots = display.slots;
+        if !self.overlay.update_retained(
+            shown,
+            self.retention
+                .deadline()
+                .map(|ms| self.epoch + Duration::from_millis(ms)),
+        )? {
             return Err("overlay-delivery");
         }
         Ok(Some(Delivery {
+            title_kind,
+            display_visible: display.visible,
+            retained: display.retained,
             snapshot,
             roi_bytes,
             ocr_ms,
@@ -243,6 +277,10 @@ impl Pipeline {
     pub fn tick_wgc(&mut self) -> Result<Option<Delivery>> {
         if self.cancel_if_requested()? {
             return Ok(None);
+        }
+        if self.retention.expire(self.now()) {
+            self.overlay.visible(false)?;
+            self.capture_state = "waiting-frame";
         }
         if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
             return Ok(None);
@@ -266,6 +304,7 @@ impl Pipeline {
             }
             FrameStatus::Resized => {
                 self.capture_state = "resizing";
+                self.retention = Default::default();
                 let cleanup = self.session.capture_replaced()?;
                 if !self
                     .overlay
@@ -288,6 +327,7 @@ impl Pipeline {
             }
             FrameStatus::Suspended => {
                 self.capture_state = "suspended";
+                self.retention = Default::default();
                 self.overlay.visible(false)?;
                 self.next_capture_at = self.now().saturating_add(500);
                 Ok(None)
@@ -304,6 +344,7 @@ impl Pipeline {
         }
         if matches!(result, Err("capture-frame" | "capture-atlas")) {
             self.capture_state = "recovering";
+            self.retention = Default::default();
             let cleanup = self.session.capture_replaced()?;
             self.overlay
                 .reset(cleanup.generation, self.dataset.clone())?;

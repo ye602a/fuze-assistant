@@ -4,7 +4,7 @@ This is the current checklist. Earlier milestone documents are historical eviden
 
 | Area | Implemented | Remaining acceptance or development |
 | --- | --- | --- |
-| Capture / OCR / three-card overlay | Native WGC host, persistent worker, exact title reuse, CPU/DirectML recovery, partial slots, public statistics and stale-result rejection | Popup/shard classifier, reroll retention, loading-phase prewarm; real Tencent sessions and target GPU timing |
+| Capture / OCR / three-card overlay | Native WGC host, persistent worker, exact title reuse, CPU/DirectML recovery, narrow three-title shard classification, bounded reroll retention, loading prewarm, partial slots, public statistics and stale-result rejection | Full popup geometry/absence proof, real shard/forge fixtures, Tencent sessions and target GPU timing |
 | Client integration | Process-first discovery, command-line fallback, WebSocket/reconnect, phase/hero changes and automatic language | Real client reconnect and region-specific acceptance |
 | Scheduling | M11 connects the actual local level endpoint; expiry, cancellation generations and ordinary fallback | Gameplay timing; levels never prove actual claims |
 | Main UI / tray / settings | Three languages, pause/exit, tray, safe defaults, legacy import, directory fallback, OCR/backend and module status | Final player interaction review and optional legacy controls |
@@ -19,6 +19,8 @@ This is the current checklist. Earlier milestone documents are historical eviden
 | Secondary augment panel | M14 explicit tray entry, active supported champion, local overall rates and bounded icon cache; hidden on pause/disconnect | Actual gameplay/fullscreen acceptance; no inferred acquisition stage |
 
 ## Latest changes
+
+- [M17: title classification, reroll retention and loading prewarm](M17_SELECTION_PREWARM.md)
 
 - [M16: complete flow audit against Electron and scheduling / inference fixes](M16_FLOW_AUDIT.md)
 

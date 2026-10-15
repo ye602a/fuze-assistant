@@ -809,6 +809,9 @@ fn connection(s: Option<Connection>) -> &'static str {
 }
 fn capture(p: &PipelineStatus) -> &'static str {
     match p.capture {
+        "prewarmed" => "OCR 与推荐数据已预热 · 等待对局",
+        "stat-shards" => "属性碎片界面 · 等待强化符文",
+        "retaining" => "等待刷新 · 暂留上次结果",
         "receiving" if p.frame_age.is_some_and(|v| v < 5) => "画面已处理",
         "receiving" => "等待新的可用画面",
         "suspended" => "游戏切出 / 最小化 · 已暂停截图",

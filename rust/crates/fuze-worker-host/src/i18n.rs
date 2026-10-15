@@ -28,6 +28,9 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["属性碎片界面 · 等待强化符文", "屬性碎片介面 · 等待強化符文", "Stat shards · Waiting for augments"],
+    ["等待刷新 · 暂留上次结果", "等待更新 · 暫留上次結果", "Updating · Showing previous results"],
+    ["OCR 与推荐数据已预热 · 等待对局", "OCR 與推薦資料已預熱 · 等待對局", "OCR and recommendations warmed · Waiting for game"],
     ["未知", "未知", "Unknown"],
     ["时长", "時長", "Duration"],
     ["FUZE / 对局分享", "FUZE / 對局分享", "FUZE / MATCH SUMMARY"],
