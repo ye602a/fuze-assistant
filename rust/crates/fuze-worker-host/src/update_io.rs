@@ -190,6 +190,18 @@ pub(crate) fn transfer(
         {
             return Err("update-response");
         }
+        if std::env::var_os("FUZE_UPDATE_VERIFY_TRACE").is_some() {
+            eprintln!(
+                "update-check role={} status={} ranged={}",
+                if host == "api.github.com" {
+                    "api"
+                } else {
+                    "cdn"
+                },
+                code,
+                range.is_some()
+            );
+        }
         if [301, 302, 303, 307, 308].contains(&code) {
             let mut value = [0u16; 8192];
             let mut length = (value.len() * 2) as u32;

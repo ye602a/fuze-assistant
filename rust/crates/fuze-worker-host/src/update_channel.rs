@@ -68,6 +68,46 @@ impl Session {
         self.download(url, limit, None, &mut b, cancel)?;
         Ok(b)
     }
+    /// Full archive transfer with bounded range requests. All bytes are downloaded; no baseline
+    /// is trusted. This avoids a single slow response holding an update worker for minutes.
+    pub fn archive(
+        &self,
+        url: &str,
+        size: u64,
+        out: &mut dyn Write,
+        cancel: &dyn Fn() -> bool,
+    ) -> Result<()> {
+        if size == 0 || size > 512 * 1024 * 1024 {
+            return Err("update-size");
+        }
+        let started = std::time::Instant::now();
+        let cancelled = || cancel() || started.elapsed() > std::time::Duration::from_secs(600);
+        let mut offset = 0u64;
+        while offset < size {
+            if cancelled() {
+                return Err("update-cancelled-or-timeout");
+            }
+            let length = (size - offset).min(1024 * 1024);
+            let mut bytes = Vec::with_capacity(length as usize);
+            match self.download(
+                url,
+                length as usize,
+                Some((offset, offset + length - 1, size)),
+                &mut bytes,
+                &cancelled,
+            ) {
+                Ok(()) => {}
+                // A server without Range support may still deliver a regular full response.
+                Err("update-http-status") if offset == 0 => {
+                    return self.download(url, size as usize, None, out, &cancelled)
+                }
+                Err(error) => return Err(error),
+            }
+            out.write_all(&bytes).map_err(|_| "update-write")?;
+            offset += length;
+        }
+        Ok(())
+    }
     pub fn check(&self, cancel: &dyn Fn() -> bool) -> Result<Release> {
         let raw: serde_json::Value =
             serde_json::from_slice(&self.bytes(RELEASE, 2 * 1024 * 1024, cancel)?)

@@ -154,10 +154,9 @@ fn run() -> Result<(), &'static str> {
                 Ok(b)
             },
             &|out| {
-                session.download(
+                session.archive(
                     &release.archive,
-                    release.manifest.size as usize,
-                    None,
+                    release.manifest.size,
                     out,
                     &fuze_worker_host::update_progress::cancelled,
                 )

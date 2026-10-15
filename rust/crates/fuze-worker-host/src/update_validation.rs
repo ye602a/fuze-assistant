@@ -116,13 +116,7 @@ pub fn remote(
         Ok(bytes)
     };
     let full = |out: &mut fs::File| {
-        session.download(
-            &release.archive,
-            release.manifest.size as usize,
-            None,
-            out,
-            &|| false,
-        )
+        session.archive(&release.archive, release.manifest.size, out, &|| false)
     };
     let delta_path = root.join("delta.fuz");
     let delta = update_channel::fetch_with(
