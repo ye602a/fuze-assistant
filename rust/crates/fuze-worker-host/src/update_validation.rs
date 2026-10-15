@@ -26,6 +26,7 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
         )
         .map_err(|_| "validation-baseline")?;
         old.revision = "000000000001".into();
+        old.sequence = manifest.sequence.saturating_sub(1);
         install::save(root, &initial)?;
     }
     let target = root.join("versions").join(&manifest.revision);

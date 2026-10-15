@@ -338,6 +338,7 @@ pub fn activate(
     manifest: &Manifest,
     verify: &dyn Fn(&Path) -> Result<()>,
 ) -> Result<()> {
+    manifest.validate()?;
     let mut state = read(root)?;
     if state.pending {
         return Err("install-validation-pending");
@@ -345,7 +346,7 @@ pub fn activate(
     if state
         .current
         .as_ref()
-        .is_some_and(|s| manifest.sequence <= s.sequence)
+        .is_some_and(|s| manifest.sequence <= s.sequence || manifest.revision == s.revision)
         || state.rejected.as_ref() == Some(&manifest.revision)
     {
         return Err("install-old-or-rejected");
@@ -364,18 +365,8 @@ pub fn bootstrap(root: &Path, bundled: &Path) -> Result<()> {
     if read(root)?.current.is_some() {
         return Ok(());
     }
-    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
-        &bundled.join("build.json"),
-        16384,
-    )?)
-    .map_err(|_| "install-build")?;
-    let revision = build["revision"]
-        .as_str()
-        .filter(|r| update_channel::revision(r))
-        .ok_or("install-build")?;
-    if build["channel"] != "rust-development-preview" {
-        return Err("install-channel");
-    }
+    let installed = bundled_version(bundled)?;
+    let revision = installed.revision.as_str();
     let target = root.join("versions").join(revision);
     if !target.exists() {
         safe_dir(&target)?;
@@ -434,13 +425,32 @@ pub fn bootstrap(root: &Path, bundled: &Path) -> Result<()> {
     save(
         root,
         &State {
-            current: Some(Installed {
-                revision: revision.into(),
-                sequence: 0,
-            }),
+            current: Some(installed),
             ..Default::default()
         },
     )
+}
+pub fn bundled_version(bundled: &Path) -> Result<Installed> {
+    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &bundled.join("build.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-build")?;
+    let revision = build["revision"]
+        .as_str()
+        .filter(|r| update_channel::revision(r))
+        .ok_or("install-build")?;
+    if build["channel"] != "rust-development-preview" {
+        return Err("install-channel");
+    }
+    let sequence = match build.get("sequence") {
+        None => 0,
+        Some(v) => v.as_u64().filter(|n| *n > 0).ok_or("install-build")?,
+    };
+    Ok(Installed {
+        revision: revision.into(),
+        sequence,
+    })
 }
 /// Uses only the fixed native preview mutex, never enumerates or terminates other applications.
 pub fn desktop_running() -> bool {
@@ -573,6 +583,51 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bundle_sequence_is_read_before_first_update_and_same_revision_cannot_activate() {
+        let root = std::env::temp_dir().join(format!("fuze-version-test-{}", std::process::id()));
+        safe_dir(&root).unwrap();
+        fs::write(
+            root.join("build.json"),
+            br#"{"revision":"111111111111","channel":"rust-development-preview","sequence":500}"#,
+        )
+        .unwrap();
+        let version = bundled_version(&root).unwrap();
+        assert_eq!(version.sequence, 500);
+        save(
+            &root,
+            &State {
+                current: Some(version),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let manifest = Manifest {
+            schema: 1,
+            channel: "rust-preview".into(),
+            revision: "111111111111".into(),
+            sequence: 501,
+            archive: "Fuze-Rust-111111111111.fuz".into(),
+            size: 1,
+            sha512: "00".repeat(64),
+            blockmap_sha256: "00".repeat(32),
+        };
+        assert_eq!(
+            activate(&root, &manifest, &|_| panic!(
+                "same version must not be verified"
+            )),
+            Err("install-old-or-rejected")
+        );
+        fs::write(
+            root.join("build.json"),
+            br#"{"revision":"111111111111","channel":"rust-development-preview","sequence":-1}"#,
+        )
+        .unwrap();
+        assert!(bundled_version(&root).is_err());
+        fs::remove_file(root.join("build.json")).unwrap();
+        fs::remove_file(root.join("current.json")).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn pointer_commit_failure_and_health_failure_preserve_rollback() {
         let root = std::env::temp_dir().join(format!("fuze-pointer-test-{}", std::process::id()));

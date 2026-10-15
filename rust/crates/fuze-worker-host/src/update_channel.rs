@@ -75,38 +75,34 @@ impl Session {
         url: &str,
         size: u64,
         out: &mut dyn Write,
-        cancel: &dyn Fn() -> bool,
+        cancel: &(dyn Fn() -> bool + Sync),
     ) -> Result<()> {
         if size == 0 || size > 512 * 1024 * 1024 {
             return Err("update-size");
         }
         let started = std::time::Instant::now();
         let cancelled = || cancel() || started.elapsed() > std::time::Duration::from_secs(600);
-        let mut offset = 0u64;
-        while offset < size {
-            if cancelled() {
-                return Err("update-cancelled-or-timeout");
-            }
-            let length = (size - offset).min(1024 * 1024);
+        let fetch = |offset, length| {
             let mut bytes = Vec::with_capacity(length as usize);
-            match self.download(
+            self.download(
                 url,
                 length as usize,
                 Some((offset, offset + length - 1, size)),
                 &mut bytes,
                 &cancelled,
-            ) {
-                Ok(()) => {}
-                // A server without Range support may still deliver a regular full response.
-                Err("update-http-status") if offset == 0 => {
-                    return self.download(url, size as usize, None, out, &cancelled)
-                }
-                Err(error) => return Err(error),
+            )?;
+            Ok(bytes)
+        };
+        let first = size.min(1024 * 1024);
+        match fetch(0, first) {
+            Ok(bytes) => out.write_all(&bytes).map_err(|_| "update-write")?,
+            // Probe once before concurrency; no partial 200 body has been written.
+            Err("update-http-status") => {
+                return self.download(url, size as usize, None, out, &cancelled)
             }
-            out.write_all(&bytes).map_err(|_| "update-write")?;
-            offset += length;
+            Err(error) => return Err(error),
         }
-        Ok(())
+        transfer_chunks(first, size, out, &fetch, &cancelled)
     }
     pub fn check(&self, cancel: &dyn Fn() -> bool) -> Result<Release> {
         let raw: serde_json::Value =
@@ -152,6 +148,53 @@ impl Session {
             map,
         })
     }
+}
+/// Ordered writes, at most four 1 MiB buffers and four scoped IO workers; never a game-loop task.
+fn transfer_chunks(
+    mut offset: u64,
+    total: u64,
+    out: &mut dyn Write,
+    fetch: &(dyn Fn(u64, u64) -> Result<Vec<u8>> + Sync),
+    cancel: &dyn Fn() -> bool,
+) -> Result<()> {
+    while offset < total {
+        if cancel() {
+            return Err("update-cancelled-or-timeout");
+        }
+        let batch = std::thread::scope(|scope| {
+            let mut jobs = Vec::new();
+            for _ in 0..4 {
+                if offset >= total {
+                    break;
+                }
+                let start = offset;
+                let length = (total - offset).min(1024 * 1024);
+                jobs.push((length, scope.spawn(move || fetch(start, length))));
+                offset += length;
+            }
+            let mut blocks = Vec::new();
+            let mut error = None;
+            for (length, job) in jobs {
+                match job.join().unwrap_or(Err("update-download-worker")) {
+                    Ok(bytes) if bytes.len() as u64 == length => blocks.push(bytes),
+                    Ok(_) => {
+                        error = Some("update-range");
+                    }
+                    Err(e) => {
+                        error = Some(e);
+                    }
+                }
+            }
+            error.map_or(Ok(blocks), Err)
+        })?;
+        if cancel() {
+            return Err("update-cancelled-or-timeout");
+        }
+        for bytes in batch {
+            out.write_all(&bytes).map_err(|_| "update-write")?;
+        }
+    }
+    Ok(())
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -309,6 +352,41 @@ pub fn bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    #[test]
+    fn bounded_parallel_chunks_preserve_order_and_reject_short_ranges() {
+        let total = 4 * 1024 * 1024 + 17;
+        let active = std::sync::atomic::AtomicUsize::new(0);
+        let peak = std::sync::atomic::AtomicUsize::new(0);
+        let mut out = Vec::new();
+        transfer_chunks(
+            0,
+            total,
+            &mut out,
+            &|offset, length| {
+                let count = active.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                peak.fetch_max(count, std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                let result = vec![(offset / (1024 * 1024)) as u8; length as usize];
+                active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(result)
+            },
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(out.len() as u64, total);
+        for (i, block) in out.chunks(1024 * 1024).enumerate() {
+            assert!(block.iter().all(|b| *b == i as u8));
+        }
+        assert!(peak.load(std::sync::atomic::Ordering::SeqCst) <= 4);
+        assert_eq!(
+            transfer_chunks(0, 16, &mut Vec::new(), &|_, _| Ok(vec![]), &|| false),
+            Err("update-range")
+        );
+        assert_eq!(
+            transfer_chunks(0, 16, &mut Vec::new(), &|_, _| panic!(), &|| true),
+            Err("update-cancelled-or-timeout")
+        );
+    }
     #[test]
     fn full_fallback_is_once_and_cancellation_never_retries() {
         let dir = std::env::temp_dir().join(format!("fuze-update-test-{}", std::process::id()));

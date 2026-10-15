@@ -89,10 +89,12 @@ fn run() -> Result<(), &'static str> {
     if state.pending {
         return Err("install-validation-pending");
     }
-    if state
-        .current
-        .as_ref()
-        .is_some_and(|v| v.sequence >= release.manifest.sequence)
+    let current = match state.current.as_ref() {
+        Some(current) => current.clone(),
+        None => install::bundled_version(&bundled)?,
+    };
+    if current.sequence >= release.manifest.sequence
+        || current.revision == release.manifest.revision
         || state.rejected.as_ref() == Some(&release.manifest.revision)
     {
         message(
