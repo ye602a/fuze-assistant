@@ -72,6 +72,12 @@ unsafe extern "system" fn visit(hwnd: HWND, param: LPARAM) -> BOOL {
         return 1;
     }
     let image = std::path::PathBuf::from(String::from_utf16_lossy(&path[..length as usize]));
+    if !image.file_name().is_some_and(|name| {
+        name.to_string_lossy()
+            .eq_ignore_ascii_case("League of Legends.exe")
+    }) {
+        return 1; // Avoid filesystem resolution for unrelated applications.
+    }
     let matches = image.canonicalize().ok().is_some_and(|p| {
         p.to_string_lossy()
             .eq_ignore_ascii_case(&search.expected.to_string_lossy())

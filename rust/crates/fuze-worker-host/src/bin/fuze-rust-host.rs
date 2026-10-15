@@ -70,7 +70,13 @@ fn run() -> Result<(), &'static str> {
     let mut controller = Controller::new(config);
     let started = Instant::now();
     let mut last_error = None;
+    let mut last_connection = None;
     while started.elapsed() < Duration::from_secs(seconds) {
+        let connection = monitor.state();
+        if connection != last_connection {
+            eprintln!("fuze-lcu: {connection:?}"); // State contains fixed enums only.
+            last_connection = connection;
+        }
         if let Err(error) = controller.tick(&monitor) {
             // All controller errors are static categories; no credentials, IDs, images or paths.
             if last_error != Some(error) {

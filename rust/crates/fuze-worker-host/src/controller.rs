@@ -13,6 +13,7 @@ use std::{
 };
 
 struct Observation {
+    state: fuze_lcu::reconnect::State,
     context: Option<Context>,
     root: Option<PathBuf>,
     revision: u64,
@@ -39,8 +40,12 @@ pub struct Monitor {
     thread: Option<JoinHandle<()>>,
 }
 impl Monitor {
+    pub fn state(&self) -> Option<fuze_lcu::reconnect::State> {
+        self.latest.lock().ok().map(|s| s.state)
+    }
     pub fn start() -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
+            state: fuze_lcu::reconnect::State::Waiting,
             context: None,
             root: None,
             revision: 0,
@@ -55,11 +60,12 @@ impl Monitor {
                 let mut client = AutoClient::default();
                 while !stopped.load(Ordering::Acquire) {
                     if client.wake_at().is_some_and(|at| client.now_ms() >= at) {
-                        client.poll();
+                        let state = client.poll();
                         let context = client.context();
                         let root = client.game_root().map(PathBuf::from);
                         if let Ok(mut latest) = shared.lock() {
                             latest.publish(context, root);
+                            latest.state = state;
                         }
                     }
                     let wait = client
@@ -275,6 +281,7 @@ mod tests {
         };
         let first = context(8, 1);
         let mut observation = Observation {
+            state: fuze_lcu::reconnect::State::Waiting,
             context: Some(first),
             root: None,
             revision: 1,
@@ -306,6 +313,7 @@ mod tests {
     #[test]
     fn latest_observation_drops_old_context_and_backoff_is_bounded() {
         let mut observation = Observation {
+            state: fuze_lcu::reconnect::State::Waiting,
             context: None,
             root: None,
             revision: 0,
