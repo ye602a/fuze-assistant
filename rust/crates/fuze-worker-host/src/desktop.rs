@@ -26,6 +26,9 @@ const PAUSED: u8 = 0;
 const RUNNING: u8 = 1;
 const EXIT: u8 = 2;
 const DATA: u8 = 3;
+const APPLY: u8 = 4;
+const SETTINGS: usize = 107;
+const SAVE_SETTINGS: usize = 206;
 const UPDATE_DATA: usize = 105;
 const UPDATE_APP: usize = 106;
 const TOGGLE: usize = 101;
@@ -42,6 +45,8 @@ struct Status {
     available: Option<String>,
     notice: Option<&'static str>,
     update_error: Option<&'static str>,
+    preferences: crate::preferences::Preferences,
+    selection: Option<crate::champ_select::View>,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -53,6 +58,8 @@ impl Default for Status {
             available: None,
             notice: None,
             update_error: None,
+            preferences: Default::default(),
+            selection: None,
         }
     }
 }
@@ -62,6 +69,7 @@ struct Shared {
     desired: AtomicU8,
     status: Mutex<Status>,
     monitor: Mutex<Option<MonitorControl>>,
+    pending: Mutex<Option<crate::preferences::Preferences>>,
 }
 impl Shared {
     fn request(&self, mode: u8) {
@@ -93,7 +101,25 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             });
         }
     }
-    let locale = config.locale.unwrap_or(fuze_data::Locale::ZhCn);
+    let mut preferences = crate::preferences::Preferences::default();
+    let preference_path = if fixture {
+        None
+    } else {
+        crate::preferences::path().ok()
+    };
+    if let Some(path) = preference_path.as_ref() {
+        match crate::preferences::read(path).and_then(|p| {
+            p.apply(&mut config)?;
+            Ok(p)
+        }) {
+            Ok(p) => preferences = p,
+            Err(e) => {
+                if let Ok(mut s) = shared.status.lock() {
+                    s.update_error = Some(e);
+                }
+            }
+        }
+    }
     let roots: Vec<_> = config
         .roots
         .iter()
@@ -102,16 +128,22 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             source: r.source,
         })
         .collect();
-    let available = || {
+    let available = |locale| {
         fuze_data::prepare(&roots, locale, fuze_data::Scope::Ocr)
             .ok()
             .map(|d| format!("可用 {}", d.identity()))
     };
-    let initial_available = available();
+    let initial_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
     if let Ok(mut s) = shared.status.lock() {
         s.available = initial_available;
+        s.preferences = preferences.clone();
     }
-    let mut controller = Controller::new(config);
+    let mut controller = Controller::new(config.clone());
+    let mut champion_catalog = None;
+    let mut champion_locale = None;
+    let mut champion_retry = Instant::now();
+    let mut last_selection = None;
+    let mut selection_view = None;
     let mut monitor = None;
     let mut last_mode = PAUSED;
     loop {
@@ -120,6 +152,8 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             break;
         }
         if desired == PAUSED {
+            last_selection = None;
+            selection_view = None;
             if last_mode != PAUSED {
                 controller.suspend();
             }
@@ -127,7 +161,42 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 status.mode = PAUSED;
                 status.connection = None;
                 status.pipeline = PipelineStatus::default();
+                status.selection = None;
             }
+        } else if desired == APPLY {
+            controller.suspend();
+            let candidate = shared.pending.lock().ok().and_then(|mut p| p.take());
+            let result = (|| {
+                let p = candidate.ok_or("preferences-missing")?;
+                let mut next = config.clone();
+                p.apply(&mut next)?;
+                if let Some(path) = preference_path.as_ref() {
+                    crate::preferences::save(path, &p)?;
+                }
+                config = next;
+                preferences = p;
+                controller = Controller::new(config.clone());
+                champion_catalog = None;
+                champion_locale = None;
+                champion_retry = Instant::now();
+                Ok::<(), &'static str>(())
+            })();
+            let data = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+            if let Ok(mut s) = shared.status.lock() {
+                s.preferences = preferences.clone();
+                s.available = data;
+                s.selection = None;
+                s.update_error = result.err();
+                s.notice = Some(if s.update_error.is_none() {
+                    "偏好已保存；下次开始识别生效。"
+                } else {
+                    "保存未完成；仍使用原设置。"
+                });
+            }
+            let _ =
+                shared
+                    .desired
+                    .compare_exchange(APPLY, PAUSED, Ordering::AcqRel, Ordering::Acquire);
         } else if desired == DATA {
             controller.suspend();
             if let Ok(mut s) = shared.status.lock() {
@@ -143,7 +212,10 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     })
                 })
             };
-            let refreshed_available = available();
+            let refreshed_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+            champion_catalog = None;
+            champion_locale = None;
+            champion_retry = Instant::now();
             if let Ok(mut s) = shared.status.lock() {
                 s.available = refreshed_available;
                 s.update_error = result.as_ref().err().copied();
@@ -159,11 +231,26 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .compare_exchange(DATA, PAUSED, Ordering::AcqRel, Ordering::Acquire);
         } else if fixture {
             // Explicit offline entry only. No discovery or game access exists in this branch.
+            if champion_catalog.is_none() {
+                champion_catalog =
+                    crate::champ_select::Catalog::load(&roots, fuze_data::Locale::ZhCn).ok();
+            }
             if let Ok(mut status) = shared.status.lock() {
                 status.mode = RUNNING;
                 status.connection = Some(Connection::Connected(
                     fuze_runtime::session::Phase::ClientReady,
                 ));
+                if let Some(c) = champion_catalog.as_ref() {
+                    let mut selection = fuze_lcu::context::Selection {
+                        team: [1, 4, 17, 51, 157],
+                        local_slot: Some(1),
+                        bench: [0; 20],
+                        count: 12,
+                    };
+                    selection.bench[..12]
+                        .copy_from_slice(&[2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+                    status.selection = Some(c.view(selection));
+                }
             }
         } else {
             if last_mode != RUNNING {
@@ -194,10 +281,40 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             }
             if let Some(m) = monitor.as_ref() {
                 let _ = controller.tick(m);
+                let selection = m.selection().filter(|_| preferences.champ_select);
+                let selected_locale = config.locale.or_else(|| m.data_locale());
+                if selection.is_some() && champion_locale != selected_locale {
+                    champion_catalog = None;
+                    last_selection = None;
+                    selection_view = None;
+                    champion_retry = Instant::now();
+                    champion_locale = selected_locale;
+                }
+                if selection.is_some()
+                    && champion_catalog.is_none()
+                    && Instant::now() >= champion_retry
+                {
+                    champion_catalog = selected_locale
+                        .and_then(|l| crate::champ_select::Catalog::load(&roots, l).ok());
+                    champion_retry = Instant::now() + Duration::from_secs(30);
+                }
+                if selection != last_selection || selection_view.is_none() {
+                    selection_view =
+                        selection.and_then(|s| champion_catalog.as_ref().map(|c| c.view(s)));
+                    last_selection = selection;
+                }
                 if let Ok(mut s) = shared.status.lock() {
                     s.mode = RUNNING;
                     s.connection = m.state();
                     s.pipeline = controller.status();
+                    s.selection = selection_view.clone();
+                    if selection.is_some() && selected_locale.is_none() {
+                        s.notice = Some("选人参考等待客户端语言，暂不混用不同语言数据。");
+                    } else if selection.is_some() && champion_catalog.is_none() {
+                        s.notice = Some("选人数据暂不可用，30 秒后重试；可暂停后更新推荐数据。");
+                    } else {
+                        s.notice = None;
+                    }
                 }
             }
         }
@@ -283,8 +400,24 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
     let old = SelectObject(memory, bitmap);
     draw(hwnd, memory, ui);
     // Native hidden-window render; never captures the desktop or another application.
-    for id in [TOGGLE, UPDATE_DATA, UPDATE_APP, HIDE, QUIT] {
+    for id in [
+        TOGGLE,
+        UPDATE_DATA,
+        UPDATE_APP,
+        SETTINGS,
+        HIDE,
+        QUIT,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+    ] {
         let child = GetDlgItem(hwnd, id as i32);
+        if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            continue;
+        }
         let mut bounds: RECT = zeroed();
         GetWindowRect(child, &mut bounds);
         let mut point = POINT {
@@ -320,15 +453,15 @@ unsafe fn snapshot(hwnd: HWND, path: &str, ui: &mut Ui) -> Result<()> {
     )
     .map_err(|_| "desktop-image")
 }
-fn rgb(r: u32, g: u32, b: u32) -> u32 {
+pub(crate) fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
 }
-unsafe fn fill(dc: HDC, r: RECT, c: u32) {
+pub(crate) unsafe fn fill(dc: HDC, r: RECT, c: u32) -> () {
     let b = CreateSolidBrush(c);
     FillRect(dc, &r, b);
     DeleteObject(b);
 }
-unsafe fn text(dc: HDC, s: &str, r: RECT, size: i32, c: u32) {
+pub(crate) unsafe fn text(dc: HDC, s: &str, r: RECT, size: i32, c: u32) {
     let f = CreateFontW(
         -size,
         0,
@@ -401,6 +534,10 @@ fn explain(error: Option<&str>) -> &'static str {
     }
 }
 struct Ui {
+    settings: bool,
+    draft: crate::preferences::Preferences,
+    champions: Option<crate::champ_select::Window>,
+    champion_preview_ok: bool,
     shared: Arc<Shared>,
     shown: Status,
     desired: u8,
@@ -434,6 +571,57 @@ unsafe fn show(hwnd: HWND) {
     ShowWindow(hwnd, SW_RESTORE);
     SetForegroundWindow(hwnd);
 }
+fn cycle<'a>(current: &str, values: &[&'a str]) -> &'a str {
+    values[(values.iter().position(|s| *s == current).unwrap_or(0) + 1) % values.len()]
+}
+unsafe fn settings_controls(hwnd: HWND, u: &Ui) {
+    let yes = |v| if v { "开启" } else { "关闭" };
+    let labels = [
+        format!(
+            "{}  · 点击切换",
+            match u.draft.backend.as_str() {
+                "cpu" => "CPU",
+                "dml" => "DirectML",
+                _ => "自动",
+            }
+        ),
+        format!(
+            "{}  · 点击切换",
+            if u.draft.locale == "auto" {
+                "跟随客户端"
+            } else {
+                &u.draft.locale
+            }
+        ),
+        yes(u.draft.champ_select).into(),
+        yes(u.draft.champ_topmost).into(),
+        if u.draft.close_to_tray {
+            "收起到托盘"
+        } else {
+            "退出程序"
+        }
+        .into(),
+        "保存设置".into(),
+    ];
+    for (i, label) in labels.iter().enumerate() {
+        let child = GetDlgItem(hwnd, 201 + i as i32);
+        SetWindowTextW(child, wide(label).as_ptr());
+        ShowWindow(child, if u.settings { SW_SHOWNA } else { SW_HIDE });
+        EnableWindow(
+            child,
+            i32::from(u.desired == PAUSED && u.shown.mode == PAUSED),
+        );
+    }
+    SetWindowTextW(
+        GetDlgItem(hwnd, SETTINGS as i32),
+        wide(if u.settings {
+            "返回工作台"
+        } else {
+            "偏好设置"
+        })
+        .as_ptr(),
+    );
+}
 unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
     let mut r: RECT = zeroed();
     GetClientRect(hwnd, &mut r);
@@ -464,6 +652,50 @@ unsafe fn draw(hwnd: HWND, dc: HDC, u: &mut Ui) {
         x(16),
         dim,
     );
+    if u.settings {
+        text(
+            dc,
+            "偏好设置 · 暂停识别后保存",
+            rect(28, 105, r.right - x(28), 150),
+            x(24),
+            gold,
+        );
+        for (i, label) in [
+            "OCR 后端",
+            "识别与推荐数据语言",
+            "显示选人参考",
+            "选人窗口置顶",
+            "关闭主界面",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let t = 160 + i as i32 * 49;
+            text(dc, label, rect(28, t, r.right / 2, t + 40), x(17), pale);
+        }
+        text(
+            dc,
+            "自动模式按已有策略运行并允许 CPU 回退；界面显示实际后端。",
+            rect(28, 449, r.right - x(28), 474),
+            x(13),
+            dim,
+        );
+        text(
+            dc,
+            "语言数据校验成功后才保存。不会写入游戏、凭据或账号信息。",
+            rect(28, 475, r.right - x(28), 500),
+            x(13),
+            dim,
+        );
+        text(
+            dc,
+            u.shown.notice.unwrap_or("更改在下次开始识别时生效。"),
+            rect(28, 405, r.right / 2 - x(12), 444),
+            x(13),
+            dim,
+        );
+        return;
+    }
     let error = u.shown.pipeline.error.is_some()
         || u.shown.update_error.is_some()
         || matches!(u.shown.connection, Some(Connection::Retry(_)));
@@ -673,15 +905,25 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let mut r: RECT = zeroed();
             GetClientRect(hwnd, &mut r);
             let d = GetDpiForWindow(hwnd).max(96) as i32;
-            for (i, id) in [TOGGLE, UPDATE_DATA, UPDATE_APP, HIDE, QUIT]
+            for (i, id) in [TOGGLE, UPDATE_DATA, UPDATE_APP, SETTINGS, HIDE, QUIT]
                 .iter()
                 .enumerate()
             {
                 MoveWindow(
                     GetDlgItem(hwnd, *id as i32),
-                    28 * d / 96 + i as i32 * ((r.right - 56 * d / 96) / 5),
+                    28 * d / 96 + i as i32 * ((r.right - 56 * d / 96) / 6),
                     r.bottom - 60 * d / 96,
-                    ((r.right - 56 * d / 96) / 5 - 12 * d / 96).max(1),
+                    ((r.right - 56 * d / 96) / 6 - 10 * d / 96).max(1),
+                    38 * d / 96,
+                    1,
+                );
+            }
+            for i in 0..6 {
+                MoveWindow(
+                    GetDlgItem(hwnd, 201 + i),
+                    r.right / 2,
+                    (160 + i * 49) * d / 96,
+                    r.right / 2 - 28 * d / 96,
                     38 * d / 96,
                     1,
                 );
@@ -704,6 +946,39 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_COMMAND => {
             match w & 0xffff {
+                SETTINGS => {
+                    u.settings = !u.settings;
+                    if u.settings {
+                        u.draft = u.shown.preferences.clone();
+                    }
+                    settings_controls(hwnd, u);
+                }
+                201..=205 if u.settings => {
+                    match w & 0xffff {
+                        201 => {
+                            u.draft.backend =
+                                cycle(&u.draft.backend, &["auto", "cpu", "dml"]).into()
+                        }
+                        202 => {
+                            u.draft.locale =
+                                cycle(&u.draft.locale, &["auto", "zh-CN", "zh-TW", "en-US"]).into()
+                        }
+                        203 => u.draft.champ_select = !u.draft.champ_select,
+                        204 => u.draft.champ_topmost = !u.draft.champ_topmost,
+                        205 => u.draft.close_to_tray = !u.draft.close_to_tray,
+                        _ => {}
+                    }
+                    settings_controls(hwnd, u);
+                }
+                SAVE_SETTINGS if u.settings => {
+                    if u.shared.desired.load(Ordering::Acquire) == PAUSED && u.shown.mode == PAUSED
+                    {
+                        if let Ok(mut pending) = u.shared.pending.lock() {
+                            *pending = Some(u.draft.clone());
+                        }
+                        u.shared.request(APPLY);
+                    }
+                }
                 TOGGLE => {
                     u.shared
                         .request(if u.shared.desired.load(Ordering::Acquire) == RUNNING {
@@ -753,7 +1028,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             0
         }
         WM_CLOSE => {
-            if u.tray {
+            if u.tray && u.shown.preferences.close_to_tray {
                 ShowWindow(hwnd, SW_HIDE);
             } else {
                 u.shared.request(EXIT);
@@ -809,7 +1084,15 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             let desired = u.shared.desired.load(Ordering::Acquire);
             if next != u.shown || desired != u.desired {
                 u.shown = next;
+                if let Some(window) = u.champions.as_mut() {
+                    window.update(
+                        u.shown.selection.clone().filter(|_| desired == RUNNING),
+                        u.shown.preferences.champ_topmost,
+                        u.smoke,
+                    );
+                }
                 u.desired = desired;
+                settings_controls(hwnd, u);
                 SetWindowTextW(
                     GetDlgItem(hwnd, TOGGLE as i32),
                     wide(if desired == RUNNING {
@@ -819,7 +1102,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     })
                     .as_ptr(),
                 );
-                EnableWindow(GetDlgItem(hwnd, TOGGLE as i32), i32::from(desired != EXIT));
+                EnableWindow(
+                    GetDlgItem(hwnd, TOGGLE as i32),
+                    i32::from(desired != EXIT && desired != APPLY),
+                );
                 EnableWindow(
                     GetDlgItem(hwnd, UPDATE_DATA as i32),
                     i32::from(desired == PAUSED),
@@ -840,6 +1126,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         u.smoke_step = 1;
                     }
                     1 if u.shown.mode == RUNNING => {
+                        if let (Some(window), Ok(path)) =
+                            (u.champions.as_ref(), std::env::var("FUZE_CHAMPION_PREVIEW"))
+                        {
+                            u.champion_preview_ok = u.shown.selection.is_some()
+                                && window.render(std::path::Path::new(&path)).is_ok();
+                        }
                         if let Ok(path) = std::env::var("FUZE_DESKTOP_PREVIEW") {
                             u.preview_ok = snapshot(hwnd, &path, u).is_ok();
                         }
@@ -847,6 +1139,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                         u.smoke_step = 2;
                     }
                     2 if u.shown.mode == PAUSED => {
+                        if let Ok(path) = std::env::var("FUZE_SETTINGS_PREVIEW") {
+                            u.settings = true;
+                            u.draft = u.shown.preferences.clone();
+                            settings_controls(hwnd, u);
+                            if snapshot(hwnd, &path, u).is_err() {
+                                u.preview_ok = false;
+                            }
+                            u.settings = false;
+                            settings_controls(hwnd, u);
+                        }
                         u.smoke_pass = true;
                         PostMessageW(hwnd, WM_COMMAND, QUIT, 0);
                         u.smoke_step = 3;
@@ -925,6 +1227,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         desired: AtomicU8::new(PAUSED),
         status: Mutex::new(Status::default()),
         monitor: Mutex::new(None),
+        pending: Mutex::new(None),
     });
     let worker_shared = shared.clone();
     let worker = thread::Builder::new()
@@ -949,6 +1252,10 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
         let icon = app_icon();
         let mut ui = Box::new(Ui {
+            settings: false,
+            draft: Default::default(),
+            champions: crate::champ_select::Window::new().ok(),
+            champion_preview_ok: false,
             icon: icon.unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION)),
             icon_owned: icon.is_some(),
             shared: shared.clone(),
@@ -990,6 +1297,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
             (TOGGLE, "开始识别"),
             (UPDATE_DATA, "更新推荐数据"),
             (UPDATE_APP, "退出并检查更新"),
+            (SETTINGS, "偏好设置"),
             (HIDE, "收起到托盘"),
             (QUIT, "退出"),
         ] {
@@ -1008,6 +1316,23 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 null(),
             );
         }
+        for id in 201..=206 {
+            CreateWindowExW(
+                0,
+                wide("BUTTON").as_ptr(),
+                wide("").as_ptr(),
+                WS_CHILD | WS_TABSTOP | BS_OWNERDRAW as u32,
+                0,
+                0,
+                0,
+                0,
+                hwnd,
+                id as HMENU,
+                instance,
+                null(),
+            );
+        }
+        settings_controls(hwnd, &ui);
         SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, ui.icon as isize);
         SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, ui.icon as isize);
         ui.tray = if smoke && std::env::var("FUZE_RUST_CI_TRAY").as_deref() != Ok("1") {
@@ -1056,12 +1381,13 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
                 || !ui.shown.done
                 || (std::env::var_os("FUZE_DESKTOP_PREVIEW").is_some() && !ui.preview_ok)
                 || (ui.tray_registered && (!ui.tray_recovered || !ui.tray_removed))
+                || (std::env::var_os("FUZE_CHAMPION_PREVIEW").is_some() && !ui.champion_preview_ok)
             {
                 return Err("desktop-smoke-lifecycle");
             }
             println!(
                 "{}",
-                serde_json::json!({"desktop_ready":true,"pause_resume_exit":true,"game_access":false,"tray_registered":ui.tray_registered,"tray_recovered":ui.tray_recovered,"tray_removed":ui.tray_removed,"icon_loaded":ui.icon_owned,"preview_rendered":ui.preview_ok})
+                serde_json::json!({"desktop_ready":true,"pause_resume_exit":true,"game_access":false,"tray_registered":ui.tray_registered,"tray_recovered":ui.tray_recovered,"tray_removed":ui.tray_removed,"icon_loaded":ui.icon_owned,"preview_rendered":ui.preview_ok,"champion_preview":ui.champion_preview_ok})
             );
         }
     }

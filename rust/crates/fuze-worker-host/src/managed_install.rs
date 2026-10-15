@@ -466,7 +466,7 @@ pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
     let _lock = lock(root)?;
     launch_with(root, bundled, &check_bundle, &start)
 }
-fn launch_with(
+pub(crate) fn launch_with(
     root: &Path,
     bundled: &Path,
     check: &dyn Fn(&Path) -> Result<()>,
@@ -510,8 +510,19 @@ fn launch_with(
     Ok(())
 }
 fn start(directory: &Path) -> Result<()> {
+    start_mode(directory, false)
+}
+/// Runs the real native window hidden, with live monitoring disabled, and waits for clean exit.
+pub(crate) fn start_smoke(directory: &Path) -> Result<()> {
+    start_mode(directory, true)
+}
+fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
     let mut child = Command::new(directory.join("fuze-rust-host.exe"))
-        .arg("--managed-desktop")
+        .arg(if smoke {
+            "--desktop-smoke"
+        } else {
+            "--managed-desktop"
+        })
         .arg(directory.join("preview.json"))
         .current_dir(directory)
         .stdin(Stdio::null())
@@ -525,13 +536,37 @@ fn start(directory: &Path) -> Result<()> {
     std::thread::spawn(move || {
         use std::io::BufRead;
         let mut line = String::new();
-        let _ = std::io::BufReader::new(stdout.take(256)).read_line(&mut line);
-        let _ = tx.send(line.trim() == "FUZE_DESKTOP_READY_1");
+        let _ = std::io::BufReader::new(stdout.take(1024)).read_line(&mut line);
+        let ready = if smoke {
+            serde_json::from_str::<serde_json::Value>(&line).is_ok_and(|r| {
+                r["desktop_ready"] == true
+                    && r["pause_resume_exit"] == true
+                    && r["game_access"] == false
+            })
+        } else {
+            line.trim() == "FUZE_DESKTOP_READY_1"
+        };
+        let _ = tx.send(ready);
     });
     if rx.recv_timeout(Duration::from_secs(15)) != Ok(true) {
         let _ = child.kill();
         let _ = child.wait();
         return Err("install-launch-readiness");
+    }
+    if smoke {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(s)) if s.success() => break,
+                Ok(Some(_)) | Err(_) => return Err("install-smoke-exit"),
+                _ if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("install-smoke-timeout");
+                }
+                _ => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
     }
     Ok(())
 }

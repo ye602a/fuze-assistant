@@ -10,6 +10,8 @@ use std::{
 };
 pub type Result<T> = std::result::Result<T, &'static str>;
 #[cfg(windows)]
+pub mod champ_select;
+#[cfg(windows)]
 pub mod controller;
 #[cfg(windows)]
 pub mod data_update;
@@ -22,6 +24,8 @@ pub mod managed_install;
 #[cfg(windows)]
 pub mod pipeline;
 #[cfg(windows)]
+pub mod preferences;
+#[cfg(windows)]
 pub mod private_update;
 pub mod recovery;
 #[cfg(windows)]
@@ -32,6 +36,8 @@ pub mod update_credential;
 pub mod update_io;
 #[cfg(windows)]
 pub mod update_progress;
+#[cfg(windows)]
+pub mod update_validation;
 pub struct Worker {
     child: Child,
     send: Option<SyncSender<Request>>,

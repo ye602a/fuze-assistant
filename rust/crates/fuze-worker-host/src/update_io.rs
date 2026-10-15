@@ -243,11 +243,18 @@ pub(crate) fn transfer(
         let mut buffer = [0u8; 65536];
         loop {
             check()?;
+            // Read the bytes already available rather than waiting to fill 64 KiB.
+            // WinHTTP receive timeouts apply per network packet, not per ReadData call.
+            let mut available = 0u32;
+            if WinHttpQueryDataAvailable(request.0, &mut available) == 0 {
+                return Err("update-network");
+            }
+            check()?;
             let mut read = 0;
             if WinHttpReadData(
                 request.0,
                 buffer.as_mut_ptr().cast(),
-                buffer.len() as u32,
+                available.max(1).min(buffer.len() as u32),
                 &mut read,
             ) == 0
             {

@@ -16,6 +16,12 @@ pub struct Session {
     secret: Option<Secret>,
 }
 impl Session {
+    /// Explicit developer verification uses an anonymous pipe, never argv or a saved credential.
+    pub fn with_secret(secret: Secret) -> Self {
+        Self {
+            secret: Some(secret),
+        }
+    }
     pub fn public() -> Self {
         Self { secret: None }
     }

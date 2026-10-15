@@ -74,6 +74,25 @@ pub struct Monitor {
     thread: Option<JoinHandle<()>>,
 }
 impl Monitor {
+    pub fn data_locale(&self) -> Option<fuze_data::Locale> {
+        Some(match self.latest.lock().ok()?.locale? {
+            fuze_lcu::locale::Locale::ZhCn => fuze_data::Locale::ZhCn,
+            fuze_lcu::locale::Locale::ZhTw => fuze_data::Locale::ZhTw,
+            fuze_lcu::locale::Locale::EnUs => fuze_data::Locale::EnUs,
+        })
+    }
+    pub fn selection(&self) -> Option<fuze_lcu::context::Selection> {
+        let latest = self.latest.lock().ok()?;
+        if latest.updated.elapsed() >= Duration::from_secs(8)
+            || !matches!(
+                latest.state,
+                fuze_lcu::reconnect::State::Connected(Phase::ChampSelect)
+            )
+        {
+            return None;
+        }
+        latest.context?.selection
+    }
     pub fn control(&self) -> MonitorControl {
         self.control.clone()
     }
@@ -178,6 +197,7 @@ impl Drop for Monitor {
     }
 }
 
+#[derive(Clone)]
 pub struct Config {
     pub roots: Vec<fuze_data::Root>,
     pub locale: Option<fuze_data::Locale>,

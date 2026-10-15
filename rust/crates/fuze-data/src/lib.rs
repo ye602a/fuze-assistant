@@ -27,6 +27,7 @@ impl Locale {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Scope {
     Ocr,
+    Champions,
     Champion(u32),
     Full,
 }
@@ -35,6 +36,7 @@ pub enum Source {
     Cache,
     Bundled,
 }
+#[derive(Clone)]
 pub struct Root {
     pub path: PathBuf,
     pub source: Source,
@@ -219,6 +221,9 @@ fn catalog(value: &Value) -> Result<HashMap<String, u32>> {
 }
 fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
     let mut files = BTreeMap::from([("augments.json".into(), 0)]);
+    if scope == Scope::Champions {
+        files.insert("champions.json".into(), 0);
+    }
     if scope == Scope::Full {
         for p in ["champions.json", "items.json", "champion-shards/index.json"] {
             files.insert(p.into(), 0);
@@ -230,6 +235,7 @@ fn required(manifest: &Value, scope: Scope) -> Result<BTreeMap<String, u64>> {
     let mut add = |path: &str, entry: &Value| -> Result<()> {
         safe_path(path)?;
         if path == "augments.json"
+            || scope == Scope::Champions && path == "champions.json"
             || scope == Scope::Full
                 && (["champions.json", "items.json"].contains(&path)
                     || path.starts_with("champion-shards/"))

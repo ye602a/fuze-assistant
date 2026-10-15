@@ -1,7 +1,7 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control]
+    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates]
     paths:
       - 'rust/**'
       - 'scripts/package-rust-preview.mjs'
@@ -103,6 +103,8 @@ jobs:
             rust/artifacts/desktop-validation.json
             rust/artifacts/update-validation.json
             rust/artifacts/desktop.png
+            rust/artifacts/champion-select.png
+            rust/artifacts/settings.png
             rust/artifacts/preview-validation.json
             rust/artifacts/validation.json
             rust/artifacts/native-overlay.png

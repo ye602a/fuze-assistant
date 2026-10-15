@@ -1,0 +1,148 @@
+//! Small per-user preferences, outside immutable bundles. No credentials or game identity.
+use crate::{controller::Config, managed_install::safe_dir, Result};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preferences {
+    pub schema: u32,
+    pub backend: String,
+    pub locale: String,
+    pub champ_select: bool,
+    pub champ_topmost: bool,
+    pub close_to_tray: bool,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            schema: 1,
+            backend: "auto".into(),
+            locale: "auto".into(),
+            champ_select: true,
+            champ_topmost: true,
+            close_to_tray: true,
+        }
+    }
+}
+impl Preferences {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema != 1
+            || !["auto", "cpu", "dml"].contains(&self.backend.as_str())
+            || !["auto", "zh-CN", "zh-TW", "en-US"].contains(&self.locale.as_str())
+        {
+            return Err("preferences-invalid");
+        }
+        Ok(())
+    }
+    pub fn apply(&self, config: &mut Config) -> Result<()> {
+        self.validate()?;
+        let locale = match self.locale.as_str() {
+            "zh-CN" => Some(fuze_data::Locale::ZhCn),
+            "zh-TW" => Some(fuze_data::Locale::ZhTw),
+            "en-US" => Some(fuze_data::Locale::EnUs),
+            _ => None,
+        };
+        if let Some(locale) = locale {
+            fuze_data::prepare(&config.roots, locale, fuze_data::Scope::Champions)?;
+        }
+        config.backend.clone_from(&self.backend);
+        config.locale = locale;
+        Ok(())
+    }
+}
+pub fn path() -> Result<PathBuf> {
+    Ok(
+        PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("preferences-root")?)
+            .join("FuzeRustPreview/preferences.json"),
+    )
+}
+pub fn read(path: &Path) -> Result<Preferences> {
+    if !path.exists() {
+        return Ok(Preferences::default());
+    }
+    let value: Preferences = serde_json::from_slice(&crate::update_channel::bounded(path, 4096)?)
+        .map_err(|_| "preferences-invalid")?;
+    value.validate()?;
+    Ok(value)
+}
+pub fn save(path: &Path, value: &Preferences) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    value.validate()?;
+    let parent = path.parent().ok_or("preferences-root")?;
+    safe_dir(parent)?;
+    let tmp = parent.join(format!(
+        "preferences-{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "preferences-clock")?
+            .as_nanos()
+    ));
+    let mut f = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&tmp)
+        .map_err(|_| "preferences-write")?;
+    let result = (|| {
+        f.write_all(&serde_json::to_vec(value).map_err(|_| "preferences-invalid")?)
+            .map_err(|_| "preferences-write")?;
+        f.sync_all().map_err(|_| "preferences-write")?;
+        drop(f);
+        let wide = |p: &Path| {
+            p.as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect::<Vec<_>>()
+        };
+        if unsafe {
+            MoveFileExW(
+                wide(&tmp).as_ptr(),
+                wide(path).as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } == 0
+        {
+            return Err("preferences-write");
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(tmp);
+    }
+    result
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn preferences_roundtrip_reject_invalid_and_preserve_on_locked_commit() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir =
+            std::env::temp_dir().join(format!("fuze-preferences-test-{}", std::process::id()));
+        let path = dir.join("preferences.json");
+        let value = Preferences::default();
+        save(&path, &value).unwrap();
+        assert_eq!(read(&path).unwrap(), value);
+        let mut changed = value.clone();
+        changed.backend = "cpu".into();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        assert!(save(&path, &changed).is_err());
+        drop(lock);
+        assert_eq!(read(&path).unwrap(), value);
+        changed.locale = "../private".into();
+        assert!(save(&path, &changed).is_err());
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+}

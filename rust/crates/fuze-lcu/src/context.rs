@@ -8,6 +8,7 @@ pub struct Context {
     pub phase: Phase,
     pub champion: Option<u32>,
     pub supported: bool,
+    pub selection: Option<Selection>,
     game: u64,
 }
 impl Context {
@@ -16,12 +17,63 @@ impl Context {
             phase,
             champion: None,
             supported: false,
+            selection: None,
             game: 0,
         }
     }
     pub fn same_game(&self, other: &Self) -> bool {
         self.game == other.game
     }
+}
+/// Public champion choices only. Never retain player names, account IDs or raw session bodies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub team: [u32; 5],
+    pub local_slot: Option<usize>,
+    pub bench: [u32; 20],
+    pub count: usize,
+}
+fn selection(v: &Value) -> Result<Selection> {
+    let rows = v["myTeam"].as_array().ok_or(Error::InvalidPhase)?;
+    if rows.len() > 5 {
+        return Err(Error::ResponseLimit);
+    }
+    let mut rows: Vec<_> = rows.iter().collect();
+    rows.sort_by_key(|r| r["cellId"].as_i64().unwrap_or(-1));
+    let mut result = Selection {
+        team: [0; 5],
+        local_slot: None,
+        bench: [0; 20],
+        count: 0,
+    };
+    let mut cells = std::collections::HashSet::new();
+    for (slot, row) in rows.iter().enumerate() {
+        let cell = row["cellId"].as_u64().ok_or(Error::InvalidPhase)?;
+        if !cells.insert(cell) {
+            return Err(Error::InvalidPhase);
+        }
+        result.team[slot] = champion(&row["championId"]).unwrap_or(0);
+        if Some(cell) == v["localPlayerCellId"].as_u64() {
+            result.local_slot = Some(slot);
+        }
+    }
+    if v["benchEnabled"] == false {
+        return Ok(result);
+    }
+    if let Some(bench) = v["benchChampions"].as_array() {
+        if bench.len() > 20 {
+            return Err(Error::ResponseLimit);
+        }
+        for row in bench {
+            if let Some(id) = champion(&row["championId"]) {
+                if !result.team.contains(&id) && !result.bench[..result.count].contains(&id) {
+                    result.bench[result.count] = id;
+                    result.count += 1;
+                }
+            }
+        }
+    }
+    Ok(result)
 }
 fn json(body: &[u8]) -> Result<Value> {
     if body.len() > 256 * 1024 {
@@ -92,12 +144,64 @@ pub fn parse(phase: Phase, gameflow: &[u8], player: &[u8]) -> Result<Context> {
         phase,
         champion: selected,
         supported,
+        selection: if phase == Phase::ChampSelect {
+            Some(selection(&local)?)
+        } else {
+            None
+        },
         game: key,
     })
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bench_refresh_is_independent_of_local_pick_and_clears_disabled_pool() {
+        let flow = br#"{"phase":"ChampSelect","gameData":{"queue":{"id":2400}}}"#;
+        let body = serde_json::json!({"localPlayerCellId":2,"myTeam":[{"cellId":2,"championId":8},{"cellId":1,"championId":9}],
+            "benchEnabled":true,"benchChampions":[{"championId":10},{"championId":10},{"championId":8}]});
+        let a = parse(
+            Phase::ChampSelect,
+            flow,
+            &serde_json::to_vec(&body).unwrap(),
+        )
+        .unwrap();
+        let s = a.selection.unwrap();
+        assert_eq!(s.team, [9, 8, 0, 0, 0]);
+        assert_eq!(s.local_slot, Some(1));
+        assert_eq!(s.count, 1);
+        let mut changed = body.clone();
+        changed["benchChampions"] = serde_json::json!([{"championId":11}]);
+        let b = parse(
+            Phase::ChampSelect,
+            flow,
+            &serde_json::to_vec(&changed).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(a.champion, b.champion);
+        assert!(a != b);
+        assert_eq!(b.selection.unwrap().bench[0], 11);
+        changed["benchEnabled"] = false.into();
+        assert_eq!(
+            parse(
+                Phase::ChampSelect,
+                flow,
+                &serde_json::to_vec(&changed).unwrap()
+            )
+            .unwrap()
+            .selection
+            .unwrap()
+            .count,
+            0
+        );
+        changed["myTeam"][1]["cellId"] = 2.into();
+        assert!(parse(
+            Phase::ChampSelect,
+            flow,
+            &serde_json::to_vec(&changed).unwrap()
+        )
+        .is_err());
+    }
     #[test]
     fn select_changes_and_mid_game_identity_are_not_guessed() {
         let flow = br#"{"phase":"ChampSelect","gameData":{"queue":{"id":2400}}}"#;
