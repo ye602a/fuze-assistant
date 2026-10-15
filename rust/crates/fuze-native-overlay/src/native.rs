@@ -922,6 +922,9 @@ impl HiddenOverlay {
             if visible {
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 UpdateWindow(hwnd);
+                // CI-owned source only: finish its queued presentation before publishing HWND.
+                // DwmFlush is a presentation barrier, not proof that WGC accepted the window.
+                let _ = windows_sys::Win32::Graphics::Dwm::DwmFlush();
             }
             if ready_tx.send(hwnd as isize).is_err() {
                 DestroyWindow(hwnd);

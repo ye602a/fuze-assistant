@@ -32,6 +32,8 @@ Baseline: PR #43 head `56eb125e5995aad71bf24e6e00ab1a6af480f88d` (Windows CI suc
 
 ## Verification and delivery
 
+The first final CI run failed before capturing any fixture frame: `create_owned_window_item`, HRESULT `0x80070057`. Offline CPU/auto worker chains passed. This locates the failure at WGC source-item creation, not OCR/cache matching. A newly shown CI window not yet available to capture is a suspected timing cause, not a confirmed OS diagnosis. The CI-owned source now uses a [DwmFlush presentation barrier](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmflush) before publishing its handle. The harness permits at most three short retries of that exact startup error on the same retained owned HWND, reports their count, and still fails persistent errors or any other failure. There is no inference retry or game interaction; production capture already has bounded-backoff startup recovery. A green rerun does not establish that all environment-specific WGC failures are eliminated.
+
 - Electron baseline: 89 test files / 480 tests passed, lint, type checks and production build passed. These are source checks, not installed Electron gameplay validation.
 - Rust: one milestone-wide workspace test/build, worker/fixture integration, same-input OCR comparison and final Windows CI. Follow-up testing is focused on discovered changes; final CI results are recorded on the PR.
 - Local test executables use isolated data, fixed synthetic inputs and hidden self-owned windows. Visible WGC fixtures are restricted to GitHub's runner. No game discovery is invoked by the harness.

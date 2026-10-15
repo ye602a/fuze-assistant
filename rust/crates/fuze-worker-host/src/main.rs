@@ -225,6 +225,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
     let mut reports = Vec::new();
     let mut last = None;
     let mut sequence = 0;
+    let mut capture_start_retries = 0;
     for (sample_index, sample) in samples.iter().enumerate() {
         let path = fs::canonicalize(root.join(&sample.file))?;
         if !path.starts_with(&root) || fs::metadata(&path)?.len() > 32 * 1024 * 1024 {
@@ -251,12 +252,29 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             None
         };
         if let Some(source) = &source {
-            if let Err(error) = pipeline.capture_owned(source.owned_handle(), true) {
-                println!(
-                    "{}",
-                    serde_json::json!({"passed":false,"error":error,"capture_failure":pipeline.capture_failure()})
-                );
-                return Err("reported-capture-start".into());
+            for attempt in 0..4 {
+                match pipeline.capture_owned(source.owned_handle(), true) {
+                    Ok(()) => break,
+                    Err(error) => {
+                        let startup_race = pipeline.capture_failure().is_some_and(|d| {
+                            d["operation"] == "create_owned_window_item"
+                                && d["hresult"] == "0x80070057"
+                        });
+                        if !startup_race || attempt == 3 {
+                            println!(
+                                "{}",
+                                serde_json::json!({"passed":false,"error":error,
+                                "capture_failure":pipeline.capture_failure(),"capture_start_retries":capture_start_retries})
+                            );
+                            return Err("reported-capture-start".into());
+                        }
+                        // Same retained CI-owned HWND, before the first frame only. Production
+                        // already retries capture startup through Controller; never retry OCR here.
+                        capture_start_retries += 1;
+                        source.pulse();
+                        std::thread::sleep(Duration::from_millis([100, 250, 500][attempt]));
+                    }
+                }
             }
         }
         let uploaded = if wgc {
@@ -350,7 +368,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
     }
     println!(
         "{}",
-        serde_json::json!({"passed":true,"source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"frames":reports,"overlay_updates":sequence+u64::from(!wgc),"partial_slot_updated":!wgc,"statistics_loaded":stats.len(),"statistics_scope":"overall","dataset_version":prepared.version(),"overlay_cleared":true,"stale_and_duplicate_rejected":true,"worker_reaped":pipeline.worker.reaped(),"worker_launches":pipeline.worker.launches(),"backend":pipeline.worker.backend(),"startup_ms":startup_ms,"actual_stage":null,"selection_confirmed":false,"game_access":false})
+        serde_json::json!({"passed":true,"source":if wgc {"owned_ci_wgc"} else {"offline_gpu_texture"},"frames":reports,"capture_start_retries":capture_start_retries,"overlay_updates":sequence+u64::from(!wgc),"partial_slot_updated":!wgc,"statistics_loaded":stats.len(),"statistics_scope":"overall","dataset_version":prepared.version(),"overlay_cleared":true,"stale_and_duplicate_rejected":true,"worker_reaped":pipeline.worker.reaped(),"worker_launches":pipeline.worker.launches(),"backend":pipeline.worker.backend(),"startup_ms":startup_ms,"actual_stage":null,"selection_confirmed":false,"game_access":false})
     );
     Ok(())
 }
