@@ -20,6 +20,10 @@ fn convert(value: &Value, current: &Preferences) -> Result<Preferences> {
     };
     let mut next = current.clone();
     let mut count = 0;
+    if let Some(v) = value.get("autoScreenshotGameflowControl") {
+        next.automatic = v.as_bool().ok_or("legacy-settings-type")?;
+        count += 1;
+    }
     if let Some(v) = field("app", "locale")? {
         next.locale = v
             .as_str()
@@ -97,6 +101,14 @@ mod tests {
         assert_eq!(p.locale, "en-US");
         assert_eq!(p.backend, "cpu");
         assert!(!p.champ_select);
+        assert!(
+            !convert(
+                &serde_json::json!({"autoScreenshotGameflowControl":false}),
+                &current
+            )
+            .unwrap()
+            .automatic
+        );
         let b = serde_json::to_string(&p).unwrap();
         assert!(!b.contains("fixture"));
         assert!(p.private_updates);

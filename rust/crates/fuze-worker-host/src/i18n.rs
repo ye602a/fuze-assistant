@@ -28,6 +28,11 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["开关即时保存，目录单独保存；仅识别相关设置会重建识别链路。","開關立即儲存，目錄另行儲存；僅辨識相關設定會重建辨識流程。","Toggles save immediately; save the directory separately. Only recognition settings restart the pipeline."],
+    ["保存后自动应用；自动发现始终优先。","儲存後自動套用；優先自動探索。","Applied after saving; automatic discovery takes priority."],
+    ["偏好已保存，正在应用。","偏好已儲存，正在套用。","Preferences saved; applying."],
+    ["识别状态已切换，但未能保存，下次启动可能恢复旧状态。","辨識狀態已切換，但無法儲存，下次啟動可能恢復舊狀態。","Recognition changed but could not be saved; the next launch may restore the previous state."],
+    ["设置读写未完成，原文件已保留；请检查目录权限后重试。","設定讀寫未完成，原檔已保留；請檢查目錄權限後重試。","Settings could not be read or saved; original files are preserved. Check directory permissions."],
     ["暂停后可修改；开关即时保存，目录单独保存，再次开始识别生效。","暫停後可修改；開關立即儲存，目錄另行儲存，重新辨識後生效。","Pause to edit. Toggles save immediately; save the directory separately, then resume."],
     ["保留个人记录、设置、当前与回退版本；清理预览中的过期数据及下载事务。","保留個人紀錄、設定、目前與回退版本；清理預覽中的過期資料及下載交易。","Keeps records, settings, current and fallback data; removes only previewed stale data and downloads."],
     ["保存回退目录","儲存回退目錄","Save fallback directory"],

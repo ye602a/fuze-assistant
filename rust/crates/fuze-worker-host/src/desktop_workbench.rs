@@ -503,7 +503,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     text(
         dc,
         if u.settings {
-            "暂停后可修改；开关即时保存，目录单独保存，再次开始识别生效。"
+            "开关即时保存，目录单独保存；仅识别相关设置会重建识别链路。"
         } else {
             "连接、识别与推荐，进度一目了然。"
         },
@@ -513,6 +513,15 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     );
     if u.settings {
         box_rect(dc, rect(28, 154, right, 242), PANEL, EDGE);
+        if let Some(e) = u.shown.update_error {
+            text(
+                dc,
+                explain(Some(e)),
+                rect(48, 222, right - x(20), 242),
+                x(11),
+                rgb(247, 167, 158),
+            );
+        }
         text(
             dc,
             "数据与软件更新",
@@ -565,7 +574,9 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         );
         text(
             dc,
-            u.shown.notice.unwrap_or("更改在下次开始识别时生效。"),
+            u.shown
+                .notice
+                .unwrap_or("保存后自动应用；自动发现始终优先。"),
             rect(48, 1028, right - x(20), 1049),
             x(12),
             MUTED,
@@ -672,7 +683,10 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         ("正在更新推荐数据", rgb(18, 50, 75), rgb(105, 188, 230))
     } else if u.desired == PAUSED {
         ("已暂停 · 点击开始识别", rgb(59, 51, 32), GOLD)
-    } else if p.error.is_some() || matches!(u.shown.connection, Some(Connection::Retry(_))) {
+    } else if p.error.is_some()
+        || u.shown.update_error.is_some()
+        || matches!(u.shown.connection, Some(Connection::Retry(_)))
+    {
         ("需要关注 · 正在恢复", rgb(66, 33, 40), rgb(247, 167, 158))
     } else if p.capture == "stat-shards" {
         ("属性碎片界面 · 等待强化符文", rgb(59, 51, 32), GOLD)
@@ -703,7 +717,9 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
     text(dc, title, rect(48, 198, right - x(168), 236), x(23), IVORY);
     text(
         dc,
-        u.shown.notice.unwrap_or_else(|| explain(p.error)),
+        u.shown
+            .notice
+            .unwrap_or_else(|| explain(p.error.or(u.shown.update_error))),
         rect(48, 245, right - x(20), 274),
         x(13),
         rgb(183, 211, 219),

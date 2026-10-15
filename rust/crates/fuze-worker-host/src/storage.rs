@@ -298,6 +298,8 @@ fn scan_at(root: &Path, now: SystemTime) -> Result<Preview> {
             "account-history-v2.json",
             "account-history-v3.json",
             "preferences.json",
+            "preferences-v2.json",
+            "preferences-v3.json",
             "window-memory.json",
         ]
         .contains(&first)

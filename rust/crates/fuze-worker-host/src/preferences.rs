@@ -9,6 +9,7 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
+    pub automatic: bool,
     pub level_gate: bool,
     pub augment_overlay: bool,
     pub augment_side_panel: bool,
@@ -27,6 +28,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            automatic: true,
             level_gate: true,
             augment_overlay: true,
             augment_side_panel: false,
@@ -45,6 +47,18 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
+    pub fn recognition_changed(&self, other: &Self) -> bool {
+        self.level_gate != other.level_gate
+            || self.augment_overlay != other.augment_overlay
+            || self.backend != other.backend
+            || self.locale != other.locale
+            || self.icon_downloads != other.icon_downloads
+            || self.manual_directory != other.manual_directory
+            || self.local_records != other.local_records
+    }
+    pub fn starts_automatically(&self, fixture: bool, valid: bool) -> bool {
+        self.automatic && !fixture && valid
+    }
     pub fn validate(&self) -> Result<()> {
         if self.schema != 1
             || !["auto", "cpu", "dml"].contains(&self.backend.as_str())
@@ -84,13 +98,22 @@ impl Preferences {
 pub fn path() -> Result<PathBuf> {
     Ok(
         PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("preferences-root")?)
-            .join("FuzeRustPreview/preferences-v2.json"),
+            .join("FuzeRustPreview/preferences-v3.json"),
     )
 }
 pub fn read(path: &Path) -> Result<Preferences> {
     let legacy;
-    let path = if !path.exists() && path.file_name().is_some_and(|n| n == "preferences-v2.json") {
-        legacy = path.with_file_name("preferences.json");
+    let path = if !path.exists()
+        && path
+            .file_name()
+            .is_some_and(|n| n == "preferences-v2.json" || n == "preferences-v3.json")
+    {
+        let v2 = path.with_file_name("preferences-v2.json");
+        legacy = if v2.exists() {
+            v2
+        } else {
+            path.with_file_name("preferences.json")
+        };
         legacy.as_path()
     } else {
         path
@@ -170,6 +193,17 @@ mod tests {
     fn older_preferences_receive_safe_defaults_and_reject_remote_fallback() {
         let mut p:Preferences=serde_json::from_str(r#"{"schema":1,"backend":"cpu","locale":"auto","champ_select":true,"champ_topmost":false,"close_to_tray":true}"#).unwrap();
         p.validate().unwrap();
+        assert!(p.starts_automatically(false, true));
+        assert!(!p.starts_automatically(true, true));
+        assert!(!p.starts_automatically(false, false));
+        p.automatic = false;
+        assert!(!p.starts_automatically(false, true));
+        let mut ui_only = p.clone();
+        ui_only.champ_topmost = !ui_only.champ_topmost;
+        ui_only.close_to_tray = !ui_only.close_to_tray;
+        assert!(!p.recognition_changed(&ui_only));
+        ui_only.backend = "dml".into();
+        assert!(p.recognition_changed(&ui_only));
         assert!(p.private_updates);
         assert!(!p.pause_hotkey);
         p.manual_directory = r"\\server\share".into();

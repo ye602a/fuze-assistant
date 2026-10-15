@@ -166,6 +166,13 @@ impl Monitor {
         Self::start_with_fallback(initial, None)
     }
     pub fn start_with_fallback(initial: bool, manual: Option<PathBuf>) -> Result<Self> {
+        Self::start_with_records(initial, manual, false)
+    }
+    pub(crate) fn start_with_records(
+        initial: bool,
+        manual: Option<PathBuf>,
+        records: bool,
+    ) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
             journal: None,
             locale: None,
@@ -214,7 +221,11 @@ impl Monitor {
                         if journal.as_ref().map(|j| j.game) != game {
                             journal = None;
                         }
-                        if game.is_some() && journal.is_none() && Instant::now() >= journal_retry {
+                        if records
+                            && game.is_some()
+                            && journal.is_none()
+                            && Instant::now() >= journal_retry
+                        {
                             journal_retry = Instant::now() + Duration::from_secs(30);
                             journal = client.journal_owner().ok().and_then(|(owner, id)| {
                                 crate::local_records::Binding::from_owner(&owner, id).ok()
