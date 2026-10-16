@@ -36,7 +36,18 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
         .map_err(|_| "validation-baseline")?;
         old.revision = "000000000001".into();
         old.sequence = manifest.sequence.saturating_sub(1);
-        fs::write(root.join("versions/000000000001/build.json"),serde_json::to_vec(&serde_json::json!({"revision":old.revision,"sequence":old.sequence,"channel":"rust-development-preview"})).map_err(|_| "validation-baseline")?).map_err(|_| "validation-baseline")?;
+        let build_path = root.join("versions/000000000001/build.json");
+        let mut build: serde_json::Value =
+            serde_json::from_slice(&update_channel::bounded(&build_path, 16384)?)
+                .map_err(|_| "validation-baseline")?;
+        build["revision"] = old.revision.clone().into();
+        build["sequence"] = old.sequence.into();
+        // Preserve uiFrontend: aliasing a Slint baseline must never silently select Win32.
+        fs::write(
+            build_path,
+            serde_json::to_vec(&build).map_err(|_| "validation-baseline")?,
+        )
+        .map_err(|_| "validation-baseline")?;
         install::save(root, &initial)?;
     }
     let target = root.join("versions").join(&manifest.revision);
@@ -80,8 +91,8 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
     let mut checked = install::read(root)?;
     checked.pending = false;
     install::save(root, &checked)?;
-    let executable = target.join("fuze-rust-host.exe");
-    let held = target.join("fuze-rust-host.held");
+    let executable = install::desktop_program(&target)?;
+    let held = executable.with_extension("held");
     fs::rename(&executable, &held).map_err(|_| "validation-fault")?;
     let startup = install::launch_with(
         root,

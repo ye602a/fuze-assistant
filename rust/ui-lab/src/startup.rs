@@ -37,6 +37,14 @@ fn emit(line: &str) {
     println!("{line}");
     let _ = std::io::stdout().flush();
 }
+fn owns_foreground() -> bool {
+    unsafe {
+        let window = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+        let mut process = 0;
+        windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(window, &mut process);
+        process == std::process::id()
+    }
+}
 pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std::error::Error>> {
     let foreground = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     let config = fuze_worker_host::host_config::load(config)?;
@@ -108,6 +116,12 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
         Duration::from_millis(100),
         move || {
             let Some(ui) = weak.upgrade() else { return };
+            if smoke && owns_foreground() {
+                *error.borrow_mut() = Some("desktop-smoke-owned-foreground");
+                engine.stop();
+                let _ = slint::quit_event_loop();
+                return;
+            }
             let status = engine.snapshot();
             if ready.get().is_none() && status.initialized && status.available.is_some() {
                 // Render the real component through its selected backend before acknowledging UI readiness.
@@ -189,6 +203,7 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
     {
         return Err("desktop-smoke-visible".into());
     }
+    let owned_foreground = smoke && owns_foreground();
     drop(ui);
     drop(instance);
     result?;
@@ -200,12 +215,20 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
         if !healthy.get() {
             return Err("desktop-smoke-incomplete".into());
         }
-        if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }
-            != foreground
-        {
-            return Err("desktop-smoke-foreground".into());
+        if owned_foreground || owns_foreground() {
+            return Err("desktop-smoke-owned-foreground".into());
         }
-        emit("{\"desktop_ready\":true,\"pause_resume_exit\":true,\"game_access\":false,\"slint_rendered\":true,\"hidden\":true}");
+        // Another application's focus can change while the player uses their computer.
+        // Never restore focus or reject a healthy hidden UI for that unrelated change.
+        let external_changed = unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() != foreground
+        };
+        emit(
+            &serde_json::json!({"desktop_ready":true,"pause_resume_exit":true,"game_access":false,
+            "slint_rendered":true,"hidden":true,"owned_foreground_observed":false,
+            "external_foreground_changed":external_changed})
+            .to_string(),
+        );
     }
     // No updater can start while this session still owns the host mutex or worker.
     if let Some(handoff) = handoff {

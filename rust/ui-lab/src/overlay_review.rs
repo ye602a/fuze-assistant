@@ -107,6 +107,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
         return Err("new-choice-not-updated".into());
     }
     overlay.render(&output.join("host-live-cards-complete.png"))?;
+    overlay.review_description(output)?;
     if overlay.update(Some(first), false)? {
         return Err("stale-result-accepted".into());
     }
@@ -138,6 +139,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
             "public_data_rates": true, "partial_slots_preserved": true,
             "duplicate_model_rebuilds": 0, "dismissal_retained": true,
             "stale_sequence_rejected": true, "preference_restore": true,
+            "description_long_missing_scroll_rendered": true,
             "phase_exit_clears": true, "game_access": false, "system_input": false,
             "live_game_verified": false, "automatic_stage": "unknown_overall_only"
         }))?,

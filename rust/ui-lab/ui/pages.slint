@@ -1,6 +1,6 @@
 import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
-import { HostState, ShellState, RecordState } from "host-state.slint";
+import { HostState, ShellState, RecordState, ClaimState } from "host-state.slint";
 import { RecordDetails } from "records.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
@@ -28,9 +28,9 @@ export component SettingsPage inherits VerticalLayout {
                 ComboBox { x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
             }
             Rectangle { height: 62px;
-                Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "界面与数据语言"; }
-                ComboBox { x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["跟随客户端", "简体中文", "繁體中文", "English"]; current-index: HostState.locale; enabled: false; }
-                // Locale activation stays disabled until all Slint strings are localized together.
+                Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "界面语言"; }
+                Label { x: parent.width - 235px; y: 13px; width: 235px; height: 42px; text: "简体中文\n其他界面语言仍在迁移中"; wrap: word-wrap; font-size: 11px; color: Theme.muted; }
+                // Keep the saved data locale; do not offer a language transaction we cannot complete.
             }
         }
     }
@@ -54,24 +54,29 @@ export component SettingsPage inherits VerticalLayout {
             Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
         }
     }
-    Panel { height: 215px;
+    Panel { height: 430px;
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "领取轮次验证"; }
         Label { x: 21px; y: 58px; width: parent.width - 42px; height: 44px; text: "实际领取轮次尚未确认，继续使用整体胜率。\n刷新、属性碎片和锻造器额外选择不计为正式轮次。"; color: Theme.muted; wrap: word-wrap; }
-        HorizontalLayout { x: 21px; y: 123px; width: 360px; height: 38px; spacing: 10px;
-            Action { label: "打开本地日志"; enabled: false; }
+        HorizontalLayout { x: 21px; y: 123px; width: parent.width - 42px; height: 38px; spacing: 10px;
+            Action { label: "查看运行状态"; enabled: HostState.connected; clicked => { HostState.command("show-status"); } }
             Action { label: "预览选人详情"; enabled: HostState.connected; clicked => { HostState.command("preview-champion"); } }
-            Action { label: "检查一次"; enabled: false; }
+            Action { label: ClaimState.busy ? "正在检查" : ClaimState.cooldown > 0 ? "稍候 " + ClaimState.cooldown + " 秒" : "检查一次"; enabled: HostState.connected && !HostState.offline && !HostState.busy && !ClaimState.busy && ClaimState.cooldown == 0; clicked => { ClaimState.action("inspect"); } }
         }
-        Label { x: 21px; y: 176px; height: 23px; text: "实际领取轮次未确认，自动推荐继续使用整体胜率。"; color: Theme.muted; font-size: 11px; }
+        HorizontalLayout { x: 21px; y: 175px; width: 330px; height: 32px; spacing: 10px;
+            Action { label: "标记操作前"; enabled: ClaimState.can-mark && !ClaimState.busy; clicked => { ClaimState.action("mark"); } }
+            Action { label: "清除对比"; clicked => { ClaimState.action("clear"); } }
+        }
+        Label { x: 21px; y: 219px; width: parent.width - 42px; height: 80px; text: ClaimState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 307px; width: parent.width - 42px; height: 43px; text: ClaimState.comparison; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
+        Label { x: 21px; y: 357px; width: parent.width - 42px; height: 55px; text: ClaimState.notice == "" ? "仅手动检查本地接口的字段类型和计数，不保存账号信息、不上传。不会代替玩家操作游戏。" : ClaimState.notice; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
     }
 }
 
 export component HistoryPage inherits VerticalLayout {
     in property <bool> sample: false;
-    private property <bool> local-open: false;
     spacing: 18px;
-    Action { label: root.local-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { root.local-open = !root.local-open; RecordState.unbound-action("open", root.local-open ? 1 : 0); } }
-    if root.local-open: VerticalLayout { spacing: 10px;
+    Action { label: RecordState.unbound-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { RecordState.unbound-action("open", RecordState.unbound-open ? 0 : 1); } }
+    if RecordState.unbound-open: VerticalLayout { spacing: 10px;
         Label { height: 60px; text: RecordState.unbound-note; wrap: word-wrap; color: Theme.muted; }
         if RecordState.unbound.length == 0: Label { height: 36px; text: "暂无未绑定的本机观察记录"; color: Theme.muted; }
         Label { height: 42px; text: RecordState.unbound-names; wrap: word-wrap; color: Theme.muted; font-size: 11px; }

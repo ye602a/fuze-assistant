@@ -782,6 +782,7 @@ impl Drop for OwnWindow {
 }
 /// Owned by the Slint event thread. Input frames have already passed capture/classification retention.
 pub struct HostOverlay {
+    offline: bool,
     window: OwnWindow,
     _com: Com,
     frame: Option<std::sync::Arc<Frame>>,
@@ -799,6 +800,7 @@ impl HostOverlay {
         let mut window = OwnWindow::new(offline)?;
         window.state.managed = true;
         Ok(Self {
+            offline,
             window,
             _com: com,
             frame: None,
@@ -1042,6 +1044,43 @@ impl HostOverlay {
             image::save_buffer(path, &pixels, WIDTH, height, image::ColorType::Rgba8)?;
             Ok(())
         }
+    }
+    /// Synthetic hidden-window review; no input messages or production position storage.
+    pub fn review_description(
+        &mut self,
+        output: &Path,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        if !self.offline || !self.hidden() {
+            return Err("review-isolation".into());
+        }
+        let original = self.window.state.scene.cards[0].description.clone();
+        self.window.state.scene.cards[0].description =
+            "合成说明：保留中文换行、长文本和未知领取轮次，仅供开发验证。".repeat(35);
+        self.window.state.scene.select(Some(0))?;
+        if self.window.state.scene.max_scroll <= 0. {
+            return Err("description-scroll-missing".into());
+        }
+        unsafe {
+            size_to_content(self.window.hwnd, true);
+        }
+        self.render(&output.join("host-cards-description-top.png"))?;
+        self.window.state.scene.scroll = self.window.state.scene.max_scroll;
+        self.render(&output.join("host-cards-description-bottom.png"))?;
+        self.window.state.scene.cards[0].description.clear();
+        self.window.state.scene.select(Some(0))?;
+        if self.window.state.scene.max_scroll != 0. {
+            return Err("description-scroll-stale".into());
+        }
+        self.render(&output.join("host-cards-description-missing.png"))?;
+        self.window.state.scene.cards[0].description = original;
+        self.window.state.scene.select(None)?;
+        unsafe {
+            size_to_content(self.window.hwnd, false);
+        }
+        if !self.hidden() {
+            return Err("review-window-visible".into());
+        }
+        Ok(())
     }
 }
 pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {

@@ -655,7 +655,7 @@ pub struct Cancellation {
 }
 impl Cancellation {
     pub fn cancel(&self) {
-        if !self.flag.swap(true, Ordering::AcqRel) {
+        if !self.flag.swap(true, Ordering::AcqRel) && self.hwnd != 0 {
             unsafe {
                 PostMessageW(self.hwnd as HWND, WM_APP + 3, 0, 0);
             }
@@ -666,6 +666,7 @@ impl Cancellation {
     }
 }
 pub struct HiddenOverlay {
+    headless: Option<std::sync::Mutex<fuze_contract::ContextGate>>,
     cancellation: Cancellation,
     hwnd: isize,
     tx: std::sync::mpsc::SyncSender<OverlayCommand>,
@@ -685,6 +686,23 @@ enum OverlayCommand {
     Reset(u64, String, std::sync::mpsc::SyncSender<bool>),
 }
 impl HiddenOverlay {
+    /// External frontends own presentation. No HWND, UI thread, GDI resources or ACK wait.
+    pub fn headless(generation: u64, dataset: String) -> Self {
+        let (tx, _) = std::sync::mpsc::sync_channel(1);
+        Self {
+            headless: Some(std::sync::Mutex::new(fuze_contract::ContextGate::new(
+                generation, dataset,
+            ))),
+            cancellation: Cancellation {
+                flag: Default::default(),
+                hwnd: 0,
+            },
+            hwnd: 0,
+            tx,
+            pending_icons: Default::default(),
+            thread: None,
+        }
+    }
     pub fn start(generation: u64, dataset: String) -> std::result::Result<Self, &'static str> {
         Self::start_inner(
             generation,
@@ -740,6 +758,9 @@ impl HiddenOverlay {
         self.hwnd
     }
     pub fn pulse(&self) {
+        if self.hwnd == 0 {
+            return;
+        }
         unsafe {
             PostMessageW(self.hwnd as HWND, WM_APP + 2, 0, 0);
         }
@@ -957,6 +978,7 @@ impl HiddenOverlay {
             return Err("overlay-start");
         }
         Ok(Self {
+            headless: None,
             cancellation: Cancellation { flag, hwnd },
             hwnd,
             tx,
@@ -980,6 +1002,9 @@ impl HiddenOverlay {
         self.update_retained(snapshot, None)
     }
     pub fn locale(&self, locale: &str) -> std::result::Result<bool, &'static str> {
+        if self.headless.is_some() {
+            return Ok(!self.cancellation.cancelled());
+        }
         let value = match locale {
             "zh-TW" => 1,
             "en-US" => 2,
@@ -993,10 +1018,19 @@ impl HiddenOverlay {
         snapshot: Snapshot,
         retained: Option<std::time::Instant>,
     ) -> std::result::Result<bool, &'static str> {
+        if let Some(gate) = &self.headless {
+            if self.cancellation.cancelled() {
+                return Ok(false);
+            }
+            return Ok(gate.lock().map_err(|_| "overlay-closed")?.accept(&snapshot));
+        }
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Update(snapshot, retained, tx), rx)
     }
     pub fn visible(&self, visible: bool) -> std::result::Result<bool, &'static str> {
+        if self.headless.is_some() {
+            return Ok(!self.cancellation.cancelled());
+        }
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Visible(visible, tx), rx)
     }
@@ -1004,6 +1038,9 @@ impl HiddenOverlay {
         &self,
         icons: std::collections::HashMap<u32, std::sync::Arc<Vec<u8>>>,
     ) -> std::result::Result<bool, &'static str> {
+        if self.headless.is_some() {
+            return Ok(!self.cancellation.cancelled());
+        }
         if icons.len() > 3 || icons.values().any(|p| p.len() != 48 * 48 * 4) {
             return Err("overlay-icons-invalid");
         }
@@ -1021,6 +1058,14 @@ impl HiddenOverlay {
         generation: u64,
         dataset: String,
     ) -> std::result::Result<bool, &'static str> {
+        if let Some(gate) = &self.headless {
+            if self.cancellation.cancelled() {
+                return Ok(false);
+            }
+            *gate.lock().map_err(|_| "overlay-closed")? =
+                fuze_contract::ContextGate::new(generation, dataset);
+            return Ok(true);
+        }
         if let Ok(mut pending) = self.pending_icons.lock() {
             *pending = None;
         }
@@ -1031,8 +1076,10 @@ impl HiddenOverlay {
 impl Drop for HiddenOverlay {
     fn drop(&mut self) {
         self.cancellation.flag.store(true, Ordering::Release);
-        unsafe {
-            PostMessageW(self.hwnd as HWND, WM_CLOSE, 0, 0);
+        if self.hwnd != 0 {
+            unsafe {
+                PostMessageW(self.hwnd as HWND, WM_CLOSE, 0, 0);
+            }
         }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -1102,6 +1149,40 @@ pub fn fixture_screen_size() -> (i32, i32) {
 #[cfg(test)]
 mod retention_tests {
     use super::*;
+    #[test]
+    fn headless_gate_cancels_without_window_thread_or_ack() {
+        let overlay = HiddenOverlay::headless(4, "fixture".into());
+        assert_eq!(overlay.owned_handle(), 0);
+        assert!(overlay.thread.is_none());
+        let mut s = fuze_contract::Snapshot {
+            schema_version: 1,
+            generation: 4,
+            sequence: 1,
+            dataset_version: "fixture".into(),
+            selection_confirmed: false,
+            actual_stage: fuze_contract::ActualStage::Unknown,
+            slots: [
+                fuze_contract::Slot::Unreadable,
+                fuze_contract::Slot::Unreadable,
+                fuze_contract::Slot::Unreadable,
+            ],
+        };
+        assert!(overlay.update(s.clone()).unwrap());
+        assert!(!overlay.update(s.clone()).unwrap());
+        assert!(overlay.reset(5, "next".into()).unwrap());
+        s.sequence += 1;
+        assert!(!overlay.update(s.clone()).unwrap());
+        s.generation = 5;
+        s.dataset_version = "next".into();
+        assert!(overlay.update(s.clone()).unwrap());
+        let cancellation = overlay.cancellation();
+        cancellation.cancel();
+        assert!(cancellation.cancelled());
+        assert!(!overlay.visible(true).unwrap());
+        assert!(!overlay.reset(6, "next".into()).unwrap());
+        s.sequence += 1;
+        assert!(!overlay.update(s).unwrap());
+    }
     #[test]
     fn timer_rounds_up_remaining_time_instead_of_repeating_full_grace() {
         use std::time::Duration;

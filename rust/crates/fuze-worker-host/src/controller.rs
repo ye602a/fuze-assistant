@@ -361,7 +361,11 @@ impl Config {
             Duration::from_secs(30),
             Some(Arc::new(catalog)),
         )?;
-        let mut pipeline = Pipeline::managed(worker, &data, champion)?;
+        let mut pipeline = if self.augment_overlay {
+            Pipeline::managed(worker, &data, champion)?
+        } else {
+            Pipeline::windowless(worker, &data, champion)?
+        };
         if self.augment_overlay {
             pipeline.art = crate::overlay_art::Art::new(&data, false).ok();
         }

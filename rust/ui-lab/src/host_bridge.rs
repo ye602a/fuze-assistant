@@ -243,6 +243,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
     )));
     let unbound = crate::unbound_bridge::attach(ui, config.roots.clone());
     let session = Rc::new(Session::start(config, offline)?);
+    let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
     let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();
     state.set_connected(true);
@@ -295,6 +296,11 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
                 notice(&ui, opened);
                 return;
             }
+            if command == "show-status" {
+                ui.set_page(0);
+                ui.set_scroll_y(0.);
+                return;
+            }
             let result = match command.as_str() {
                 "toggle-running" => service.set_running(ui.get_paused()),
                 "history-refresh" => service.refresh_history(false),
@@ -344,6 +350,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
             };
             let next = service.snapshot();
             unbound.borrow_mut().update(&ui, &next, offline);
+            diagnostics.borrow_mut().poll(&ui);
             if let Err(error) = popup.borrow_mut().placement() { notice(&ui, Err(error)); }
             let state = ui.global::<HostState>();
             let completed = state.get_busy() && !service.busy();

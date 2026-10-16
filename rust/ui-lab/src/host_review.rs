@@ -28,6 +28,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     let binding = crate::host_bridge::attach(&ui, crate::host_bridge::offline_config(data), true)?;
     let session = binding.session.clone();
     let records = binding.records.clone();
+    let closure = RefCell::new(crate::closure_review::Review::new(data, session.clone())?);
     let settings_fixture = output.join("legacy-settings-fixture.json");
     std::fs::write(&settings_fixture, br#"{"championInsight":{"pinDuringChampSelect":true},"app":{"locale":"en-US"},"autoScreenshotGameflowControl":true}"#)?;
     let maintenance_root = crate::maintenance_review::fixture(output)?;
@@ -443,6 +444,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         {
                             return Err("record-foreground-changed".into());
                         }
+                        step.set(22);
+                    }
+                    22 if closure.borrow_mut().poll(&destination)? => {
                         ui.invoke_close_requested();
                         return Ok(true);
                     }

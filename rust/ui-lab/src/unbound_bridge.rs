@@ -264,6 +264,7 @@ pub fn attach(ui: &Workbench, roots: Vec<fuze_data::Root>) -> Rc<RefCell<Binding
             match action.as_str() {
                 "open" => {
                     binding.open = value != 0;
+                    state.set_unbound_open(binding.open);
                     if binding.names.is_none() {
                         binding.attempted = false;
                     }

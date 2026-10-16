@@ -10,7 +10,7 @@ const git=(args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:
 const revision=git(['rev-parse','--short=12','HEAD'])
 const sequence=Number(git(['show','-s','--format=%ct','HEAD']))
 if(!/^[a-f0-9]{12}$/.test(revision)||!Number.isSafeInteger(sequence)||sequence<=0)throw new Error('Invalid release identity')
-const directory=path.join(root,'rust/artifacts/preview')
+const directory=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview'))
 const zip=new AdmZip(path.join(directory,`fuze-rust-preview-${revision}.zip`))
 const entries=zip.getEntries().filter(e=>!e.isDirectory).sort((a,b)=>a.entryName.localeCompare(b.entryName,'en'))
 const files=[]

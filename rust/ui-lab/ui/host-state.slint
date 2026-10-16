@@ -1,4 +1,13 @@
 export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
+export global ClaimState {
+    in-out property <bool> busy: false;
+    in-out property <bool> can-mark: false;
+    in-out property <int> cooldown: 0;
+    in-out property <string> summary: "尚未检查；这项检查不会确认领取轮次。";
+    in-out property <string> notice;
+    in-out property <string> comparison;
+    callback action(string);
+}
 export global MaintenanceState {
     in-out property <bool> attached: false;
     in-out property <bool> offline: true;
@@ -17,6 +26,7 @@ export global MaintenanceState {
 export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool, source-index: int, date: string, icon: image, items: [image], augments: [image], chosen: bool }
 export struct ObservationRow { title: string, cards: string, hint: string }
 export global RecordState {
+    in-out property <bool> unbound-open: false;
     in-out property <[ObservationRow]> unbound;
     in-out property <string> unbound-note: "等待本机记录服务";
     in-out property <string> unbound-names;

@@ -48,16 +48,20 @@ impl Pipeline {
         (d.mode, d.interval_ms, next)
     }
     pub fn new(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
-        Self::new_inner(worker, data, champion, false)
+        Self::new_inner(worker, data, champion, false, false)
     }
     pub fn managed(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
-        Self::new_inner(worker, data, champion, true)
+        Self::new_inner(worker, data, champion, true, false)
+    }
+    pub fn windowless(worker: Supervisor, data: &Prepared, champion: u32) -> Result<Self> {
+        Self::new_inner(worker, data, champion, false, true)
     }
     fn new_inner(
         worker: Supervisor,
         data: &Prepared,
         champion: u32,
         persist: bool,
+        headless: bool,
     ) -> Result<Self> {
         let dataset = data.identity();
         let detail = data.champion_detail(champion).unwrap_or_default();
@@ -76,7 +80,9 @@ impl Pipeline {
                 .filter_map(|(id, r)| r.score.map(|s| (*id, s)))
                 .collect(),
         );
-        let overlay = if persist {
+        let overlay = if headless {
+            HiddenOverlay::headless(session.generation(), dataset.clone())
+        } else if persist {
             HiddenOverlay::with_placement(
                 session.generation(),
                 dataset.clone(),

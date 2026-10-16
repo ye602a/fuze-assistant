@@ -8,6 +8,7 @@ pub struct Session {
     worker: Option<thread::JoinHandle<()>>,
     offline: bool,
     maintenance: AtomicBool,
+    last_probe: Mutex<Option<Instant>>,
 }
 
 impl Session {
@@ -37,11 +38,54 @@ impl Session {
             worker: Some(worker),
             offline,
             maintenance: AtomicBool::new(false),
+            last_probe: Mutex::new(None),
         })
     }
     /// Account keys never need to be logged or serialized by a frontend.
     pub fn snapshot(&self) -> Status {
         self.shared.status()
+    }
+    pub fn diagnostic_context(&self) -> (u64, bool) {
+        self.shared
+            .monitor
+            .lock()
+            .ok()
+            .and_then(|m| m.clone())
+            .map(|m| m.diagnostic_context())
+            .unwrap_or((0, false))
+    }
+    /// Only an explicit player action can start this bounded, sanitized read-only probe.
+    pub fn probe_claim(&self) -> Result<std::sync::mpsc::Receiver<fuze_lcu::stage_probe::Report>> {
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        if self.busy() || self.shared.desired.load(Ordering::Acquire) == EXIT {
+            return Err("frontend-busy");
+        }
+        let monitor = self
+            .shared
+            .monitor
+            .lock()
+            .map_err(|_| "frontend-lock")?
+            .clone()
+            .ok_or("probe-context")?;
+        if !monitor.diagnostic_context().1 {
+            return Err("probe-context");
+        }
+        let mut last = self.last_probe.lock().map_err(|_| "frontend-lock")?;
+        if last.is_some_and(|at| at.elapsed() < Duration::from_secs(30)) {
+            return Err("probe-cooldown");
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("fuze-explicit-claim-probe".into())
+            .spawn(move || {
+                let report = fuze_lcu::stage_probe::inspect(|| monitor.diagnostic_context());
+                let _ = tx.send(report);
+            })
+            .map_err(|_| "probe-thread")?;
+        *last = Some(Instant::now());
+        Ok(rx)
     }
     pub fn busy(&self) -> bool {
         self.maintenance.load(Ordering::Acquire)
