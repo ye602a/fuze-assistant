@@ -53,6 +53,10 @@ await copy(path.join(root,'docs/RUST_PLAYER_TEST_GUIDE.txt'),'TESTING-zh-CN.txt'
 await text('Export-feedback.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Export-feedback.ps1"\r\npause\r\n')
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --launch\r\n')
+// A targeted test must not silently route through a previously installed revision.
+await text('Start-this-build.cmd',frontend==='slint'
+ ? '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0fuze-ui-lab.exe" --desktop "%~dp0preview.json"\r\n'
+ : '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0fuze-rust-host.exe" --desktop "%~dp0preview.json"\r\n')
 await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
 await text('Uninstall-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --uninstall-local\r\n')
 await text('Install-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --install-local\r\n')

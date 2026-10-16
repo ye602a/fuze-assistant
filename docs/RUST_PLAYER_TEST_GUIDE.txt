@@ -3,8 +3,8 @@ FUZE Rust 中文阶段测试说明
 安装与启动
 1. 把整个 ZIP 复制到另一台 Windows x64 电脑，完整解压到可写目录。
 2. 退出其他 FUZE/ARAMGG 助手，避免两套识别同时运行。游戏由你正常操作。
-3. 双击 Install-local.cmd，按程序提示安装到独立用户目录。不需要管理员权限，不覆盖 Electron 稳定版。
-4. 从开始菜单的 Fuze Rust Preview 启动。也可以不安装，直接运行 Start-preview.cmd。
+3. 本次验证优先双击 Start-this-build.cmd，直接启动当前解压包的版本，无需安装。
+4. Start-preview.cmd 和开始菜单可能启动此前已安装的版本，不用于确认本次修复。需要安装时再使用 Install-local.cmd，不覆盖 Electron 稳定版。
 5. 窗口关闭按钮通常收起到托盘；结束测试请使用退出按钮或托盘“退出”。
 
 先在大厅确认：战绩、设置能一次点击打开，首页显示“通信已验证”。任何一项失败就停止，不必进入对局。
