@@ -1,0 +1,43 @@
+name: UI framework prototype
+on:
+  pull_request:
+    branches: [master, feat/rust-v063-parity]
+    paths:
+      - 'rust/ui-lab/**'
+      - 'public/fuze.png'
+      - '.github/workflows/ui-framework-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ui-framework-lab-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-prototype:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tracked privacy boundary
+        run: node scripts/check-secrets.mjs
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: rust/ui-lab/target
+          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+      - name: Format and build software and Skia entry points
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --release --locked --features gpu -j 2
+          exit $LASTEXITCODE
+      - name: Offscreen images and hidden own-window invariants
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-native software artifacts
+          exit $LASTEXITCODE
+      # No installers, upload-artifact, release publication or game/LCU access.

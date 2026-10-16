@@ -1,0 +1,134 @@
+import { LineEdit, ScrollView, AboutSlint } from "std-widgets.slint";
+
+global Palette {
+    out property <color> background: #07121b;
+    out property <color> surface: #10232e;
+    out property <color> gold: #d2b878;
+    out property <color> text: #e3e8e6;
+    out property <color> muted: #a9bdc6;
+    out property <color> edge: #40535c;
+}
+
+component GoldButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked;
+    height: 38px;
+    min-width: 112px;
+    background: touch.has-hover ? #34473d : root.selected ? #243a3d : #101e27;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: Palette.gold;
+    accessible-role: button;
+    accessible-label: root.label;
+    forward-focus: focus;
+    Text { text: root.label; color: Palette.gold; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
+    touch := TouchArea { clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope {
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+}
+
+component Module inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> detail;
+    background: Palette.surface;
+    border-width: 1px; border-color: Palette.edge;
+    VerticalLayout {
+        padding: 16px; spacing: 8px;
+        Text { text: root.label; color: Palette.gold; font-size: 14px; }
+        Text { text: root.value; color: Palette.text; font-size: 16px; font-weight: 600; }
+        Text { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+    }
+}
+
+export component Workbench inherits Window {
+    title: "符择 · 界面验证原型";
+    preferred-width: 1120px; preferred-height: 860px; min-width: 920px; min-height: 760px;
+    background: Palette.background;
+    default-font-family: "Microsoft YaHei UI";
+    default-font-size: 14px;
+    in-out property <int> health: 0;
+    in-out property <bool> paused: false;
+    in-out property <string> query;
+    in-out property <int> page: 0;
+    in-out property <bool> about: false;
+    callback query-edited(string);
+    callback cycle-health;
+    out property <float> content-width: content.width / 1px;
+    out property <float> module-width: module-row.width / 4px;
+
+    HorizontalLayout {
+        spacing: 0px;
+        Rectangle {
+            width: 180px; background: #050f17;
+            VerticalLayout {
+                padding: 20px; spacing: 18px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Image { source: @image-url("../../../public/fuze.png"); width: 38px; height: 38px; image-fit: contain; }
+                    Text { text: "符择"; color: Palette.gold; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+                }
+                Text { text: "F U Z E"; color: Palette.gold; font-size: 12px; }
+                Rectangle { height: 14px; }
+                for label[index] in ["对局助手", "战绩查询", "偏好设置"]: GoldButton {
+                    label: label;
+                    selected: root.page == index;
+                    clicked => { root.page = index; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: "离线界面原型\n未连接游戏"; color: Palette.muted; wrap: word-wrap; }
+                GoldButton { label: "关于原型"; clicked => { root.about = !root.about; } }
+            }
+        }
+        content := Rectangle {
+            HorizontalLayout { padding: 28px;
+                ScrollView {
+                    VerticalLayout {
+                        spacing: 18px;
+                        Text { text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询 · 界面验证" : "偏好设置 · 界面验证"; color: Palette.text; font-size: 28px; font-weight: 600; }
+                        Text { text: "保留原中文版布局 · 所有状态与数值均为固定示例"; color: Palette.muted; }
+                        Rectangle {
+                            height: 145px; border-width: 1px; border-color: Palette.gold;
+                            background: root.paused ? #302b1c : root.health == 0 ? #15352e : root.health == 1 ? #172e43 : root.health == 2 ? #3b321b : #3d2028;
+                            HorizontalLayout {
+                                padding: 22px; spacing: 20px;
+                                VerticalLayout {
+                                    Text { text: "实时状态 · 示例"; color: Palette.gold; }
+                                    Text { text: root.paused ? "识别已暂停（示例）" : root.health == 0 ? "识别正常 · 推荐已就绪" : root.health == 1 ? "正在准备识别" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: Palette.text; font-size: 24px; font-weight: 600; }
+                                    Text { text: "此原型只验证界面，不访问客户端、账号或游戏画面。"; color: Palette.muted; wrap: word-wrap; }
+                                }
+                                VerticalLayout {
+                                    alignment: center; spacing: 10px;
+                                    GoldButton { label: root.paused ? "继续（示例）" : "暂停（示例）"; clicked => { root.paused = !root.paused; } }
+                                    GoldButton { label: "切换示例状态"; clicked => { root.cycle-health(); } }
+                                }
+                            }
+                        }
+                        module-row := HorizontalLayout {
+                            height: 114px; spacing: 12px;
+                            Module { label: "客户端连接"; value: "离线示例"; detail: "未执行 LCU 连接"; }
+                            Module { label: "游戏画面"; value: "固定测试画面"; detail: "未捕获屏幕或游戏"; }
+                            Module { label: "中文识别"; value: "未启动 OCR"; detail: "仅验证中文排版"; }
+                            Module { label: "推荐数据"; value: "16.20.1 · 示例"; detail: "非当前游戏版本检测"; }
+                        }
+                        Text { text: "本局最近识别 · 示例"; color: Palette.gold; font-size: 18px; }
+                        HorizontalLayout {
+                            height: 124px; spacing: 12px;
+                            for title in ["裁决使", "超凡邪恶", "神射法师"]: Module { label: title; value: "整体胜率 56.3%"; detail: "固定示例 · 不代表实际领取"; }
+                        }
+                        Text { text: "中文输入验证 · 请手动输入，内容不保存"; color: Palette.gold; }
+                        LineEdit { text <=> root.query; placeholder-text: "搜索英雄：格温／深海泰坦／繁體中文"; edited(value) => { root.query-edited(value); } }
+                        Text { text: "当前输入：" + root.query; color: Palette.text; wrap: word-wrap; }
+                        if root.page != 0: Text { text: "本页仅验证导航与输入状态；没有接入真实战绩或设置写入。"; color: Palette.muted; wrap: word-wrap; }
+                        if root.about: AboutSlint { }
+                    }
+                }
+            }
+        }
+    }
+}
