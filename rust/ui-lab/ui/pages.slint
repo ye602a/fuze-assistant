@@ -1,7 +1,9 @@
-import { Theme, Label, Action, Panel, SectionTitle, Disclosure } from "components.slint";
+import { ComboBox, LineEdit } from "std-widgets.slint";
+import { HostState } from "host-state.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
-    // Rendering restoration only. Mutations stay disabled until the Rust host is connected.
+    in-out property <bool> manual-open: false;
     spacing: 18px;
     Panel {
         height: 280px;
@@ -16,22 +18,23 @@ export component SettingsPage inherits VerticalLayout {
     }
     Disclosure { label: "存储管理"; detail: "保留个人记录、设置、当前与回滚版本。\n连接宿主后先预览，再确认清理；离线预览不扫描文件。"; }
     Panel {
-        height: 660px;
-        VerticalLayout { x: 21px; y: 5px; width: parent.width - 42px; height: 640px; spacing: 0px;
-            for pref in [
-                {name:"自动识别强化符文",hint:"仅在对局阶段检测，空闲时停止截图。"},
-                {name:"按强化等级节省识别开销",hint:"等级读取失败会恢复基础检测，不据此推断实际领取轮次。"},
-                {name:"GPU 加速识别",hint:"选人时预热；识别后端异常时使用已有 CPU 回退。"},
-                {name:"顶部三卡推荐",hint:"按实际卡位展示；暂不可读时保留位置和提示。"},
-                {name:"局内海克斯侧栏",hint:"按需查看符文池与详情，不自动操作游戏。"},
-                {name:"选人英雄详情",hint:"我方五人在顶部，候选英雄按胜率网格一览。"},
-                {name:"选人阶段窗口置顶",hint:"仅影响助手窗口，不改变游戏设置。"},
-                {name:"界面与数据语言",hint:"简体中文"}
-            ]: Rectangle {
-                Rectangle { x: 0px; y: parent.height - 1px; height: 1px; background: Theme.stroke; }
-                Label { x: 0px; y: 15px; height: 24px; text: pref.name; font-size: 13px; }
-                Label { x: 0px; y: 43px; width: parent.width - 160px; height: 26px; wrap: word-wrap; text: pref.hint; color: Theme.muted; font-size: 11px; }
-                Label { x: parent.width - 125px; y: 24px; width: 125px; height: 30px; text: "等待读取设置"; horizontal-alignment: right; color: Theme.muted; font-size: 11px; }
+        height: HostState.preferences.length * 78px + 136px;
+        VerticalLayout { x: 21px; y: 5px; width: parent.width - 42px; height: parent.height - 10px; spacing: 0px;
+            for pref in HostState.preferences: Rectangle {
+                height: 78px;
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.stroke; }
+                Label { x: 0px; y: 11px; width: parent.width - 75px; height: 24px; text: pref.title; font-size: 13px; }
+                Label { x: 0px; y: 38px; width: parent.width - 75px; height: 30px; wrap: word-wrap; text: pref.hint; color: Theme.muted; font-size: 11px; }
+                Toggle { x: parent.width - 44px; y: 24px; label: pref.title; checked: pref.checked; enabled: HostState.connected && !HostState.busy; toggled => { HostState.preference(pref.key, !pref.checked); } }
+            }
+            Rectangle { height: 62px;
+                Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "识别后端"; }
+                ComboBox { x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
+            }
+            Rectangle { height: 62px;
+                Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "界面与数据语言"; }
+                ComboBox { x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["跟随客户端", "简体中文", "繁體中文", "English"]; current-index: HostState.locale; enabled: false; }
+                // Locale activation stays disabled until all Slint strings are localized together.
             }
         }
     }
@@ -39,22 +42,31 @@ export component SettingsPage inherits VerticalLayout {
         Label { x: 21px; y: 12px; height: 23px; text: "浮窗显示"; color: Theme.blue; }
         Label { x: 21px; y: 38px; width: parent.width - 42px; height: 25px; text: "独占全屏可能遮住桌面浮窗，需要显示时可在游戏中自行选择无边框或窗口模式。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
     }
-    Panel { height: 300px;
+    Panel { height: root.manual-open ? 430px : 300px;
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "连接与诊断"; }
         Label { x: 21px; y: 58px; height: 24px; text: "自动识别并连接客户端"; }
         Label { x: 21px; y: 91px; width: parent.width - 42px; height: 38px; text: "登录后自动发现，无需选择安装目录。目录识别不等于通信成功，以实际连接状态为准。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
         Label { x: 21px; y: 138px; height: 20px; text: "离线预览未访问客户端"; color: Theme.blue; font-size: 11px; }
-        Disclosure { x: 21px; y: 174px; width: parent.width - 42px; label: "高级回退：自动连接失败时手动指定目录"; detail: "目录操作接回宿主后启用，不把手动路径当作自动发现成功。"; }
+        Action { x: 21px; y: 174px; width: parent.width - 42px; label: "高级回退：自动连接失败时手动指定目录"; clicked => { root.manual-open = !root.manual-open; } }
+        if root.manual-open: VerticalLayout { x: 21px; y: 227px; width: parent.width - 42px; height: 155px; spacing: 12px;
+            Label { text: "填写包含 LeagueClient.exe 的客户端目录；留空则仅使用自动发现。"; color: Theme.muted; height: 30px; }
+            LineEdit { text <=> HostState.directory; enabled: HostState.connected && !HostState.busy; placeholder-text: "客户端目录"; height: 36px; }
+            HorizontalLayout { height: 38px; spacing: 12px;
+                Action { label: "保存目录"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(HostState.directory); } }
+                Action { label: "清除手动回退"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(""); } }
+            }
+            Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
+        }
     }
     Panel { height: 215px;
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "领取轮次验证"; }
         Label { x: 21px; y: 58px; width: parent.width - 42px; height: 44px; text: "实际领取轮次尚未确认，继续使用整体胜率。\n刷新、属性碎片和锻造器额外选择不计为正式轮次。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 123px; width: 360px; height: 38px; spacing: 10px;
             Action { label: "打开本地日志"; enabled: false; }
-            Action { label: "预览推荐浮窗"; enabled: false; }
+            Action { label: "预览选人详情"; enabled: HostState.connected; clicked => { HostState.command("preview-champion"); } }
             Action { label: "检查一次"; enabled: false; }
         }
-        Label { x: 21px; y: 176px; height: 23px; text: "此预览仅恢复布局，诊断操作尚未接回宿主。"; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 176px; height: 23px; text: "实际领取轮次未确认，自动推荐继续使用整体胜率。"; color: Theme.muted; font-size: 11px; }
     }
 }
 
@@ -63,25 +75,32 @@ export component HistoryPage inherits VerticalLayout {
     spacing: 18px;
     Panel { height: 220px;
         SectionTitle { x: 21px; y: 18px; height: 26px; text: "海克斯大乱斗战绩"; }
-        Label { x: 21px; y: 53px; width: parent.width - 150px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；登录客户端后可补充最新战绩。"; color: Theme.muted; wrap: word-wrap; }
-        Action { x: parent.width - 110px; y: 20px; width: 88px; label: "刷新战绩"; enabled: false; }
-        Disclosure { x: 21px; y: 100px; width: parent.width - 42px; label: "本地选择记录 · 观察不等于领取"; detail: "按已确认账号与区服隔离显示。未归属的旧观察记录不自动算入当前账号。"; }
-        if !root.sample: Label { x: 21px; y: 168px; width: parent.width - 42px; height: 30px; text: "此预览未读取账号或战绩缓存。业务接回宿主后再查询，不猜测区服。"; color: Theme.yellow; wrap: word-wrap; }
-    }
-    if root.sample: VerticalLayout {
-        spacing: 12px;
-        Label { text: "固定界面样例 · 非个人战绩"; color: Theme.yellow; height: 24px; }
-        for match in [
-            {hero:"格温",result:"胜利",kda:"8 / 3 / 15",tone:Theme.green},
-            {hero:"深海泰坦",result:"失败",kda:"3 / 7 / 22",tone:Theme.red}
-        ]: Panel {
-            height: 130px;
-            Image { x: 21px; y: 27px; width: 43px; height: 43px; source: @image-url("assets/rune.svg"); }
-            SectionTitle { x: 80px; y: 21px; width: 240px; height: 30px; text: match.hero; }
-            Label { x: 80px; y: 58px; height: 23px; text: "海克斯大乱斗 · 固定示例"; color: Theme.muted; font-size: 11px; }
-            Label { x: parent.width - 260px; y: 25px; height: 28px; text: match.result; color: match.tone; font-size: 18px; }
-            Label { x: parent.width - 170px; y: 25px; height: 28px; text: match.kda; font-size: 20px; }
-            Label { x: 21px; y: 95px; width: parent.width - 42px; height: 20px; text: "装备、符文、战绩详情与分享将使用已有 Rust 数据；此处不虚构已领取符文。"; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 55px; width: parent.width - 42px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；区服未确认时不猜测。"; color: Theme.muted; wrap: word-wrap; }
+        HorizontalLayout { x: 21px; y: 98px; width: 330px; height: 38px; spacing: 10px;
+            Action { label: "刷新战绩"; enabled: HostState.connected && !HostState.busy && !HostState.offline; clicked => { HostState.command("history-refresh"); } }
+            Action { label: "本地缓存"; enabled: HostState.connected && !HostState.busy && !HostState.offline; clicked => { HostState.command("history-cached"); } }
+            Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.offline; clicked => { HostState.command("history-more"); } }
         }
+        Label { x: 21px; y: 160px; width: parent.width - 42px; height: 42px; text: HostState.history-note; wrap: word-wrap; color: Theme.yellow; }
+    }
+    HorizontalLayout { height: 36px; spacing: 12px;
+        LineEdit { text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
+        ComboBox { width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
+    }
+    if HostState.history.length == 0: Label { text: "暂无符合条件的战绩"; height: 42px; color: Theme.muted; }
+    Disclosure { label: "本地选择记录 · 观察不等于领取"; detail: "按已确认账号与区服隔离。\n属性碎片、刷新及观察到的卡片都不证明实际领取。"; }
+    for match[index] in HostState.history: Panel {
+        height: HostState.history-selected == index ? 300px : 132px;
+        SectionTitle { x: 21px; y: 17px; width: parent.width - 280px; height: 32px; text: match.title; }
+        Label { x: 21px; y: 51px; height: 25px; text: "海克斯大乱斗 · " + match.duration; color: Theme.muted; }
+        Label { x: parent.width - 260px; y: 23px; width: 75px; height: 30px; text: match.result; color: match.won ? Theme.green : Theme.red; font-size: 18px; }
+        Label { x: parent.width - 170px; y: 23px; width: 150px; height: 30px; text: match.kda; font-size: 20px; }
+        Action { x: 21px; y: 83px; width: 114px; height: 30px; label: HostState.history-selected == index ? "收起详情" : "查看详情"; clicked => { HostState.history-selected = HostState.history-selected == index ? -1 : index; } }
+        if HostState.history-selected == index: Label { x: 21px; y: 137px; width: parent.width - 42px; height: 143px; wrap: word-wrap; text: match.detail; color: Theme.muted; }
+    }
+    HorizontalLayout { height: 38px; spacing: 12px;
+        Action { label: "上一页"; enabled: HostState.history-page > 0; clicked => { HostState.history-turn(-1); } }
+        Label { text: "第 " + (HostState.history-page + 1) + " / " + HostState.history-pages + " 页"; horizontal-alignment: center; }
+        Action { label: "下一页"; enabled: HostState.history-page + 1 < HostState.history-pages; clicked => { HostState.history-turn(1); } }
     }
 }

@@ -1,0 +1,20 @@
+{
+  "augment_filter": true,
+  "bench_replace_and_clear": true,
+  "champion_latest_request": true,
+  "detail_idle_timer_stopped": true,
+  "disk_save_verified": false,
+  "foreground_unchanged": true,
+  "game_access": false,
+  "hidden_window": true,
+  "history_detail_and_paging": true,
+  "history_filter": true,
+  "host_preferences_apply": true,
+  "invalid_preferences_preserved": true,
+  "offline_network_command_rejected": true,
+  "pause_resume": true,
+  "personal_data_read": false,
+  "production_parity_complete": false,
+  "public_build_details": true,
+  "system_input": false
+}

@@ -1,9 +1,11 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration]
     paths:
       - 'rust/ui-lab/**'
+      - 'rust/crates/**'
+      - 'scripts/create-ui-host-fixture.mjs'
       - 'public/fuze.png'
       - '.github/workflows/ui-framework-lab.yml'
   workflow_dispatch:
@@ -46,3 +48,10 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
           exit $LASTEXITCODE
       # No installers, upload-artifact, release publication or game/LCU access.
+      - name: Existing Rust services through hidden Slint callbacks
+        working-directory: rust/ui-lab
+        run: |
+          node ../../scripts/create-ui-host-fixture.mjs artifacts/host-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-host artifacts/host-data artifacts/host-review
+          exit $LASTEXITCODE

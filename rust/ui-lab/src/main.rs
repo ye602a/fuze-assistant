@@ -1,6 +1,10 @@
+mod champion_bridge;
 mod direct;
 mod font_probe;
+mod host_bridge;
+mod host_review;
 mod manual_profile;
+mod public_art;
 #[cfg(feature = "gpu")]
 mod skia_surface_probe;
 mod slint_probe;
@@ -10,6 +14,14 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-host") if args.len() == 3 => println!("{}", host_review::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[2]))?),
+        Some("--host-offline") if args.len() == 2 => {
+            slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).select()?;
+            let ui = Workbench::new()?;
+            slint_probe::connect(&ui);
+            let _binding = host_bridge::attach(&ui, host_bridge::offline_config(std::path::Path::new(&args[1])), true)?;
+            ui.run()?;
+        }
         Some("--manual-profile") if args.len()==3 => manual_profile::run(&args[1],std::path::Path::new(&args[2]))?,
         #[cfg(feature="gpu")]
         Some("--review-skia-surface") if args.len()==3 => {

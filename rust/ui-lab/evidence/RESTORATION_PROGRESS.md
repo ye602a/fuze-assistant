@@ -1,5 +1,7 @@
 # 中文界面恢复：首批开发侧结果
 
+> 后续服务接线和仍未完成的范围见 [HOST_INTERACTIONS.md](HOST_INTERACTIONS.md)。本文保留为首批视觉恢复记录。
+
 2026-10-16。基准仍是 `v0.6.3 / 58aea5e`，按 [设计审查](../../../docs/development/rust/V063_UI_DESIGN_AUDIT.md) 修复。**这不是完整迁移完成报告，也不是玩家验收通知。** 稳定版保留，不打包；新界面仍处于隔离 ui-lab。
 
 ## 已恢复并查看的画面

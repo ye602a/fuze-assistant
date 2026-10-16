@@ -1,11 +1,15 @@
+import { Palette } from "std-widgets.slint";
+export { HostState } from "host-state.slint";
+import { HostState } from "host-state.slint";
 export { ChampionWindow } from "champion.slint";
 import { SettingsPage, HistoryPage } from "pages.slint";
 import { LineEdit, AboutSlint } from "std-widgets.slint";
-import { Theme, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure } from "components.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar } from "components.slint";
 
 export component Workbench inherits Window {
     title: "符择 · 离线界面预览";
     preferred-width: 1120px; preferred-height: 860px; min-width: 920px; min-height: 760px;
+    init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
     background: Theme.background;
     default-font-family: "Microsoft YaHei"; default-font-size: 13px;
@@ -54,8 +58,8 @@ export component Workbench inherits Window {
         Rectangle { x: 0px; y: 41px; height: 1px; background: #253340; }
         Label { y: 0px; x: root.inset; height: 41px; text: root.page == 0 ? "对局助手" : root.page == 1 ? "战绩查询" : "偏好设置"; color: #91a0ac; font-size: 11px; }
         TouchArea { x: 0px; y: 0px; width: parent.width - 92px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
-        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open; quiet: true; label: "−"; clicked => { root.minimize(); } }
-        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; quiet: true; label: "×"; clicked => { root.quit-open = true; } }
+        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open; quiet: true; label: "−"; description: "最小化窗口"; clicked => { root.minimize(); } }
+        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; quiet: true; label: "×"; description: "关闭窗口"; clicked => { root.quit-open = true; } }
     }
     FocusScope {
     enabled: !root.quit-open;
@@ -77,6 +81,10 @@ export component Workbench inherits Window {
                         Label { x: 0px; y: 0px; text: "符择 / 离线预览"; width: parent.width; height: parent.height; horizontal-alignment: center; color: #c7b386; font-size: 10px; }
                     }
                 }
+                if HostState.notice != "": Panel { height: 62px;
+                    Label { x: 14px; y: 8px; width: parent.width - 65px; height: 46px; text: HostState.notice; wrap: word-wrap; color: Theme.yellow; }
+                    Action { x: parent.width - 47px; y: 8px; width: 38px; min-width: 0px; quiet: true; label: "×"; description: "关闭提示"; clicked => { HostState.notice = ""; } }
+                }
                 if root.page == 0: VerticalLayout {
                     spacing: 18px;
                     Rectangle {
@@ -86,10 +94,10 @@ export component Workbench inherits Window {
                         Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
                         Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }
                         Label { x: 44px; y: 22px; height: 24px; text: "实时状态"; color: Theme.gold; font-size: 10px; letter-spacing: 2px; }
-                        Label { x: 27px; y: 47px; width: parent.width - 170px; height: 36px; text: root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "识别正常 · 推荐已就绪" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: root.tone; font-size: 22px; font-weight: 700; }
-                        Label { x: 27px; y: 88px; width: parent.width - 170px; height: 28px; text: root.paused ? "已暂停识别。继续后恢复自动识别。" : root.health == 0 ? "客户端通信正常。进入对局后才会开始截图识别。" : root.health == 2 ? "保留卡位，等待下一次识别；可能被遮挡或正在刷新。" : root.health == 3 ? "暂时无法连接客户端，等待重连。" : "已展示识别结果。仅作推荐，不自动选择。"; color: #bacbd0; wrap: word-wrap; }
+                        Label { x: 27px; y: 47px; width: parent.width - 170px; height: 36px; text: HostState.connected ? HostState.status-title : root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "识别正常 · 推荐已就绪" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: root.tone; font-size: 22px; font-weight: 700; }
+                        Label { x: 27px; y: 88px; width: parent.width - 170px; height: 28px; text: HostState.connected ? HostState.status-hint : root.paused ? "已暂停识别。继续后恢复自动识别。" : root.health == 0 ? "客户端通信正常。进入对局后才会开始截图识别。" : root.health == 2 ? "保留卡位，等待下一次识别；可能被遮挡或正在刷新。" : root.health == 3 ? "暂时无法连接客户端，等待重连。" : "已展示识别结果。仅作推荐，不自动选择。"; color: #bacbd0; wrap: word-wrap; }
                         Label { x: 27px; y: 126px; height: 18px; text: "最近连接验证 · 固定预览状态，非本机连接结果"; color: #91afb6; font-size: 10px; }
-                        Action { x: parent.width - 130px; y: 63px; width: 103px; primary: true; label: root.paused ? "继续识别" : "暂停识别"; clicked => { root.paused = !root.paused; } }
+                        Action { x: parent.width - 130px; y: 63px; width: 103px; primary: true; label: root.paused ? "继续识别" : "暂停识别"; enabled: !HostState.busy; clicked => { if HostState.connected { HostState.command("toggle-running"); } else { root.paused = !root.paused; } } }
                     }
                     VerticalLayout {
                         spacing: 3px;
@@ -97,10 +105,10 @@ export component Workbench inherits Window {
                         module-grid := Rectangle {
                             height: root.narrow ? 202px : 137px;
                             for item[index] in [
-                                {label: "客户端连接", value: root.health == 3 ? "连接异常" : "通信已验证", hint: root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: root.health == 3 ? Theme.red : Theme.green},
-                                {label: "游戏画面", value: root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
-                                {label: "中文识别", value: root.paused ? "已暂停" : root.health == 0 ? "正常待命" : root.health == 2 ? "部分卡位暂不可读" : "识别结果已就绪", hint: "预览不启动识别引擎", icon: @image-url("assets/recognition.svg"), tone: root.paused || root.health == 2 ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
-                                {label: "推荐数据", value: "16.20.1 · 示例", hint: "保留数据版本 · 使用整体胜率", icon: @image-url("assets/data.svg"), tone: Theme.green}
+                                {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "通信已验证", hint: root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: root.health == 3 ? Theme.red : Theme.green},
+                                {label: "游戏画面", value: HostState.connected ? HostState.capture-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "中文识别", value: HostState.connected ? HostState.ocr-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : root.health == 2 ? "部分卡位暂不可读" : "识别结果已就绪", hint: "预览不启动识别引擎", icon: @image-url("assets/recognition.svg"), tone: root.paused || root.health == 2 ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20.1 · 示例", hint: "保留数据版本 · 使用整体胜率", icon: @image-url("assets/data.svg"), tone: Theme.green}
                             ]: Module {
                                 x: mod(index, root.narrow ? 2 : 4) * (self.width + 12px);
                                 y: root.narrow && index >= 2 ? 107px : 0px;
@@ -120,22 +128,22 @@ export component Workbench inherits Window {
                                 background: #091724; border-width: 1px; border-color: #3f4c54;
                                 Label { x: 15px; y: 13px; height: 20px; text: "选项 " + (index + 1); color: #91a6b2; font-size: 10px; }
                                 Image { x: (parent.width - 43px)/2; y: 47px; width: 43px; height: 43px; source: @image-url("assets/rune.svg"); }
-                                Label { x: 0px; y: 100px; width: parent.width; height: 24px; horizontal-alignment: center; text: root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "此位置暂不可读" : name) : "等待海克斯出现"; color: #b4c0c5; font-size: 13px; }
-                                Label { x: 10px; y: 131px; width: parent.width - 20px; height: 24px; horizontal-alignment: center; wrap: word-wrap; text: root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #8fa3ae; font-size: 10px; }
+                                Label { x: 0px; y: 100px; width: parent.width; height: 24px; horizontal-alignment: center; text: HostState.connected ? HostState.slots[index].name : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "此位置暂不可读" : name) : "等待海克斯出现"; color: #b4c0c5; font-size: 13px; }
+                                Label { x: 10px; y: 131px; width: parent.width - 20px; height: 24px; horizontal-alignment: center; wrap: word-wrap; text: HostState.connected ? HostState.slots[index].hint : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #8fa3ae; font-size: 10px; }
                             }
                         }
                     }
                     Panel {
                         height: 166px;
                         SectionTitle { x: 21px; y: 17px; height: 26px; text: "运行开销"; }
-                        Label { x: parent.width - 130px; y: 17px; height: 26px; text: "等待首次采样"; color: Theme.muted; font-size: 11px; }
+                        Label { x: parent.width - 130px; y: 17px; height: 26px; text: HostState.sampled; color: Theme.muted; font-size: 11px; }
                         HorizontalLayout { x: 21px; y: 60px; width: parent.width - 42px; height: 58px; spacing: 12px;
-                            for metric in ["CPU", "内存", "截图次数", "最近识别耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 10px; } Label { text: "—"; font-size: 24px; } }
+                            for metric[index] in ["CPU", "内存", "识别次数", "最近识别耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 10px; } Label { text: HostState.resources[index]; font-size: 24px; } }
                         }
                         Label { x: 21px; y: 130px; height: 22px; text: "仅统计本软件及其识别进程；离线预览不采集运行数据。"; color: #98a9b3; font-size: 10px; }
                     }
-                    Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
-                    Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：16.20.1（示例） · 实际补丁与来源接入宿主后显示。"; }
+                    Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: HostState.connected ? HostState.schedule : "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
+                    Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：" + HostState.data-version + " · 实际领取轮次未确认，继续使用整体胜率。"; }
                 }
                 if root.page == 1: HistoryPage { sample: root.history-sample; }
                 if root.page == 2: SettingsPage { }
@@ -154,10 +162,7 @@ export component Workbench inherits Window {
                 if root.about: AboutSlint { }
             }
         }
-        if scroll.viewport-height > scroll.height: Rectangle {
-            x: parent.width - 7px; y: 6px + (-scroll.viewport-y / scroll.viewport-height) * (scroll.height - 12px);
-            width: 5px; height: max(28px, (scroll.height / scroll.viewport-height) * (scroll.height - 12px)); border-radius: 2px; background: #635638;
-        }
+        Scrollbar { x: parent.width - 13px; y: 6px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     }
     }
     if root.quit-open: Rectangle { x: 0px; y: 0px;

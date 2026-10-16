@@ -28,6 +28,8 @@ use windows_sys::Win32::{
 };
 #[path = "claim_diagnostic_ui.rs"]
 mod claim_ui;
+#[path = "frontend_session.rs"]
+pub mod frontend;
 #[path = "history_presentation.rs"]
 mod history_ui;
 #[path = "maintenance_ui.rs"]
@@ -76,24 +78,24 @@ const OPEN: usize = 104;
 const SIDE: usize = 109;
 const TRAY: u32 = WM_APP + 1;
 #[derive(Clone, Debug, PartialEq)]
-struct Status {
-    history: crate::account_history::View,
-    records: Vec<crate::local_records::Row>,
-    record_error: Option<&'static str>,
-    ui_locale: String,
-    mode: u8,
-    verified_time: Option<String>,
-    connection: Option<Connection>,
-    pipeline: PipelineStatus,
-    resources: crate::resources::Snapshot,
-    recognition: crate::recognition_sources::Summary,
-    done: bool,
-    available: Option<String>,
-    notice: Option<&'static str>,
-    update_error: Option<&'static str>,
-    preferences: crate::preferences::Preferences,
-    selection: Option<crate::champ_select::View>,
-    playing: Option<crate::champ_select::View>,
+pub struct Status {
+    pub history: crate::account_history::View,
+    pub records: Vec<crate::local_records::Row>,
+    pub record_error: Option<&'static str>,
+    pub ui_locale: String,
+    pub mode: u8,
+    pub verified_time: Option<String>,
+    pub connection: Option<Connection>,
+    pub pipeline: PipelineStatus,
+    pub resources: crate::resources::Snapshot,
+    pub recognition: crate::recognition_sources::Summary,
+    pub done: bool,
+    pub available: Option<String>,
+    pub notice: Option<&'static str>,
+    pub update_error: Option<&'static str>,
+    pub preferences: crate::preferences::Preferences,
+    pub selection: Option<crate::champ_select::View>,
+    pub playing: Option<crate::champ_select::View>,
 }
 impl Default for Status {
     fn default() -> Self {

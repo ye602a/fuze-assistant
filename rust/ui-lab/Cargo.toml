@@ -12,6 +12,11 @@ resolver = "2"
 gpu = ["slint/renderer-skia", "dep:i-slint-renderer-skia", "dep:raw-window-handle"]
 
 [dependencies]
+fuze-worker-host = { path = "../crates/fuze-worker-host" }
+fuze-data = { path = "../crates/fuze-data" }
+fuze-lcu = { path = "../crates/fuze-lcu" }
+fuze-runtime = { path = "../crates/fuze-runtime" }
+fuze-contract = { path = "../crates/fuze-contract" }
 # Diagnostic-only access, pinned with Slint; not a production UI contract.
 i-slint-common = { version = "=1.13.1", features = ["shared-fontdb"] }
 i-slint-renderer-skia = { version = "=1.13.1", optional = true, features = ["opengl"] }

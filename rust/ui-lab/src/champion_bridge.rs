@@ -1,0 +1,494 @@
+//! Latest-request-only public catalogue worker. Bounded cache, no network or user directories.
+use crate::{BuildRow, ChampionChoice, ChampionWindow, DetailRow};
+use fuze_data::champion_detail::Detail;
+use slint::{ComponentHandle, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::Path,
+    rc::Rc,
+    sync::{Arc, Condvar, Mutex},
+    time::Duration,
+};
+struct Loaded {
+    id: u32,
+    detail: Detail,
+    icons: HashMap<String, Arc<image::RgbaImage>>,
+    version: String,
+}
+#[derive(Default)]
+struct Work {
+    wanted: Option<(u64, u32)>,
+    generation: u64,
+    stop: bool,
+    invalidate: bool,
+    reply: Option<(u64, Result<Arc<Loaded>, &'static str>)>,
+}
+struct Worker {
+    shared: Arc<(Mutex<Work>, Condvar)>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Worker {
+    fn new(data: &Path) -> Result<Self, &'static str> {
+        let shared = Arc::new((Mutex::new(Work::default()), Condvar::new()));
+        let task = shared.clone();
+        let roots = vec![fuze_data::Root {
+            path: data.into(),
+            source: fuze_data::Source::Bundled,
+        }];
+        let thread = std::thread::Builder::new()
+            .name("fuze-slint-details".into())
+            .spawn(move || {
+                let mut cache = HashMap::<u32, Arc<Loaded>>::new();
+                let mut art = HashMap::<String, Arc<image::RgbaImage>>::new();
+                loop {
+                    let mut s = match task.0.lock() {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    while !s.stop && s.wanted.is_none() {
+                        s = match task.1.wait(s) {
+                            Ok(s) => s,
+                            Err(_) => return,
+                        };
+                    }
+                    if s.stop {
+                        return;
+                    }
+                    let (generation, id) = s.wanted.take().unwrap();
+                    let invalidate = std::mem::take(&mut s.invalidate);
+                    drop(s);
+                    if invalidate {
+                        cache.clear();
+                        art.clear();
+                    }
+                    let result = if let Some(d) = cache.get(&id) {
+                        Ok(d.clone())
+                    } else {
+                        (|| {
+                            let data = fuze_data::prepare(
+                                &roots,
+                                fuze_data::Locale::ZhCn,
+                                fuze_data::Scope::Detail(id),
+                            )?;
+                            let detail = data.champion_detail(id)?;
+                            let mut icons = HashMap::new();
+                            for url in detail.augments.iter().map(|a| a.icon.as_str()).chain(
+                                detail
+                                    .lines
+                                    .iter()
+                                    .flat_map(|l| l.icons.iter().map(String::as_str)),
+                            ) {
+                                if !art.contains_key(url) {
+                                    if let Some(bytes) = crate::public_art::bytes(url) {
+                                        if let Ok(png) = image::load_from_memory(bytes) {
+                                            if art.len() >= 128 {
+                                                art.clear();
+                                            }
+                                            art.insert(url.into(), Arc::new(png.into_rgba8()));
+                                        }
+                                    }
+                                }
+                                if let Some(png) = art.get(url) {
+                                    icons.insert(url.into(), png.clone());
+                                }
+                            }
+                            Ok(Arc::new(Loaded {
+                                id,
+                                detail,
+                                icons,
+                                version: data.identity(),
+                            }))
+                        })()
+                    };
+                    let mut s = match task.0.lock() {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    if s.stop {
+                        return;
+                    }
+                    if s.generation != generation {
+                        continue;
+                    }
+                    if let Ok(d) = &result {
+                        if cache.len() >= 8 {
+                            cache.clear();
+                        }
+                        cache.insert(id, d.clone());
+                    }
+                    s.reply = Some((generation, result));
+                }
+            })
+            .map_err(|_| "details-thread")?;
+        Ok(Self {
+            shared,
+            thread: Some(thread),
+        })
+    }
+    fn request(&self, id: u32) {
+        if let Ok(mut s) = self.shared.0.lock() {
+            s.generation = s.generation.wrapping_add(1);
+            s.wanted = Some((s.generation, id));
+            s.reply = None;
+            self.shared.1.notify_one();
+        }
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.shared.0.lock() {
+            s.stop = true;
+            self.shared.1.notify_one();
+        }
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+pub struct Binding {
+    _worker: Rc<Worker>,
+    _timer: Rc<slint::Timer>,
+    state: Rc<RefCell<Presentation>>,
+    known_icons: HashMap<i32, slint::Image>,
+    version: RefCell<String>,
+}
+impl Binding {
+    /// Every changed selection snapshot replaces both models; never retain an obsolete bench.
+    pub fn selection(
+        &self,
+        ui: &ChampionWindow,
+        view: Option<&fuze_worker_host::champ_select::View>,
+    ) {
+        let Some(view) = view else {
+            if let Ok(mut s) = self._worker.shared.0.lock() {
+                s.generation = s.generation.wrapping_add(1);
+                s.wanted = None;
+                s.reply = None;
+            }
+            self._timer.stop();
+            self.state.borrow_mut().loaded = None;
+            ui.set_team(Default::default());
+            ui.set_bench(Default::default());
+            ui.set_augments(Default::default());
+            ui.set_build_lines(Default::default());
+            ui.set_local_id(0);
+            ui.set_inspected_id(0);
+            ui.set_inspected_name("等待选择英雄".into());
+            ui.set_inspected_icon(Default::default());
+            ui.set_inspected_win("—".into());
+            ui.set_inspected_pick("—".into());
+            ui.set_detail_status("选人阶段已结束或连接暂不可用".into());
+            return;
+        };
+        let model =
+            |heroes: &[fuze_worker_host::champ_select::Hero]| -> slint::ModelRc<ChampionChoice> {
+                Rc::new(VecModel::from(
+                    heroes
+                        .iter()
+                        .map(|h| ChampionChoice {
+                            id: h.id as i32,
+                            name: h.name.clone().into(),
+                            win: rate(h.win),
+                            pick: rate(h.pick),
+                            icon: self
+                                .known_icons
+                                .get(&(h.id as i32))
+                                .cloned()
+                                .unwrap_or_default(),
+                        })
+                        .collect::<Vec<_>>(),
+                ))
+                .into()
+            };
+        let version_changed = *self.version.borrow() != view.version;
+        if version_changed {
+            *self.version.borrow_mut() = view.version.clone();
+            if let Ok(mut s) = self._worker.shared.0.lock() {
+                s.invalidate = true;
+            }
+        }
+        let local = view
+            .local_slot
+            .and_then(|i| view.team.get(i))
+            .map(|h| h.id as i32)
+            .unwrap_or(0);
+        let changed = local != ui.get_local_id();
+        let present = view
+            .team
+            .iter()
+            .chain(&view.bench)
+            .any(|h| h.id as i32 == ui.get_inspected_id());
+        ui.set_team(model(&view.team));
+        ui.set_bench(model(&view.bench));
+        ui.set_local_id(local);
+        if let Some(hero) = view
+            .team
+            .iter()
+            .chain(&view.bench)
+            .find(|h| h.id as i32 == ui.get_inspected_id())
+        {
+            ui.set_inspected_name(hero.name.clone().into());
+            ui.set_inspected_win(rate(hero.win));
+            ui.set_inspected_pick(rate(hero.pick));
+        }
+        if changed || !present || version_changed {
+            if local > 0 {
+                ui.invoke_inspect(if changed || !present {
+                    local
+                } else {
+                    ui.get_inspected_id()
+                });
+            } else {
+                if let Ok(mut s) = self._worker.shared.0.lock() {
+                    s.generation = s.generation.wrapping_add(1);
+                    s.wanted = None;
+                    s.reply = None;
+                }
+                self._timer.stop();
+                self.state.borrow_mut().loaded = None;
+                ui.set_inspected_id(0);
+                ui.set_detail_champion(0);
+                ui.set_inspected_name("等待选择英雄".into());
+                ui.set_inspected_icon(Default::default());
+                ui.set_inspected_win("—".into());
+                ui.set_inspected_pick("—".into());
+                ui.set_augments(Default::default());
+                ui.set_build_lines(Default::default());
+                ui.set_build_routes(Default::default());
+                ui.set_detail_status("等待确认自己的英雄".into());
+            }
+        }
+    }
+    pub fn idle(&self) -> bool {
+        !self._timer.running()
+    }
+}
+struct Presentation {
+    loaded: Option<Arc<Loaded>>,
+    icons: HashMap<String, slint::Image>,
+}
+fn rate(value: Option<f64>) -> slint::SharedString {
+    value
+        .filter(|n| n.is_finite() && (0.0..=1.).contains(n))
+        .map(|n| format!("{:.1}%", n * 100.))
+        .unwrap_or("—".into())
+        .into()
+}
+fn apply(ui: &ChampionWindow, p: &Presentation) {
+    let Some(loaded) = &p.loaded else {
+        return;
+    };
+    let query = ui.get_augment_query().to_lowercase();
+    let rarity = ui.get_rarity();
+    ui.set_expanded_augment(-1);
+    ui.set_augments(
+        Rc::new(VecModel::from(
+            loaded
+                .detail
+                .augments
+                .iter()
+                .filter(|a| {
+                    (rarity < 0 || a.rarity.map(i32::from) == Some(rarity))
+                        && (query.is_empty()
+                            || a.name.to_lowercase().contains(&query)
+                            || a.description.to_lowercase().contains(&query))
+                })
+                .map(|a| DetailRow {
+                    title: a.name.clone().into(),
+                    description: if a.description.is_empty() {
+                        "数据源暂未提供说明".into()
+                    } else {
+                        a.description.clone().into()
+                    },
+                    win: rate(a.win),
+                    pick: rate(a.pick),
+                    rarity: a.rarity.map(i32::from).unwrap_or(-1),
+                    tier: a.tier.map(|v| format!("T{v}")).unwrap_or_default().into(),
+                    icon: p.icons.get(&a.icon).cloned().unwrap_or_default(),
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+}
+fn builds(ui: &ChampionWindow, p: &Presentation) {
+    let Some(loaded) = &p.loaded else {
+        return;
+    };
+    let routes = loaded
+        .detail
+        .lines
+        .iter()
+        .filter(|l| l.text.starts_with("路线 "))
+        .map(|l| l.text.clone().into())
+        .collect::<Vec<slint::SharedString>>();
+    ui.set_build_routes(Rc::new(VecModel::from(routes.clone())).into());
+    let chosen = ui.get_build_route().max(0) as usize;
+    let mut route = None;
+    let mut augments = false;
+    let lines = loaded
+        .detail
+        .lines
+        .iter()
+        .filter(|l| {
+            if l.text.starts_with("海克斯强化") {
+                augments = true;
+            }
+            if l.text.starts_with("路线 ") {
+                route = Some(route.map_or(0, |n: usize| n + 1));
+            }
+            !augments
+                && (route.is_none() || route == Some(chosen.min(routes.len().saturating_sub(1))))
+        })
+        .map(|l| BuildRow {
+            text: l.text.clone().into(),
+            icons: Rc::new(VecModel::from(
+                l.icons
+                    .iter()
+                    .map(|url| p.icons.get(url).cloned().unwrap_or_default())
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+            skills: Rc::new(VecModel::from(if l.text.starts_with("1–18") {
+                l.text
+                    .split('·')
+                    .nth(1)
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .filter(|k| matches!(*k, "Q" | "W" | "E" | "R"))
+                    .take(18)
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }))
+            .into(),
+        })
+        .collect::<Vec<_>>();
+    ui.set_build_lines(Rc::new(VecModel::from(lines)).into());
+}
+pub fn attach(ui: &ChampionWindow, data: &Path) -> Result<Binding, &'static str> {
+    let worker = Rc::new(Worker::new(data)?);
+    let state = Rc::new(RefCell::new(Presentation {
+        loaded: None,
+        icons: HashMap::new(),
+    }));
+    let timer = Rc::new(slint::Timer::default());
+    let reload = timer.clone();
+    let weak = ui.as_weak();
+    let service = worker.clone();
+    let current = state.clone();
+    ui.on_inspect(move |id| {
+        if let Some(ui) = weak.upgrade() {
+            let found: Option<ChampionChoice> = ui
+                .get_team()
+                .iter()
+                .chain(ui.get_bench().iter())
+                .find(|h| h.id == id);
+            if let Some(hero) = found {
+                current.borrow_mut().loaded = None;
+                ui.set_inspected_id(id);
+                ui.set_build_route(0);
+                ui.set_build_routes(Default::default());
+                ui.set_detail_champion(0);
+                ui.set_inspected_name(hero.name);
+                ui.set_inspected_win(hero.win);
+                ui.set_inspected_pick(hero.pick);
+                ui.set_inspected_icon(hero.icon);
+                ui.set_augments(Default::default());
+                ui.set_build_lines(Default::default());
+                ui.set_detail_status("正在读取本地英雄数据…".into());
+                ui.set_scroll_y(-480.);
+                service.request(id as u32);
+                reload.restart();
+            }
+        }
+    });
+    let weak = ui.as_weak();
+    let current = state.clone();
+    ui.on_filter(move |query, rarity| {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_augment_query(query);
+            ui.set_rarity(rarity);
+            apply(&ui, &current.borrow());
+        }
+    });
+    let weak = ui.as_weak();
+    let service = worker.clone();
+    let current = state.clone();
+    let route_weak = ui.as_weak();
+    let route_state = state.clone();
+    ui.on_route_changed(move |route| {
+        if let Some(ui) = route_weak.upgrade() {
+            ui.set_build_route(route);
+            builds(&ui, &route_state.borrow());
+        }
+    });
+    let tick = Rc::downgrade(&timer);
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(100),
+        move || {
+            let reply = service
+                .shared
+                .0
+                .lock()
+                .ok()
+                .and_then(|mut s| s.reply.take());
+            let Some((_, reply)) = reply else {
+                return;
+            };
+            if let Some(timer) = tick.upgrade() {
+                timer.stop();
+            }
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            match reply {
+                Ok(loaded) => {
+                    let mut p = current.borrow_mut();
+                    p.icons.clear();
+                    for (url, png) in &loaded.icons {
+                        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                            png.as_raw(),
+                            png.width(),
+                            png.height(),
+                        );
+                        p.icons
+                            .insert(url.clone(), slint::Image::from_rgba8(buffer));
+                    }
+                    ui.set_detail_version(loaded.version.clone().into());
+                    ui.set_detail_champion(loaded.id as i32);
+                    ui.set_detail_status(
+                        format!(
+                            "{} · 整体胜率参考\n实际领取轮次未确认，不自动使用阶段排序。",
+                            loaded.version
+                        )
+                        .into(),
+                    );
+                    p.loaded = Some(loaded);
+                    apply(&ui, &p);
+                    builds(&ui, &p);
+                }
+                Err(_) => {
+                    current.borrow_mut().loaded = None;
+                    ui.set_detail_status("本地详情暂不可用；不会显示上一位英雄的数据。".into());
+                }
+            }
+        },
+    );
+    worker.request(ui.get_inspected_id() as u32);
+    Ok(Binding {
+        _worker: worker,
+        _timer: timer,
+        state,
+        version: RefCell::new(String::new()),
+        known_icons: ui
+            .get_team()
+            .iter()
+            .chain(ui.get_bench().iter())
+            .map(|h| (h.id, h.icon))
+            .collect(),
+    })
+}

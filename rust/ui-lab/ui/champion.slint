@@ -1,17 +1,37 @@
-import { Theme, Label, Action, Panel, SectionTitle, Disclosure } from "components.slint";
+import { Palette } from "std-widgets.slint";
+import { LineEdit, ListView } from "std-widgets.slint";
+import { DetailRow, BuildRow } from "host-state.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Scrollbar } from "components.slint";
 import { ChampionFixture, ChampionChoice } from "champion-fixture.slint";
 
 export component ChampionWindow inherits Window {
     title: "符择 · 选人界面预览";
+    init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
     preferred-width: 420px; preferred-height: 640px; min-width: 380px; min-height: 600px;
     background: Theme.background;
     default-font-family: "Microsoft YaHei"; default-font-size: 12px;
     in-out property <length> scroll-y <=> scroll.viewport-y;
     in-out property <int> detail-tab: 0;
+    in-out property <[ChampionChoice]> team: ChampionFixture.team;
+    in-out property <[ChampionChoice]> bench: ChampionFixture.bench;
+    in-out property <int> local-id: 4;
+    in-out property <[DetailRow]> augments;
+    in-out property <[BuildRow]> build-lines;
+    in-out property <[string]> build-routes;
+    in-out property <int> build-route: 0;
+    callback route-changed(int);
+    in-out property <string> detail-status: "等待加载英雄数据";
+    in-out property <string> augment-query;
+    in-out property <int> rarity: -1;
+    in-out property <int> expanded-augment: -1;
+    in-out property <string> detail-version;
+    in-out property <int> detail-champion: 0;
+    callback inspect(int);
+    callback filter(string, int);
     in-out property <int> inspected-id: 4;
     in-out property <string> inspected-name: "崔斯特";
-    in-out property <string> inspected-win: "56.1%";
+    in-out property <string> inspected-win: "56.0%";
     in-out property <string> inspected-pick: "11.6%";
     in-out property <image> inspected-icon: @image-url("assets/champion-4.png");
     callback close-requested;
@@ -25,28 +45,35 @@ export component ChampionWindow inherits Window {
         viewport-width: self.width; viewport-height: body.height + 26px;
         body := VerticalLayout {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
-            Panel { height: 468px;
+            Panel { height: 231px + ceil(root.bench.length / 3) * 59px;
                 SectionTitle { x: 12px; y: 10px; height: 24px; text: "选人参考"; font-size: 13px; }
                 Label { x: 12px; y: 42px; height: 20px; text: "我方阵容 · 五人选择"; color: Theme.gold; font-size: 11px; }
                 HorizontalLayout { x: 12px; y: 70px; width: parent.width - 24px; height: 90px; spacing: 5px;
-                    for hero in ChampionFixture.team: Rectangle {
+                    for hero in root.team: Rectangle {
                         Image { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; source: hero.icon; image-fit: cover; }
-                        if hero.id == 4: Rectangle { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; background: transparent; border-width: 1px; border-color: Theme.gold; }
+                        if hero.id == root.local-id: Rectangle { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; background: transparent; border-width: 1px; border-color: Theme.gold; }
                         Label { x: 0px; y: 47px; width: parent.width; height: 20px; text: hero.name; horizontal-alignment: center; font-size: 10px; }
                         Label { x: 0px; y: 69px; width: parent.width; height: 18px; text: hero.win; horizontal-alignment: center; color: #91bbc9; font-size: 10px; }
+                        accessible-role: button; accessible-label: "查看" + hero.name; forward-focus: ally-focus;
+                        ally-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
+                        TouchArea { clicked => { ally-focus.focus(); root.inspect(hero.id); } }
+                        if ally-focus.has-focus: Rectangle { border-width: 1px; border-color: Theme.blue; background: transparent; }
                     }
                 }
                 Label { x: 12px; y: 166px; height: 20px; text: "可选英雄 · 胜率从高到低"; color: Theme.gold; font-size: 11px; }
                 Label { x: 12px; y: 190px; height: 18px; text: "仅作选人参考，查看不会更换游戏内英雄。"; color: Theme.muted; font-size: 10px; }
-                Rectangle { x: 12px; y: 219px; width: parent.width - 24px; height: 237px;
-                    for hero[index] in ChampionFixture.bench: Rectangle {
+                Rectangle { x: 12px; y: 219px; width: parent.width - 24px; height: ceil(root.bench.length / 3) * 59px;
+                    for hero[index] in root.bench: Rectangle {
                         x: mod(index, 3) * (self.width + 6px); y: floor(index / 3) * 59px;
                         width: (parent.width - 12px)/3; height: 53px;
                         background: index == 0 ? #202b2d : #0a1925; border-width: 1px; border-color: index == 0 ? #89703f : #2b414e;
                         Image { x: 5px; y: 6px; width: 22px; height: 22px; source: hero.icon; }
                         Label { x: 32px; y: 5px; width: parent.width - 36px; height: 20px; text: hero.name; font-size: 11px; }
                         Label { x: 5px; y: 30px; width: parent.width - 10px; height: 18px; text: hero.win + " · 选 " + hero.pick; font-size: 10px; color: #e6cb8d; }
-                        TouchArea { x: 0px; y: 0px; clicked => { root.inspected-id = hero.id; root.inspected-name = hero.name; root.inspected-win = hero.win; root.inspected-pick = hero.pick; root.inspected-icon = hero.icon; root.scroll-y = -480px; } }
+                        accessible-role: button; accessible-label: hero.name + "，胜率 " + hero.win; forward-focus: candidate-focus;
+                        candidate-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
+                        TouchArea { x: 0px; y: 0px; clicked => { candidate-focus.focus(); root.inspect(hero.id); } }
+                        if candidate-focus.has-focus: Rectangle { border-width: 2px; border-color: Theme.blue; background: transparent; }
                     }
                 }
             }
@@ -65,13 +92,55 @@ export component ChampionWindow inherits Window {
                 Action { label: "海克斯"; primary: root.detail-tab == 0; clicked => { root.detail-tab = 0; } }
                 Action { label: "出装与技能"; primary: root.detail-tab == 1; clicked => { root.detail-tab = 1; } }
             }
-            Panel { height: 122px;
-                SectionTitle { x: 16px; y: 12px; height: 26px; text: root.detail-tab == 0 ? "海克斯推荐" : "出装路线与技能"; }
-                Label { x: 16px; y: 48px; width: parent.width - 32px; height: 60px; wrap: word-wrap; text: "详情、装备、技能与攻略尚待接入已有 Rust 数据模型。未提供的数据保持缺失，不生成虚构推荐。"; color: Theme.muted; font-size: 11px; }
+            Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 11px; }
+            if root.detail-tab == 0: VerticalLayout { spacing: 10px;
+                LineEdit { text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
+                HorizontalLayout { height: 32px; spacing: 5px;
+                    for title[index] in ["全部", "白银", "黄金", "棱彩"]: Action { min-width: 0px; height: 32px; label: title; primary: root.rarity == index - 1; clicked => { root.rarity = index - 1; root.filter(root.augment-query, root.rarity); } }
+                }
+                ListView { height: 400px;
+                    for a[index] in root.augments: Panel {
+                        height: 82px;
+                        Image { x: 10px; y: 14px; width: 45px; height: 45px; source: a.icon; }
+                        Label { x: 65px; y: 10px; width: parent.width - 155px; height: 27px; text: a.title; font-size: 14px; color: a.rarity == 2 ? #bf9ee9 : a.rarity == 1 ? Theme.gold : Theme.ivory; }
+                        Label { x: 65px; y: 42px; width: parent.width - 155px; height: 22px; text: a.tier + " · 选 " + a.pick; color: Theme.muted; font-size: 11px; }
+                        Label { x: parent.width - 83px; y: 12px; width: 70px; height: 19px; text: "胜率"; horizontal-alignment: right; color: Theme.muted; font-size: 10px; }
+                        Label { x: parent.width - 88px; y: 34px; width: 75px; height: 30px; text: a.win; horizontal-alignment: right; color: Theme.gold; font-size: 22px; font-weight: 700; }
+                        accessible-role: button; accessible-label: "查看" + a.title + "的说明"; forward-focus: card-focus;
+                        card-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded-augment = index; return accept; } return reject; } }
+                        card-touch := TouchArea { clicked => { card-focus.focus(); root.expanded-augment = root.expanded-augment == index ? -1 : index; } }
+                        if card-focus.has-focus: Rectangle { background: transparent; border-width: 1px; border-color: Theme.blue; }
+                    }
+                }
+                if root.augments.length == 0: Label { height: 40px; text: "没有符合条件的强化符文"; color: Theme.muted; }
+            }
+            if root.detail-tab == 1: VerticalLayout {
+                spacing: 10px;
+                for route[index] in root.build-routes: Action { label: route; primary: root.build-route == index; clicked => { root.build-route = index; root.route-changed(index); } }
+                for line in root.build-lines: Panel { height: line.skills.length > 0 ? 170px : line.icons.length > 0 ? 145px : 98px;
+                    Label { x: 12px; y: 8px; width: parent.width - 24px; height: line.skills.length > 0 ? 30px : 82px; text: line.skills.length > 0 ? "1–18 级加点" : line.text; wrap: word-wrap; font-size: 11px; }
+                    if line.skills.length > 0: Rectangle { x: 12px; y: 43px; width: parent.width - 24px; height: 119px;
+                        for key[index] in line.skills: Rectangle { x: mod(index, 6) * (self.width + 4px); y: floor(index / 6) * 39px; width: (parent.width - 20px) / 6; height: 34px; background: #0a1925; border-width: 1px; border-color: Theme.stroke;
+                            Label { x: 4px; y: 0px; width: 15px; height: 34px; text: index + 1; color: Theme.muted; font-size: 9px; }
+                            Label { x: 17px; y: 0px; width: parent.width - 19px; height: 34px; text: key; color: key == "R" ? Theme.gold : Theme.ivory; horizontal-alignment: center; font-weight: 700; }
+                        }
+                    }
+                    HorizontalLayout { x: 12px; y: 98px; height: 35px; width: min(parent.width - 24px, line.icons.length * 42px); spacing: 7px; for icon in line.icons: Image { source: icon; width: 35px; height: 35px; image-fit: contain; } }
+                }
             }
             Disclosure { label: "分阶段胜率参考"; detail: "实际领取轮次未确认，自动推荐继续整体胜率。\n阶段统计页面尚待迁入。"; }
         }
     }
+    if root.expanded-augment >= 0 && root.detail-tab == 0: Panel {
+        x: 12px; y: root.height - 300px; width: root.width - 24px; height: 228px;
+        TouchArea { }
+        SectionTitle { x: 14px; y: 10px; width: parent.width - 62px; height: 28px; text: root.augments[root.expanded-augment].title; }
+        Action { x: parent.width - 40px; y: 5px; width: 34px; min-width: 0px; height: 34px; label: "×"; description: "关闭符文说明"; quiet: true; clicked => { root.expanded-augment = -1; } }
+        desc-scroll := Flickable { x: 14px; y: 50px; width: parent.width - 28px; height: 162px; viewport-width: self.width; viewport-height: description-text.preferred-height;
+            description-text := Text { width: desc-scroll.width; height: self.preferred-height; text: root.augments[root.expanded-augment].description; color: Theme.ivory; font-size: 12px; wrap: word-wrap; }
+        }
+    }
+    Scrollbar { x: root.width - 13px; y: 48px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     Rectangle { x: 0px; y: root.height - 61px; height: 61px; background: #101e2a;
         Action { x: 10px; y: 8px; width: parent.width - 20px; label: "配置装备方案 · 预览不可用"; enabled: false; }
         Label { x: 10px; y: 46px; height: 14px; text: "只展示公开样例，不操作游戏。"; color: Theme.muted; font-size: 10px; }

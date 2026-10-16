@@ -16,6 +16,7 @@ export component Label inherits Text {
 }
 export component Action inherits Rectangle {
     in property <string> label;
+    in property <string> description: root.label;
     in property <bool> primary: false;
     in property <bool> enabled: true;
     in property <bool> quiet: false;
@@ -24,12 +25,28 @@ export component Action inherits Rectangle {
     background: root.quiet ? (touch.has-hover ? #263340 : transparent) : root.primary ? (touch.has-hover ? #e5cc99 : Theme.gold) : (touch.has-hover ? #243742 : #122432);
     border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : #89703f;
     border-radius: 2px; opacity: root.enabled ? 1 : 0.45;
-    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    accessible-role: button; accessible-label: root.description; forward-focus: focus;
     Label { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #1a2025 : #dcc794; horizontal-alignment: center; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
     focus := FocusScope { enabled: root.enabled; key-pressed(event) => {
         if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject;
     } }
+}
+export component Toggle inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback toggled;
+    width: 44px; height: 26px;
+    background: root.checked ? #557260 : #253340;
+    border-radius: 13px; border-width: 1px;
+    border-color: focus.has-focus ? Theme.blue : root.checked ? Theme.gold : Theme.stroke;
+    opacity: root.enabled ? 1 : 0.45;
+    accessible-role: checkbox; accessible-label: root.label; accessible-checked: root.checked;
+    forward-focus: focus;
+    Rectangle { x: root.checked ? 22px : 4px; y: 4px; width: 18px; height: 18px; border-radius: 9px; background: root.checked ? Theme.ivory : Theme.muted; }
+    TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
 }
 export component Panel inherits Rectangle {
     background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
@@ -79,4 +96,19 @@ export component Disclosure inherits Panel {
     TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
     focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
     if focus.has-focus: Rectangle { x: 0px; y: 0px; background: transparent; border-width: 1px; border-color: Theme.blue; height: 46px; }
+}
+export component Scrollbar inherits Rectangle {
+    in property <length> content-height;
+    in-out property <length> offset;
+    private property <length> maximum: max(0px, root.content-height - root.height);
+    private property <length> thumb-height: max(28px, root.height * root.height / max(1px, root.content-height));
+    width: 12px;
+    visible: root.maximum > 0px;
+    Rectangle { x: 4px; y: clamp(-root.offset / max(1px, root.maximum), 0, 1) * (root.height - root.thumb-height); width: 5px; height: root.thumb-height; border-radius: 2px; background: touch.has-hover ? Theme.gold : #635638; }
+    touch := TouchArea {
+        private property <length> start-offset;
+        pointer-event(event) => { if event.kind == PointerEventKind.down { self.start-offset = root.offset; } }
+        moved => { if self.pressed { root.offset = clamp(self.start-offset - (self.mouse-y - self.pressed-y) * root.maximum / max(1px, root.height - root.thumb-height), -root.maximum, 0px); } }
+        scroll-event(event) => { root.offset = clamp(root.offset + event.delta-y, -root.maximum, 0px); return accept; }
+    }
 }

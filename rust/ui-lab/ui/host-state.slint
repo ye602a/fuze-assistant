@@ -1,0 +1,41 @@
+export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
+export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool }
+export struct DetailRow { title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
+export struct BuildRow { text: string, icons: [image], skills: [string] }
+export struct SlotRow { name: string, hint: string }
+export global HostState {
+    in-out property <[SlotRow]> slots;
+    in-out property <[string]> resources: ["—", "—", "—", "—"];
+    in-out property <string> sampled: "等待首次采样";
+    in-out property <string> schedule: "无法确认等级时恢复基础检测；等级不是实际领取轮次。";
+    in-out property <bool> connected: false;
+    in-out property <bool> busy: false;
+    in-out property <bool> offline: true;
+    in-out property <bool> running: false;
+    in-out property <string> notice;
+    in-out property <string> data-version: "—";
+    in-out property <[PreferenceRow]> preferences;
+    in-out property <int> backend: 0;
+    in-out property <int> locale: 0;
+    in-out property <string> directory;
+    in-out property <[MatchRow]> history;
+    in-out property <string> history-query;
+    in-out property <int> history-result: 0;
+    callback history-filter(string, int);
+    in-out property <int> history-selected: -1;
+    in-out property <int> history-page: 0;
+    in-out property <int> history-pages: 1;
+    in-out property <string> history-note: "未读取账号与缓存";
+    in-out property <string> status-title;
+    in-out property <string> status-hint;
+    in-out property <string> connection-value;
+    in-out property <string> capture-value;
+    in-out property <string> ocr-value;
+    in-out property <string> verified;
+    callback preference(string, bool);
+    callback backend-changed(int);
+    callback locale-changed(int);
+    callback directory-save(string);
+    callback command(string);
+    callback history-turn(int);
+}
