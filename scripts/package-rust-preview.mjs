@@ -48,6 +48,9 @@ for(const locale of ['zh-CN','zh-TW','en-US']) {
  versions[locale]=current.dataVersion
 }
 await copy(path.join(root,'THANKS.md'),'THANKS.md')
+await copy(path.join(root,'scripts/export-rust-feedback.ps1'),'Export-feedback.ps1')
+await copy(path.join(root,'docs/RUST_PLAYER_TEST_GUIDE.txt'),'TESTING-zh-CN.txt')
+await text('Export-feedback.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Export-feedback.ps1"\r\npause\r\n')
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --launch\r\n')
 await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')

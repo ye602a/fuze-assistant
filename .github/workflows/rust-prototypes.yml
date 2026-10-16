@@ -109,6 +109,8 @@ jobs:
           node --test tests/unit/actions-validation-summary.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-data-preparation.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/unit/rust-feedback-export.test.mjs
           exit $LASTEXITCODE
       - name: Build the selected milestone frontend from the same checkout
         id: frontend
