@@ -6,7 +6,7 @@ const checks = {
     ['secrets', '源码隐私检查'], ['build', '格式、契约测试与编译'],
     ['ocr', '离线 OCR 与原生窗口'], ['worker', '工作进程与 IPC 生命周期'],
     ['capture', '原生捕获与 GPU ROI'], ['pipeline', '捕获到 OCR 完整链路'],
-    ['fallback', 'CPU 对照与回退'], ['contracts', '工作流与数据契约'], ['package', '阶段验收：打包、更新与安装回滚'],
+    ['fallback', 'CPU 对照与回退'], ['contracts', '工作流与数据契约'], ['frontend', '阶段验收：Slint 前端构建'], ['package', '阶段验收：打包、更新与安装回滚'],
     ['desktop', '原生桌面交互'], ['upload_scan', '上传内容隐私检查'],
   ],
   electron: [

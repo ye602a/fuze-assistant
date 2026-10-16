@@ -35,6 +35,11 @@ on:
         type: choice
         default: none
         options: [none, preview, full]
+      ui_frontend:
+        description: '阶段测试界面：Slint 为当前中文版；Win32 仅保留旧实现对照'
+        type: choice
+        default: slint
+        options: [slint, win32]
 permissions:
   contents: read
 concurrency:
@@ -43,7 +48,7 @@ concurrency:
 jobs:
   prototypes:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Verify no private runtime data or secrets are tracked
@@ -105,9 +110,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-data-preparation.test.mjs
           exit $LASTEXITCODE
+      - name: Build the selected milestone frontend from the same checkout
+        id: frontend
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.ui_frontend == 'slint'
+        run: |
+          cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --target-dir rust/target --release --features gpu --locked -j 2
+          exit $LASTEXITCODE
       - name: Assemble and self-check milestone Rust preview
         id: package
         if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
+        env:
+          FUZE_UI_FRONTEND: ${{ inputs.ui_frontend }}
         run: |
           node scripts/prepare-rust-data.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
