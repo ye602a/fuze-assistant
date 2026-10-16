@@ -36,6 +36,7 @@ impl Panel {
         ui.on_close_requested(move || {
             closed.set(true);
             if let Some(ui) = weak.upgrade() {
+                ui.invoke_player_action("cancel".into(), 0);
                 if let Some(h) = hwnd(ui.window()) {
                     unsafe {
                         ShowWindow(h, SW_HIDE);
@@ -240,12 +241,19 @@ impl Manager {
             .flatten();
         if !self.offline_preview && (choose.is_some() || self.champion.is_some()) {
             let visible = self.visible;
-            self.panel(false)?
-                .update(choose, status.preferences.champ_topmost, visible)?;
+            let panel = self.panel(false)?;
+            panel
+                .details
+                .options(&panel.ui, status.preferences.icon_downloads);
+            panel.update(choose, status.preferences.champ_topmost, visible)?;
         }
         if side.is_some() || self.side.is_some() {
             let visible = self.visible;
-            self.panel(true)?.update(side, true, visible)?;
+            let panel = self.panel(true)?;
+            panel
+                .details
+                .options(&panel.ui, status.preferences.icon_downloads);
+            panel.update(side, true, visible)?;
         }
         let frame = (active && phase == Phase::InProgress && status.preferences.augment_overlay)
             .then_some(status.pipeline.overlay.clone())

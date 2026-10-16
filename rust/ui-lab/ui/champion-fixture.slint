@@ -1,5 +1,5 @@
 // Offline public-data fixture, never represents the current player.
-export struct ChampionChoice { id: int, name: string, win: string, pick: string, icon: image }
+export struct ChampionChoice { id: int, name: string, win: string, pick: string, games: string, icon: image }
 export global ChampionFixture {
  out property <[ChampionChoice]> team: [{ id: 1, name: "安妮", win: "48.5%", pick: "2.3%", icon: @image-url("assets/champion-1.png") },
 { id: 4, name: "崔斯特", win: "56.0%", pick: "11.6%", icon: @image-url("assets/champion-4.png") },

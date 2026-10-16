@@ -1,7 +1,7 @@
-//! Latest-request-only public catalogue worker. Bounded cache, no network or user directories.
+//! Local catalogue worker and independently scheduled public artwork.
 use crate::{BuildRow, ChampionChoice, ChampionWindow, DetailRow};
 use fuze_data::champion_detail::Detail;
-use slint::{ComponentHandle, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, Model, VecModel};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -13,7 +13,6 @@ use std::{
 struct Loaded {
     id: u32,
     detail: Detail,
-    icons: HashMap<String, Arc<image::RgbaImage>>,
     version: String,
 }
 #[derive(Default)]
@@ -37,7 +36,6 @@ impl Worker {
             .name("fuze-slint-details".into())
             .spawn(move || {
                 let mut cache = HashMap::<u32, Arc<Loaded>>::new();
-                let mut art = HashMap::<String, Arc<image::RgbaImage>>::new();
                 loop {
                     let mut s = match task.0.lock() {
                         Ok(s) => s,
@@ -57,7 +55,6 @@ impl Worker {
                     drop(s);
                     if invalidate {
                         cache.clear();
-                        art.clear();
                     }
                     let result = if let Some(d) = cache.get(&id) {
                         Ok(d.clone())
@@ -76,31 +73,9 @@ impl Worker {
                                 return Err("detail-version-mismatch");
                             }
                             let detail = data.champion_detail(id)?;
-                            let mut icons = HashMap::new();
-                            for url in detail.augments.iter().map(|a| a.icon.as_str()).chain(
-                                detail
-                                    .lines
-                                    .iter()
-                                    .flat_map(|l| l.icons.iter().map(String::as_str)),
-                            ) {
-                                if !art.contains_key(url) {
-                                    if let Some(bytes) = crate::public_art::bytes(url) {
-                                        if let Ok(png) = image::load_from_memory(bytes) {
-                                            if art.len() >= 128 {
-                                                art.clear();
-                                            }
-                                            art.insert(url.into(), Arc::new(png.into_rgba8()));
-                                        }
-                                    }
-                                }
-                                if let Some(png) = art.get(url) {
-                                    icons.insert(url.into(), png.clone());
-                                }
-                            }
                             Ok(Arc::new(Loaded {
                                 id,
                                 detail,
-                                icons,
                                 version: data.identity(),
                             }))
                         })()
@@ -152,6 +127,8 @@ impl Drop for Worker {
 }
 pub struct Binding {
     _stage: crate::stage_bridge::Binding,
+    actions: Rc<crate::champion_actions::Binding>,
+    art: Rc<crate::champion_art::Binding>,
     _worker: Rc<Worker>,
     _timer: Rc<slint::Timer>,
     state: Rc<RefCell<Presentation>>,
@@ -166,6 +143,9 @@ impl Binding {
         view: Option<&fuze_worker_host::champ_select::View>,
     ) {
         let Some(view) = view else {
+            self.actions.context(ui, None);
+            self.art.cancel();
+            self.state.borrow_mut().heroes.clear();
             ui.invoke_stage_reset();
             if let Ok(mut s) = self._worker.shared.0.lock() {
                 s.generation = s.generation.wrapping_add(1);
@@ -180,6 +160,7 @@ impl Binding {
             ui.set_augments(Default::default());
             ui.set_build_lines(Default::default());
             ui.set_local_id(0);
+            ui.set_inspected_games(Default::default());
             ui.set_inspected_id(0);
             ui.set_inspected_name("等待选择英雄".into());
             ui.set_inspected_icon(Default::default());
@@ -198,16 +179,33 @@ impl Binding {
                             name: h.name.clone().into(),
                             win: rate(h.win),
                             pick: rate(h.pick),
+                            games: h.games.map(|n| n.to_string()).unwrap_or_default().into(),
                             icon: self
-                                .known_icons
-                                .get(&(h.id as i32))
+                                .state
+                                .borrow()
+                                .icons
+                                .get(&h.icon)
                                 .cloned()
+                                .or_else(|| self.known_icons.get(&(h.id as i32)).cloned())
                                 .unwrap_or_default(),
                         })
                         .collect::<Vec<_>>(),
                 ))
                 .into()
             };
+        {
+            let mut p = self.state.borrow_mut();
+            p.heroes = view
+                .team
+                .iter()
+                .chain(&view.bench)
+                .map(|h| (h.id as i32, h.icon.clone()))
+                .collect();
+            if p.version != view.version {
+                p.icons.clear();
+            }
+            p.version = view.version.clone();
+        }
         let version_changed = *self.version.borrow() != view.version;
         if version_changed {
             *self.version.borrow_mut() = view.version.clone();
@@ -239,6 +237,7 @@ impl Binding {
             ui.set_inspected_name(hero.name.clone().into());
             ui.set_inspected_win(rate(hero.win));
             ui.set_inspected_pick(rate(hero.pick));
+            ui.set_inspected_games(hero.games.map(|n| n.to_string()).unwrap_or_default().into());
         }
         if changed || !present || version_changed {
             if local > 0 {
@@ -256,10 +255,12 @@ impl Binding {
                     s.reply = None;
                 }
                 self._timer.stop();
+                self.actions.context(ui, None);
                 self.state.borrow_mut().loaded = None;
                 ui.invoke_stage_reset();
                 ui.set_inspected_id(0);
                 ui.set_detail_champion(0);
+                ui.set_inspected_games(Default::default());
                 ui.set_inspected_name("等待选择英雄".into());
                 ui.set_inspected_icon(Default::default());
                 ui.set_inspected_win("—".into());
@@ -270,14 +271,70 @@ impl Binding {
                 ui.set_detail_status("等待确认自己的英雄".into());
             }
         }
+        request_art(ui, &self.state.borrow(), &self.art);
+    }
+    pub fn options(&self, ui: &ChampionWindow, download: bool) {
+        if self.state.borrow().download != download {
+            self.state.borrow_mut().download = download;
+            request_art(ui, &self.state.borrow(), &self.art);
+        }
     }
     pub fn idle(&self) -> bool {
         !self._timer.running()
     }
 }
 struct Presentation {
+    heroes: Vec<(i32, String)>,
+    version: String,
+    download: bool,
     loaded: Option<Arc<Loaded>>,
     icons: HashMap<String, slint::Image>,
+}
+fn request_art(ui: &ChampionWindow, p: &Presentation, art: &crate::champion_art::Binding) {
+    let mut urls = p
+        .heroes
+        .iter()
+        .map(|(_, url)| url.clone())
+        .collect::<Vec<_>>();
+    if let Some(loaded) = &p.loaded {
+        let query = ui.get_augment_query().to_lowercase();
+        let rarity = ui.get_rarity();
+        urls.extend(
+            loaded
+                .detail
+                .augments
+                .iter()
+                .filter(|a| {
+                    (rarity < 0 || a.rarity.map(i32::from) == Some(rarity))
+                        && (query.is_empty()
+                            || a.name.to_lowercase().contains(&query)
+                            || a.description.to_lowercase().contains(&query))
+                })
+                .skip(ui.get_augment_offset().max(0) as usize)
+                .take(24)
+                .map(|a| a.icon.clone()),
+        );
+        urls.extend(
+            loaded
+                .detail
+                .lines
+                .iter()
+                .flat_map(|l| l.icons.clone())
+                .take(64),
+        );
+    }
+    art.request(
+        if p.version.is_empty() {
+            p.loaded
+                .as_ref()
+                .map(|l| l.version.clone())
+                .unwrap_or_default()
+        } else {
+            p.version.clone()
+        },
+        urls,
+        p.download,
+    );
 }
 fn rate(value: Option<f64>) -> slint::SharedString {
     value
@@ -292,7 +349,6 @@ fn apply(ui: &ChampionWindow, p: &Presentation) {
     };
     let query = ui.get_augment_query().to_lowercase();
     let rarity = ui.get_rarity();
-    ui.set_expanded_augment(-1);
     ui.set_augments(
         Rc::new(VecModel::from(
             loaded
@@ -307,6 +363,7 @@ fn apply(ui: &ChampionWindow, p: &Presentation) {
                 })
                 .map(|a| DetailRow {
                     title: a.name.clone().into(),
+                    icon_url: a.icon.clone().into(),
                     description: if a.description.is_empty() {
                         "数据源暂未提供说明".into()
                     } else {
@@ -393,15 +450,70 @@ pub fn attach_roots(
     roots: Vec<fuze_data::Root>,
 ) -> Result<Binding, &'static str> {
     let worker = Rc::new(Worker::new(roots.clone())?);
+    let actions = Rc::new(crate::champion_actions::attach(ui));
     let state = Rc::new(RefCell::new(Presentation {
         loaded: None,
+        heroes: Vec::new(),
+        version: String::new(),
+        download: false,
         icons: HashMap::new(),
     }));
+    let weak = ui.as_weak();
+    let artwork_state = state.clone();
+    let art = Rc::new(crate::champion_art::Binding::new(
+        ui.get_offline(),
+        move |images| {
+            let Some(ui) = weak.upgrade() else { return };
+            artwork_state.borrow_mut().icons = images;
+            let p = artwork_state.borrow();
+            let rows = |model: slint::ModelRc<ChampionChoice>| {
+                Rc::new(VecModel::from(
+                    model
+                        .iter()
+                        .map(|mut h| {
+                            if let Some(image) = p
+                                .heroes
+                                .iter()
+                                .find(|(id, _)| *id == h.id)
+                                .and_then(|(_, url)| p.icons.get(url))
+                            {
+                                h.icon = image.clone();
+                            }
+                            h
+                        })
+                        .collect::<Vec<_>>(),
+                ))
+                .into()
+            };
+            ui.set_team(rows(ui.get_team()));
+            ui.set_bench(rows(ui.get_bench()));
+            if let Some(hero) = ui
+                .get_team()
+                .iter()
+                .chain(ui.get_bench().iter())
+                .find(|h| h.id == ui.get_inspected_id())
+            {
+                ui.set_inspected_icon(hero.icon);
+            }
+            let augments = ui.get_augments();
+            for index in 0..augments.row_count() {
+                if let Some(mut row) = augments.row_data(index) {
+                    if let Some(image) = p.icons.get(row.icon_url.as_str()) {
+                        row.icon = image.clone();
+                        augments.set_row_data(index, row);
+                    }
+                }
+            }
+            builds(&ui, &p);
+        },
+    )?);
     let timer = Rc::new(slint::Timer::default());
     let reload = timer.clone();
     let weak = ui.as_weak();
     let service = worker.clone();
     let current = state.clone();
+    let action_reset = actions.clone();
+    let art_reset = art.clone();
     ui.on_inspect(move |id| {
         if let Some(ui) = weak.upgrade() {
             let found: Option<ChampionChoice> = ui
@@ -410,8 +522,10 @@ pub fn attach_roots(
                 .chain(ui.get_bench().iter())
                 .find(|h| h.id == id);
             if let Some(hero) = found {
+                action_reset.context(&ui, None);
                 ui.invoke_stage_reset();
                 current.borrow_mut().loaded = None;
+                art_reset.cancel();
                 ui.set_inspected_id(id);
                 ui.set_build_route(0);
                 ui.set_build_routes(Default::default());
@@ -420,6 +534,7 @@ pub fn attach_roots(
                 ui.set_inspected_name(hero.name);
                 ui.set_inspected_win(hero.win);
                 ui.set_inspected_pick(hero.pick);
+                ui.set_inspected_games(hero.games);
                 ui.set_inspected_icon(hero.icon);
                 ui.set_augments(Default::default());
                 ui.set_build_lines(Default::default());
@@ -432,10 +547,14 @@ pub fn attach_roots(
     });
     let weak = ui.as_weak();
     let current = state.clone();
+    let art_filter = art.clone();
     ui.on_filter(move |query, rarity| {
         if let Some(ui) = weak.upgrade() {
             ui.set_augment_query(query);
             ui.set_rarity(rarity);
+            ui.set_expanded_augment(-1);
+            ui.set_augment_offset(0);
+            request_art(&ui, &current.borrow(), &art_filter);
             apply(&ui, &current.borrow());
         }
     });
@@ -450,6 +569,26 @@ pub fn attach_roots(
             builds(&ui, &route_state.borrow());
         }
     });
+    let art_request = art.clone();
+    let art_state = state.clone();
+    let weak_art = ui.as_weak();
+    let debounce = Rc::new(slint::Timer::default());
+    ui.on_artwork_refresh(move || {
+        let weak = weak_art.clone();
+        let state = art_state.clone();
+        let art = art_request.clone();
+        debounce.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(150),
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    request_art(&ui, &state.borrow(), &art);
+                }
+            },
+        );
+    });
+    let art_result = art.clone();
+    let action_result = actions.clone();
     let tick = Rc::downgrade(&timer);
     timer.start(
         slint::TimerMode::Repeated,
@@ -472,17 +611,6 @@ pub fn attach_roots(
             };
             match reply {
                 Ok(loaded) => {
-                    let mut p = current.borrow_mut();
-                    p.icons.clear();
-                    for (url, png) in &loaded.icons {
-                        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                            png.as_raw(),
-                            png.width(),
-                            png.height(),
-                        );
-                        p.icons
-                            .insert(url.clone(), slint::Image::from_rgba8(buffer));
-                    }
                     ui.set_detail_version(loaded.version.clone().into());
                     ui.set_detail_champion(loaded.id as i32);
                     ui.set_detail_status(
@@ -492,7 +620,17 @@ pub fn attach_roots(
                         )
                         .into(),
                     );
-                    p.loaded = Some(loaded);
+                    action_result.context(
+                        &ui,
+                        Some((
+                            loaded.id,
+                            loaded.version.clone(),
+                            Arc::new(loaded.detail.clone()),
+                        )),
+                    );
+                    current.borrow_mut().loaded = Some(loaded);
+                    let p = current.borrow();
+                    request_art(&ui, &p, &art_result);
                     apply(&ui, &p);
                     builds(&ui, &p);
                 }
@@ -510,6 +648,8 @@ pub fn attach_roots(
     }
     Ok(Binding {
         _stage: crate::stage_bridge::attach(ui, roots, ui.get_offline()),
+        actions,
+        art,
         _worker: worker,
         _timer: timer,
         state,

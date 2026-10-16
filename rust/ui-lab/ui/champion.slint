@@ -45,12 +45,24 @@ export component ChampionWindow inherits Window {
     in-out property <int> detail-champion: 0;
     callback inspect(int);
     callback filter(string, int);
+    in-out property <int> augment-offset: 0;
+    callback artwork-refresh;
     in-out property <int> inspected-id: 4;
     in-out property <string> inspected-name: "崔斯特";
     in-out property <string> inspected-win: "56.0%";
     in-out property <string> inspected-pick: "11.6%";
+    in-out property <string> inspected-games;
     in-out property <image> inspected-icon: @image-url("assets/champion-4.png");
     callback close-requested;
+    in-out property <[string]> guides;
+    in-out property <int> item-count: 0;
+    in-out property <bool> item-confirm: false;
+    in-out property <string> item-summary;
+    in-out property <bool> action-busy: false;
+    in-out property <string> action-notice;
+    callback player-action(string, int);
+    changed item-confirm => { if root.item-confirm { cancel-items.focus(); } else { content-focus.focus(); } }
+    content-focus := FocusScope { enabled: !root.item-confirm;
     Rectangle { x: 0px; y: 0px; height: 42px; background: #172c3c;
         Label { x: 15px; y: 0px; height: 42px; text: "FUZE"; color: #79d6ce; font-size: 10px; letter-spacing: 2px; }
         Label { x: 76px; y: 0px; height: 42px; text: root.side-mode ? "局内符文资料" : root.offline ? "英雄详情 · 离线预览" : "选人英雄详情"; font-weight: 600; }
@@ -100,7 +112,7 @@ export component ChampionWindow inherits Window {
                 Label { x: 84px; y: 55px; height: 18px; text: root.offline ? "公开数据预览 · 非当前选人" : root.inspected-id == root.local-id ? "当前英雄 · 整体胜率参考" : "候选英雄 · 只读查看"; color: Theme.muted; font-size: 10px; }
             }
             HorizontalLayout { height: 55px; spacing: 8px;
-                for metric in [{label:"胜率",value:root.inspected-win},{label:"选取率",value:root.inspected-pick},{label:"场次",value:"—"}]: Panel {
+                for metric in [{label:"胜率",value:root.inspected-win},{label:"选取率",value:root.inspected-pick},{label:"场次",value:root.inspected-games == "" ? "—" : root.inspected-games}]: Panel {
                     Label { x: 8px; y: 6px; height: 15px; text: metric.label; color: Theme.muted; font-size: 10px; }
                     Label { x: 8px; y: 24px; height: 24px; text: metric.value; font-size: 19px; }
                 }
@@ -109,6 +121,11 @@ export component ChampionWindow inherits Window {
                 Action { label: "海克斯"; primary: root.detail-tab == 0; clicked => { root.detail-tab = 0; } }
                 Action { label: "出装与技能"; primary: root.detail-tab == 1; clicked => { root.detail-tab = 1; } }
             }
+            if root.guides.length > 0: VerticalLayout { spacing: 6px;
+                SectionTitle { height: 25px; text: "相关攻略"; font-size: 13px; }
+                for title[index] in root.guides: Action { label: title; description: "在默认浏览器打开攻略：" + title; enabled: !root.offline && !root.action-busy; clicked => { root.player-action("guide", index); } }
+            }
+            if root.action-notice != "": Label { height: 56px; text: root.action-notice; wrap: word-wrap; color: Theme.gold; }
             Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 11px; }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
                 LineEdit { text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
@@ -116,6 +133,7 @@ export component ChampionWindow inherits Window {
                     for title[index] in ["全部", "白银", "黄金", "棱彩"]: Action { min-width: 0px; height: 32px; label: title; primary: root.rarity == index - 1; clicked => { root.rarity = index - 1; root.filter(root.augment-query, root.rarity); } }
                 }
                 ListView { height: 400px;
+                    changed viewport-y => { root.augment-offset = max(0, floor(-self.viewport-y / 82px)); root.artwork-refresh(); }
                     for a[index] in root.augments: Panel {
                         height: 82px;
                         Image { x: 10px; y: 14px; width: 45px; height: 45px; source: a.icon; }
@@ -174,7 +192,24 @@ export component ChampionWindow inherits Window {
     }
     Scrollbar { x: root.width - 13px; y: 48px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     Rectangle { x: 0px; y: root.height - 61px; height: 61px; background: #101e2a;
-        Action { x: 10px; y: 8px; width: parent.width - 20px; label: root.offline ? "配置装备方案 · 预览不可用" : "配置装备方案 · 暂不可用"; enabled: false; }
+        Action { x: 10px; y: 8px; width: parent.width - 20px; label: root.action-busy ? "正在配置装备方案…" : root.offline ? "配置装备方案 · 预览不可用" : root.item-count > 0 ? "配置 " + root.item-count + " 套装备方案" : "暂无装备方案"; enabled: !root.offline && !root.side-mode && !root.action-busy && root.item-count > 0 && root.inspected-id == root.local-id && root.detail-champion == root.local-id; clicked => { root.player-action("prepare-items",0); } }
         Label { x: 10px; y: 46px; height: 14px; text: root.offline ? "只展示公开样例，不操作游戏。" : "资料查看不会更换游戏内英雄或选择符文。"; color: Theme.muted; font-size: 10px; }
+    }
+    }
+    Rectangle { visible: root.item-confirm; x: 0px; y: 0px; background: #000000b8;
+        TouchArea { clicked => { root.player-action("cancel",0); } }
+        FocusScope { enabled: root.item-confirm;
+            key-pressed(event) => { if event.text == Key.Escape { root.player-action("cancel",0); return accept; }
+                if event.text == Key.Tab || event.text == Key.Backtab { if cancel-items.focused { confirm-items.focus(); } else { cancel-items.focus(); } return accept; } return reject; }
+            Panel { x: 12px; y: (root.height - 260px)/2; width: root.width - 24px; height: 260px;
+                TouchArea { }
+                SectionTitle { x: 20px; y: 16px; height: 28px; text: "确认配置装备方案"; }
+                Label { x: 20px; y: 57px; width: parent.width - 40px; height: 126px; wrap: word-wrap; text: root.item-summary; }
+                HorizontalLayout { x: 20px; y: 204px; width: parent.width - 40px; height: 36px; spacing: 12px;
+                    cancel-items := Action { label: "取消"; clicked => { root.player-action("cancel",0); } }
+                    confirm-items := Action { label: "确认配置"; primary: true; clicked => { root.player-action("confirm-items",0); } }
+                }
+            }
+        }
     }
 }

@@ -275,6 +275,21 @@ impl Journal {
             })
             .collect()
     }
+    /// Device-only summaries: never show another account's bound records in this view.
+    pub fn unbound_recent(&self) -> Vec<Row> {
+        self.active
+            .iter()
+            .chain(self.saved.segments.iter().rev())
+            .filter(|s| s.binding.is_none())
+            .take(8)
+            .map(|s| Row {
+                champion: s.champion,
+                count: s.observations.len(),
+                last: s.observations.last().copied().unwrap_or([None; 3]),
+                capped: s.capped,
+            })
+            .collect()
+    }
     pub fn finish(&mut self) {
         if let Some(writer) = self.writer.take() {
             if writer.join().unwrap_or(Err("records-writer")).is_err() {

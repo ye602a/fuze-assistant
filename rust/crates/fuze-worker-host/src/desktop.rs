@@ -83,6 +83,7 @@ pub struct Status {
     pub initialized: bool,
     pub history: crate::account_history::View,
     pub records: Vec<crate::local_records::Row>,
+    pub unbound_records: Vec<crate::local_records::Row>,
     pub record_error: Option<&'static str>,
     pub ui_locale: String,
     pub mode: u8,
@@ -105,6 +106,7 @@ impl Default for Status {
             initialized: false,
             history: Default::default(),
             records: Vec::new(),
+            unbound_records: Vec::new(),
             record_error: None,
             ui_locale: "zh-CN".into(),
             mode: PAUSED,
@@ -846,6 +848,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
         last_mode = desired;
         if let Ok(mut s) = shared.status.lock() {
             (s.records, s.record_error) = controller.records();
+            s.unbound_records = controller.unbound_records();
         }
         if let Ok(guard) = shared.wait.lock() {
             if shared.desired.load(Ordering::Acquire) == desired {

@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -15,7 +15,30 @@ concurrency:
   group: ui-framework-lab-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # Development batch requested compile/privacy checks only. Full workflow_dispatch remains available.
+  windows-compile:
+    if: github.event_name == 'pull_request' && github.base_ref == 'feat/slint-history-actions'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tracked privacy boundary
+        run: node scripts/check-secrets.mjs
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: rust/ui-lab/target
+          key: ui-check-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+      - name: Format and compile only
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 check --locked --features gpu -j 2
+          exit $LASTEXITCODE
   windows-prototype:
+    if: github.event_name != 'pull_request' || github.base_ref != 'feat/slint-history-actions'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:

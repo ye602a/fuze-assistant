@@ -17,6 +17,8 @@ export global MaintenanceState {
 export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool, source-index: int, date: string, icon: image, items: [image], augments: [image], chosen: bool }
 export struct ObservationRow { title: string, cards: string, hint: string }
 export global RecordState {
+    in-out property <[ObservationRow]> unbound;
+    in-out property <string> unbound-note: "等待本机记录服务";
     in-out property <bool> busy: false;
     in-out property <string> notice;
     in-out property <[ObservationRow]> observations;
@@ -33,7 +35,7 @@ export global RecordState {
     callback refresh;
     callback action(string, int);
 }
-export struct DetailRow { title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
+export struct DetailRow { icon-url: string, title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }
 export struct SlotRow { name: string, hint: string }
 export global ShellState {

@@ -429,6 +429,9 @@ impl Controller {
     pub fn records(&self) -> (Vec<crate::local_records::Row>, Option<&'static str>) {
         (self.records.recent(), self.records.error)
     }
+    pub fn unbound_records(&self) -> Vec<crate::local_records::Row> {
+        self.records.unbound_recent()
+    }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
             overlay: self.pipeline.as_ref().and_then(|p| p.frames.current()),

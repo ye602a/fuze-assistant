@@ -1,4 +1,6 @@
 mod art_cache;
+mod champion_actions;
+mod champion_art;
 mod champion_bridge;
 mod direct;
 mod font_probe;
