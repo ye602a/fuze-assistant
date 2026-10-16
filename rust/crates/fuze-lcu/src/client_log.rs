@@ -1,6 +1,6 @@
 //! Bounded startup-log fallback. Never log paths, bodies, ports or credentials.
 use crate::{Credentials, Error, Result};
-use std::{fs, io::Read, path::Path, time::SystemTime};
+use std::{borrow::Cow, fs, io::Read, path::Path, time::SystemTime};
 
 const MAX_BYTES: usize = 256 * 1024;
 struct Secret(Vec<u8>);
@@ -8,6 +8,23 @@ impl Drop for Secret {
     fn drop(&mut self) {
         crate::wipe(&mut self.0);
     }
+}
+struct SecretText<'a>(Cow<'a, str>);
+impl Drop for SecretText<'_> {
+    fn drop(&mut self) {
+        if let Cow::Owned(text) = &mut self.0 {
+            // Filling with zero preserves UTF-8 and wipes the lossy decoding copy.
+            unsafe {
+                crate::wipe(text.as_bytes_mut());
+            }
+        }
+    }
+}
+fn parse_bytes(pid: u32, bytes: &[u8]) -> Result<Credentials> {
+    // Match Node's readFile(..., "utf8"): replace malformed sequences and continue.
+    // A non-UTF8 installation path in the preamble must not hide later ASCII flags.
+    let text = SecretText(String::from_utf8_lossy(bytes));
+    parse(pid, &text.0)
 }
 
 fn matches_process(name: &str, pid: u32) -> bool {
@@ -100,12 +117,7 @@ pub(crate) fn credentials(
             .read_to_end(&mut buffer.0)
             .is_ok()
         {
-            // Decode borrowed text; no copy of the full sensitive log.
-            let bytes = match std::str::from_utf8(&buffer.0) {
-                Ok(text) => text,
-                Err(e) => std::str::from_utf8(&buffer.0[..e.valid_up_to()]).unwrap_or(""),
-            };
-            if let Ok(credentials) = parse(pid, bytes) {
+            if let Ok(credentials) = parse_bytes(pid, &buffer.0) {
                 return Ok(credentials);
             }
         }
@@ -114,8 +126,26 @@ pub(crate) fn credentials(
 }
 
 #[cfg(test)]
+#[path = "client_log_review.rs"]
+mod review;
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lossy_decode_preserves_url_fallback_and_rejects_damage_inside_auth() {
+        let c = parse_bytes(
+            12,
+            b"\xff\xfe\r\nhttps://riot:fixture@127.0.0.1:58124/\r\n\xe4\xb8",
+        )
+        .unwrap();
+        assert_eq!(c.port, 58124);
+        assert!(parse_bytes(12, b"--app-port=58124 --remoting-auth-token=fi\xffxture").is_err());
+        assert!(parse_bytes(12, b"\xffhttps://riot:fixture@remote:58124/").is_err());
+        assert!(matches!(
+            SecretText(String::from_utf8_lossy(b"plain UTF8")).0,
+            Cow::Borrowed(_)
+        ));
+    }
     #[test]
     fn log_forms_and_credential_boundaries() {
         for text in [
@@ -139,6 +169,33 @@ mod tests {
         assert!(matches_process("date_12_LeagueClientUx.log", 12));
         assert!(!matches_process("date_112_LeagueClientUx.log", 12));
         assert!(!matches_process("date_12_LeagueClientUx.log.bak", 12));
+    }
+    #[test]
+    fn non_utf8_preamble_does_not_hide_ascii_credentials() {
+        let root = std::env::temp_dir().join(format!(
+            "fuze-log-encoding-fixture-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("date_12_LeagueClientUx.log");
+        // Reproduce the observed byte layout, not any personal log content.
+        let mut log = vec![b' '; 488];
+        log.extend_from_slice(b"\xff\xfe non-UTF8 installation text\r\n");
+        log.resize(1339, b' ');
+        log.extend_from_slice(b"--remoting-auth-token=fixture --app-port=58124\r\n");
+        fs::write(&path, log).unwrap();
+        let result = credentials(&root, 12, None);
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(&root).unwrap();
+        assert!(
+            result.is_ok(),
+            "an unrelated encoding error must not discard later credentials"
+        );
+        assert_eq!(result.unwrap().port, 58124);
     }
     #[test]
     fn fallback_uses_only_current_process_startup_logs() {
