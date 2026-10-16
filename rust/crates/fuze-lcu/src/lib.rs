@@ -2,6 +2,8 @@
 use fuze_runtime::session::Phase;
 use std::fmt;
 #[cfg(windows)]
+mod client_log;
+#[cfg(windows)]
 mod command_line;
 pub mod context;
 #[cfg(windows)]

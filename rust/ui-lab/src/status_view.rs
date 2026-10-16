@@ -65,18 +65,13 @@ pub fn present(s: &Status, offline: bool) -> View {
                 };
             }
             Some(State::Retry(error)) => {
-                v.connection = "连接未通过";
+                let (title, hint, code) = connection_error(error);
+                v.connection = title;
                 v.connection_tone = 3;
-                v.phase = match error {
-                    Error::Unauthorized => "认证失败，正在重试",
-                    Error::Discovery => "未发现客户端，正在重试",
-                    Error::AmbiguousClient => "检测到多个客户端，暂不猜测",
-                    Error::InvalidPhase => "游戏阶段未确认",
-                    _ => "通信失败，正在重试",
-                };
+                v.phase = code;
                 v.health = 3;
-                v.title = "客户端连接异常";
-                v.hint = "正在自动重试；目录发现不代表通信成功。";
+                v.title = title;
+                v.hint = hint;
             }
             Some(State::Paused) => {
                 v.connection = "监听已暂停";
@@ -190,9 +185,84 @@ pub fn present(s: &Status, offline: bool) -> View {
     }
     v
 }
+fn connection_error(error: Error) -> (&'static str, &'static str, &'static str) {
+    match error {
+        Error::Discovery => (
+            "无法取得客户端连接信息",
+            "自动发现正在重试；可在偏好设置检查游戏目录回退。",
+            "LCU-DISCOVERY",
+        ),
+        Error::AuthInput => (
+            "客户端连接信息无效",
+            "正在重新发现连接信息；无需填写或发送临时密码。",
+            "LCU-CREDENTIALS",
+        ),
+        Error::AmbiguousClient => (
+            "检测到多个客户端",
+            "无法可靠确认当前客户端，暂不连接；设置和本地记录仍可查看。",
+            "LCU-MULTIPLE",
+        ),
+        Error::Unauthorized => (
+            "客户端认证失败",
+            "客户端拒绝了临时凭据，正在重新发现并重试。",
+            "LCU-AUTH",
+        ),
+        Error::NotFound => (
+            "客户端接口暂不可用",
+            "请求的接口返回 404，尚未验证当前游戏阶段；正在重试。",
+            "LCU-NOT-FOUND",
+        ),
+        Error::HttpStatus => (
+            "客户端响应异常",
+            "客户端返回非成功状态，正在重试；未判定连接成功。",
+            "LCU-HTTP",
+        ),
+        Error::InvalidPhase => (
+            "游戏阶段尚未确认",
+            "返回内容未通过阶段校验，正在重试；设置仍可使用。",
+            "LCU-PHASE",
+        ),
+        Error::ResponseLimit => (
+            "客户端响应超出限制",
+            "未读取超限响应，正在重试；设置仍可使用。",
+            "LCU-LIMIT",
+        ),
+        Error::Transport => (
+            "客户端通信失败",
+            "本机连接或安全握手未完成，正在重试；设置仍可使用。",
+            "LCU-TRANSPORT",
+        ),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn connection_failures_have_safe_distinct_visible_reasons() {
+        let mut s = Status::default();
+        s.mode = 1;
+        let mut codes = std::collections::HashSet::new();
+        for error in [
+            Error::Discovery,
+            Error::AuthInput,
+            Error::AmbiguousClient,
+            Error::Unauthorized,
+            Error::NotFound,
+            Error::HttpStatus,
+            Error::InvalidPhase,
+            Error::ResponseLimit,
+            Error::Transport,
+        ] {
+            s.connection = Some(State::Retry(error));
+            let v = present(&s, false);
+            assert_ne!(v.title, "客户端连接异常");
+            assert_eq!(v.title, v.connection);
+            assert!(codes.insert(v.phase));
+            assert_eq!(v.health, 3);
+        }
+        s.connection = Some(State::Waiting);
+        assert_eq!(present(&s, false).title, "等待英雄联盟客户端");
+    }
     #[test]
     fn authentication_and_phase_override_stale_cards() {
         let mut s = Status::default();

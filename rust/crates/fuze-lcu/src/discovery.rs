@@ -117,28 +117,31 @@ impl Candidate {
         unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_TIMEOUT }
     }
 }
-fn discover(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
-    let automatic = match discover_lockfile(None) {
+fn discover_sources(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
+    match discover_lockfile(manual) {
         Ok(Some(c)) => Ok(Some(c)),
         Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
-        previous => match discover_command() {
+        previous => match discover_command(manual) {
             Ok(None) => previous,
             other => other,
         },
-    };
+    }
+}
+fn discover(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
+    let automatic = discover_sources(None);
     match automatic {
         Ok(Some(c)) => Ok(Some(c)),
         Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
         other => {
             if let Some(root) = manual {
-                discover_lockfile(Some(root))
+                discover_sources(Some(root))
             } else {
                 other
             }
         }
     }
 }
-fn discover_command() -> Result<Option<Candidate>> {
+fn discover_command(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -172,11 +175,29 @@ fn discover_command() -> Result<Option<Candidate>> {
                     let process = Handle(p);
                     let mut path = vec![0u16; 32768];
                     let mut length = path.len() as u32;
-                    if QueryFullProcessImageNameW(p, 0, path.as_mut_ptr(), &mut length) == 0 {
-                        denied = true;
+                    let readable =
+                        QueryFullProcessImageNameW(p, 0, path.as_mut_ptr(), &mut length) != 0;
+                    let image = if readable {
+                        Some(PathBuf::from(String::from_utf16_lossy(
+                            &path[..length as usize],
+                        )))
                     } else {
-                        let image =
-                            PathBuf::from(String::from_utf16_lossy(&path[..length as usize]));
+                        manual
+                            .filter(|r| r.join("LeagueClientUx.exe").is_file())
+                            .map(|r| r.join("LeagueClientUx.exe"))
+                    };
+                    if image.is_none() {
+                        denied = true;
+                    }
+                    if let Some(image) = image {
+                        if let Some(root) = manual {
+                            if readable
+                                && std::fs::canonicalize(root).ok()
+                                    != image.parent().and_then(|p| std::fs::canonicalize(p).ok())
+                            {
+                                return Err(Error::Discovery);
+                            }
+                        }
                         if !image.file_name().is_some_and(|s| {
                             s.to_string_lossy()
                                 .eq_ignore_ascii_case("LeagueClientUx.exe")
@@ -187,7 +208,34 @@ fn discover_command() -> Result<Option<Candidate>> {
                         if !root.join("LeagueClient.exe").is_file() {
                             return Err(Error::Discovery);
                         }
-                        match crate::command_line::credentials(row.th32ProcessID) {
+                        // Tencent may hide WMI command arguments and omit lockfile.
+                        // Read only this live UX process's startup log as the last fallback.
+                        let credentials = crate::command_line::credentials(row.th32ProcessID)
+                            .or_else(|_| {
+                                let mut created: FILETIME = zeroed();
+                                let mut exited: FILETIME = zeroed();
+                                let mut kernel: FILETIME = zeroed();
+                                let mut user: FILETIME = zeroed();
+                                if GetProcessTimes(
+                                    p,
+                                    &mut created,
+                                    &mut exited,
+                                    &mut kernel,
+                                    &mut user,
+                                ) == 0
+                                {
+                                    return Err(Error::Discovery);
+                                }
+                                let ticks = ((created.dwHighDateTime as u64) << 32)
+                                    | created.dwLowDateTime as u64;
+                                let since_unix = ticks
+                                    .checked_sub(116444736000000000)
+                                    .ok_or(Error::Discovery)?;
+                                let started = std::time::UNIX_EPOCH
+                                    + std::time::Duration::from_nanos(since_unix * 100);
+                                crate::client_log::credentials(&root, row.th32ProcessID, started)
+                            });
+                        match credentials {
                             Ok(credentials) => {
                                 let candidate = Candidate {
                                     process,

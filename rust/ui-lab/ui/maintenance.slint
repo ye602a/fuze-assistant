@@ -38,7 +38,7 @@ export component MaintenanceConfirm inherits Rectangle {
     background: #000000b8;
     changed opened => { if root.opened { cancel.focus(); } }
     TouchArea { clicked => { MaintenanceState.action("cancel"); } }
-    FocusScope { enabled: root.opened;
+    FocusScope { focus-on-click: false; enabled: root.opened;
         key-pressed(event) => {
             if event.text == Key.Escape { MaintenanceState.action("cancel"); return accept; }
             if event.text == Key.Tab || event.text == Key.Backtab { if cancel.focused { confirm.focus(); } else { cancel.focus(); } return accept; }

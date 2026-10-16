@@ -62,7 +62,7 @@ export component ChampionWindow inherits Window {
     in-out property <string> action-notice;
     callback player-action(string, int);
     changed item-confirm => { if root.item-confirm { cancel-items.focus(); } else { content-focus.focus(); } }
-    content-focus := FocusScope { enabled: !root.item-confirm;
+    content-focus := FocusScope { focus-on-click: false; enabled: !root.item-confirm;
     Rectangle { x: 0px; y: 0px; height: 42px; background: #172c3c;
         Label { x: 15px; y: 0px; height: 42px; text: "FUZE"; color: #79d6ce; font-size: 10px; letter-spacing: 2px; }
         Label { x: 76px; y: 0px; height: 42px; text: root.side-mode ? "局内符文资料" : root.offline ? "英雄详情 · 离线预览" : "选人英雄详情"; font-weight: 600; }
@@ -84,7 +84,7 @@ export component ChampionWindow inherits Window {
                         Label { x: 0px; y: 47px; width: parent.width; height: 20px; text: hero.name; horizontal-alignment: center; font-size: 10px; }
                         Label { x: 0px; y: 69px; width: parent.width; height: 18px; text: hero.win; horizontal-alignment: center; color: #91bbc9; font-size: 10px; }
                         accessible-role: button; accessible-label: "查看" + hero.name; forward-focus: ally-focus;
-                        ally-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
+                        ally-focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
                         TouchArea { clicked => { ally-focus.focus(); root.inspect(hero.id); } }
                         if ally-focus.has-focus: Rectangle { border-width: 1px; border-color: Theme.blue; background: transparent; }
                     }
@@ -100,7 +100,7 @@ export component ChampionWindow inherits Window {
                         Label { x: 32px; y: 5px; width: parent.width - 36px; height: 20px; text: hero.name; font-size: 11px; }
                         Label { x: 5px; y: 30px; width: parent.width - 10px; height: 18px; text: hero.win + " · 选 " + hero.pick; font-size: 10px; color: #e6cb8d; }
                         accessible-role: button; accessible-label: hero.name + "，胜率 " + hero.win; forward-focus: candidate-focus;
-                        candidate-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
+                        candidate-focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
                         TouchArea { x: 0px; y: 0px; clicked => { candidate-focus.focus(); root.inspect(hero.id); } }
                         if candidate-focus.has-focus: Rectangle { border-width: 2px; border-color: Theme.blue; background: transparent; }
                     }
@@ -142,7 +142,7 @@ export component ChampionWindow inherits Window {
                         Label { x: parent.width - 83px; y: 12px; width: 70px; height: 19px; text: "胜率"; horizontal-alignment: right; color: Theme.muted; font-size: 10px; }
                         Label { x: parent.width - 88px; y: 34px; width: 75px; height: 30px; text: a.win; horizontal-alignment: right; color: Theme.gold; font-size: 22px; font-weight: 700; }
                         accessible-role: button; accessible-label: "查看" + a.title + "的说明"; forward-focus: card-focus;
-                        card-focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded-augment = index; return accept; } return reject; } }
+                        card-focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded-augment = index; return accept; } return reject; } }
                         card-touch := TouchArea { clicked => { card-focus.focus(); root.expanded-augment = root.expanded-augment == index ? -1 : index; } }
                         if card-focus.has-focus: Rectangle { background: transparent; border-width: 1px; border-color: Theme.blue; }
                     }
@@ -198,7 +198,7 @@ export component ChampionWindow inherits Window {
     }
     Rectangle { visible: root.item-confirm; x: 0px; y: 0px; background: #000000b8;
         TouchArea { clicked => { root.player-action("cancel",0); } }
-        FocusScope { enabled: root.item-confirm;
+        FocusScope { focus-on-click: false; enabled: root.item-confirm;
             key-pressed(event) => { if event.text == Key.Escape { root.player-action("cancel",0); return accept; }
                 if event.text == Key.Tab || event.text == Key.Backtab { if cancel-items.focused { confirm-items.focus(); } else { cancel-items.focus(); } return accept; } return reject; }
             Panel { x: 12px; y: (root.height - 260px)/2; width: root.width - 24px; height: 260px;

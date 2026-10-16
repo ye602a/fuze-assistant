@@ -35,7 +35,7 @@ export component RecordConfirm inherits Rectangle {
     visible: root.opened; background: #000000b8;
     changed opened => { if root.opened { cancel.focus(); } }
     TouchArea { clicked => { RecordState.action("cancel-confirm",0); } }
-    FocusScope { enabled: root.opened;
+    FocusScope { focus-on-click: false; enabled: root.opened;
         key-pressed(event) => {
             if event.text == Key.Escape { RecordState.action("cancel-confirm",0); return accept; }
             if event.text == Key.Tab || event.text == Key.Backtab { if cancel.focused { confirm.focus(); } else { cancel.focus(); } return accept; } return reject;

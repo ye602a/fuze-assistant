@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -77,6 +77,9 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
           exit $LASTEXITCODE
       # No installers, upload-artifact, release publication or game/LCU access.
+      - name: LCU startup-log fallback (synthetic files only)
+        working-directory: rust/ui-lab
+        run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-lcu --lib --locked -j 2
       - name: Managed frontend selection compatibility
         working-directory: rust/ui-lab
         run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-worker-host --lib frontend_selection_preserves_legacy_and_rejects_unknown_or_missing --locked -j 2

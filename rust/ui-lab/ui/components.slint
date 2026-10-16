@@ -29,7 +29,7 @@ export component Action inherits Rectangle {
     accessible-role: button; accessible-label: root.description; forward-focus: focus;
     Label { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #1a2025 : #dcc794; horizontal-alignment: center; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
-    focus := FocusScope { enabled: root.enabled; key-pressed(event) => {
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => {
         if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject;
     } }
 }
@@ -47,7 +47,7 @@ export component Toggle inherits Rectangle {
     forward-focus: focus;
     Rectangle { x: root.checked ? 22px : 4px; y: 4px; width: 18px; height: 18px; border-radius: 9px; background: root.checked ? Theme.ivory : Theme.muted; }
     TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
-    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
 }
 export component Panel inherits Rectangle {
     background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
@@ -69,7 +69,7 @@ export component Navigation inherits Rectangle {
     Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7; }
     Label { y: 0px; x: 51px; width: parent.width - 56px; height: parent.height; text: root.label; color: root.selected ? #e8ce96 : Theme.muted; font-size: 13px; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
-    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject; } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject; } }
 }
 export component Module inherits Rectangle {
     in property <image> icon;
@@ -95,7 +95,7 @@ export component Disclosure inherits Panel {
     Label { y: 0px; x: 20px; height: 46px; width: parent.width - 40px; text: (root.expanded ? "−  " : "+  ") + root.label; color: #bdad88; }
     if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
     TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
-    focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
+    focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
     if focus.has-focus: Rectangle { x: 0px; y: 0px; background: transparent; border-width: 1px; border-color: Theme.blue; height: 46px; }
 }
 export component Scrollbar inherits Rectangle {

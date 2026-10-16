@@ -22,7 +22,7 @@ impl Drop for Args {
         }
     }
 }
-fn parse(pid: u32, text: &str) -> Result<Credentials> {
+pub(crate) fn parse(pid: u32, text: &str) -> Result<Credentials> {
     if text.len() > 32768 {
         return Err(Error::AuthInput);
     }

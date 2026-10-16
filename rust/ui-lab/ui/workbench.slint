@@ -65,7 +65,7 @@ export component Workbench inherits Window {
         Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; label: "−"; description: "最小化窗口"; clicked => { root.minimize(); } }
         Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; label: "×"; description: "关闭窗口"; clicked => { root.request-close(); } }
     }
-    content-focus := FocusScope {
+    content-focus := FocusScope { focus-on-click: false;
     enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
     content := Rectangle {
         x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px;
@@ -181,7 +181,7 @@ export component Workbench inherits Window {
     Rectangle { x: 0px; y: 0px; visible: root.quit-open;
         background: #000000b8;
         TouchArea { x: 0px; y: 0px; clicked => { root.quit-open = false; } }
-        FocusScope {
+        FocusScope { focus-on-click: false;
         enabled: root.quit-open;
         key-pressed(event) => {
             if event.text == Key.Escape { root.quit-open = false; return accept; }

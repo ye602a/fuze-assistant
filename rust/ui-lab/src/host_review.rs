@@ -1,4 +1,4 @@
-//! Bounded hidden-window integration check. Calls component callbacks, never system input.
+//! Bounded hidden-window integration check. Component pointer events, never system input.
 use crate::{HostState, Workbench};
 use slint::{winit_030::WinitWindowAccessor, ComponentHandle, Model};
 use std::{
@@ -7,6 +7,72 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
+// Exercise Slint hit testing, not direct page/callback assignment. Events stay in
+// this hidden component; no Windows messages, cursor movement or system input.
+fn navigation_input(ui: &Workbench) -> Result<(), Box<dyn std::error::Error>> {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let click = |x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        ui.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        ui.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        ui.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    };
+    for width in [1120., 920.] {
+        ui.window().set_size(slint::LogicalSize::new(width, 860.));
+        for health in [0, 3] {
+            ui.set_health(health);
+            for (page, y) in [(1, 210.), (2, 277.), (0, 142.)] {
+                let _ = ui.window().take_snapshot()?;
+                click(90., y);
+                if ui.get_page() != page {
+                    return Err(format!(
+                        "navigation-hit-test-failed: expected={page} actual={}",
+                        ui.get_page()
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+    ui.window().set_size(slint::LogicalSize::new(1120., 860.));
+    ui.set_health(0);
+    // A confirmation still blocks navigation, and its first cancel click works.
+    ui.set_quit_open(true);
+    let _ = ui.window().take_snapshot()?;
+    click(90., 210.);
+    if ui.get_page() != 0 {
+        return Err("modal-navigation-not-blocked".into());
+    }
+    ui.set_quit_open(true); // outside click may dismiss, reopen for the button check
+    let _ = ui.window().take_snapshot()?;
+    click(585., 471.);
+    if ui.get_quit_open() {
+        return Err("modal-cancel-hit-test-failed".into());
+    }
+    let _ = ui.window().take_snapshot()?;
+    click(90., 277.);
+    if ui.get_page() != 2 {
+        return Err("navigation-after-modal-failed".into());
+    }
+    // Keyboard activation remains available on the now-focused settings button.
+    ui.set_page(0);
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: " ".into() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: " ".into() });
+    if ui.get_page() != 2 {
+        return Err("navigation-keyboard-failed".into());
+    }
+    click(90., 142.);
+    Ok(())
+}
 pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(output)?;
     let before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
@@ -91,6 +157,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         && state.get_data_version() != "—" =>
                     {
                         save("home-paused")?;
+                        navigation_input(&ui)?;
                         state.invoke_preference("champ_topmost".into(), false);
                         step.set(1);
                     }
@@ -477,6 +544,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false,"storage_scan_clean_preservation":true,"maintenance_offline_network_rejected":true,"maintenance_confirmation_cancel_focus":true});
     let mut report = report;
     report["record_icons_and_observation_paging"] = true.into();
+    report["component_pointer_navigation_two_widths"] = true.into();
+    report["component_pointer_modal_cancel"] = true.into();
+    report["component_navigation_keyboard"] = true.into();
     report["anonymous_share_preview"] = true.into();
     report["record_selection_clears_previous"] = true.into();
     report["clipboard_offline_rejected"] = true.into();
