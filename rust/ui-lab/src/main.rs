@@ -22,6 +22,7 @@ mod stage_bridge;
 mod startup;
 mod status_view;
 mod telemetry;
+mod unbound_bridge;
 slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

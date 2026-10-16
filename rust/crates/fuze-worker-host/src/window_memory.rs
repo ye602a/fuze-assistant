@@ -153,6 +153,23 @@ impl Memory {
             return;
         }
         let next = read_window(hwnd);
+        self.queue(next);
+    }
+    /// A disclosure changes height temporarily; persist the collapsed card dimensions instead.
+    pub unsafe fn remember_fixed(&mut self, hwnd: HWND, width: u32, height: u32) {
+        if self.worker.is_none() || IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
+            return;
+        }
+        let next = read_window(hwnd)
+            .map(|mut g| {
+                g.width = (width as u64 * g.dpi as u64 / 96) as i32;
+                g.height = (height as u64 * g.dpi as u64 / 96) as i32;
+                g
+            })
+            .filter(|g| g.valid());
+        self.queue(next);
+    }
+    fn queue(&mut self, next: Option<Geometry>) {
         if next.is_none() || self.last == next && !self.failed() {
             return;
         }

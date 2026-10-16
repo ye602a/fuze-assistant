@@ -19,6 +19,12 @@ export struct ObservationRow { title: string, cards: string, hint: string }
 export global RecordState {
     in-out property <[ObservationRow]> unbound;
     in-out property <string> unbound-note: "等待本机记录服务";
+    in-out property <string> unbound-names;
+    in-out property <int> unbound-selected: -1;
+    in-out property <int> unbound-page: 0;
+    in-out property <int> unbound-pages: 1;
+    in-out property <[ObservationRow]> unbound-events;
+    callback unbound-action(string, int);
     in-out property <bool> busy: false;
     in-out property <string> notice;
     in-out property <[ObservationRow]> observations;

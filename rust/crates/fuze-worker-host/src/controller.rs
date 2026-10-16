@@ -429,7 +429,7 @@ impl Controller {
     pub fn records(&self) -> (Vec<crate::local_records::Row>, Option<&'static str>) {
         (self.records.recent(), self.records.error)
     }
-    pub fn unbound_records(&self) -> Vec<crate::local_records::Row> {
+    pub fn unbound_records(&self) -> crate::local_records::UnboundSnapshot {
         self.records.unbound_recent()
     }
     pub fn status(&self) -> PipelineStatus {

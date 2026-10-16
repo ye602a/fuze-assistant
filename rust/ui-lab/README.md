@@ -1,4 +1,4 @@
-> 最新开发进度与集中验收清单见 [选人操作与按需图片](evidence/CHAMPION_ACTIONS.md)，此前记录见 [战绩、观察记录与显式迁移](evidence/RECORD_ACTIONS.md)、[启动与维护页面](evidence/STARTUP_MAINTENANCE.md)、[HOST_INTERACTIONS.md](evidence/HOST_INTERACTIONS.md) 和 [LIVE_OVERLAYS.md](evidence/LIVE_OVERLAYS.md)。本批只做轻量检查，完整生产迁移仍未通过，不发布安装包。
+> 最新开发进度见 [完整观察与三卡交互](evidence/OBSERVATION_OVERLAY.md)，下一会话从 [阶段交接清单](../../docs/RUST_TEST_STAGE_HANDOFF.md) 继续。此前记录见 [选人操作与按需图片](evidence/CHAMPION_ACTIONS.md)、[战绩与迁移](evidence/RECORD_ACTIONS.md)、[启动与维护](evidence/STARTUP_MAINTENANCE.md)。本批只做轻量检查，完整生产迁移仍未通过，不发布安装包。
 
 # FUZE UI 技术验证
 

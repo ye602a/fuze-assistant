@@ -21,7 +21,7 @@ fn asset(doc: &Value, id: u32) -> &Value {
         d.get(key).unwrap_or(&Value::Null)
     }
 }
-fn name(v: &Value, id: u32) -> String {
+pub fn name(v: &Value, id: u32) -> String {
     let n = clean(&v["name"]);
     if n.is_empty() {
         format!("#{id}")

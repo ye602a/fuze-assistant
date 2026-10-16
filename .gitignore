@@ -66,8 +66,11 @@ FuzeRustPreview/
 account-history.json
 account-history-v*.json
 observations.json
+observations-v*.json
 window-main.json
 window-champions.json
 window-augments.json
+window-direct-cards.json
+window-slint-*.json
 
 preferences-v*.json

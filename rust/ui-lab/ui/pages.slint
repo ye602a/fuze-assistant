@@ -70,14 +70,27 @@ export component HistoryPage inherits VerticalLayout {
     in property <bool> sample: false;
     private property <bool> local-open: false;
     spacing: 18px;
-    Action { label: root.local-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { root.local-open = !root.local-open; } }
+    Action { label: root.local-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { root.local-open = !root.local-open; RecordState.unbound-action("open", root.local-open ? 1 : 0); } }
     if root.local-open: VerticalLayout { spacing: 10px;
         Label { height: 60px; text: RecordState.unbound-note; wrap: word-wrap; color: Theme.muted; }
         if RecordState.unbound.length == 0: Label { height: 36px; text: "暂无未绑定的本机观察记录"; color: Theme.muted; }
-        for row in RecordState.unbound: Panel { height: 126px;
+        Label { height: 42px; text: RecordState.unbound-names; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        for row[index] in RecordState.unbound: Panel { height: RecordState.unbound-selected == index ? 190px + RecordState.unbound-events.length * 150px : 126px;
             SectionTitle { x: 21px; y: 12px; width: parent.width - 42px; height: 28px; text: row.title; font-size: 13px; }
-            Label { x: 21px; y: 47px; width: parent.width - 42px; height: 32px; text: row.cards; wrap: word-wrap; }
-            Label { x: 21px; y: 87px; width: parent.width - 42px; height: 23px; text: row.hint; color: Theme.muted; font-size: 11px; }
+            Label { x: 21px; y: 47px; width: parent.width - 42px; height: 25px; text: row.hint; color: Theme.muted; font-size: 11px; }
+            Action { x: 21px; y: 81px; width: 150px; height: 32px; label: RecordState.unbound-selected == index ? "收起完整事件" : "查看完整事件"; clicked => { RecordState.unbound-action("select", index); } }
+            if RecordState.unbound-selected == index: VerticalLayout { x: 21px; y: 136px; width: parent.width - 42px; spacing: 10px;
+                HorizontalLayout { height: 34px; spacing: 12px;
+                    Action { label: "上一页"; enabled: RecordState.unbound-page > 0; clicked => { RecordState.unbound-action("page", -1); } }
+                    Label { text: "第 " + (RecordState.unbound-page + 1) + " / " + RecordState.unbound-pages + " 页"; horizontal-alignment: center; }
+                    Action { label: "下一页"; enabled: RecordState.unbound-page + 1 < RecordState.unbound-pages; clicked => { RecordState.unbound-action("page", 1); } }
+                }
+                for event in RecordState.unbound-events: Rectangle { height: 140px; background: Theme.background;
+                    Label { x: 12px; y: 8px; width: parent.width - 24px; height: 24px; text: event.title; color: Theme.gold; font-size: 11px; }
+                    Label { x: 12px; y: 37px; width: parent.width - 24px; height: 67px; text: event.cards; wrap: word-wrap; font-size: 12px; }
+                    Label { x: 12px; y: 109px; width: parent.width - 24px; height: 24px; text: event.hint; color: Theme.muted; font-size: 11px; }
+                }
+            }
         }
     }
     Panel { height: 262px;

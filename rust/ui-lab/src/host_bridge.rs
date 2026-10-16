@@ -39,6 +39,9 @@ fn notice(ui: &Workbench, result: Result<(), &'static str>) {
                 }
                 "frontend-busy" => "当前操作尚未结束，请稍候。",
                 "frontend-pause-required" => "请先暂停识别，再执行此操作。",
+                "overlay-position-memory" => {
+                    "三卡浮窗位置未能保存，当前显示不受影响；下次移动时会重试。"
+                }
                 "frontend-offline-operation" => "离线验证不会查询账号或下载数据。",
                 "preferences-directory" | "preferences-directory-client-missing" => {
                     "目录无效；请填写包含 LeagueClient.exe 的本地目录，原设置已保留。"
@@ -238,6 +241,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
         offline,
         !offline,
     )));
+    let unbound = crate::unbound_bridge::attach(ui, config.roots.clone());
     let session = Rc::new(Session::start(config, offline)?);
     let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();
@@ -339,6 +343,8 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
                 return;
             };
             let next = service.snapshot();
+            unbound.borrow_mut().update(&ui, &next, offline);
+            if let Err(error) = popup.borrow_mut().placement() { notice(&ui, Err(error)); }
             let state = ui.global::<HostState>();
             let completed = state.get_busy() && !service.busy();
             state.set_busy(service.busy());
@@ -381,15 +387,6 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
             }
             if old.as_ref().is_none_or(|s| s.history != next.history) {
                 history(&ui, &next.history, 0);
-            }
-            if old.as_ref().is_none_or(|s|s.unbound_records!=next.unbound_records || s.record_error!=next.record_error || s.preferences.local_records!=next.preferences.local_records) {
-                let record=ui.global::<crate::RecordState>();
-                record.set_unbound(Rc::new(VecModel::from(next.unbound_records.iter().enumerate().map(|(i,r)|crate::ObservationRow {
-                    title:format!("记录段 {} · 英雄 #{} · {} 次候选变化",i+1,r.champion,r.count).into(),
-                    cards:r.last.iter().map(|id|id.map(|n|format!("强化 #{n}")).unwrap_or_else(||"此位置未识别".into())).collect::<Vec<_>>().join(" / ").into(),
-                    hint:if r.capped {"仅展示最后一次候选 · 已达记录上限"}else{"仅展示最后一次候选 · 非领取记录"}.into(),
-                }).collect::<Vec<_>>())).into());
-                record.set_unbound_note(if offline {"隔离预览不读取个人记录。"}else if next.record_error.is_some(){"记录读取或保存异常，已有记录保留。"}else if !next.preferences.local_records {"本地观察保存已关闭；这里只显示会话中已加载的摘要。"}else{"最近 8 段未绑定账号/对局的本机摘要。不能确认属于当前账号，不自动并入战绩。"}.into());
             }
             if old
                 .as_ref()

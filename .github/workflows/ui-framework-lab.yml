@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   # Development batch requested compile/privacy checks only. Full workflow_dispatch remains available.
   windows-compile:
-    if: github.event_name == 'pull_request' && github.base_ref == 'feat/slint-history-actions'
+    if: github.event_name == 'pull_request' && (github.base_ref == 'feat/slint-history-actions' || github.base_ref == 'feat/slint-champion-records')
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -38,7 +38,7 @@ jobs:
           cargo +1.90.0 check --locked --features gpu -j 2
           exit $LASTEXITCODE
   windows-prototype:
-    if: github.event_name != 'pull_request' || github.base_ref != 'feat/slint-history-actions'
+    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records')
     runs-on: windows-latest
     timeout-minutes: 25
     steps:

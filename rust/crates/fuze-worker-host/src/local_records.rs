@@ -66,8 +66,25 @@ pub struct Row {
     pub last: [Option<u32>; 3],
     pub capped: bool,
 }
+/// No binding, account digest or match identifier crosses into the unbound UI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unbound {
+    pub champion: u32,
+    pub events: Vec<fuze_lcu::history::ObservedCards>,
+    pub legacy: Vec<[Option<u32>; 3]>,
+    pub capped: bool,
+    pub interrupted: bool,
+}
+#[derive(Clone, Debug, Default)]
+pub struct UnboundSnapshot(pub std::sync::Arc<Vec<Unbound>>);
+impl PartialEq for UnboundSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
 #[derive(Default)]
 pub struct Journal {
+    unbound_cache: std::cell::RefCell<Option<UnboundSnapshot>>,
     recognition: fuze_lcu::history::Recognition,
     binding: Option<Binding>,
     visible: bool,
@@ -81,6 +98,7 @@ pub struct Journal {
 }
 impl Journal {
     pub fn verified_end(&mut self) {
+        self.unbound_cache.get_mut().take();
         if let Some(s) = self.active.as_mut() {
             s.interrupted = false;
         }
@@ -155,6 +173,7 @@ impl Journal {
         };
         match read() {
             Ok(saved) => Self {
+                unbound_cache: Default::default(),
                 saved,
                 path: Some(path),
                 active: None,
@@ -168,6 +187,7 @@ impl Journal {
             },
             // Preserve unreadable data rather than overwriting it on the next match.
             Err(error) => Self {
+                unbound_cache: Default::default(),
                 error: Some(error),
                 saved: Saved::default(),
                 active: None,
@@ -208,9 +228,13 @@ impl Journal {
             return;
         }
         if segment.observations.len() == 80 {
+            if !segment.capped {
+                self.unbound_cache.get_mut().take();
+            }
             segment.capped = true;
             return;
         }
+        self.unbound_cache.get_mut().take();
         let kind = if segment.observations.is_empty() {
             "first"
         } else if self.visible {
@@ -275,20 +299,33 @@ impl Journal {
             })
             .collect()
     }
-    /// Device-only summaries: never show another account's bound records in this view.
-    pub fn unbound_recent(&self) -> Vec<Row> {
-        self.active
-            .iter()
-            .chain(self.saved.segments.iter().rev())
-            .filter(|s| s.binding.is_none())
-            .take(8)
-            .map(|s| Row {
-                champion: s.champion,
-                count: s.observations.len(),
-                last: s.observations.last().copied().unwrap_or([None; 3]),
-                capped: s.capped,
-            })
-            .collect()
+    /// Snapshot once per event change, never copy the event history on every engine tick.
+    pub fn unbound_recent(&self) -> UnboundSnapshot {
+        if let Some(cached) = self.unbound_cache.borrow().as_ref() {
+            return cached.clone();
+        }
+        let snapshot = UnboundSnapshot(std::sync::Arc::new(
+            self.active
+                .iter()
+                .chain(self.saved.segments.iter().rev())
+                .filter(|s| s.binding.is_none())
+                .take(8)
+                .map(|s| Unbound {
+                    champion: s.champion,
+                    events: s.events.clone(),
+                    // Older journals lack event metadata. Keep their cards without inventing it.
+                    legacy: if s.events.is_empty() {
+                        s.observations.clone()
+                    } else {
+                        Vec::new()
+                    },
+                    capped: s.capped,
+                    interrupted: s.interrupted,
+                })
+                .collect(),
+        ));
+        *self.unbound_cache.borrow_mut() = Some(snapshot.clone());
+        snapshot
     }
     pub fn finish(&mut self) {
         if let Some(writer) = self.writer.take() {
@@ -300,6 +337,7 @@ impl Journal {
         let Some(segment) = self.active.take() else {
             return;
         };
+        self.unbound_cache.get_mut().take();
         self.recognition = Default::default();
         self.saved.segments.push(segment);
         if self.saved.segments.len() > 100 {

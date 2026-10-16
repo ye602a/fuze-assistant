@@ -10,6 +10,7 @@ struct Card {
     pick: String,
     score: Option<f64>,
     icon: String,
+    description: String,
 }
 use windows::{
     core::{w, Result},
@@ -28,6 +29,7 @@ use windows::{
 };
 const WIDTH: u32 = 760;
 const HEIGHT: u32 = 170;
+const DETAIL_HEIGHT: u32 = 210;
 const BG: u32 = 0x07131e;
 const PANEL: u32 = 0x101e2a;
 const GOLD: u32 = 0xc8aa6e;
@@ -84,6 +86,11 @@ struct Scene {
     cards: [Card; 3],
     caption: String,
     image_cache: std::collections::HashMap<String, image::RgbaImage>,
+    dw: IDWriteFactory,
+    selected: Option<usize>,
+    detail: Option<IDWriteTextLayout>,
+    scroll: f32,
+    max_scroll: f32,
 }
 impl Scene {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -123,11 +130,44 @@ impl Scene {
                     pick: "12.0%".into(),
                     score: Some([0.62, 0.72, 0.82][i]),
                     icon: String::new(),
+                    description: "离线说明示例。此处仅说明候选强化的效果，不表示玩家已领取。"
+                        .into(),
                 }),
                 caption: "整体胜率 · 离线预览，非实际领取".into(),
                 image_cache: Default::default(),
+                dw,
+                selected: None,
+                detail: None,
+                scroll: 0.,
+                max_scroll: 0.,
             })
         }
+    }
+    fn select(&mut self, index: Option<usize>) -> Result<()> {
+        self.selected = None;
+        self.detail = None;
+        self.scroll = 0.;
+        self.max_scroll = 0.;
+        let Some(index) = index.filter(|i| *i < 3 && self.cards[*i].id.is_some()) else {
+            return Ok(());
+        };
+        let text = if self.cards[index].description.trim().is_empty() {
+            "当前数据未提供这张强化的说明。推荐继续使用整体胜率。"
+        } else {
+            &self.cards[index].description
+        };
+        let utf16 = text.encode_utf16().collect::<Vec<_>>();
+        unsafe {
+            let layout =
+                self.dw
+                    .CreateTextLayout(&utf16, &self.formats[1], (WIDTH - 40) as f32, 32768.)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            self.max_scroll = (metrics.height - 136.).max(0.);
+            self.detail = Some(layout);
+        }
+        self.selected = Some(index);
+        Ok(())
     }
 }
 // Formats and decoded image are cached; only target-dependent resources are recreated.
@@ -193,13 +233,22 @@ impl Surface {
     }
     unsafe fn draw(&self, scene: &Scene, target: &ID2D1RenderTarget, partial: bool) -> Result<()> {
         target.BeginDraw();
+        let scale = target.GetSize().width / WIDTH as f32;
+        target.SetTransform(&windows_numerics::Matrix3x2 {
+            M11: scale,
+            M12: 0.,
+            M21: 0.,
+            M22: scale,
+            M31: 0.,
+            M32: 0.,
+        });
         target.Clear(Some(&color(BG)));
         self.text(
             scene,
             target,
-            "FUZE  海克斯推荐",
+            "FUZE  海克斯推荐 · 拖动移动",
             0,
-            rect(9., 5., 160., 22.),
+            rect(9., 5., 175., 22.),
             GOLD,
         );
         self.text(
@@ -207,7 +256,7 @@ impl Surface {
             target,
             &scene.caption,
             0,
-            rect(169., 5., 490., 22.),
+            rect(190., 5., 520., 22.),
             MUTED,
         );
         // Close affordance is geometry, independent of font coverage.
@@ -287,7 +336,11 @@ impl Surface {
             self.text(
                 scene,
                 target,
-                "整体胜率参考",
+                if scene.selected == Some(i) {
+                    "点击收起说明"
+                } else {
+                    "点击查看说明"
+                },
                 0,
                 rect(x + 10., 119., 134., 18.),
                 MUTED,
@@ -315,6 +368,71 @@ impl Surface {
                 if best { GOLD } else { 0x42c6cc },
             );
         }
+        if let Some(index) = scene.selected {
+            self.fill(target, rect(9., 173., 742., 198.), PANEL);
+            self.text(
+                scene,
+                target,
+                &scene.cards[index].title,
+                1,
+                rect(20., 183., 500., 24.),
+                GOLD,
+            );
+            self.text(
+                scene,
+                target,
+                if scene.max_scroll > 0. {
+                    "滚轮阅读 · 再点卡片收起"
+                } else {
+                    "再点卡片收起"
+                },
+                0,
+                rect(530., 185., 210., 20.),
+                MUTED,
+            );
+            target.PushAxisAlignedClip(&rect(20., 214., 720., 136.), D2D1_ANTIALIAS_MODE_ALIASED);
+            if let Some(layout) = &scene.detail {
+                self.brush.SetColor(&color(TEXT));
+                target.DrawTextLayout(
+                    windows_numerics::Vector2 {
+                        X: 20.,
+                        Y: 214. - scene.scroll,
+                    },
+                    layout,
+                    &self.brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
+            target.PopAxisAlignedClip();
+            if scene.max_scroll > 0. {
+                self.text(
+                    scene,
+                    target,
+                    "上移",
+                    0,
+                    rect(619., 352., 50., 20.),
+                    if scene.scroll > 0. { GOLD } else { MUTED },
+                );
+                self.text(
+                    scene,
+                    target,
+                    "下移",
+                    0,
+                    rect(689., 352., 50., 20.),
+                    if scene.scroll < scene.max_scroll {
+                        GOLD
+                    } else {
+                        MUTED
+                    },
+                );
+                self.fill(target, rect(741., 214., 3., 136.), 0x24343e);
+                self.fill(
+                    target,
+                    rect(741., 214. + scene.scroll / scene.max_scroll * 108., 3., 28.),
+                    GOLD,
+                );
+            }
+        }
         target.EndDraw(None, None)
     }
 }
@@ -328,6 +446,8 @@ struct Native {
     managed: bool,
     dismissed: bool,
     deadline: Option<Instant>,
+    position_dirty: bool,
+    recover: bool,
 }
 impl Native {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -341,6 +461,8 @@ impl Native {
             managed: false,
             dismissed: false,
             deadline: None,
+            position_dirty: false,
+            recover: false,
         })
     }
     unsafe fn draw(&mut self, hwnd: HWND) -> Result<()> {
@@ -394,6 +516,50 @@ impl Native {
         result
     }
 }
+unsafe fn logical_point(hwnd: HWND, lp: LPARAM) -> (f32, f32) {
+    let mut bounds = RECT::default();
+    let _ = GetClientRect(hwnd, &mut bounds);
+    let scale = (bounds.right - bounds.left).max(1) as f32 / WIDTH as f32;
+    (
+        ((lp.0 & 0xffff) as u16 as i16) as f32 / scale,
+        (((lp.0 >> 16) & 0xffff) as u16 as i16) as f32 / scale,
+    )
+}
+unsafe fn size_to_content(hwnd: HWND, expanded: bool) {
+    let mut r = RECT::default();
+    if GetWindowRect(hwnd, &mut r).is_err() {
+        return;
+    }
+    let mut monitor = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !GetMonitorInfoW(
+        MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+        &mut monitor,
+    )
+    .as_bool()
+    {
+        return;
+    }
+    let area = monitor.rcWork;
+    let height = HEIGHT + if expanded { DETAIL_HEIGHT } else { 0 };
+    let scale = (GetDpiForWindow(hwnd).max(96) as f32 / 96.)
+        .min((area.right - area.left).max(1) as f32 / WIDTH as f32)
+        .min((area.bottom - area.top).max(1) as f32 / height as f32);
+    let w = (WIDTH as f32 * scale).floor().max(1.) as i32;
+    let h = (height as f32 * scale).floor().max(1.) as i32;
+    let _ = SetWindowPos(
+        hwnd,
+        None,
+        r.left.clamp(area.left, area.right - w),
+        r.top.clamp(area.top, area.bottom - h),
+        w,
+        h,
+        SWP_NOACTIVATE | SWP_NOZORDER,
+    );
+    let _ = InvalidateRect(Some(hwnd), None, false);
+}
 unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if message == WM_NCCREATE {
         let create = &*(lp.0 as *const CREATESTRUCTW);
@@ -405,6 +571,37 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
     }
     let state = &mut *pointer;
     match message {
+        WM_NCHITTEST => {
+            let mut bounds = RECT::default();
+            let _ = GetWindowRect(hwnd, &mut bounds);
+            let scale = (bounds.right - bounds.left).max(1) as f32 / WIDTH as f32;
+            let x = (((lp.0 & 0xffff) as u16 as i16) as i32 - bounds.left) as f32 / scale;
+            let y = ((((lp.0 >> 16) & 0xffff) as u16 as i16) as i32 - bounds.top) as f32 / scale;
+            return LRESULT(if (0. ..720.).contains(&x) && (0. ..30.).contains(&y) {
+                HTCAPTION
+            } else {
+                HTCLIENT
+            } as isize);
+        }
+        WM_EXITSIZEMOVE => {
+            state.position_dirty = true;
+            let expanded = state.scene.selected.is_some();
+            size_to_content(hwnd, expanded);
+            LRESULT(0)
+        }
+        WM_DISPLAYCHANGE => {
+            state.recover = true;
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            if state.scene.selected.is_some() {
+                let steps = ((wp.0 >> 16) as u16 as i16) as f32 / 120.;
+                state.scene.scroll =
+                    (state.scene.scroll - steps * 42.).clamp(0., state.scene.max_scroll);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == 73 => {
             if state.deadline.is_some_and(|t| Instant::now() >= t) {
                 KillTimer(Some(hwnd), 73).ok();
@@ -432,6 +629,8 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             let area = &*(lp.0 as *const RECT);
             state.surface = None;
             state.target = None;
+            state.position_dirty = true;
+            let expanded = state.scene.selected.is_some();
             let _ = SetWindowPos(
                 hwnd,
                 None,
@@ -441,6 +640,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 area.bottom - area.top,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             );
+            size_to_content(hwnd, expanded);
             let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         }
@@ -460,15 +660,34 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            let scale = GetDpiForWindow(hwnd) as f32 / 96.;
-            let x = (lp.0 as u32 & 0xffff) as f32 / scale;
-            let y = ((lp.0 as u32 >> 16) & 0xffff) as f32 / scale;
+            let (x, y) = logical_point(hwnd, lp);
             if x >= 720. && x <= WIDTH as f32 && y < 30. {
                 if state.managed {
                     state.dismissed = true;
                     let _ = ShowWindow(hwnd, SW_HIDE);
                 } else {
                     let _ = DestroyWindow(hwnd);
+                }
+            } else if state.scene.selected.is_some()
+                && (350. ..373.).contains(&y)
+                && (609. ..749.).contains(&x)
+            {
+                let delta = if x < 679. { -100. } else { 100. };
+                state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            } else if (34. ..161.).contains(&y) {
+                let index = ((x - 9.) / 250.).floor() as isize;
+                if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
+                    let selected = if state.scene.selected == Some(index as usize) {
+                        None
+                    } else {
+                        Some(index as usize)
+                    };
+                    if state.scene.select(selected).is_err() {
+                        state.error = true;
+                    }
+                    let expanded = state.scene.selected.is_some();
+                    size_to_content(hwnd, expanded);
                 }
             }
             LRESULT(0)
@@ -484,6 +703,7 @@ struct OwnWindow {
     hwnd: HWND,
     state: Box<Native>,
     _dpi: ThreadDpi,
+    memory: fuze_worker_host::window_memory::Memory,
 }
 struct ThreadDpi(DPI_AWARENESS_CONTEXT);
 impl Drop for ThreadDpi {
@@ -496,7 +716,7 @@ impl Drop for ThreadDpi {
     }
 }
 impl OwnWindow {
-    fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
+    fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
         unsafe {
             let mut state = Box::new(Native::new()?);
             let dpi = ThreadDpi(SetThreadDpiAwarenessContext(
@@ -507,12 +727,17 @@ impl OwnWindow {
                 lpfnWndProc: Some(procedure),
                 hInstance: instance.into(),
                 lpszClassName: w!("FuzeIsolatedD2DProbe"),
+                hCursor: LoadCursorW(None, IDC_ARROW)?,
                 ..Default::default()
             });
             let hwnd = CreateWindowExW(
                 WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                 w!("FuzeIsolatedD2DProbe"),
-                w!("符择 · 离线三卡原型"),
+                if offline {
+                    w!("符择 · 离线三卡预览")
+                } else {
+                    w!("符择 · 海克斯推荐")
+                },
                 WS_POPUP,
                 40,
                 40,
@@ -527,6 +752,7 @@ impl OwnWindow {
                 hwnd,
                 state,
                 _dpi: dpi,
+                memory: fuze_worker_host::window_memory::Memory::new("direct-cards", offline),
             };
             let scale = GetDpiForWindow(hwnd) as f32 / 96.;
             SetWindowPos(
@@ -538,6 +764,8 @@ impl OwnWindow {
                 (HEIGHT as f32 * scale) as i32,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )?;
+            window.memory.restore(hwnd.0);
+            size_to_content(hwnd, false);
             Ok(window)
         }
     }
@@ -546,6 +774,7 @@ impl Drop for OwnWindow {
     fn drop(&mut self) {
         unsafe {
             if IsWindow(Some(self.hwnd)).as_bool() {
+                self.memory.remember_fixed(self.hwnd.0, WIDTH, HEIGHT);
                 let _ = DestroyWindow(self.hwnd);
             }
         }
@@ -565,9 +794,9 @@ pub struct HostOverlay {
     revisions: u64,
 }
 impl HostOverlay {
-    pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let com = Com::new()?;
-        let mut window = OwnWindow::new()?;
+        let mut window = OwnWindow::new(offline)?;
         window.state.managed = true;
         Ok(Self {
             window,
@@ -582,16 +811,38 @@ impl HostOverlay {
             revisions: 0,
         })
     }
+    /// Called by the existing UI tick even if host data is unchanged. No per-tick file IO.
+    pub fn placement(&mut self) -> bool {
+        unsafe {
+            if self.window.state.recover {
+                self.window.state.recover = false;
+                size_to_content(self.window.hwnd, self.window.state.scene.selected.is_some());
+                self.window.state.position_dirty = true;
+            }
+            if self.window.state.position_dirty {
+                self.window.state.position_dirty = false;
+                self.window
+                    .memory
+                    .remember_fixed(self.window.hwnd.0, WIDTH, HEIGHT);
+            }
+        }
+        !self.window.memory.failed()
+    }
     pub fn update(
         &mut self,
         frame: Option<std::sync::Arc<Frame>>,
         visible: bool,
     ) -> std::result::Result<bool, Box<dyn std::error::Error>> {
         let Some(frame) = frame else {
+            if self.frame.is_none() {
+                return Ok(true);
+            }
             self.frame = None;
             self.ids = [None; 3];
             self.window.state.dismissed = false;
+            self.window.state.scene.select(None)?;
             unsafe {
+                size_to_content(self.window.hwnd, false);
                 KillTimer(Some(self.window.hwnd), 73).ok();
                 let _ = ShowWindow(self.window.hwnd, SW_HIDE);
             }
@@ -630,6 +881,10 @@ impl HostOverlay {
                 self.generation = frame.snapshot.generation;
                 self.dataset = frame.snapshot.dataset_version.clone();
                 self.window.state.dismissed = false;
+                self.window.state.scene.select(None)?;
+                unsafe {
+                    size_to_content(self.window.hwnd, false);
+                }
             } else if !self.gate.as_mut().unwrap().accept(&frame.snapshot) {
                 return Ok(false);
             }
@@ -650,6 +905,10 @@ impl HostOverlay {
                         .as_ref()
                         .map(|a| a.icon.clone())
                         .unwrap_or_default(),
+                    description: frame.cards[i]
+                        .as_ref()
+                        .map(|a| a.description.clone())
+                        .unwrap_or_default(),
                 },
                 _ => Card::default(),
             });
@@ -657,6 +916,10 @@ impl HostOverlay {
             if ids != self.ids {
                 self.window.state.dismissed = false;
                 self.ids = ids;
+                self.window.state.scene.select(None)?;
+                unsafe {
+                    size_to_content(self.window.hwnd, false);
+                }
             }
             let caption = if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
@@ -685,6 +948,7 @@ impl HostOverlay {
                     .collect();
                 scene.cards = cards;
                 scene.caption = caption;
+                scene.select(scene.selected)?;
                 self.window.state.surface = None;
                 // Existing target survives data changes. Only target-bound bitmaps/brush are refreshed.
                 if let Some(target) = &self.window.state.target {
@@ -746,11 +1010,17 @@ impl HostOverlay {
     }
     pub fn render(&self, path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
         unsafe {
+            let height = HEIGHT
+                + if self.window.state.scene.selected.is_some() {
+                    DETAIL_HEIGHT
+                } else {
+                    0
+                };
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let bitmap = imaging.CreateBitmap(
                 WIDTH,
-                HEIGHT,
+                height,
                 &GUID_WICPixelFormat32bppPBGRA,
                 WICBitmapCacheOnLoad,
             )?;
@@ -764,12 +1034,12 @@ impl HostOverlay {
                 .CreateWicBitmapRenderTarget(&bitmap, &props)?;
             let surface = Surface::new(&self.window.state.scene, &target)?;
             surface.draw(&self.window.state.scene, &target, false)?;
-            let mut pixels = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
+            let mut pixels = vec![0u8; (WIDTH * height * 4) as usize];
             bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
             for pixel in pixels.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
-            image::save_buffer(path, &pixels, WIDTH, HEIGHT, image::ColorType::Rgba8)?;
+            image::save_buffer(path, &pixels, WIDTH, height, image::ColorType::Rgba8)?;
             Ok(())
         }
     }
@@ -822,7 +1092,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             cases.push(serde_json::json!({"dpi":dpi,"render":crate::telemetry::samples(&timings)}));
         }
         let before = GetForegroundWindow();
-        let mut native = OwnWindow::new()?;
+        let mut native = OwnWindow::new(true)?;
         let mut timings = Vec::new();
         native.state.draw(native.hwnd)?;
         for _ in 0..24 {
@@ -865,7 +1135,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
 }
 pub fn interactive() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let _com = Com::new()?;
-    let window = OwnWindow::new()?;
+    let window = OwnWindow::new(true)?;
     unsafe {
         let _ = ShowWindow(window.hwnd, SW_SHOWNOACTIVATE);
         while IsWindow(Some(window.hwnd)).as_bool() {

@@ -186,6 +186,12 @@ pub struct Manager {
     pub cards: Option<HostOverlay>,
 }
 impl Manager {
+    pub fn placement(&mut self) -> Result<(), &'static str> {
+        if self.cards.as_mut().is_some_and(|cards| !cards.placement()) {
+            return Err("overlay-position-memory");
+        }
+        Ok(())
+    }
     pub fn new(roots: Vec<fuze_data::Root>, offline: bool, visible: bool) -> Self {
         Self {
             roots,
@@ -259,7 +265,7 @@ impl Manager {
             .then_some(status.pipeline.overlay.clone())
             .flatten();
         if frame.is_some() && self.cards.is_none() {
-            self.cards = Some(HostOverlay::new().map_err(|_| "overlay-window")?);
+            self.cards = Some(HostOverlay::new(self.offline).map_err(|_| "overlay-window")?);
         }
         if let Some(cards) = self.cards.as_mut() {
             cards
