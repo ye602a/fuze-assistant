@@ -15,6 +15,24 @@ pub const RELEASE: &str =
 pub struct Session {
     secret: Option<Secret>,
 }
+struct ArchiveRoute<'a> {
+    original: &'a str,
+    resolved: std::sync::OnceLock<String>,
+}
+impl<'a> ArchiveRoute<'a> {
+    fn new(original: &'a str) -> Self {
+        Self {
+            original,
+            resolved: std::sync::OnceLock::new(),
+        }
+    }
+    fn fetch<T>(&self, request: impl FnOnce(&str) -> Result<(String, T)>) -> Result<T> {
+        let (target, value) = request(self.resolved.get().map_or(self.original, String::as_str))?;
+        // The serial probe has already validated the response before publishing its route.
+        self.resolved.get_or_init(|| target);
+        Ok(value)
+    }
+}
 struct Received<'a> {
     out: &'a mut dyn Write,
     progress: &'a (dyn Fn(u64) + Sync),
@@ -52,16 +70,36 @@ impl Session {
         out: &mut dyn Write,
         cancel: &dyn Fn() -> bool,
     ) -> Result<()> {
-        self.download_with(url, out, &|host, path, auth, output| {
+        self.download_resolved(url, limit, range, out, cancel)
+            .map(|_| ())
+    }
+    fn download_resolved(
+        &self,
+        url: &str,
+        limit: usize,
+        range: Option<(u64, u64, u64)>,
+        out: &mut dyn Write,
+        cancel: &dyn Fn() -> bool,
+    ) -> Result<String> {
+        self.download_resolved_with(url, out, &|host, path, auth, output| {
             update_io::transfer(host, path, limit, auth, range, cancel, output)
         })
     }
+    #[cfg(test)]
     fn download_with(
         &self,
         url: &str,
         out: &mut dyn Write,
         transfer: &dyn Fn(&str, &str, Option<&str>, &mut dyn Write) -> Result<Option<String>>,
     ) -> Result<()> {
+        self.download_resolved_with(url, out, transfer).map(|_| ())
+    }
+    fn download_resolved_with(
+        &self,
+        url: &str,
+        out: &mut dyn Write,
+        transfer: &dyn Fn(&str, &str, Option<&str>, &mut dyn Write) -> Result<Option<String>>,
+    ) -> Result<String> {
         let mut current = url.to_owned();
         let mut cdn = false;
         for _ in 0..4 {
@@ -76,7 +114,7 @@ impl Session {
                 _ => return Err("update-redirect-policy"),
             };
             match transfer(host, path, auth, out)? {
-                None => return Ok(()),
+                None => return Ok(current),
                 Some(next) => {
                     if !matches!(private_update::target(&next)?, Target::Cdn { .. }) {
                         return Err("update-redirect-policy");
@@ -116,19 +154,24 @@ impl Session {
         }
         let started = std::time::Instant::now();
         let cancelled = || cancel() || started.elapsed() > std::time::Duration::from_secs(600);
+        // Filled only after the serial probe succeeds. Never persisted or shared with
+        // another archive; signed CDN addresses expire and must not become a disk cache.
+        let resolved = ArchiveRoute::new(url);
         let fetch = |offset, length| {
-            let mut bytes = Vec::with_capacity(length as usize);
-            self.download(
-                url,
-                length as usize,
-                Some((offset, offset + length - 1, size)),
-                &mut Received {
-                    out: &mut bytes,
-                    progress,
-                },
-                &cancelled,
-            )?;
-            Ok(bytes)
+            resolved.fetch(|target| {
+                let mut bytes = Vec::with_capacity(length as usize);
+                let final_url = self.download_resolved(
+                    target,
+                    length as usize,
+                    Some((offset, offset + length - 1, size)),
+                    &mut Received {
+                        out: &mut bytes,
+                        progress,
+                    },
+                    &cancelled,
+                )?;
+                Ok((final_url, bytes))
+            })
         };
         let first = size.min(1024 * 1024);
         match fetch(0, first) {
@@ -200,44 +243,55 @@ fn transfer_chunks(
     fetch: &(dyn Fn(u64, u64) -> Result<Vec<u8>> + Sync),
     cancel: &dyn Fn() -> bool,
 ) -> Result<()> {
-    while offset < total {
-        if cancel() {
-            return Err("update-cancelled-or-timeout");
-        }
-        let batch = std::thread::scope(|scope| {
-            let mut jobs = Vec::new();
-            for _ in 0..4 {
-                if offset >= total {
-                    break;
-                }
+    std::thread::scope(|scope| {
+        let mut jobs = std::collections::VecDeque::new();
+        let mut error = None;
+        loop {
+            if cancel() {
+                error = Some("update-cancelled-or-timeout");
+            }
+            // Refill after each ordered write, without waiting for the slowest member
+            // of a four-request batch. Pending/completed buffers remain bounded by four.
+            while error.is_none() && jobs.len() < 4 && offset < total {
                 let start = offset;
                 let length = (total - offset).min(1024 * 1024);
-                jobs.push((length, scope.spawn(move || fetch(start, length))));
+                jobs.push_back((length, scope.spawn(move || fetch(start, length))));
                 offset += length;
             }
-            let mut blocks = Vec::new();
-            let mut error = None;
-            for (length, job) in jobs {
-                match job.join().unwrap_or(Err("update-download-worker")) {
-                    Ok(bytes) if bytes.len() as u64 == length => blocks.push(bytes),
-                    Ok(_) => {
-                        error = Some("update-range");
+            let Some((length, job)) = jobs.pop_front() else {
+                break;
+            };
+            let block = job
+                .join()
+                .unwrap_or(Err("update-download-worker"))
+                .and_then(|bytes| {
+                    if bytes.len() as u64 == length {
+                        Ok(bytes)
+                    } else {
+                        Err("update-range")
                     }
-                    Err(e) => {
+                });
+            if cancel() {
+                error = Some("update-cancelled-or-timeout");
+            }
+            match block {
+                Ok(bytes) if error.is_none() => {
+                    if out.write_all(&bytes).is_err() {
+                        error = Some("update-write");
+                    }
+                }
+                Err(e) => {
+                    // Drain all in-flight workers after failure. An access-policy error
+                    // must not be hidden by a transient error and cause a full retry.
+                    if error.is_none_or(|prior| can_retry_full(prior) && !can_retry_full(e)) {
                         error = Some(e);
                     }
                 }
+                _ => {}
             }
-            error.map_or(Ok(blocks), Err)
-        })?;
-        if cancel() {
-            return Err("update-cancelled-or-timeout");
         }
-        for bytes in batch {
-            out.write_all(&bytes).map_err(|_| "update-write")?;
-        }
-    }
-    Ok(())
+        error.map_or(Ok(()), Err)
+    })
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -464,6 +518,57 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     #[test]
+    fn archive_reuses_validated_route_without_reauthorizing_cdn_or_retrying_denial() {
+        let session = Session::with_secret(Secret::new(b"fixture".to_vec()).unwrap());
+        let route = ArchiveRoute::new(RELEASE);
+        let api = std::sync::atomic::AtomicUsize::new(0);
+        let cdn = std::sync::atomic::AtomicUsize::new(0);
+        let fetch = |_, length| {
+            route.fetch(|url| {
+                let mut bytes = Vec::new();
+                let target =
+                    session.download_resolved_with(url, &mut bytes, &|host, _, auth, out| {
+                        if host == "api.github.com" {
+                            assert!(auth.is_some());
+                            api.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Ok(Some(
+                                "https://release-assets.githubusercontent.com/fixture".into(),
+                            ))
+                        } else {
+                            assert!(auth.is_none());
+                            cdn.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            out.write_all(&vec![7; length as usize]).unwrap();
+                            Ok(None)
+                        }
+                    })?;
+                Ok((target, bytes))
+            })
+        };
+        assert_eq!(fetch(0, 16).unwrap(), vec![7; 16]); // Serial probe publishes the route.
+        let mut out = Vec::new();
+        transfer_chunks(16, 4 * 1024 * 1024 + 17, &mut out, &fetch, &|| false).unwrap();
+        assert_eq!(api.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(cdn.load(std::sync::atomic::Ordering::Relaxed), 6);
+        assert!(out.iter().all(|b| *b == 7));
+        let denied: Result<()> = route.fetch(|url| {
+            session
+                .download_resolved_with(url, &mut Vec::new(), &|host, _, auth, _| {
+                    assert_ne!(host, "api.github.com");
+                    assert!(auth.is_none());
+                    Err("update-access-or-release")
+                })
+                .map(|target| (target, ()))
+        });
+        assert_eq!(denied, Err("update-access-or-release"));
+        assert!(ArchiveRoute::new(RELEASE).resolved.get().is_none());
+        let failed = ArchiveRoute::new(RELEASE);
+        assert_eq!(
+            failed.fetch::<()>(|_| Err("update-range")),
+            Err("update-range")
+        );
+        assert!(failed.resolved.get().is_none());
+    }
+    #[test]
     fn redirects_strip_authorization_and_never_return_to_api() {
         let session = Session::with_secret(Secret::new(b"fixture".to_vec()).unwrap());
         let calls = Cell::new(0);
@@ -670,6 +775,56 @@ mod tests {
             transfer_chunks(0, 16, &mut Vec::new(), &|_, _| panic!(), &|| true),
             Err("update-cancelled-or-timeout")
         );
+    }
+    #[test]
+    fn ordered_window_refills_before_later_blocks_and_drains_terminal_errors() {
+        use std::sync::{mpsc, Mutex};
+        let (started, ready) = mpsc::channel();
+        let ready = Mutex::new(ready);
+        let mut out = Vec::new();
+        transfer_chunks(
+            0,
+            5 * 1024 * 1024,
+            &mut out,
+            &|offset, length| {
+                let index = offset / (1024 * 1024);
+                if index == 1 {
+                    ready
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .map_err(|_| "validation-window-stalled")?;
+                }
+                if index == 4 {
+                    started.send(()).unwrap();
+                }
+                Ok(vec![index as u8; length as usize])
+            },
+            &|| false,
+        )
+        .unwrap();
+        for (index, block) in out.chunks(1024 * 1024).enumerate() {
+            assert!(block.iter().all(|b| *b == index as u8));
+        }
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        assert_eq!(
+            transfer_chunks(
+                0,
+                5 * 1024 * 1024,
+                &mut Vec::new(),
+                &|offset, _| {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Err(if offset == 1024 * 1024 {
+                        "update-access-or-release"
+                    } else {
+                        "update-network"
+                    })
+                },
+                &|| false
+            ),
+            Err("update-access-or-release")
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 4);
     }
     #[test]
     fn full_fallback_is_once_and_cancellation_never_retries() {

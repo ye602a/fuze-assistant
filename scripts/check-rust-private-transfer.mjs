@@ -70,8 +70,17 @@ async function main() {
     child.stdin.end(secret, () => secret.fill(0))
     timer = setTimeout(() => { terminationReason = 'validation-deadline'; child.kill() }, 620000)
     const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve) })
+    const lines = Buffer.concat(errors).toString('utf8').trim().split(/\r?\n/)
+    const transport = {api_requests: 0, cdn_requests: 0, api_headers_ms: 0, cdn_headers_ms: 0, body_ms: 0, received_bytes: 0}
+    for (const line of lines) {
+      const match = /^update-transfer role=(api|cdn) ranged=(true|false) headers_ms=(\d{1,10}) body_ms=(\d{1,10}) bytes=(\d{1,10})$/.exec(line)
+      if (!match) continue
+      transport[`${match[1]}_requests`]++
+      transport[`${match[1]}_headers_ms`] += Number(match[3])
+      transport.body_ms += Number(match[4])
+      transport.received_bytes += Number(match[5])
+    }
     if (code !== 0) {
-      const lines = Buffer.concat(errors).toString('utf8').trim().split(/\r?\n/)
       const error = lines.at(-1)
       const network = lines.map(line => /^update-network stage=(open|send|receive|available|read) code=(\d{1,10})$/.exec(line))
         .filter(Boolean).map(match => ({stage: match[1], code: Number(match[2])})).slice(0, 8)
@@ -80,7 +89,7 @@ async function main() {
       const budget = lines.map(line => /^update-budget scope=(caller|request) ms=(\d{1,10})$/.exec(line))
         .filter(Boolean).map(match => ({scope: match[1], ms: Number(match[2])})).slice(0, 8)
       const report = {success: false, error: terminationReason ?? (allowedErrors.has(error) ? error : 'private-transfer-verification-failed'), network, budget, deltaVerified,
-        installed: false, game_access: false, credential_persisted: false}
+        transport, installed: false, game_access: false, credential_persisted: false}
       try { await writeFile(path.join(output, 'transfer-report.json'), JSON.stringify(report, null, 2), {flag: 'wx'}) }
       catch (writeError) { if (writeError.code !== 'ENOENT') throw writeError }
       console.log(JSON.stringify(report))
@@ -88,7 +97,7 @@ async function main() {
       return
     }
     const raw = JSON.parse(Buffer.concat(buffers).toString('utf8'))
-    const report = {}
+    const report = {transport}
     for (const key of ['package_bytes', 'real_range_bytes', 'full_bytes', 'delta_received_bytes', 'fallback_received_bytes', 'delta_range_requests', 'delta_ms', 'total_ms']) {
       if (!Number.isSafeInteger(raw[key]) || raw[key] < 0) throw new Error('report')
       report[key] = raw[key]

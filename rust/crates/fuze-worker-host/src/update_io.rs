@@ -7,6 +7,30 @@ use std::{
 };
 use windows_sys::Win32::{Networking::WinHttp::*, Security::Cryptography::*};
 struct Handle(*mut c_void);
+struct TransferTrace {
+    enabled: bool,
+    started: Instant,
+    headers_ms: Option<u128>,
+    api: bool,
+    ranged: bool,
+    bytes: usize,
+}
+impl Drop for TransferTrace {
+    fn drop(&mut self) {
+        if self.enabled {
+            let elapsed = self.started.elapsed().as_millis();
+            let headers = self.headers_ms.unwrap_or(elapsed);
+            eprintln!(
+                "update-transfer role={} ranged={} headers_ms={} body_ms={} bytes={}",
+                if self.api { "api" } else { "cdn" },
+                self.ranged,
+                headers,
+                elapsed.saturating_sub(headers),
+                self.bytes
+            );
+        }
+    }
+}
 impl Drop for Handle {
     fn drop(&mut self) {
         unsafe {
@@ -101,6 +125,14 @@ pub(crate) fn transfer(
     output: &mut dyn std::io::Write,
 ) -> Result<Option<String>> {
     let started = Instant::now();
+    let mut trace = TransferTrace {
+        enabled: std::env::var_os("FUZE_UPDATE_VERIFY_TRACE").is_some(),
+        started,
+        headers_ms: None,
+        api: host == "api.github.com",
+        ranged: range.is_some(),
+        bytes: 0,
+    };
     let budget = request_budget(limit, range.is_some());
     let check = || {
         let cancelled = cancel();
@@ -198,6 +230,7 @@ pub(crate) fn transfer(
         if WinHttpReceiveResponse(request.0, null_mut()) == 0 {
             return Err(network_error("receive"));
         }
+        trace.headers_ms = Some(started.elapsed().as_millis());
         let mut code = 0u32;
         let mut len = 4u32;
         if WinHttpQueryHeaders(
@@ -303,6 +336,7 @@ pub(crate) fn transfer(
                 .write_all(&buffer[..read as usize])
                 .map_err(|_| "update-write")?;
             bytes += read as usize;
+            trace.bytes = bytes;
         }
         check()?;
         if range.is_some() && bytes != limit {
