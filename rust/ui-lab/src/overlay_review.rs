@@ -46,7 +46,34 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     publisher.publish(snapshot.clone(), true, false, None);
     let first = publisher.current().ok_or("overlay-frame-missing")?;
     let mut manager = crate::game_windows::Manager::new(roots.to_vec(), true, false);
+    manager.preview(None)?;
+    if !manager
+        .sample_champion
+        .as_ref()
+        .ok_or("preview-champion-missing")?
+        .ui
+        .get_offline()
+    {
+        return Err("preview-client-write-enabled".into());
+    }
+    manager.preview_cards()?;
+    if !manager
+        .sample_cards
+        .as_ref()
+        .ok_or("preview-cards-missing")?
+        .hidden()
+    {
+        return Err("preview-window-visible".into());
+    }
+    manager
+        .sample_cards
+        .as_ref()
+        .unwrap()
+        .render(&output.join("cards-preview.png"))?;
     let mut status = Status::default();
+    if manager.reference(&status).is_ok() {
+        return Err("reference-allowed-without-game".into());
+    }
     status.mode = 1;
     status.connection = Some(fuze_lcu::reconnect::State::Connected(Phase::ChampSelect));
     status.preferences.champ_select = true;
@@ -57,6 +84,9 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     view.bench = view.team.iter().take(1).cloned().collect();
     status.selection = Some(view.clone());
     manager.update(&status)?;
+    if manager.sample_champion.is_some() || manager.sample_cards.is_some() {
+        return Err("preview-replaced-live-context".into());
+    }
     let panel = manager
         .champion
         .as_ref()
@@ -66,6 +96,8 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     }
     status.connection = Some(fuze_lcu::reconnect::State::Connected(Phase::InProgress));
     status.playing = Some(view);
+    status.preferences.augment_side_panel = false;
+    manager.reference(&status)?;
     status.pipeline.overlay = Some(first.clone());
     manager.update(&status)?;
     if manager
@@ -140,6 +172,9 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
             "duplicate_model_rebuilds": 0, "dismissal_retained": true,
             "stale_sequence_rejected": true, "preference_restore": true,
             "description_long_missing_scroll_rendered": true,
+            "three_card_click_collapse_gap_scroll_close": true,
+            "preview_without_lcu_is_separate_and_read_only": true,
+            "explicit_side_panel_without_auto_show": true,
             "phase_exit_clears": true, "game_access": false, "system_input": false,
             "live_game_verified": false, "automatic_stage": "unknown_overall_only"
         }))?,

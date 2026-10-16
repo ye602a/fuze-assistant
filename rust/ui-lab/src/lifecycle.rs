@@ -88,6 +88,7 @@ pub fn attach(
                     Action::Pause => "pause",
                     Action::Quit => "quit",
                     Action::Availability => "availability",
+                    Action::Reference => "reference",
                 }
                 .into(),
             )
@@ -122,6 +123,10 @@ pub fn attach(
             return;
         };
         match action.as_str() {
+            "reference" => {
+                ui.global::<crate::HostState>()
+                    .invoke_command("show-reference".into());
+            }
             "open" => reveal(&ui, interactive),
             "hide" => {
                 if native.tray_available() && interactive {

@@ -560,6 +560,37 @@ unsafe fn size_to_content(hwnd: HWND, expanded: bool) {
     );
     let _ = InvalidateRect(Some(hwnd), None, false);
 }
+unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
+    if x >= 720. && x <= WIDTH as f32 && y < 30. {
+        if state.managed {
+            state.dismissed = true;
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        } else {
+            let _ = DestroyWindow(hwnd);
+        }
+    } else if state.scene.selected.is_some()
+        && (350. ..373.).contains(&y)
+        && (609. ..749.).contains(&x)
+    {
+        let delta = if x < 679. { -100. } else { 100. };
+        state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    } else if (34. ..161.).contains(&y) {
+        let index = ((x - 9.) / 250.).floor() as isize;
+        if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
+            let selected = if state.scene.selected == Some(index as usize) {
+                None
+            } else {
+                Some(index as usize)
+            };
+            if state.scene.select(selected).is_err() {
+                state.error = true;
+            }
+            let expanded = state.scene.selected.is_some();
+            size_to_content(hwnd, expanded);
+        }
+    }
+}
 unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if message == WM_NCCREATE {
         let create = &*(lp.0 as *const CREATESTRUCTW);
@@ -661,35 +692,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
         }
         WM_LBUTTONUP => {
             let (x, y) = logical_point(hwnd, lp);
-            if x >= 720. && x <= WIDTH as f32 && y < 30. {
-                if state.managed {
-                    state.dismissed = true;
-                    let _ = ShowWindow(hwnd, SW_HIDE);
-                } else {
-                    let _ = DestroyWindow(hwnd);
-                }
-            } else if state.scene.selected.is_some()
-                && (350. ..373.).contains(&y)
-                && (609. ..749.).contains(&x)
-            {
-                let delta = if x < 679. { -100. } else { 100. };
-                state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
-                let _ = InvalidateRect(Some(hwnd), None, false);
-            } else if (34. ..161.).contains(&y) {
-                let index = ((x - 9.) / 250.).floor() as isize;
-                if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
-                    let selected = if state.scene.selected == Some(index as usize) {
-                        None
-                    } else {
-                        Some(index as usize)
-                    };
-                    if state.scene.select(selected).is_err() {
-                        state.error = true;
-                    }
-                    let expanded = state.scene.selected.is_some();
-                    size_to_content(hwnd, expanded);
-                }
-            }
+            handle_click(hwnd, state, x, y);
             LRESULT(0)
         }
         WM_NCDESTROY => {
@@ -793,6 +796,7 @@ pub struct HostOverlay {
     dataset: String,
     ids: [Option<u32>; 3],
     revisions: u64,
+    preview_mode: bool,
 }
 impl HostOverlay {
     pub fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -811,6 +815,7 @@ impl HostOverlay {
             dataset: String::new(),
             ids: [None; 3],
             revisions: 0,
+            preview_mode: false,
         })
     }
     /// Called by the existing UI tick even if host data is unchanged. No per-tick file IO.
@@ -923,7 +928,9 @@ impl HostOverlay {
                     size_to_content(self.window.hwnd, false);
                 }
             }
-            let caption = if frame.retained {
+            let caption = if self.preview_mode {
+                "窗口预览 · 公开数据样例 · 非本局识别或领取"
+            } else if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
             } else {
                 "整体胜率 · 实际领取轮次未确认"
@@ -998,6 +1005,18 @@ impl HostOverlay {
             let _ = ShowWindow(self.window.hwnd, SW_HIDE);
         }
     }
+    pub fn preview(
+        &mut self,
+        frame: std::sync::Arc<Frame>,
+        visible: bool,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        if !self.offline {
+            return Err("preview-isolation".into());
+        }
+        self.preview_mode = true;
+        self.update(Some(frame), visible)?;
+        Ok(())
+    }
     pub fn ids(&self) -> [Option<u32>; 3] {
         self.ids
     }
@@ -1054,6 +1073,36 @@ impl HostOverlay {
             return Err("review-isolation".into());
         }
         let original = self.window.state.scene.cards[0].description.clone();
+        for index in 0..3 {
+            unsafe {
+                handle_click(
+                    self.window.hwnd,
+                    &mut self.window.state,
+                    100. + index as f32 * 250.,
+                    90.,
+                );
+            }
+            if self.window.state.scene.selected != Some(index) {
+                return Err("card-click-route".into());
+            }
+            unsafe {
+                handle_click(
+                    self.window.hwnd,
+                    &mut self.window.state,
+                    100. + index as f32 * 250.,
+                    90.,
+                );
+            }
+            if self.window.state.scene.selected.is_some() {
+                return Err("card-collapse-route".into());
+            }
+        }
+        unsafe {
+            handle_click(self.window.hwnd, &mut self.window.state, 255., 90.);
+        }
+        if self.window.state.scene.selected.is_some() {
+            return Err("card-gap-click".into());
+        }
         self.window.state.scene.cards[0].description =
             "合成说明：保留中文换行、长文本和未知领取轮次，仅供开发验证。".repeat(35);
         self.window.state.scene.select(Some(0))?;
@@ -1064,6 +1113,18 @@ impl HostOverlay {
             size_to_content(self.window.hwnd, true);
         }
         self.render(&output.join("host-cards-description-top.png"))?;
+        unsafe {
+            handle_click(self.window.hwnd, &mut self.window.state, 710., 360.);
+        }
+        if self.window.state.scene.scroll <= 0. {
+            return Err("description-down-click".into());
+        }
+        unsafe {
+            handle_click(self.window.hwnd, &mut self.window.state, 640., 360.);
+        }
+        if self.window.state.scene.scroll != 0. {
+            return Err("description-up-click".into());
+        }
         self.window.state.scene.scroll = self.window.state.scene.max_scroll;
         self.render(&output.join("host-cards-description-bottom.png"))?;
         self.window.state.scene.cards[0].description.clear();
@@ -1080,6 +1141,13 @@ impl HostOverlay {
         if !self.hidden() {
             return Err("review-window-visible".into());
         }
+        unsafe {
+            handle_click(self.window.hwnd, &mut self.window.state, 740., 15.);
+        }
+        if !self.dismissed() || !self.hidden() {
+            return Err("card-close-click".into());
+        }
+        self.window.state.dismissed = false;
         Ok(())
     }
 }

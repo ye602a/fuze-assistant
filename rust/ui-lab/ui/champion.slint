@@ -128,7 +128,7 @@ export component ChampionWindow inherits Window {
             if root.action-notice != "": Label { height: 56px; text: root.action-notice; wrap: word-wrap; color: Theme.gold; }
             Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 11px; }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
-                LineEdit { text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
+                LineEdit { accessible-label: "搜索强化符文"; text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
                 HorizontalLayout { height: 32px; spacing: 5px;
                     for title[index] in ["全部", "白银", "黄金", "棱彩"]: Action { min-width: 0px; height: 32px; label: title; primary: root.rarity == index - 1; clicked => { root.rarity = index - 1; root.filter(root.augment-query, root.rarity); } }
                 }

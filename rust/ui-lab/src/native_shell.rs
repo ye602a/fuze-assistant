@@ -21,6 +21,30 @@ pub enum Action {
     Pause,
     Quit,
     Availability,
+    Reference,
+}
+fn menu_action(id: i32) -> Option<Action> {
+    match id {
+        1 => Some(Action::Open),
+        2 => Some(Action::Hide),
+        3 => Some(Action::Pause),
+        4 => Some(Action::Quit),
+        5 => Some(Action::Reference),
+        _ => None,
+    }
+}
+pub fn review_menu() -> bool {
+    [
+        Action::Open,
+        Action::Hide,
+        Action::Pause,
+        Action::Quit,
+        Action::Reference,
+    ]
+    .into_iter()
+    .enumerate()
+    .all(|(i, action)| menu_action(i as i32 + 1) == Some(action))
+        && menu_action(0).is_none()
 }
 struct State {
     emit: Box<dyn Fn(Action)>,
@@ -140,6 +164,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                                 },
                             ),
                             (4, "退出软件"),
+                            (5, "局内符文资料"),
                         ] {
                             AppendMenuW(menu, MF_STRING, id, wide(label).as_ptr());
                         }
@@ -156,13 +181,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                                 hwnd,
                                 null(),
                             );
-                            if let Some(action) = match selected {
-                                1 => Some(Action::Open),
-                                2 => Some(Action::Hide),
-                                3 => Some(Action::Pause),
-                                4 => Some(Action::Quit),
-                                _ => None,
-                            } {
+                            if let Some(action) = menu_action(selected) {
                                 (s.emit)(action);
                             }
                             PostMessageW(hwnd, WM_NULL, 0, 0);

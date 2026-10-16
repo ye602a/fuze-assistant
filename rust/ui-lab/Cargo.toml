@@ -10,8 +10,10 @@ resolver = "2"
 
 [features]
 gpu = ["slint/renderer-skia", "dep:i-slint-renderer-skia"]
+ui-audit = ["dep:i-slint-core"]
 
 [dependencies]
+i-slint-core = { version = "=1.13.1", default-features = false, optional = true }
 fuze-worker-host = { path = "../crates/fuze-worker-host" }
 fuze-data = { path = "../crates/fuze-data" }
 fuze-lcu = { path = "../crates/fuze-lcu" }

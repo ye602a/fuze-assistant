@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -61,9 +61,9 @@ jobs:
         run: |
           cargo +1.90.0 fmt -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --release --locked --features gpu -j 2
+          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --release --locked --features gpu -j 2 status_view::tests
+          cargo +1.90.0 test --release --locked --features gpu,ui-audit -j 2 status_view::tests
           exit $LASTEXITCODE
       - name: Offscreen images and hidden own-window invariants
         working-directory: rust/ui-lab
@@ -75,6 +75,11 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-native skia-software artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
+          exit $LASTEXITCODE
+      - name: Individual control hit tests and keyboard actions at two window sizes
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review-controls artifacts/control-review
           exit $LASTEXITCODE
       # No installers, upload-artifact, release publication or game/LCU access.
       - name: LCU startup-log fallback (synthetic files only)
@@ -169,7 +174,7 @@ jobs:
         run: |
           cargo +1.90.0 fmt -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --release --locked --features gpu -j 2
+          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node ../../scripts/create-ui-host-fixture.mjs artifacts/host-data
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

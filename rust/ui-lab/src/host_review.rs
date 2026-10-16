@@ -9,6 +9,23 @@ use std::{
 };
 // Exercise Slint hit testing, not direct page/callback assignment. Events stay in
 // this hidden component; no Windows messages, cursor movement or system input.
+fn control(
+    ui: &Workbench,
+    label: &str,
+    fallback: impl FnOnce(),
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "ui-audit")]
+    {
+        let _ = fallback;
+        crate::control_review::hit(ui, label)?;
+    }
+    #[cfg(not(feature = "ui-audit"))]
+    {
+        let _ = (ui, label);
+        fallback();
+    }
+    Ok(())
+}
 fn navigation_input(ui: &Workbench) -> Result<(), Box<dyn std::error::Error>> {
     use slint::platform::{PointerEventButton, WindowEvent};
     let click = |x, y| {
@@ -75,6 +92,9 @@ fn navigation_input(ui: &Workbench) -> Result<(), Box<dyn std::error::Error>> {
 }
 pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(output)?;
+    if !crate::native_shell::review_menu() {
+        return Err("tray-menu-command-map".into());
+    }
     let before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -158,10 +178,28 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                     {
                         save("home-paused")?;
                         navigation_input(&ui)?;
-                        state.invoke_preference("champ_topmost".into(), false);
+                        control(&ui, "偏好设置", || ui.set_page(2))?;
+                        control(&ui, "预览选人详情", || {
+                            state.invoke_command("preview-champion".into())
+                        })?;
+                        if !state.get_notice().contains("已打开只读选人预览") {
+                            return Err("champion-preview-command".into());
+                        }
+                        control(&ui, "预览三卡推荐", || {
+                            state.invoke_command("preview-cards".into())
+                        })?;
+                        if !state.get_notice().contains("已打开三卡公开样例") {
+                            return Err("cards-preview-command".into());
+                        }
+                        control(&ui, "选人阶段窗口置顶", || {
+                            state.invoke_preference("champ_topmost".into(), false)
+                        })?;
                         step.set(1);
                     }
                     1 if !session.busy() && !session.snapshot().preferences.champ_topmost => {
+                        #[cfg(feature = "ui-audit")]
+                        crate::control_review::select_next(&ui, "识别后端")?;
+                        #[cfg(not(feature = "ui-audit"))]
                         state.invoke_backend_changed(1);
                         step.set(2);
                     }
@@ -170,7 +208,21 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         save("settings")?;
                         ui.set_scroll_y(-660.);
                         save("settings-controls")?;
-                        state.invoke_directory_save("relative/invalid".into());
+                        #[cfg(feature = "ui-audit")]
+                        {
+                            crate::control_review::hit(
+                                &ui,
+                                "高级回退：自动连接失败时手动指定目录",
+                            )?;
+                            crate::control_review::type_text(
+                                &ui,
+                                "客户端目录",
+                                "relative/invalid",
+                            )?;
+                        }
+                        control(&ui, "保存目录", || {
+                            state.invoke_directory_save("relative/invalid".into())
+                        })?;
                         if !session.snapshot().preferences.manual_directory.is_empty() {
                             return Err("invalid-settings-committed".into());
                         }
@@ -189,7 +241,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         state.set_history_selected(0);
                         ui.set_scroll_y(-420.);
                         save("history-detail")?;
-                        state.invoke_history_turn(1);
+                        control(&ui, "下一页", || state.invoke_history_turn(1))?;
                         step.set(5);
                     }
                     5 => {
@@ -328,8 +380,10 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         ui.set_quit_open(false);
                         ui.set_page(2);
                         ui.set_scroll_y(0.);
-                        ui.global::<crate::MaintenanceState>()
-                            .invoke_action("scan".into());
+                        control(&ui, "扫描本地占用", || {
+                            ui.global::<crate::MaintenanceState>()
+                                .invoke_action("scan".into())
+                        })?;
                         step.set(10);
                     }
                     10 if !ui.global::<crate::MaintenanceState>().get_busy() => {
@@ -340,7 +394,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         save("maintenance-update")?;
                         ui.set_scroll_y(-460.);
                         save("maintenance-storage")?;
-                        maintenance.invoke_action("clean".into());
+                        control(&ui, "清理可回收文件", || {
+                            maintenance.invoke_action("clean".into())
+                        })?;
                         step.set(11);
                     }
                     11 => {
@@ -351,12 +407,16 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                             return Err("storage-confirmation-focus".into());
                         }
                         save("maintenance-confirmation")?;
-                        maintenance.invoke_action("cancel".into());
+                        control(&ui, "取消", || maintenance.invoke_action("cancel".into()))?;
                         if !maintenance_root.join("client-data/versions/1.0.0").exists() {
                             return Err("storage-cancel-deleted".into());
                         }
-                        maintenance.invoke_action("clean".into());
-                        maintenance.invoke_action("confirm".into());
+                        control(&ui, "清理可回收文件", || {
+                            maintenance.invoke_action("clean".into())
+                        })?;
+                        control(&ui, "确认", || {
+                            maintenance.invoke_action("confirm".into())
+                        })?;
                         if !session.busy() || session.set_running(true).is_ok() {
                             return Err("maintenance-session-reservation".into());
                         }
@@ -400,7 +460,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                             return Err("record-icons-missing".into());
                         }
                         let record = ui.global::<crate::RecordState>();
-                        record.invoke_action("select".into(), 0);
+                        control(&ui, "查看详情", || {
+                            record.invoke_action("select".into(), 0)
+                        })?;
                         if record.get_observations().row_count() != 5
                             || !record
                                 .get_observations()
@@ -413,13 +475,17 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         }
                         ui.set_scroll_y(-360.);
                         save("records-detail")?;
-                        record.invoke_action("observation-page".into(), 1);
+                        control(&ui, "下一组", || {
+                            record.invoke_action("observation-page".into(), 1)
+                        })?;
                         if record.get_observations().row_count() != 3 {
                             return Err("observation-pagination".into());
                         }
                         ui.set_scroll_y(-610.);
                         save("records-observations")?;
-                        record.invoke_action("share".into(), 0);
+                        control(&ui, "生成匿名分享预览", || {
+                            record.invoke_action("share".into(), 0)
+                        })?;
                         if !session.busy() || session.set_running(true).is_ok() {
                             return Err("share-reservation".into());
                         }
@@ -480,7 +546,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                             return Err("settings-preview-focus".into());
                         }
                         save("records-settings-confirmation")?;
-                        record.invoke_action("cancel-confirm".into(), 0);
+                        control(&ui, "取消", || {
+                            record.invoke_action("cancel-confirm".into(), 0)
+                        })?;
                         if session.snapshot().preferences.champ_topmost {
                             return Err("settings-cancel-applied".into());
                         }
@@ -488,8 +556,10 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         step.set(19);
                     }
                     19 if records.idle() => {
-                        ui.global::<crate::RecordState>()
-                            .invoke_action("confirm".into(), 0);
+                        control(&ui, "确认导入", || {
+                            ui.global::<crate::RecordState>()
+                                .invoke_action("confirm".into(), 0)
+                        })?;
                         step.set(20);
                     }
                     20 if !session.busy() => {
@@ -544,6 +614,8 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false,"storage_scan_clean_preservation":true,"maintenance_offline_network_rejected":true,"maintenance_confirmation_cancel_focus":true});
     let mut report = report;
     report["record_icons_and_observation_paging"] = true.into();
+    report["service_actions_via_component_hits"] = cfg!(feature = "ui-audit").into();
+    report["tray_menu_ids_map_to_each_action"] = true.into();
     report["component_pointer_navigation_two_widths"] = true.into();
     report["component_pointer_modal_cancel"] = true.into();
     report["component_navigation_keyboard"] = true.into();

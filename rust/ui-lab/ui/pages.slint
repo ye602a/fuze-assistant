@@ -7,7 +7,16 @@ import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "c
 export component SettingsPage inherits VerticalLayout {
     in-out property <bool> manual-open: false;
     spacing: 18px;
+    if HostState.running: Panel { height: 90px;
+        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行。更新、清理和导入需要先暂停；其余偏好可直接调整。"; wrap: word-wrap; color: Theme.muted; }
+        Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
+    }
     MaintenancePage { }
+    Panel { height: 153px;
+        SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据 · " + HostState.data-version; }
+        Label { x: 21px; y: 52px; width: parent.width - 42px; height: 42px; text: "识别字典与胜率统计分别更新；失败保留可用缓存，三卡继续使用整体胜率。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Action { x: 21px; y: 104px; width: 180px; height: 34px; label: "更新推荐数据与字典"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
+    }
     Panel { height: 130px;
         SectionTitle { x: 21px; y: 17px; height: 25px; text: "迁移旧版偏好"; }
         Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "只读取你选择的旧配置；预览确认后导入受支持偏好，保留当前语言与启动状态。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
@@ -25,7 +34,7 @@ export component SettingsPage inherits VerticalLayout {
             }
             Rectangle { height: 62px;
                 Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "识别后端"; }
-                ComboBox { x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
+                ComboBox { accessible-label: "识别后端"; x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
             }
             Rectangle { height: 62px;
                 Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "界面语言"; }
@@ -34,9 +43,10 @@ export component SettingsPage inherits VerticalLayout {
             }
         }
     }
-    Panel { height: 74px;
+    Panel { height: 119px;
         Label { x: 21px; y: 12px; height: 23px; text: "浮窗显示"; color: Theme.blue; }
         Label { x: 21px; y: 38px; width: parent.width - 42px; height: 25px; text: "独占全屏可能遮住桌面浮窗，需要显示时可在游戏中自行选择无边框或窗口模式。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Action { x: 21px; y: 76px; width: 175px; height: 30px; label: "重新打开局内资料"; enabled: HostState.connected; clicked => { HostState.command("show-reference"); } }
     }
     Panel { height: root.manual-open ? 430px : 300px;
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "连接与诊断"; }
@@ -46,7 +56,7 @@ export component SettingsPage inherits VerticalLayout {
         Action { x: 21px; y: 174px; width: parent.width - 42px; label: "高级回退：自动连接失败时手动指定目录"; clicked => { root.manual-open = !root.manual-open; } }
         if root.manual-open: VerticalLayout { x: 21px; y: 227px; width: parent.width - 42px; height: 155px; spacing: 12px;
             Label { text: "填写包含 LeagueClient.exe 的客户端目录；留空则仅使用自动发现。"; color: Theme.muted; height: 30px; }
-            LineEdit { text <=> HostState.directory; enabled: HostState.connected && !HostState.busy; placeholder-text: "客户端目录"; height: 36px; }
+            LineEdit { accessible-label: "客户端目录"; text <=> HostState.directory; enabled: HostState.connected && !HostState.busy; placeholder-text: "客户端目录"; height: 36px; }
             HorizontalLayout { height: 38px; spacing: 12px;
                 Action { label: "保存目录"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(HostState.directory); } }
                 Action { label: "清除手动回退"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(""); } }
@@ -54,7 +64,7 @@ export component SettingsPage inherits VerticalLayout {
             Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
         }
     }
-    Panel { height: 430px;
+    Panel { height: 530px;
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "领取轮次验证"; }
         Label { x: 21px; y: 58px; width: parent.width - 42px; height: 44px; text: "实际领取轮次尚未确认，继续使用整体胜率。\n刷新、属性碎片和锻造器额外选择不计为正式轮次。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 123px; width: parent.width - 42px; height: 38px; spacing: 10px;
@@ -66,9 +76,13 @@ export component SettingsPage inherits VerticalLayout {
             Action { label: "标记操作前"; enabled: ClaimState.can-mark && !ClaimState.busy; clicked => { ClaimState.action("mark"); } }
             Action { label: "清除对比"; clicked => { ClaimState.action("clear"); } }
         }
-        Label { x: 21px; y: 219px; width: parent.width - 42px; height: 80px; text: ClaimState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
-        Label { x: 21px; y: 307px; width: parent.width - 42px; height: 43px; text: ClaimState.comparison; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
-        Label { x: 21px; y: 357px; width: parent.width - 42px; height: 55px; text: ClaimState.notice == "" ? "仅手动检查本地接口的字段类型和计数，不保存账号信息、不上传。不会代替玩家操作游戏。" : ClaimState.notice; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 220px; height: 34px; text: "这次检查的场景"; color: Theme.muted; }
+        ComboBox { accessible-label: "领取验证场景"; x: 160px; y: 220px; width: parent.width - 181px; height: 34px; model: ["正式强化选择前后", "同轮刷新前后", "属性碎片选择前后", "锻造器连续选择", "额外选择或替换", "重连或中途启动"]; current-index <=> ClaimState.scenario; enabled: !ClaimState.busy; selected(value) => { ClaimState.action("clear"); } }
+        Action { x: 21px; y: 270px; width: 160px; height: 34px; label: "预览三卡推荐"; enabled: HostState.connected; clicked => { HostState.command("preview-cards"); } }
+        Label { x: 196px; y: 270px; width: parent.width - 217px; height: 34px; text: "预览只展示公开样例，不代表本局识别。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 319px; width: parent.width - 42px; height: 80px; text: ClaimState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: 407px; width: parent.width - 42px; height: 43px; text: ClaimState.comparison; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
+        Label { x: 21px; y: 457px; width: parent.width - 42px; height: 55px; text: ClaimState.notice == "" ? "仅手动检查本地接口的字段类型和计数，不保存账号信息、不上传。不会代替玩家操作游戏。" : ClaimState.notice; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
     }
 }
 
@@ -118,8 +132,8 @@ export component HistoryPage inherits VerticalLayout {
         }
     }
     HorizontalLayout { height: 36px; spacing: 12px;
-        LineEdit { enabled: !RecordState.busy; text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
-        ComboBox { enabled: !RecordState.busy; width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
+        LineEdit { accessible-label: "筛选英雄"; enabled: !RecordState.busy; text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
+        ComboBox { accessible-label: "战绩结果"; enabled: !RecordState.busy; width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
     }
     if HostState.history.length == 0: Label { text: "暂无符合条件的战绩"; height: 42px; color: Theme.muted; }
     for match[index] in HostState.history: Panel {

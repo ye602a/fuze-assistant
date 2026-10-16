@@ -1,5 +1,6 @@
 export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
 export global ClaimState {
+    in-out property <int> scenario: 0;
     in-out property <bool> busy: false;
     in-out property <bool> can-mark: false;
     in-out property <int> cooldown: 0;

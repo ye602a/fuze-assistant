@@ -180,7 +180,9 @@ pub struct Manager {
     roots: Vec<fuze_data::Root>,
     offline: bool,
     visible: bool,
-    offline_preview: bool,
+    manual_side: bool,
+    pub sample_champion: Option<Panel>,
+    pub sample_cards: Option<HostOverlay>,
     pub champion: Option<Panel>,
     pub side: Option<Panel>,
     pub cards: Option<HostOverlay>,
@@ -197,7 +199,9 @@ impl Manager {
             roots,
             offline,
             visible,
-            offline_preview: false,
+            manual_side: false,
+            sample_champion: None,
+            sample_cards: None,
             champion: None,
             side: None,
             cards: None,
@@ -218,20 +222,83 @@ impl Manager {
         let fallback;
         let view = if let Some(view) = view {
             view
-        } else if self.offline {
+        } else {
             fallback = fuze_worker_host::champ_select::Catalog::load(
                 &self.roots,
                 fuze_data::Locale::ZhCn,
             )?
             .playing(4);
             &fallback
-        } else {
-            return Err("champion-selection-unavailable");
         };
-        self.offline_preview = self.offline;
-        let p = self.panel(false)?;
+        // Separate read-only public-data window; never reuse or replace the actual
+        // selection context, save its placement, or enable client writes in a preview.
+        if self.sample_champion.is_none() {
+            self.sample_champion = Some(Panel::new(&self.roots, false, true)?);
+        }
+        let p = self.sample_champion.as_mut().unwrap();
         p.dismissed.set(false);
-        p.update(Some(view), true, true)
+        p.update(Some(view), true, self.visible)
+    }
+    pub fn preview_cards(&mut self) -> Result<(), &'static str> {
+        use fuze_contract::{ActualStage, Slot, Snapshot};
+        let prepared = fuze_data::prepare(
+            &self.roots,
+            fuze_data::Locale::ZhCn,
+            fuze_data::Scope::Detail(4),
+        )?;
+        let cards = prepared.champion_detail(4)?.augments;
+        if cards.len() < 3 {
+            return Err("preview-data-unavailable");
+        }
+        let slots = std::array::from_fn(|i| Slot::Known {
+            id: cards[i].id,
+            name: cards[i].name.clone(),
+            confidence: 1.,
+        });
+        let mut publisher = fuze_worker_host::overlay_frame::Publisher::new(
+            cards,
+            prepared
+                .recommendations(4)?
+                .into_iter()
+                .filter_map(|(id, r)| r.score.map(|s| (id, s)))
+                .collect(),
+        );
+        publisher.publish(
+            Snapshot {
+                schema_version: 1,
+                generation: 1,
+                sequence: 1,
+                dataset_version: prepared.identity(),
+                selection_confirmed: false,
+                actual_stage: ActualStage::Unknown,
+                slots,
+            },
+            true,
+            false,
+            None,
+        );
+        let mut overlay = HostOverlay::new(true).map_err(|_| "overlay-window")?;
+        overlay
+            .preview(
+                publisher.current().ok_or("preview-data-unavailable")?,
+                self.visible,
+            )
+            .map_err(|_| "overlay-window")?;
+        self.sample_cards = Some(overlay);
+        Ok(())
+    }
+    pub fn reference(&mut self, status: &Status) -> Result<(), &'static str> {
+        if status.mode != 1
+            || !matches!(status.connection, Some(State::Connected(Phase::InProgress)))
+        {
+            return Err("reference-unavailable");
+        }
+        let view = status.playing.as_ref().ok_or("reference-unavailable")?;
+        self.manual_side = true;
+        let visible = self.visible;
+        let panel = self.panel(true)?;
+        panel.dismissed.set(false);
+        panel.update(Some(view), true, visible)
     }
     pub fn update(&mut self, status: &Status) -> Result<(), &'static str> {
         let active = status.mode == 1;
@@ -242,10 +309,20 @@ impl Manager {
         let choose = (active && phase == Phase::ChampSelect && status.preferences.champ_select)
             .then_some(status.selection.as_ref())
             .flatten();
-        let side = (active && phase == Phase::InProgress && status.preferences.augment_side_panel)
+        if !active || phase != Phase::InProgress {
+            self.manual_side = false;
+        }
+        let side = (active
+            && phase == Phase::InProgress
+            && (status.preferences.augment_side_panel || self.manual_side))
             .then_some(status.playing.as_ref())
             .flatten();
-        if !self.offline_preview && (choose.is_some() || self.champion.is_some()) {
+        // Live game surfaces always supersede previews, including after reconnect.
+        if active && matches!(phase, Phase::ChampSelect | Phase::InProgress) {
+            self.sample_champion = None;
+            self.sample_cards = None;
+        }
+        if choose.is_some() || self.champion.is_some() {
             let visible = self.visible;
             let panel = self.panel(false)?;
             panel

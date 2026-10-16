@@ -34,6 +34,13 @@ fn notice(ui: &Workbench, result: Result<(), &'static str>) {
     if let Err(e) = result {
         ui.global::<HostState>().set_notice(
             match e {
+                "reference-unavailable" => {
+                    "当前没有已确认英雄的对局，局内资料暂不可用。请在进入对局后重试。"
+                }
+                "preview-data-unavailable" => "本地预览数据不完整，请暂停识别后更新推荐数据。",
+                "preview-live-phase" => {
+                    "正在显示真实选人或对局内容。请先暂停识别，再打开样例预览。"
+                }
                 "champion-selection-unavailable" => {
                     "当前没有已确认的选人信息，请进入选人阶段后查看。"
                 }
@@ -297,10 +304,45 @@ pub fn attach_recovered(
     let popup_action = popup.clone();
     state.on_command(move |command| {
         if let Some(ui) = weak.upgrade() {
+            if matches!(command.as_str(), "preview-champion" | "preview-cards") {
+                let status = service.snapshot();
+                if status.mode == 1
+                    && matches!(
+                        status.connection,
+                        Some(fuze_lcu::reconnect::State::Connected(
+                            fuze_runtime::session::Phase::ChampSelect
+                                | fuze_runtime::session::Phase::InProgress
+                        ))
+                    )
+                {
+                    notice(&ui, Err("preview-live-phase"));
+                    return;
+                }
+            }
             if command == "preview-champion" {
                 let opened = popup_action
                     .borrow_mut()
                     .preview(service.snapshot().selection.as_ref());
+                if opened.is_ok() {
+                    ui.global::<HostState>()
+                        .set_notice("已打开只读选人预览，内容不是本局识别结果。".into());
+                }
+                notice(&ui, opened);
+                return;
+            }
+            if command == "show-reference" {
+                notice(
+                    &ui,
+                    popup_action.borrow_mut().reference(&service.snapshot()),
+                );
+                return;
+            }
+            if command == "preview-cards" {
+                let opened = popup_action.borrow_mut().preview_cards();
+                if opened.is_ok() {
+                    ui.global::<HostState>()
+                        .set_notice("已打开三卡公开样例，内容不是本局识别结果。".into());
+                }
                 notice(&ui, opened);
                 return;
             }
