@@ -63,6 +63,29 @@ const RETENTION_TIMER: usize = 0xf017;
 fn retention_expired() -> bool {
     RETAIN_UNTIL.with(|r| r.get().is_some_and(|at| std::time::Instant::now() >= at))
 }
+fn retention_delay(remaining: std::time::Duration) -> u32 {
+    // Truncating milliseconds can schedule before the absolute deadline.
+    remaining.as_nanos().div_ceil(1_000_000).clamp(1, 2500) as u32
+}
+unsafe fn arm_retention(hwnd: HWND) {
+    KillTimer(hwnd, RETENTION_TIMER);
+    let now = std::time::Instant::now();
+    let Some(deadline) = RETAIN_UNTIL.with(|r| r.get()) else {
+        return;
+    };
+    if now >= deadline {
+        ShowWindow(hwnd, SW_HIDE);
+    } else if SetTimer(
+        hwnd,
+        RETENTION_TIMER,
+        retention_delay(deadline.duration_since(now)),
+        None,
+    ) == 0
+    {
+        RETAIN_UNTIL.with(|r| r.set(Some(now)));
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
 thread_local! {
     static ICONS: std::cell::RefCell<std::collections::HashMap<u32, std::sync::Arc<Vec<u8>>>> = std::cell::RefCell::new(std::collections::HashMap::new());
     static STATS: std::cell::RefCell<std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -224,10 +247,8 @@ unsafe extern "system" fn procedure(
             0
         }
         WM_TIMER if wparam == RETENTION_TIMER => {
-            if retention_expired() {
-                KillTimer(hwnd, RETENTION_TIMER);
-                ShowWindow(hwnd, SW_HIDE);
-            }
+            // An early timer message must re-arm only the remaining time, not another 2.5s.
+            arm_retention(hwnd);
             0
         }
         WM_PAINT => {
@@ -885,19 +906,7 @@ impl HiddenOverlay {
                                     });
                                     RETAINED.with(|r| r.set(retained.is_some()));
                                     RETAIN_UNTIL.with(|r| r.set(retained));
-                                    KillTimer(hwnd, RETENTION_TIMER);
-                                    if let Some(deadline) = retained {
-                                        let delay = deadline
-                                            .saturating_duration_since(std::time::Instant::now())
-                                            .as_millis()
-                                            .clamp(1, 2500)
-                                            as u32;
-                                        if SetTimer(hwnd, RETENTION_TIMER, delay, None) == 0 {
-                                            RETAIN_UNTIL
-                                                .with(|r| r.set(Some(std::time::Instant::now())));
-                                            ShowWindow(hwnd, SW_HIDE); // Timer failure must never leave stale content visible.
-                                        }
-                                    }
+                                    arm_retention(hwnd);
                                     SNAPSHOT.with(|s| *s.borrow_mut() = Some(snapshot));
                                 }
                                 (accepted, ack)
@@ -1088,4 +1097,24 @@ impl Drop for Surface {
 /// Numeric test metadata only; never reads desktop pixels.
 pub fn fixture_screen_size() -> (i32, i32) {
     unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    #[test]
+    fn timer_rounds_up_remaining_time_instead_of_repeating_full_grace() {
+        use std::time::Duration;
+        assert_eq!(retention_delay(Duration::from_nanos(1)), 1);
+        assert_eq!(retention_delay(Duration::from_micros(2499_100)), 2500);
+        assert_eq!(retention_delay(Duration::from_micros(11_100)), 12);
+        assert_eq!(retention_delay(Duration::from_secs(60)), 2500);
+        let now = std::time::Instant::now();
+        RETAIN_UNTIL.with(|r| r.set(Some(now + Duration::from_secs(1))));
+        assert!(!retention_expired());
+        RETAIN_UNTIL.with(|r| r.set(Some(now)));
+        assert!(retention_expired());
+        RETAIN_UNTIL.with(|r| r.set(None));
+        assert!(!retention_expired());
+    }
 }

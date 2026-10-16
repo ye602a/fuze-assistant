@@ -372,14 +372,20 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
         {
             return Err("retention-timer-start".into());
         }
+        let wait = Instant::now();
         std::thread::sleep(Duration::from_millis(2700));
-        if unsafe {
+        let still_visible = unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(
                 timed.owned_handle() as windows_sys::Win32::Foundation::HWND
             )
-        } != 0
-            || timed.visible(true)?
-        {
+        } != 0;
+        let reopened = timed.visible(true)?;
+        if still_visible || reopened {
+            println!(
+                "{}",
+                serde_json::json!({"error":"retention-timer-expiry","passed":false,
+                "still_visible":still_visible,"reopen_accepted":reopened,"wait_ms":wait.elapsed().as_millis(),"game_access":false})
+            );
             return Err("retention-timer-expiry".into());
         }
     }
@@ -458,7 +464,10 @@ fn main() {
             | "cancelled-update-accepted" => text.as_str(),
             _ => "host-failed",
         };
-        if code != "fixture-mismatch" && text != "reported-capture-start" {
+        if code != "fixture-mismatch"
+            && code != "retention-timer-expiry"
+            && text != "reported-capture-start"
+        {
             println!("{}", serde_json::json!({"passed":false,"error":code}));
         }
         eprintln!("fuze-worker-host: failed");

@@ -113,6 +113,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rust-prototype-evidence
+          retention-days: 7
           path: |
             rust/artifacts/desktop-validation.json
             rust/artifacts/update-validation.json
