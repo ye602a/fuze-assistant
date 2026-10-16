@@ -305,45 +305,66 @@ pub(crate) fn transfer(
                 return Err("update-range");
             }
         }
-        let mut bytes = 0usize;
-        let mut buffer = [0u8; 65536];
-        loop {
-            check()?;
-            // Read the bytes already available rather than waiting to fill 64 KiB.
-            // WinHTTP receive timeouts apply per network packet, not per ReadData call.
-            let mut available = 0u32;
-            if WinHttpQueryDataAvailable(request.0, &mut available) == 0 {
-                return Err(network_error("available"));
-            }
-            check()?;
-            let mut read = 0;
-            if WinHttpReadData(
-                request.0,
-                buffer.as_mut_ptr().cast(),
-                available.max(1).min(buffer.len() as u32),
-                &mut read,
-            ) == 0
-            {
-                return Err(network_error("read"));
-            }
-            if read == 0 {
-                break;
-            }
-            if bytes + read as usize > limit {
-                return Err("update-size");
-            }
-            output
-                .write_all(&buffer[..read as usize])
-                .map_err(|_| "update-write")?;
-            bytes += read as usize;
-            trace.bytes = bytes;
-        }
-        check()?;
-        if range.is_some() && bytes != limit {
-            return Err("update-range");
-        }
+        // Whole-response downloads use a fixed buffer directly. QueryDataAvailable
+        // adds a call/internal copy and normally limits each read to at most 8 KiB.
+        // Keep both wall budgets and WinHTTP receive timeouts; zero ReadData means EOF.
+        read_body(
+            limit,
+            range.is_some(),
+            output,
+            &check,
+            &mut |buffer| {
+                let mut read = 0;
+                if WinHttpReadData(
+                    request.0,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len() as u32,
+                    &mut read,
+                ) == 0
+                {
+                    Err(network_error("read"))
+                } else {
+                    Ok(read as usize)
+                }
+            },
+            &mut |bytes| trace.bytes = bytes,
+        )?;
         Ok(None)
     }
+}
+
+fn read_body(
+    limit: usize,
+    exact: bool,
+    output: &mut dyn std::io::Write,
+    check: &dyn Fn() -> Result<()>,
+    read: &mut dyn FnMut(&mut [u8]) -> Result<usize>,
+    accepted: &mut dyn FnMut(usize),
+) -> Result<()> {
+    let mut bytes = 0usize;
+    let mut buffer = [0u8; 65536];
+    loop {
+        check()?;
+        // At the limit, one extra byte distinguishes EOF from an oversized response.
+        let capacity = (limit - bytes).saturating_add(1).min(buffer.len());
+        let count = read(&mut buffer[..capacity])?;
+        check()?;
+        if count > capacity || count > limit - bytes {
+            return Err("update-size");
+        }
+        if count == 0 {
+            break;
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|_| "update-write")?;
+        bytes += count;
+        accepted(bytes);
+    }
+    if exact && bytes != limit {
+        return Err("update-range");
+    }
+    Ok(())
 }
 
 fn request_budget(limit: usize, ranged: bool) -> Duration {
@@ -360,6 +381,86 @@ fn request_budget(limit: usize, ranged: bool) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixed_buffer_preserves_short_read_eof_size_and_cancellation_boundaries() {
+        use std::io::{Cursor, Read};
+        let bytes = vec![3u8; 131089];
+        let mut source = Cursor::new(&bytes);
+        let mut output = Vec::new();
+        read_body(
+            bytes.len(),
+            true,
+            &mut output,
+            &|| Ok(()),
+            &mut |buf| {
+                // Short reads are valid; only zero is EOF.
+                let length = buf.len().min(12345);
+                source
+                    .read(&mut buf[..length])
+                    .map_err(|_| "update-network")
+            },
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(output, bytes);
+        let mut short = Cursor::new(b"abc");
+        assert_eq!(
+            read_body(
+                4,
+                true,
+                &mut Vec::new(),
+                &|| Ok(()),
+                &mut |buf| Ok(short.read(buf).unwrap()),
+                &mut |_| {}
+            ),
+            Err("update-range")
+        );
+        let mut long = Cursor::new(b"abcde");
+        assert_eq!(
+            read_body(
+                4,
+                false,
+                &mut Vec::new(),
+                &|| Ok(()),
+                &mut |buf| Ok(long.read(buf).unwrap()),
+                &mut |_| {}
+            ),
+            Err("update-size")
+        );
+        assert_eq!(
+            read_body(
+                4,
+                true,
+                &mut Vec::new(),
+                &|| Err("update-cancelled"),
+                &mut |_| panic!("cancelled before read"),
+                &mut |_| {}
+            ),
+            Err("update-cancelled")
+        );
+        let cancelled = std::cell::Cell::new(false);
+        let mut output = Vec::new();
+        assert_eq!(
+            read_body(
+                4,
+                true,
+                &mut output,
+                &|| if cancelled.get() {
+                    Err("update-cancelled")
+                } else {
+                    Ok(())
+                },
+                &mut |buf| {
+                    buf[0] = 1;
+                    cancelled.set(true);
+                    Ok(1)
+                },
+                &mut |_| {}
+            ),
+            Err("update-cancelled")
+        );
+        assert!(output.is_empty());
+    }
     #[test]
     fn archive_ranges_keep_package_budget_without_relaxing_metadata() {
         assert_eq!(request_budget(1024 * 1024, true), Duration::from_secs(600));

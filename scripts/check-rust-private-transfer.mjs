@@ -10,11 +10,16 @@ const allowedErrors = new Set(['update-access-or-release', 'update-network', 'up
   'update-range', 'update-http-status', 'update-redirect-policy', 'update-redirect-limit', 'update-map-hash',
   'update-final-hash', 'delta-final-hash', 'validation-real-range-required', 'validation-full-fallback',
   'validation-root-must-be-new', 'validation-baseline', 'credential-format', 'update-release-assets',
-  'update-release-channel', 'update-manifest-policy', 'update-auth-policy', 'update-size', 'update-write', 'update-stage'])
+  'update-release-channel', 'update-manifest-policy', 'update-auth-policy', 'update-size', 'update-write', 'update-stage',
+  'validation-resume-root', 'validation-resume-version-changed', 'validation-resume-empty',
+  'update-resume-open', 'update-resume-path', 'update-resume-header', 'update-resume-size', 'update-resume-write'])
 async function main() {
   const args = process.argv.slice(2)
-  if (args.length !== 3) throw new Error('arguments')
-  const [verifier, baseline, output] = args.map(value => path.resolve(value))
+  if (args.length !== 3 && args.length !== 4) throw new Error('arguments')
+  const mode = args[3] ?? 'transfer'
+  if (!['transfer', 'resume-seed', 'resume'].includes(mode)) throw new Error('arguments')
+  const [verifier, baseline, output] = args.slice(0, 3).map(value => path.resolve(value))
+  const reportName = mode === 'transfer' ? 'transfer-report.json' : `transfer-report-${mode}-${Date.now()}.json`
   const artifacts = path.join(root, 'rust', 'artifacts') + path.sep
   if (path.basename(verifier).toLowerCase() !== 'fuze-update-verify.exe'
     || !output.startsWith(artifacts) || !path.basename(output).startsWith('private-transfer-')) throw new Error('paths')
@@ -22,7 +27,13 @@ async function main() {
     const stat = await lstat(file)
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error('inputs')
   }
-  try { await access(output); throw new Error('output-exists') } catch (error) { if (error.code !== 'ENOENT') throw error }
+  if (mode === 'resume') {
+    const dir = await lstat(output)
+    const marker = await lstat(path.join(output, 'resume-validation.json'))
+    if (!dir.isDirectory() || dir.isSymbolicLink() || !marker.isFile() || marker.isSymbolicLink() || marker.size > 16384) throw new Error('resume-root')
+  } else {
+    try { await access(output); throw new Error('output-exists') } catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
   const env = {...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_TRACE: '0', GIT_CURL_VERBOSE: '0'}
   for (const key of Object.keys(env)) if (/^GIT_TRACE/i.test(key)) delete env[key]
   env.GIT_TRACE = '0'
@@ -54,7 +65,9 @@ async function main() {
   console.log('Starting isolated Rust transfer verification; no installation.')
   let timer
   try {
-    const child = spawn(verifier, ['--transport-private', output, baseline, baseline + '.blockmap'], {
+    const childArgs = mode === 'transfer' ? ['--transport-private', output, baseline, baseline + '.blockmap']
+      : [mode === 'resume-seed' ? '--resume-seed-private' : '--resume-private', output]
+    const child = spawn(verifier, childArgs, {
       cwd: root, env: {...env, FUZE_UPDATE_VERIFY_TRACE: '1'}, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     })
     const buffers = [], errors = []
@@ -80,31 +93,43 @@ async function main() {
       transport.body_ms += Number(match[4])
       transport.received_bytes += Number(match[5])
     }
+    const network = lines.map(line => /^update-network stage=(open|send|receive|available|read) code=(\d{1,10})$/.exec(line))
+      .filter(Boolean).map(match => ({stage: match[1], code: Number(match[2])})).slice(0, 8)
+    const budget = lines.map(line => /^update-budget scope=(caller|request) ms=(\d{1,10})$/.exec(line))
+      .filter(Boolean).map(match => ({scope: match[1], ms: Number(match[2])})).slice(0, 8)
     if (code !== 0) {
       const error = lines.at(-1)
-      const network = lines.map(line => /^update-network stage=(open|send|receive|available|read) code=(\d{1,10})$/.exec(line))
-        .filter(Boolean).map(match => ({stage: match[1], code: Number(match[2])})).slice(0, 8)
       const delta = lines.map(line => /^validation-delta bytes=(\d{1,15}) requests=(\d{1,10}) ms=(\d{1,10})$/.exec(line)).find(Boolean)
       const deltaVerified = delta ? {bytes: Number(delta[1]), requests: Number(delta[2]), ms: Number(delta[3])} : undefined
-      const budget = lines.map(line => /^update-budget scope=(caller|request) ms=(\d{1,10})$/.exec(line))
-        .filter(Boolean).map(match => ({scope: match[1], ms: Number(match[2])})).slice(0, 8)
       const report = {success: false, error: terminationReason ?? (allowedErrors.has(error) ? error : 'private-transfer-verification-failed'), network, budget, deltaVerified,
         transport, installed: false, game_access: false, credential_persisted: false}
-      try { await writeFile(path.join(output, 'transfer-report.json'), JSON.stringify(report, null, 2), {flag: 'wx'}) }
+      try { await writeFile(path.join(output, reportName), JSON.stringify(report, null, 2), {flag: 'wx'}) }
       catch (writeError) { if (writeError.code !== 'ENOENT') throw writeError }
       console.log(JSON.stringify(report))
       process.exitCode = 1
       return
     }
     const raw = JSON.parse(Buffer.concat(buffers).toString('utf8'))
-    const report = {transport}
-    for (const key of ['package_bytes', 'real_range_bytes', 'full_bytes', 'delta_received_bytes', 'fallback_received_bytes', 'delta_range_requests', 'delta_ms', 'total_ms']) {
+    const report = {transport, network, budget}
+    const numericKeys = mode === 'transfer'
+      ? ['package_bytes', 'real_range_bytes', 'full_bytes', 'delta_received_bytes', 'fallback_received_bytes', 'delta_range_requests', 'delta_ms', 'total_ms']
+      : ['package_bytes', 'retained_before', 'retained_after', 'resume_offset', 'received_bytes', 'total_ms']
+    for (const key of numericKeys) {
       if (!Number.isSafeInteger(raw[key]) || raw[key] < 0) throw new Error('report')
       report[key] = raw[key]
     }
-    for (const key of ['private_download', 'final_hashes_verified', 'full_fallback']) {
+    for (const key of mode === 'transfer' ? ['private_download', 'final_hashes_verified', 'full_fallback'] : []) {
       if (raw[key] !== true) throw new Error('report')
       report[key] = true
+    }
+    if (mode !== 'transfer') {
+      for (const key of ['success', 'seed', 'final_hashes_verified']) {
+        if (typeof raw[key] !== 'boolean') throw new Error('report')
+        report[key] = raw[key]
+      }
+      if (raw.seed !== (mode === 'resume-seed') || raw.success && raw.final_hashes_verified !== !raw.seed) throw new Error('report')
+      report.error = raw.success ? null : allowedErrors.has(raw.error) ? raw.error : 'private-transfer-verification-failed'
+      if (!raw.success) process.exitCode = 1
     }
     for (const key of ['installed', 'game_access', 'credential_persisted']) {
       if (raw[key] !== false) throw new Error('report')
@@ -112,7 +137,7 @@ async function main() {
     }
     if (!/^[0-9a-f]{12}$/.test(raw.revision)) throw new Error('report')
     report.revision = raw.revision
-    await writeFile(path.join(output, 'transfer-report.json'), JSON.stringify(report, null, 2), {flag: 'wx'})
+    await writeFile(path.join(output, reportName), JSON.stringify(report, null, 2), {flag: 'wx'})
     console.log(JSON.stringify(report))
   } finally { clearTimeout(timer); secret?.fill(0) }
 }

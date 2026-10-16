@@ -158,6 +158,122 @@ pub fn transport(
     transfer_check(session, root, old_archive, old_map).map(|(_, report)| report)
 }
 
+/// Two explicit processes: seed a real prefix then reopen it in a later invocation.
+/// No archive extraction, application launch or install lifecycle is reachable here.
+pub fn resume_transport(session: Session, root: &Path, seed: bool) -> Result<serde_json::Value> {
+    use std::{
+        cell::{Cell, RefCell},
+        io::Write,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{Duration, Instant},
+    };
+    if seed {
+        fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
+    } else if !root.is_dir() {
+        return Err("validation-resume-root");
+    }
+    install::safe_dir(root)?;
+    let _lock = install::lock(root)?;
+    let marker = root.join("resume-validation.json");
+    let prior = if seed {
+        None
+    } else {
+        let manifest: Manifest = serde_json::from_slice(&update_channel::bounded(&marker, 16384)?)
+            .map_err(|_| "validation-resume-root")?;
+        manifest.validate()?;
+        Some(manifest)
+    };
+    let started = Instant::now();
+    let cancel = || started.elapsed() >= Duration::from_secs(600);
+    let release = session.check(&cancel)?;
+    if release.manifest.size <= 1024 * 1024 {
+        return Err("validation-real-range-required");
+    }
+    let manifest = serde_json::to_vec(&release.manifest).map_err(|_| "validation-manifest")?;
+    if let Some(prior) = prior {
+        if serde_json::to_vec(&prior).map_err(|_| "validation-manifest")? != manifest {
+            return Err("validation-resume-version-changed");
+        }
+    } else {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&marker)
+            .map_err(|_| "validation-resume-root")?;
+        file.write_all(&manifest)
+            .map_err(|_| "validation-resume-root")?;
+    }
+    let cache = RefCell::new(crate::update_resume::Cache::open(root, &release.manifest)?);
+    let before = cache.borrow().retained_bytes()?;
+    if !seed && before == 0 {
+        return Err("validation-resume-empty");
+    }
+    let received = AtomicU64::new(0);
+    let prefix = Cell::new(0);
+    let attempt = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "validation-clock")?
+        .as_nanos();
+    let result = update_channel::fetch_with(
+        &release.manifest,
+        &root.join(format!("attempt-{attempt}.fuz")),
+        None,
+        &[],
+        &|_, _| Err("validation-unexpected-delta"),
+        &|out| {
+            cache.borrow_mut().transfer(
+                out,
+                &|offset, output| {
+                    if seed {
+                        let mut bytes = Vec::new();
+                        session.download(
+                            &release.archive,
+                            1024 * 1024,
+                            Some((0, 1024 * 1024 - 1, release.manifest.size)),
+                            &mut bytes,
+                            &cancel,
+                        )?;
+                        received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                        output.write_all(&bytes).map_err(|_| "update-write")?;
+                        Err("validation-intentional-interruption")
+                    } else {
+                        session.archive_from_observed(
+                            &release.archive,
+                            release.manifest.size,
+                            offset,
+                            output,
+                            &cancel,
+                            &|bytes| {
+                                received.fetch_add(bytes, Ordering::Relaxed);
+                            },
+                        )
+                    }
+                },
+                &cancel,
+                &|value| prefix.set(value),
+            )
+        },
+        &cancel,
+    );
+    let success = if seed {
+        result == Err("validation-intentional-interruption")
+    } else {
+        result.is_ok()
+    };
+    let verified = result.is_ok();
+    if verified || result == Err("update-final-hash") {
+        cache.borrow_mut().clear()?;
+    }
+    Ok(serde_json::json!({
+        "success": success, "seed": seed, "final_hashes_verified": verified,
+        "error": if success { None } else { result.err() },
+        "package_bytes": release.manifest.size, "retained_before": before,
+        "retained_after": cache.borrow().retained_bytes()?, "resume_offset": prefix.get(),
+        "received_bytes": received.load(Ordering::Relaxed), "total_ms": started.elapsed().as_millis(),
+        "revision": release.manifest.revision, "installed": false, "game_access": false, "credential_persisted": false
+    }))
+}
+
 fn transfer_check(
     session: Session,
     root: &Path,

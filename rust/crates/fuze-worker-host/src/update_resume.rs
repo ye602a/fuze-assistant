@@ -99,6 +99,16 @@ impl Cache {
             .map_err(|_| "update-resume-write")?;
         self.file.sync_all().map_err(|_| "update-resume-write")
     }
+    /// Candidate byte count only, never an integrity or installation verdict.
+    pub fn retained_bytes(&self) -> Result<u64> {
+        self.file
+            .metadata()
+            .map_err(|_| "update-resume-open")?
+            .len()
+            .checked_sub(HEADER)
+            .filter(|n| *n <= self.size)
+            .ok_or("update-resume-size")
+    }
     pub fn transfer(
         &mut self,
         output: &mut File,
@@ -109,14 +119,7 @@ impl Cache {
         if cancel() {
             return Err("update-cancelled");
         }
-        let length = self
-            .file
-            .metadata()
-            .map_err(|_| "update-resume-open")?
-            .len()
-            .checked_sub(HEADER)
-            .filter(|n| *n <= self.size)
-            .ok_or("update-resume-size")?;
+        let length = self.retained_bytes()?;
         // File length is NOT a verification signal. Drop an interrupted final block;
         // even a complete cached prefix remains untrusted until the caller's final hash.
         let mut prefix = if length == self.size {
