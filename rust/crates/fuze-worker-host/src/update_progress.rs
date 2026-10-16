@@ -17,10 +17,12 @@ static BYTES: AtomicU64 = AtomicU64::new(0);
 static SIZE: AtomicU64 = AtomicU64::new(0);
 static REUSE: AtomicU64 = AtomicU64::new(0);
 static MODE: AtomicU8 = AtomicU8::new(0);
+static FULL_MODE: AtomicU8 = AtomicU8::new(2);
 pub fn reset_transfer() {
     BYTES.store(0, Ordering::Relaxed);
     SIZE.store(0, Ordering::Relaxed);
     REUSE.store(0, Ordering::Relaxed);
+    FULL_MODE.store(2, Ordering::Relaxed);
     MODE.store(0, Ordering::Release);
 }
 pub fn transfer_event(event: crate::update_channel::TransferEvent) {
@@ -34,6 +36,7 @@ pub fn transfer_event(event: crate::update_channel::TransferEvent) {
         Full { size, fallback } => {
             SIZE.store(size, Ordering::Relaxed);
             REUSE.store(0, Ordering::Relaxed);
+            FULL_MODE.store(if fallback { 3 } else { 2 }, Ordering::Relaxed);
             MODE.store(if fallback { 3 } else { 2 }, Ordering::Release);
         }
         Verify => MODE.store(4, Ordering::Release),
@@ -44,6 +47,18 @@ pub fn transfer_event(event: crate::update_channel::TransferEvent) {
 pub struct Counted<'a>(pub &'a mut dyn std::io::Write);
 pub fn received(count: u64) {
     BYTES.fetch_add(count, Ordering::Relaxed);
+}
+pub fn resume_prefix(bytes: u64) {
+    REUSE.store(bytes, Ordering::Relaxed);
+    // Full fallback is still a full-package path; only its transport resumes.
+    MODE.store(
+        if bytes > 0 {
+            5
+        } else {
+            FULL_MODE.load(Ordering::Relaxed)
+        },
+        Ordering::Release,
+    );
 }
 impl std::io::Write for Counted<'_> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -91,6 +106,7 @@ fn status_text(view: View) -> String {
         2 => "全量下载 · 没有可用差分基线",
         3 => "已回退全量下载 · 差分未成功",
         4 => "正在校验完整包 · 校验通过前不会安装",
+        5 => "继续上次下载 · 保留片段仍须整包校验",
         _ => "正在准备下载方案",
     });
     format!(
@@ -287,7 +303,7 @@ mod tests {
             let mut fits = true;
             for locale in ["zh-CN", "zh-TW", "en-US"] {
                 crate::i18n::set(locale);
-                for mode in 1..=4 {
+                for mode in 1..=5 {
                     let text = status_text(View {
                         stage: 2,
                         mode,
@@ -342,6 +358,12 @@ mod tests {
         });
         assert_eq!(received_bytes(), 4);
         assert_eq!(snapshot().reuse, 0);
+        resume_prefix(1048576);
+        assert_eq!(snapshot().mode, 5);
+        assert_eq!(snapshot().reuse, 1048576);
+        assert_eq!(received_bytes(), 4);
+        resume_prefix(0);
+        assert_eq!(snapshot().mode, 3);
         Counted(&mut output).write_all(b"AAAACCCC").unwrap();
         assert_eq!(received_bytes(), 12);
         struct Partial;

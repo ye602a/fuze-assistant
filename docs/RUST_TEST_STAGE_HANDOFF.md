@@ -27,8 +27,9 @@
 | #61 | `feat/rust-locale-activation`，基于 #60 | 完整语言数据预检、原子设置提交与旧结果清理 | Windows CI 38899584011 已复核成功 |
 | #62 | `fix/rust-locale-context`，基于 #61 | 失效语言/目录清理、观察名称按精确版本加载 | Windows CI 38900861413 已复核成功 |
 | #63 | `test/rust-private-transfer`，基于 #62 | 包分块预算修正、独立真实私有传输验收 | Windows CI 38905418434 已复核成功；差分真实验证通过，全量整体超时仍未关闭 |
+| #64 | `perf/rust-update-range-routing`，基于 #63 | CDN 路由复用、滚动四路分块、固定字段耗时 | Windows 更新 CI 38908962753 已复核成功；真实全量正文超时仍未关闭 |
 
-本批继续 `perf/rust-update-range-routing`，基于 #63：全量分块仅在当前下载内复用已验证的 CDN 地址，四路改为按序写入后立即补发，补上认证错误优先及固定角色耗时汇总。两次真实复验均仅 7 次 API 请求；最终构建差分通过，全量写入 21 MiB 后正文等待报 WinHTTP 12002 超时，尚未通过。具体结果见 `rust/ui-lab/evidence/PRIVATE_RANGE_ROUTING.md`。前一批预算修复见 `PRIVATE_TRANSFER.md`。语言上下文与显式切换事务分别见 `LOCALE_CONTEXT.md`、`LOCALE_ACTIVATION.md`。Slint 全量文案和语言入口仍未开放，本批不打包。
+本批继续 `feat/rust-update-resume`，基于 #64：显式重试时复用全量下载的候选前缀；单个有界缓存不保存凭据/地址，完成后仍需整包校验；补取消、认证失败、Range 回退和缓存身份边界。生产更新入口已接线，定向测试与编译通过，尚未再次完成真实私有全量续传，见 `rust/ui-lab/evidence/UPDATE_RESUME.md`。上一批真实全量写入 21 MiB 后正文等待报 WinHTTP 12002 超时的证据仍有效，见 `PRIVATE_RANGE_ROUTING.md`。Slint 全量文案和语言入口仍未开放，本批不打包。
 
 这是堆叠 PR，不能跳过依赖只合并最后一项。按顺序核对后再处理基分支调整与合并。本批开始时已有 `docs/STAGE_STATISTICS.md` 修改和未跟踪的 `docs/LOCAL_VALIDATION_NEXT.md`，均未纳入本批提交，不得覆盖、清理或顺手上传。
 

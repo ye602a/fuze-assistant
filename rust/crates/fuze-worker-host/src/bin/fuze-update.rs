@@ -237,7 +237,8 @@ fn run() -> Result<(), &'static str> {
                 }
             })?;
         fuze_worker_host::update_progress::STAGE.store(2, std::sync::atomic::Ordering::Release);
-        let transfer = update_channel::fetch_observed(
+        let resume = std::cell::RefCell::new(None);
+        let transfer_result = update_channel::fetch_observed(
             &release.manifest,
             &destination,
             old,
@@ -254,17 +255,45 @@ fn run() -> Result<(), &'static str> {
                 Ok(b)
             },
             &|out| {
-                session.archive_observed(
-                    &release.archive,
-                    release.manifest.size,
-                    out,
-                    &cancelled,
-                    &fuze_worker_host::update_progress::received,
-                )
+                let mut cache = resume.borrow_mut();
+                *cache =
+                    fuze_worker_host::update_resume::Cache::open(&root, &release.manifest).ok();
+                let fetch = |offset, output: &mut dyn std::io::Write| {
+                    session.archive_from_observed(
+                        &release.archive,
+                        release.manifest.size,
+                        offset,
+                        output,
+                        &cancelled,
+                        &fuze_worker_host::update_progress::received,
+                    )
+                };
+                match cache.as_mut() {
+                    Some(cache) => cache.transfer(
+                        out,
+                        &fetch,
+                        &cancelled,
+                        &fuze_worker_host::update_progress::resume_prefix,
+                    ),
+                    // An unknown/locked cache is preserved; it cannot block a fresh download.
+                    None => fetch(0, out),
+                }
             },
             &cancelled,
             &fuze_worker_host::update_progress::transfer_event,
-        )?;
+        );
+        if transfer_result.is_ok() || transfer_result == Err("update-final-hash") {
+            let mut cached = resume.borrow_mut();
+            // A later successful delta should also release an older full-download prefix.
+            if cached.is_none() && root.join("download.resume").exists() {
+                *cached =
+                    fuze_worker_host::update_resume::Cache::open(&root, &release.manifest).ok();
+            }
+            if let Some(cache) = cached.as_mut() {
+                cache.clear()?;
+            }
+        }
+        let transfer = transfer_result?;
         fuze_worker_host::update_progress::STAGE.store(3, std::sync::atomic::Ordering::Release);
         let extracted = stage.join("version");
         install::unpack(&destination, &extracted, &release.manifest.revision)?;

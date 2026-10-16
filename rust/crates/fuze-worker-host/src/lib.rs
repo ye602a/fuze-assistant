@@ -77,6 +77,8 @@ pub mod update_io;
 #[cfg(windows)]
 pub mod update_progress;
 #[cfg(windows)]
+pub mod update_resume;
+#[cfg(windows)]
 pub mod update_validation;
 #[cfg(windows)]
 pub mod window_memory;

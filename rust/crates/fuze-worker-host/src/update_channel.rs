@@ -149,8 +149,26 @@ impl Session {
         cancel: &(dyn Fn() -> bool + Sync),
         progress: &(dyn Fn(u64) + Sync),
     ) -> Result<()> {
-        if size == 0 || size > 512 * 1024 * 1024 {
+        self.archive_from_observed(url, size, 0, out, cancel, progress)
+    }
+    /// Append only the requested suffix; the caller must still verify the whole package.
+    pub fn archive_from_observed(
+        &self,
+        url: &str,
+        size: u64,
+        offset: u64,
+        out: &mut dyn Write,
+        cancel: &(dyn Fn() -> bool + Sync),
+        progress: &(dyn Fn(u64) + Sync),
+    ) -> Result<()> {
+        if size == 0 || size > 512 * 1024 * 1024 || offset > size {
             return Err("update-size");
+        }
+        if cancel() {
+            return Err("update-cancelled");
+        }
+        if offset == size {
+            return Ok(());
         }
         let started = std::time::Instant::now();
         let cancelled = || cancel() || started.elapsed() > std::time::Duration::from_secs(600);
@@ -173,11 +191,11 @@ impl Session {
                 Ok((final_url, bytes))
             })
         };
-        let first = size.min(1024 * 1024);
-        match fetch(0, first) {
+        let first = (size - offset).min(1024 * 1024);
+        match fetch(offset, first) {
             Ok(bytes) => out.write_all(&bytes).map_err(|_| "update-write")?,
             // Probe once before concurrency; no partial 200 body has been written.
-            Err("update-http-status") => {
+            Err("update-http-status") if offset == 0 => {
                 return self.download(
                     url,
                     size as usize,
@@ -188,7 +206,7 @@ impl Session {
             }
             Err(error) => return Err(error),
         }
-        transfer_chunks(first, size, out, &fetch, &cancelled)
+        transfer_chunks(offset + first, size, out, &fetch, &cancelled)
     }
     pub fn check(&self, cancel: &dyn Fn() -> bool) -> Result<Release> {
         let raw: serde_json::Value =

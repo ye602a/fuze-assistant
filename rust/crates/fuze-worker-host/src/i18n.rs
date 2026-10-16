@@ -30,6 +30,7 @@ pub fn text(s: &str) -> &str {
 const MESSAGES: &[[&str; 3]] = &[
     ["差分下载 · 复用旧包内容", "差分下載 · 重用舊包內容", "Delta download · reusing the previous package"],
     ["全量下载 · 没有可用差分基线", "完整下載 · 沒有可用差分基準", "Full download · no usable delta baseline"],
+    ["继续上次下载 · 保留片段仍须整包校验", "繼續上次下載 · 保留片段仍須完整驗證", "Resuming download · cached bytes still require full verification"],
     ["已回退全量下载 · 差分未成功", "已改為完整下載 · 差分未成功", "Falling back to a full download · delta failed"],
     ["正在校验完整包 · 校验通过前不会安装", "正在驗證完整包 · 通過前不會安裝", "Verifying the complete package · installation has not started"],
     ["正在准备下载方案", "正在準備下載方案", "Preparing the download plan"],
