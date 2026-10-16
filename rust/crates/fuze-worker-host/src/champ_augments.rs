@@ -3,6 +3,80 @@ use super::*;
 use crate::desktop::{fill, rgb, text};
 use fuze_data::champion_detail::Augment;
 
+struct DescriptionLayout {
+    chars: usize,
+    rows: usize,
+    max_scroll: usize,
+    top: i32,
+    height: i32,
+}
+impl DescriptionLayout {
+    fn new(width: i32, bottom: i32, text: &str, english: bool) -> Self {
+        let chars = ((width - 64) / if english { 7 } else { 14 }).max(12) as usize;
+        let count = text.chars().count().div_ceil(chars).max(1);
+        let rows = count.min(((bottom - 42 - 100) / 22).clamp(1, 14) as usize);
+        let height = 100 + rows as i32 * 22;
+        Self {
+            chars,
+            rows,
+            max_scroll: count.saturating_sub(rows),
+            top: (bottom - height).max(42),
+            height,
+        }
+    }
+    fn contains(&self, width: i32, x: i32, y: i32) -> bool {
+        x >= 20 && x < width - 20 && y >= self.top && y < self.top + self.height
+    }
+}
+fn description(state: &State) -> Option<&Augment> {
+    if state.active_tab != 0 {
+        return None;
+    }
+    let id = state.inspected.or(state.hover)?;
+    state
+        .reply
+        .detail
+        .as_ref()?
+        .augments
+        .iter()
+        .find(|a| a.id == id)
+}
+fn description_text(a: &Augment) -> &str {
+    if a.description.is_empty() {
+        crate::i18n::text("数据源暂未提供说明")
+    } else {
+        &a.description
+    }
+}
+fn description_layout(state: &State, l: &presentation::Layout, a: &Augment) -> DescriptionLayout {
+    DescriptionLayout::new(
+        l.width,
+        presentation::content_bottom(state, l) - 8,
+        description_text(a),
+        crate::i18n::locale() == "en-US",
+    )
+}
+pub(super) unsafe fn description_click(
+    hwnd: HWND,
+    state: &mut State,
+    l: &presentation::Layout,
+    x: i32,
+    y: i32,
+) -> bool {
+    let Some(a) = description(state) else {
+        return false;
+    };
+    let bounds = description_layout(state, l, a);
+    if !bounds.contains(l.width, x, y) {
+        return false;
+    }
+    // A visible description owns its input. Never activate a covered card or guide.
+    state.inspected = Some(a.id);
+    state.hover = None;
+    InvalidateRect(hwnd, null(), 0);
+    true
+}
+
 pub(super) fn cards(state: &State) -> Vec<&Augment> {
     state
         .reply
@@ -59,7 +133,12 @@ pub(super) unsafe fn click(
 pub(super) unsafe fn hover(hwnd: HWND, state: &mut State, px: i32, py: i32) {
     let l = presentation::layout(hwnd, state);
     let y = py * 96 / l.dpi;
-    let next = if y >= 40 && y < l.height - 22 {
+    if description(state)
+        .is_some_and(|a| description_layout(state, &l, a).contains(l.width, px * 96 / l.dpi, y))
+    {
+        return;
+    }
+    let next = if y >= 40 && y < presentation::content_bottom(state, &l) {
         hit(state, &l, px * 96 / l.dpi, y - 40 + state.page_scroll)
     } else {
         None
@@ -200,16 +279,7 @@ pub(super) unsafe fn draw(dc: HDC, state: &State, l: &presentation::Layout) {
     }
 }
 pub(super) unsafe fn tooltip(dc: HDC, state: &State, l: &presentation::Layout) {
-    let Some(id) = state.inspected.or(state.hover) else {
-        return;
-    };
-    let Some(a) = state
-        .reply
-        .detail
-        .iter()
-        .flat_map(|d| &d.augments)
-        .find(|a| a.id == id)
-    else {
+    let Some(a) = description(state) else {
         return;
     };
     let x = |n| n * l.dpi / 96;
@@ -219,32 +289,16 @@ pub(super) unsafe fn tooltip(dc: HDC, state: &State, l: &presentation::Layout) {
         right: x(c),
         bottom: x(d),
     };
-    let chars = ((l.width - 64)
-        / if crate::i18n::locale() == "en-US" {
-            7
-        } else {
-            14
-        })
-    .max(12) as usize;
-    let description = if a.description.is_empty() {
-        crate::i18n::text("数据源暂未提供说明")
-    } else {
-        &a.description
-    };
-    let parts: Vec<char> = description.chars().collect();
-    let max_rows = ((l.height - 190) / 22).clamp(2, 14) as usize;
+    let bounds = description_layout(state, l, a);
+    let parts: Vec<char> = description_text(a).chars().collect();
     let rows: Vec<String> = parts
-        .chunks(chars)
-        .skip(
-            state
-                .description_scroll
-                .min(parts.len().div_ceil(chars).saturating_sub(max_rows)),
-        )
-        .take(max_rows)
+        .chunks(bounds.chars)
+        .skip(state.description_scroll.min(bounds.max_scroll))
+        .take(bounds.rows)
         .map(|c| c.iter().collect())
         .collect();
-    let height = 100 + rows.len() as i32 * 22;
-    let top = (l.height - height - 30).max(42);
+    let height = bounds.height;
+    let top = bounds.top;
     fill(
         dc,
         r(20, top, l.width - 20, top + height),
@@ -300,36 +354,44 @@ pub(super) unsafe fn scroll_description(
     y: i32,
     delta: i32,
 ) -> bool {
-    let Some(id) = state.inspected else {
+    let Some(a) = description(state) else {
         return false;
     };
-    let Some(a) = state
-        .reply
-        .detail
-        .as_ref()
-        .and_then(|d| d.augments.iter().find(|a| a.id == id))
-    else {
-        return false;
-    };
-    let chars = ((l.width - 64)
-        / if crate::i18n::locale() == "en-US" {
-            7
-        } else {
-            14
-        })
-    .max(12) as usize;
-    let count = a.description.chars().count().div_ceil(chars).max(1);
-    let max_rows = ((l.height - 190) / 22).clamp(2, 14) as usize;
-    let height = 100 + count.min(max_rows) as i32 * 22;
-    let top = (l.height - height - 30).max(42);
-    if x < 20 || x >= l.width - 20 || y < top || y >= top + height {
+    let bounds = description_layout(state, l, a);
+    if !bounds.contains(l.width, x, y) {
         return false;
     }
+    state.inspected = Some(a.id);
+    state.hover = None;
     state.description_scroll = if delta > 0 {
         state.description_scroll.saturating_sub(3)
     } else {
-        (state.description_scroll + 3).min(count.saturating_sub(max_rows))
+        (state.description_scroll + 3).min(bounds.max_scroll)
     };
     InvalidateRect(hwnd, null(), 0);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn long_descriptions_keep_footer_clear_and_last_line_reachable() {
+        for (width, height) in [(346, 360), (380, 440), (420, 640), (800, 900)] {
+            for bottom in [height - 72, height - 30] {
+                for english in [false, true] {
+                    let text = "长说明".repeat(400);
+                    let l = DescriptionLayout::new(width, bottom, &text, english);
+                    assert!(l.top >= 42);
+                    assert!(l.top + l.height <= bottom);
+                    assert_eq!(
+                        l.max_scroll + l.rows,
+                        text.chars().count().div_ceil(l.chars)
+                    );
+                    assert!(!l.contains(width, 30, bottom));
+                    assert!(l.contains(width, 30, l.top));
+                }
+            }
+        }
+    }
 }

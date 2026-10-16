@@ -118,6 +118,9 @@ jobs:
             rust/artifacts/update-validation.json
             rust/artifacts/desktop.png
             rust/artifacts/champion-select.png
+            rust/artifacts/popup-review/interaction-checks.json
+            rust/artifacts/popup-review/champion-description.png
+            rust/artifacts/popup-review/champion-build.png
             rust/artifacts/augment-reference.png
             rust/artifacts/share.png
             rust/artifacts/share-icons-zh-CN.png

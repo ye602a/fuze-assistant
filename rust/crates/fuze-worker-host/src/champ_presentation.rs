@@ -205,6 +205,9 @@ pub(super) fn total(state: &State, layout: &Layout) -> i32 {
         }
         + 24
 }
+pub(super) fn content_bottom(state: &State, layout: &Layout) -> i32 {
+    layout.height - if state.side { 22 } else { 64 }
+}
 pub(super) unsafe fn scroll(hwnd: HWND, state: &mut State, delta: i32) {
     if delta != 0 {
         state.hover = None;
@@ -212,16 +215,17 @@ pub(super) unsafe fn scroll(hwnd: HWND, state: &mut State, delta: i32) {
     }
     let l = layout(hwnd, state);
     let content = total(state, &l);
+    let viewport = (content_bottom(state, &l) - 40).max(1);
     state.page_scroll = state
         .page_scroll
         .saturating_add(delta)
-        .clamp(0, (content - (l.height - 100)).max(0));
+        .clamp(0, (content - viewport).max(0));
     let si = SCROLLINFO {
         cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
         fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
         nMin: 0,
         nMax: content - 1,
-        nPage: (l.height - 100).max(1) as u32,
+        nPage: viewport as u32,
         nPos: state.page_scroll,
         nTrackPos: 0,
     };
@@ -264,9 +268,16 @@ pub(super) unsafe fn click(hwnd: HWND, state: &mut State, px: i32, py: i32) {
         SendMessageW(hwnd, WM_CLOSE, 0, 0);
         return;
     }
+    if augment_ui::description_click(hwnd, state, &l, x, y) {
+        return;
+    }
     if y >= l.height - 60 && y < l.height - 24 && x >= 16 && x < l.width - 16 && !state.side {
         state.install_items();
         InvalidateRect(hwnd, null(), 0);
+        return;
+    }
+    // Only painted content can receive clicks; the fixed title/footer cover these rows.
+    if y < 40 || y >= content_bottom(state, &l) {
         return;
     }
     let y = y - 40 + state.page_scroll;
@@ -312,6 +323,8 @@ pub(super) unsafe fn click(hwnd: HWND, state: &mut State, px: i32, py: i32) {
     if y >= l.tabs_top && y < l.tabs_top + 34 && x >= 16 && x < l.width - 16 {
         let tab = ((x - 16) / ((l.width - 32) / 2).max(1)).min(1) as usize;
         state.active_tab = tab;
+        state.hover = None;
+        state.inspected = None;
         if tab != 0 {
             state.stage_panel = false;
         }
@@ -348,7 +361,12 @@ pub(super) unsafe fn click(hwnd: HWND, state: &mut State, px: i32, py: i32) {
         InvalidateRect(hwnd, null(), 0);
         return;
     }
-    if let Some(id) = state.view.as_ref().and_then(|v| l.hit(x, y, v)) {
+    if let Some(id) = state
+        .view
+        .as_ref()
+        .filter(|_| !state.side)
+        .and_then(|v| l.hit(x, y, v))
+    {
         if state.selected != id {
             state.selected = id;
             state.scroll = 0;
@@ -369,6 +387,75 @@ unsafe fn panel(dc: HDC, r: RECT, surface: u32, edge: u32) {
         },
         surface,
     );
+}
+/// Direct callbacks on the offline fixture window, never OS input or game actions.
+pub(super) unsafe fn review_interactions(
+    hwnd: HWND,
+    state: &mut State,
+    directory: &std::path::Path,
+) -> Result<()> {
+    if !state.offline {
+        return Err("fixture-only");
+    }
+    let l = layout(hwnd, state);
+    let original_route = state.build_route;
+    let route_count = route_titles(state).len();
+    if !(1..=4).contains(&route_count) {
+        return Err("fixture-routes-missing");
+    }
+    state.page_scroll = l.detail_top;
+    for route in 0..route_count {
+        let x = 16 + route as i32 * ((l.width - 32) / route_count as i32) + 8;
+        click(hwnd, state, x * l.dpi / 96, 48 * l.dpi / 96);
+        if state.build_route != route
+            || lines(state).first().map(|v| v.text.as_str())
+                != route_titles(state).get(route).copied()
+        {
+            return Err("fixture-route-content");
+        }
+    }
+    // Fixed title/footer must not hit content that happens to scroll underneath them.
+    let selected = state.selected;
+    state.page_scroll = 100;
+    click(hwnd, state, 25 * l.dpi / 96, 20 * l.dpi / 96);
+    click(hwnd, state, 25 * l.dpi / 96, (l.height - 10) * l.dpi / 96);
+    if state.selected != selected {
+        return Err("fixture-covered-content");
+    }
+    state.active_tab = 0;
+    state.rarity = 0;
+    state.page_scroll = body_top(state, &l);
+    state.inspected = augment_ui::cards(state).first().map(|a| a.id);
+    let pinned = state.inspected;
+    if pinned.is_none() {
+        return Err("fixture-augment-missing");
+    }
+    // This point is inside every nonempty tooltip but above the fixed footer.
+    click(
+        hwnd,
+        state,
+        30 * l.dpi / 96,
+        (content_bottom(state, &l) - 20) * l.dpi / 96,
+    );
+    if state.inspected != pinned || state.active_tab != 0 || state.selected != selected {
+        return Err("fixture-description-click-through");
+    }
+    if !augment_ui::scroll_description(hwnd, state, &l, 30, content_bottom(state, &l) - 20, -120) {
+        return Err("fixture-description-scroll");
+    }
+    // Native footer and painted content share one viewport, including the side panel.
+    scroll(hwnd, state, i32::MAX);
+    if state.page_scroll != (total(state, &l) - (content_bottom(state, &l) - 40)).max(0) {
+        return Err("fixture-scroll-end");
+    }
+    state.build_route = original_route;
+    state.inspected = None;
+    state.hover = None;
+    std::fs::write(directory.join("interaction-checks.json"), serde_json::to_vec(&serde_json::json!({
+        "game_access":false,"input_simulated":false,"routes_checked":route_count,
+        "description_click_isolated":true,"description_scroll":true,"fixed_regions_isolated":true,"scroll_end_reachable":true
+    })).map_err(|_| "fixture-report")?).map_err(|_| "fixture-report")?;
+    Ok(())
 }
 pub(super) unsafe fn header(hwnd: HWND, dc: HDC, state: &State) {
     let l = layout(hwnd, state);
@@ -420,7 +507,7 @@ pub(super) unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
         return;
     };
     let saved = SaveDC(dc);
-    IntersectClipRect(dc, 0, x(40), x(l.width), x(l.height - 22));
+    IntersectClipRect(dc, 0, x(40), x(l.width), x(content_bottom(state, &l)));
     SetViewportOrgEx(dc, 0, x(40 - state.page_scroll), null_mut());
     let label = |s: &str, a, b, c, d, size, color| text(dc, s, r(a, b, c, d), x(size), color);
     if !state.side {

@@ -284,6 +284,7 @@ impl Window {
                 self.state.dismissed = false;
             }
             let allowed = view.is_some() && !hidden && !self.state.dismissed;
+            let becoming_visible = allowed && !self.state.stage_allowed;
             if self.state.stage_allowed != allowed {
                 self.state.stage_allowed = allowed;
                 self.state.stage_key = None;
@@ -349,7 +350,7 @@ impl Window {
             }
             if self.state.view.is_none() || self.state.dismissed || hidden {
                 ShowWindow(self.hwnd, SW_HIDE);
-            } else if entering {
+            } else if becoming_visible {
                 ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }
         }
@@ -444,6 +445,7 @@ impl Window {
                 return Err("fixture-tab-hit");
             }
             self.render(&directory.join("champion-build.png"))?;
+            presentation::review_interactions(self.hwnd, &mut self.state, directory)?;
             self.state.active_tab = tab;
             self.state.page_scroll = scroll;
             let mut bounds: RECT = zeroed();
