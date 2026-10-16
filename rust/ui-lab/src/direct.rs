@@ -15,12 +15,12 @@ use windows::{
         UI::{HiDpi::*, WindowsAndMessaging::*},
     },
 };
-const WIDTH: u32 = 1032;
-const HEIGHT: u32 = 300;
-const BG: u32 = 0x07121b;
-const PANEL: u32 = 0x10232e;
-const GOLD: u32 = 0xd2b878;
-const TEXT: u32 = 0xe3e8e6;
+const WIDTH: u32 = 760;
+const HEIGHT: u32 = 170;
+const BG: u32 = 0x07131e;
+const PANEL: u32 = 0x101e2a;
+const GOLD: u32 = 0xc8aa6e;
+const TEXT: u32 = 0xf0e6d2;
 const MUTED: u32 = 0xa9bdc6;
 fn rect(x: f32, y: f32, w: f32, h: f32) -> D2D_RECT_F {
     D2D_RECT_F {
@@ -69,7 +69,7 @@ impl Drop for Com {
 struct Scene {
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
-    logo: image::RgbaImage,
+    icons: Vec<image::RgbaImage>,
 }
 impl Scene {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -77,7 +77,7 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [13., 17., 24., 30.] {
+            for size in [10., 14., 20., 24.] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
@@ -90,12 +90,18 @@ impl Scene {
                 format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
                 formats.push(format);
             }
-            let logo =
-                image::load_from_memory(include_bytes!("../../../public/fuze.png"))?.into_rgba8();
+            let icons = [
+                include_bytes!("../ui/assets/courageofthecolossus_large.png").as_slice(),
+                include_bytes!("../ui/assets/apexinventor_large.png").as_slice(),
+                include_bytes!("../ui/assets/backtobasics_large.png").as_slice(),
+            ]
+            .into_iter()
+            .map(|bytes| image::load_from_memory(bytes).map(|i| i.into_rgba8()))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(Self {
                 factory,
                 formats,
-                logo,
+                icons,
             })
         }
     }
@@ -103,35 +109,39 @@ impl Scene {
 // Formats and decoded image are cached; only target-dependent resources are recreated.
 struct Surface {
     brush: ID2D1SolidColorBrush,
-    logo: ID2D1Bitmap,
+    icons: Vec<ID2D1Bitmap>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
         let brush = target.CreateSolidColorBrush(&color(TEXT), None)?;
-        let mut bgra = scene.logo.as_raw().clone();
-        for p in bgra.chunks_exact_mut(4) {
-            p.swap(0, 2);
-            for c in 0..3 {
-                p[c] = ((p[c] as u16 * p[3] as u16 + 127) / 255) as u8;
+        let mut icons = Vec::new();
+        for icon in &scene.icons {
+            let mut bgra = icon.as_raw().clone();
+            for p in bgra.chunks_exact_mut(4) {
+                p.swap(0, 2);
+                for c in 0..3 {
+                    p[c] = ((p[c] as u16 * p[3] as u16 + 127) / 255) as u8;
+                }
             }
-        }
-        let logo = target.CreateBitmap(
-            D2D_SIZE_U {
-                width: scene.logo.width(),
-                height: scene.logo.height(),
-            },
-            Some(bgra.as_ptr().cast()),
-            scene.logo.width() * 4,
-            &D2D1_BITMAP_PROPERTIES {
-                pixelFormat: D2D1_PIXEL_FORMAT {
-                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            let logo = target.CreateBitmap(
+                D2D_SIZE_U {
+                    width: icon.width(),
+                    height: icon.height(),
                 },
-                dpiX: 96.,
-                dpiY: 96.,
-            },
-        )?;
-        Ok(Self { brush, logo })
+                Some(bgra.as_ptr().cast()),
+                icon.width() * 4,
+                &D2D1_BITMAP_PROPERTIES {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.,
+                    dpiY: 96.,
+                },
+            )?;
+            icons.push(logo);
+        }
+        Ok(Self { brush, icons })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
         self.brush.SetColor(&color(rgb));
@@ -163,111 +173,110 @@ impl Surface {
         self.text(
             scene,
             target,
-            "符择 · 海克斯推荐",
-            1,
-            rect(20., 12., 310., 28.),
+            "FUZE  海克斯推荐",
+            0,
+            rect(9., 5., 160., 22.),
             GOLD,
         );
         self.text(
             scene,
             target,
-            "离线固定示例 · 整体胜率 · 非实际领取",
+            "整体胜率 · 离线预览，非实际领取",
             0,
-            rect(348., 16., 580., 22.),
+            rect(169., 5., 490., 22.),
             MUTED,
         );
-        self.text(scene, target, "关闭", 0, rect(975., 14., 48., 25.), MUTED);
-        for (i, title) in ["裁决使", "超凡邪恶", "神射法师 · 长标题换行示例"]
+        // Close affordance is geometry, independent of font coverage.
+        self.brush.SetColor(&color(MUTED));
+        target.DrawLine(
+            windows_numerics::Vector2 { X: 735., Y: 11. },
+            windows_numerics::Vector2 { X: 743., Y: 19. },
+            &self.brush,
+            1.,
+            None,
+        );
+        target.DrawLine(
+            windows_numerics::Vector2 { X: 743., Y: 11. },
+            windows_numerics::Vector2 { X: 735., Y: 19. },
+            &self.brush,
+            1.,
+            None,
+        );
+        for (i, title) in ["巨像的勇气", "尖端发明家", "回归基本功"]
             .iter()
             .enumerate()
         {
-            let x = 12. + i as f32 * 340.;
-            self.fill(target, rect(x, 50., 328., 234.), PANEL);
-            self.fill(
-                target,
-                rect(x, 50., 328., 2.),
-                if i == 0 { GOLD } else { 0x40535c },
-            );
+            let x = 9. + i as f32 * 250.;
+            let best = i == 2;
+            self.fill(target, rect(x, 34., 242., 127.), PANEL);
+            self.brush
+                .SetColor(&color(if best { GOLD } else { 0x52616b }));
+            target.DrawRectangle(&rect(x, 34., 242., 127.), &self.brush, 1., None);
             if partial && i == 1 {
                 self.text(
                     scene,
                     target,
                     "此位置暂不可读",
-                    2,
-                    rect(x + 18., 82., 292., 40.),
+                    1,
+                    rect(x + 10., 50., 222., 24.),
                     GOLD,
                 );
                 self.text(
                     scene,
                     target,
                     "可能被遮挡或正在刷新。\n保留卡位，等待下一次识别。",
-                    1,
-                    rect(x + 18., 135., 292., 70.),
-                    MUTED,
-                );
-                self.text(
-                    scene,
-                    target,
-                    "不会用其他卡位填补",
                     0,
-                    rect(x + 18., 248., 292., 24.),
+                    rect(x + 10., 84., 222., 46.),
                     MUTED,
                 );
                 continue;
             }
+            self.fill(target, rect(x + 10., 49., 64., 64.), 0x07131e);
             target.DrawBitmap(
-                &self.logo,
-                Some(&rect(x + 16., 111., 64., 64.)),
+                &self.icons[i],
+                Some(&rect(x + 12., 51., 60., 60.)),
                 1.,
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                 None,
             );
-            self.text(scene, target, title, 2, rect(x + 92., 68., 222., 68.), TEXT);
+            self.text(scene, target, title, 1, rect(x + 85., 47., 147., 23.), TEXT);
+            for (j, label) in ["选取率", "胜率"].iter().enumerate() {
+                let sx = x + 85. + j as f32 * 75.;
+                self.text(scene, target, label, 0, rect(sx, 74., 72., 17.), MUTED);
+                self.text(
+                    scene,
+                    target,
+                    if j == 0 {
+                        "12.0%"
+                    } else {
+                        ["52.0%", "53.0%", "54.0%"][i]
+                    },
+                    2,
+                    rect(sx, 89., 72., 27.),
+                    if best { GOLD } else { TEXT },
+                );
+            }
             self.text(
                 scene,
                 target,
-                "选取率",
+                "海克斯推荐 · 示例",
                 0,
-                rect(x + 92., 149., 80., 22.),
+                rect(x + 10., 119., 134., 18.),
                 MUTED,
             );
             self.text(
                 scene,
                 target,
-                ["3.7%", "4.6%", "8.2%"][i],
-                2,
-                rect(x + 194., 140., 120., 36.),
-                TEXT,
-            );
-            self.text(
-                scene,
-                target,
-                "胜率",
+                ["必选 · 62", "必选 · 72", "优先推荐 · 82"][i],
                 0,
-                rect(x + 92., 190., 80., 22.),
-                MUTED,
+                rect(x + 145., 119., 90., 18.),
+                if best { GOLD } else { TEXT },
             );
-            self.text(
-                scene,
-                target,
-                ["56.3%", "54.1%", "52.2%"][i],
-                2,
-                rect(x + 194., 181., 120., 36.),
-                TEXT,
-            );
-            self.text(
-                scene,
-                target,
-                "示例推荐度 · 图标为品牌占位",
-                0,
-                rect(x + 18., 222., 292., 23.),
-                MUTED,
-            );
-            self.fill(target, rect(x + 18., 251., 292., 12.), 0x24343e);
+            self.fill(target, rect(x + 10., 141., 222., 8.), 0x24343e);
             self.fill(
                 target,
-                rect(x + 18., 251., [245., 199., 164.][i], 12.),
-                if i == 0 { GOLD } else { 0x62b2a2 },
+                rect(x + 11., 142., 220. * [0.62, 0.72, 0.82][i], 6.),
+                if best { GOLD } else { 0x42c6cc },
             );
         }
         target.EndDraw(None, None)
@@ -400,7 +409,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             let scale = GetDpiForWindow(hwnd) as f32 / 96.;
             let x = (lp.0 as u32 & 0xffff) as f32 / scale;
             let y = ((lp.0 as u32 >> 16) & 0xffff) as f32 / scale;
-            if x >= 970. && y < 45. {
+            if x >= 720. && x <= WIDTH as f32 && y < 30. {
                 let _ = DestroyWindow(hwnd);
             }
             LRESULT(0)

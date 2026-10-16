@@ -1,0 +1,79 @@
+import { Theme, Label, Action, Panel, SectionTitle, Disclosure } from "components.slint";
+import { ChampionFixture, ChampionChoice } from "champion-fixture.slint";
+
+export component ChampionWindow inherits Window {
+    title: "符择 · 选人界面预览";
+    no-frame: true;
+    preferred-width: 420px; preferred-height: 640px; min-width: 380px; min-height: 600px;
+    background: Theme.background;
+    default-font-family: "Microsoft YaHei"; default-font-size: 12px;
+    in-out property <length> scroll-y <=> scroll.viewport-y;
+    in-out property <int> detail-tab: 0;
+    in-out property <int> inspected-id: 4;
+    in-out property <string> inspected-name: "崔斯特";
+    in-out property <string> inspected-win: "56.1%";
+    in-out property <string> inspected-pick: "11.6%";
+    in-out property <image> inspected-icon: @image-url("assets/champion-4.png");
+    callback close-requested;
+    Rectangle { x: 0px; y: 0px; height: 42px; background: #172c3c;
+        Label { x: 15px; y: 0px; height: 42px; text: "FUZE"; color: #79d6ce; font-size: 10px; letter-spacing: 2px; }
+        Label { x: 76px; y: 0px; height: 42px; text: "英雄详情 · 离线预览"; font-weight: 600; }
+        Action { x: parent.width - 42px; y: 0px; width: 42px; height: 42px; label: "×"; quiet: true; clicked => { root.close-requested(); } }
+    }
+    scroll := Flickable {
+        x: 0px; y: 42px; width: root.width; height: root.height - 103px;
+        viewport-width: self.width; viewport-height: body.height + 26px;
+        body := VerticalLayout {
+            x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
+            Panel { height: 468px;
+                SectionTitle { x: 12px; y: 10px; height: 24px; text: "选人参考"; font-size: 13px; }
+                Label { x: 12px; y: 42px; height: 20px; text: "我方阵容 · 五人选择"; color: Theme.gold; font-size: 11px; }
+                HorizontalLayout { x: 12px; y: 70px; width: parent.width - 24px; height: 90px; spacing: 5px;
+                    for hero in ChampionFixture.team: Rectangle {
+                        Image { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; source: hero.icon; image-fit: cover; }
+                        if hero.id == 4: Rectangle { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; background: transparent; border-width: 1px; border-color: Theme.gold; }
+                        Label { x: 0px; y: 47px; width: parent.width; height: 20px; text: hero.name; horizontal-alignment: center; font-size: 10px; }
+                        Label { x: 0px; y: 69px; width: parent.width; height: 18px; text: hero.win; horizontal-alignment: center; color: #91bbc9; font-size: 10px; }
+                    }
+                }
+                Label { x: 12px; y: 166px; height: 20px; text: "可选英雄 · 胜率从高到低"; color: Theme.gold; font-size: 11px; }
+                Label { x: 12px; y: 190px; height: 18px; text: "仅作选人参考，查看不会更换游戏内英雄。"; color: Theme.muted; font-size: 10px; }
+                Rectangle { x: 12px; y: 219px; width: parent.width - 24px; height: 237px;
+                    for hero[index] in ChampionFixture.bench: Rectangle {
+                        x: mod(index, 3) * (self.width + 6px); y: floor(index / 3) * 59px;
+                        width: (parent.width - 12px)/3; height: 53px;
+                        background: index == 0 ? #202b2d : #0a1925; border-width: 1px; border-color: index == 0 ? #89703f : #2b414e;
+                        Image { x: 5px; y: 6px; width: 22px; height: 22px; source: hero.icon; }
+                        Label { x: 32px; y: 5px; width: parent.width - 36px; height: 20px; text: hero.name; font-size: 11px; }
+                        Label { x: 5px; y: 30px; width: parent.width - 10px; height: 18px; text: hero.win + " · 选 " + hero.pick; font-size: 10px; color: #e6cb8d; }
+                        TouchArea { x: 0px; y: 0px; clicked => { root.inspected-id = hero.id; root.inspected-name = hero.name; root.inspected-win = hero.win; root.inspected-pick = hero.pick; root.inspected-icon = hero.icon; root.scroll-y = -480px; } }
+                    }
+                }
+            }
+            Panel { height: 86px;
+                Image { x: 16px; y: 16px; width: 54px; height: 54px; source: root.inspected-icon; }
+                Label { x: 84px; y: 18px; height: 32px; text: root.inspected-name; font-size: 23px; color: #79d6ce; }
+                Label { x: 84px; y: 55px; height: 18px; text: "公开数据预览 · 非当前选人"; color: Theme.muted; font-size: 10px; }
+            }
+            HorizontalLayout { height: 55px; spacing: 8px;
+                for metric in [{label:"胜率",value:root.inspected-win},{label:"选取率",value:root.inspected-pick},{label:"场次",value:"—"}]: Panel {
+                    Label { x: 8px; y: 6px; height: 15px; text: metric.label; color: Theme.muted; font-size: 10px; }
+                    Label { x: 8px; y: 24px; height: 24px; text: metric.value; font-size: 19px; }
+                }
+            }
+            HorizontalLayout { height: 36px; spacing: 8px;
+                Action { label: "海克斯"; primary: root.detail-tab == 0; clicked => { root.detail-tab = 0; } }
+                Action { label: "出装与技能"; primary: root.detail-tab == 1; clicked => { root.detail-tab = 1; } }
+            }
+            Panel { height: 122px;
+                SectionTitle { x: 16px; y: 12px; height: 26px; text: root.detail-tab == 0 ? "海克斯推荐" : "出装路线与技能"; }
+                Label { x: 16px; y: 48px; width: parent.width - 32px; height: 60px; wrap: word-wrap; text: "详情、装备、技能与攻略尚待接入已有 Rust 数据模型。未提供的数据保持缺失，不生成虚构推荐。"; color: Theme.muted; font-size: 11px; }
+            }
+            Disclosure { label: "分阶段胜率参考"; detail: "实际领取轮次未确认，自动推荐继续整体胜率。\n阶段统计页面尚待迁入。"; }
+        }
+    }
+    Rectangle { x: 0px; y: root.height - 61px; height: 61px; background: #101e2a;
+        Action { x: 10px; y: 8px; width: parent.width - 20px; label: "配置装备方案 · 预览不可用"; enabled: false; }
+        Label { x: 10px; y: 46px; height: 14px; text: "只展示公开样例，不操作游戏。"; color: Theme.muted; font-size: 10px; }
+    }
+}

@@ -95,12 +95,147 @@ pub fn native_review(
             }
             let foreground_unchanged =
                 before == unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+            // Fixed model transitions only, never OS input or access to another window.
+            for (name, width, height, state, paused, bottom, quit) in [
+                ("home", 1120, 860, 0, false, false, false),
+                ("ready", 1120, 860, 1, false, false, false),
+                ("partial", 1120, 860, 2, false, false, false),
+                ("error", 1120, 860, 3, false, false, false),
+                ("paused", 1120, 860, 0, true, false, false),
+                ("home-bottom", 1120, 860, 0, false, true, false),
+                ("quit", 1120, 860, 0, false, false, true),
+            ] {
+                ui.window()
+                    .set_size(slint::LogicalSize::new(width as f32, height as f32));
+                ui.set_health(state);
+                ui.set_paused(paused);
+                ui.set_quit_open(quit);
+                ui.set_level_open(bottom);
+                ui.set_sources_open(bottom);
+                ui.set_scroll_y(0.);
+                // First layout determines the new scroll extent.
+                let _ = ui.window().take_snapshot()?;
+                if bottom {
+                    ui.set_scroll_y(-520.);
+                }
+                let pixels = ui.window().take_snapshot()?;
+                let expected = slint::LogicalSize::new(width as f32, height as f32)
+                    .to_physical(ui.window().scale_factor());
+                if pixels.width() != expected.width || pixels.height() != expected.height {
+                    return Err("layout image size differs from requested window".into());
+                }
+                image::save_buffer(
+                    destination.join(format!("restored-{name}.png")),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )?;
+                if ui.get_module_width() < 180. {
+                    return Err("restored module width too small".into());
+                }
+            }
+            ui.set_quit_open(false);
+            for (name, page, bottom, sample) in [
+                ("settings", 2, false, false),
+                ("settings-bottom", 2, true, false),
+                ("history-empty", 1, false, false),
+                ("history-sample", 1, false, true),
+            ] {
+                ui.set_page(page);
+                ui.set_history_sample(sample);
+                ui.set_scroll_y(0.);
+                let _ = ui.window().take_snapshot()?;
+                if bottom {
+                    ui.set_scroll_y(-1200.);
+                }
+                let pixels = ui.window().take_snapshot()?;
+                image::save_buffer(
+                    destination.join(format!("restored-{name}.png")),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )?;
+            }
+            ui.set_page(0);
+            ui.set_history_sample(false);
+            let champion = crate::ChampionWindow::new()?;
+            champion
+                .window()
+                .set_size(slint::LogicalSize::new(420., 640.));
+            for (name, offset, tab) in [
+                ("champion", 0., 0),
+                ("champion-detail", -480., 0),
+                ("champion-build", -480., 1),
+            ] {
+                champion.set_scroll_y(offset);
+                champion.set_detail_tab(tab);
+                let pixels = champion.window().take_snapshot()?;
+                image::save_buffer(
+                    destination.join(format!("restored-{name}.png")),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )?;
+            }
+            let champion_visibility = champion
+                .window()
+                .with_winit_window(|w| w.is_visible())
+                .flatten();
+            if champion_visibility == Some(true) {
+                return Err("champion preview unexpectedly visible".into());
+            }
+            ui.set_level_open(false);
+            ui.set_sources_open(false);
+            ui.set_scroll_y(0.);
             Ok(
-                serde_json::json!({"requested_backend":name,"native_window_created":true,"visible":false,"foreground_unchanged_observed":foreground_unchanged,"hidden_native_resize":resize_checks,"elapsed_including_400ms_timer":start.elapsed().as_secs_f64()*1000.,"first_raster_snapshot_ms":snapshot_ms,"warm_raster_snapshot":crate::telemetry::samples(&timings),"warm_process_cpu_ms":cpu_ms,"gpu_performance_verified":false,"real_ime_verified":false}),
+                serde_json::json!({"champion_native_visibility_observed":champion_visibility,"requested_backend":name,"native_window_created":true,"visible":false,"foreground_unchanged_observed":foreground_unchanged,"hidden_native_resize":resize_checks,"elapsed_including_400ms_timer":start.elapsed().as_secs_f64()*1000.,"first_raster_snapshot_ms":snapshot_ms,"warm_raster_snapshot":crate::telemetry::samples(&timings),"warm_process_cpu_ms":cpu_ms,"gpu_performance_verified":false,"real_ime_verified":false}),
             )
         })();
+        let ok = checked.is_ok();
         *returned.borrow_mut() = Some(checked);
-        let _ = slint::quit_event_loop();
+        if !ok {
+            let _ = slint::quit_event_loop();
+            return;
+        }
+        let Some(ui) = weak.upgrade() else {
+            let _ = slint::quit_event_loop();
+            return;
+        };
+        ui.window().set_size(slint::LogicalSize::new(920., 760.));
+        // Yield to the real Winit resize event before snapshotting the narrow layout.
+        slint::Timer::single_shot(std::time::Duration::from_millis(100), move || {
+            let narrow = (|| -> Result<(), Box<dyn std::error::Error>> {
+                let ui = weak
+                    .upgrade()
+                    .ok_or("component destroyed before narrow review")?;
+                let pixels = ui.window().take_snapshot()?;
+                let expected =
+                    slint::LogicalSize::new(920., 760.).to_physical(ui.window().scale_factor());
+                if pixels.width() != expected.width
+                    || pixels.height() != expected.height
+                    || ui.get_module_width() < 300.
+                {
+                    return Err("narrow window/layout did not process resize".into());
+                }
+                image::save_buffer(
+                    destination.join("restored-home-narrow.png"),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )?;
+                Ok(())
+            })();
+            if let Err(e) = narrow {
+                *returned.borrow_mut() = Some(Err(e));
+            } else if let Some(Ok(value)) = returned.borrow_mut().as_mut() {
+                value["narrow_real_event_layout_verified"] = true.into();
+            }
+            let _ = slint::quit_event_loop();
+        });
     });
     slint::run_event_loop_until_quit()?;
     let value = result
@@ -119,6 +254,32 @@ impl Platform for Offscreen {
     }
 }
 pub fn connect(ui: &Workbench) {
+    use slint::winit_030::WinitWindowAccessor;
+    let weak = ui.as_weak();
+    ui.on_minimize(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.window()
+                .with_winit_window(|window| window.set_minimized(true));
+        }
+    });
+    let weak = ui.as_weak();
+    ui.on_drag_window(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.window().with_winit_window(|window| {
+                let _ = window.drag_window();
+            });
+        }
+    });
+    ui.on_close_requested(|| {
+        let _ = slint::quit_event_loop();
+    });
+    let weak = ui.as_weak();
+    ui.window().on_close_requested(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_quit_open(true);
+        }
+        slint::CloseRequestResponse::KeepWindowShown
+    });
     let weak = ui.as_weak();
     ui.on_cycle_health(move || {
         if let Some(ui) = weak.upgrade() {

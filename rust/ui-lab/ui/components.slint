@@ -1,0 +1,82 @@
+// Palette and glyphs from the v0.6.3 Chinese workbench.
+export global Theme {
+    out property <color> background: #07131e;
+    out property <color> surface: #101e2a;
+    out property <color> stroke: #39444a;
+    out property <color> muted: #a1adb4;
+    out property <color> gold: #c8aa6e;
+    out property <color> ivory: #f0e6d2;
+    out property <color> blue: #69bce6;
+    out property <color> green: #79d6ae;
+    out property <color> yellow: #e5c06d;
+    out property <color> red: #f19b9b;
+}
+export component Label inherits Text {
+    color: Theme.ivory; font-size: 12px; vertical-alignment: center; overflow: elide;
+}
+export component Action inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <bool> quiet: false;
+    callback clicked;
+    height: 38px; min-width: 100px;
+    background: root.quiet ? (touch.has-hover ? #263340 : transparent) : root.primary ? (touch.has-hover ? #e5cc99 : Theme.gold) : (touch.has-hover ? #243742 : #122432);
+    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : #89703f;
+    border-radius: 2px; opacity: root.enabled ? 1 : 0.45;
+    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    Label { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #1a2025 : #dcc794; horizontal-alignment: center; }
+    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => {
+        if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject;
+    } }
+}
+export component Panel inherits Rectangle {
+    background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
+    Rectangle { x: 0px; y: 0px; height: 1px; background: #73603d; }
+    @children
+}
+export component SectionTitle inherits Label { color: #e5d2a6; font-size: 15px; }
+export component Navigation inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: 55px;
+    background: root.selected ? @linear-gradient(90deg, #263234, #0f1c29) : touch.has-hover ? #132635 : transparent;
+    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.selected ? #75613c : transparent;
+    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    if root.selected: Rectangle { x: 0px; width: 3px; y: 13px; height: parent.height - 26px; background: Theme.gold; }
+    Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7; }
+    Label { y: 0px; x: 51px; width: parent.width - 56px; height: parent.height; text: root.label; color: root.selected ? #e8ce96 : Theme.muted; font-size: 13px; }
+    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject; } }
+}
+export component Module inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> value;
+    in property <string> detail;
+    in property <color> tone: Theme.blue;
+    in property <bool> compact: false;
+    background: #0c1b28; border-width: 1px; border-color: Theme.stroke;
+    Rectangle { x: 0px; y: 0px; height: 2px; background: root.tone; }
+    Image { x: 15px; y: 19px; width: 27px; height: 27px; source: root.icon; image-fit: contain; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 13px : 57px; width: parent.width - self.x - 12px; height: 18px; text: root.label; color: #aab9c1; font-size: 11px; }
+    Rectangle { x: root.compact ? 51px : 15px; y: root.compact ? 43px : 87px; width: 6px; height: 6px; border-radius: 3px; background: root.tone; }
+    Label { x: root.compact ? 64px : 28px; y: root.compact ? 33px : 77px; width: parent.width - self.x - 10px; height: 24px; text: root.value; color: root.tone; font-weight: 600; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 60px : 105px; width: parent.width - self.x - 12px; height: 27px; text: root.detail; color: #8da3b0; font-size: 10px; wrap: word-wrap; }
+}
+export component Disclosure inherits Panel {
+    in property <string> label;
+    in property <string> detail;
+    in-out property <bool> expanded: false;
+    height: root.expanded ? 114px : 46px;
+    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    Label { y: 0px; x: 20px; height: 46px; width: parent.width - 40px; text: (root.expanded ? "−  " : "+  ") + root.label; color: #bdad88; }
+    if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+    TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
+    focus := FocusScope { key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
+    if focus.has-focus: Rectangle { x: 0px; y: 0px; background: transparent; border-width: 1px; border-color: Theme.blue; height: 46px; }
+}

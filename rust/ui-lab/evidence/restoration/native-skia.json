@@ -1,0 +1,34 @@
+{
+  "champion_native_visibility_observed": null,
+  "elapsed_including_400ms_timer": 1118.6109,
+  "first_raster_snapshot_ms": 10.2688,
+  "foreground_unchanged_observed": true,
+  "gpu_performance_verified": false,
+  "hidden_native_resize": [
+    {
+      "logical_height": 760,
+      "logical_width": 920,
+      "physical_height": 760,
+      "physical_width": 920,
+      "still_hidden": true
+    },
+    {
+      "logical_height": 860,
+      "logical_width": 1120,
+      "physical_height": 860,
+      "physical_width": 1120,
+      "still_hidden": true
+    }
+  ],
+  "narrow_real_event_layout_verified": true,
+  "native_window_created": true,
+  "real_ime_verified": false,
+  "requested_backend": "skia",
+  "visible": false,
+  "warm_process_cpu_ms": 62.5,
+  "warm_raster_snapshot": {
+    "count": 12,
+    "median_ms": 4.6785000000000005,
+    "p95_ms": 6.6044
+  }
+}

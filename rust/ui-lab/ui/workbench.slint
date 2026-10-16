@@ -1,135 +1,175 @@
-import { LineEdit, ScrollView, AboutSlint } from "std-widgets.slint";
-
-global Palette {
-    out property <color> background: #07121b;
-    out property <color> surface: #10232e;
-    out property <color> gold: #d2b878;
-    out property <color> text: #e3e8e6;
-    out property <color> muted: #a9bdc6;
-    out property <color> edge: #40535c;
-}
-
-component GoldButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected: false;
-    callback clicked;
-    height: 38px;
-    min-width: 112px;
-    background: touch.has-hover ? #34473d : root.selected ? #243a3d : #101e27;
-    border-width: focus.has-focus ? 2px : 1px;
-    border-color: Palette.gold;
-    accessible-role: button;
-    accessible-label: root.label;
-    forward-focus: focus;
-    Text { text: root.label; color: Palette.gold; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
-    touch := TouchArea { clicked => { focus.focus(); root.clicked(); } }
-    focus := FocusScope {
-        width: 0px;
-        key-pressed(event) => {
-            if event.text == " " || event.text == "\n" { root.clicked(); return accept; }
-            return reject;
-        }
-    }
-}
-
-component Module inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
-    in property <string> detail;
-    background: Palette.surface;
-    border-width: 1px; border-color: Palette.edge;
-    VerticalLayout {
-        padding: 16px; spacing: 8px;
-        Text { text: root.label; color: Palette.gold; font-size: 14px; }
-        Text { text: root.value; color: Palette.text; font-size: 16px; font-weight: 600; }
-        Text { text: root.detail; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
-    }
-}
+export { ChampionWindow } from "champion.slint";
+import { SettingsPage, HistoryPage } from "pages.slint";
+import { LineEdit, AboutSlint } from "std-widgets.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure } from "components.slint";
 
 export component Workbench inherits Window {
-    title: "符择 · 界面验证原型";
+    title: "符择 · 离线界面预览";
     preferred-width: 1120px; preferred-height: 860px; min-width: 920px; min-height: 760px;
-    background: Palette.background;
-    default-font-family: "Microsoft YaHei UI";
-    default-font-size: 14px;
+    no-frame: true;
+    background: Theme.background;
+    default-font-family: "Microsoft YaHei"; default-font-size: 13px;
     in-out property <int> health: 0;
     in-out property <bool> paused: false;
     in-out property <string> query;
     in-out property <string> backend-note;
     in-out property <int> page: 0;
     in-out property <bool> about: false;
+    in-out property <bool> history-sample: false;
+    in-out property <bool> quit-open: false;
+    in-out property <bool> level-open: false;
+    in-out property <bool> sources-open: false;
+    in-out property <length> scroll-y <=> scroll.viewport-y;
     callback query-edited(string);
     callback cycle-health;
+    callback minimize;
+    callback close-requested;
+    callback drag-window;
+    private property <bool> narrow: root.width <= 950px;
+    private property <length> rail-width: root.narrow ? 158px : 184px;
+    private property <length> inset: root.narrow ? 20px : 30px;
+    private property <color> tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : root.health == 1 ? Theme.green : root.health == 2 ? Theme.yellow : Theme.red;
+    private property <color> tone-background: root.paused ? #49391b : root.health == 0 ? #12324b : root.health == 1 ? #123d34 : root.health == 2 ? #49391b : #4b222b;
     out property <float> content-width: content.width / 1px;
-    out property <float> module-width: module-row.width / 4px;
+    out property <float> module-width: (body.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2px : 4px);
 
-    HorizontalLayout {
-        spacing: 0px;
-        Rectangle {
-            width: 180px; background: #050f17;
-            VerticalLayout {
-                padding: 20px; spacing: 18px;
-                HorizontalLayout {
-                    spacing: 12px;
-                    Image { source: @image-url("../../../public/fuze.png"); width: 38px; height: 38px; image-fit: contain; }
-                    Text { text: "符择"; color: Palette.gold; font-size: 28px; font-weight: 700; vertical-alignment: center; }
-                }
-                Text { text: "F U Z E"; color: Palette.gold; font-size: 12px; }
-                Rectangle { height: 14px; }
-                for label[index] in ["对局助手", "战绩查询", "偏好设置"]: GoldButton {
-                    label: label;
-                    selected: root.page == index;
-                    clicked => { root.page = index; }
-                }
-                Rectangle { vertical-stretch: 1; }
-                Text { text: "离线界面原型\n未连接游戏"; color: Palette.muted; wrap: word-wrap; }
-                GoldButton { label: "关于原型"; clicked => { root.about = !root.about; } }
-            }
+    Rectangle { x: 0px; y: 0px;
+        width: root.rail-width; height: root.height; background: #06101a;
+        Rectangle { y: 0px; x: parent.width - 1px; width: 1px; height: parent.height; background: #5d5139; }
+        Image { x: 21px; y: 30px; width: 43px; height: 48px; source: @image-url("../../../public/fuze.svg"); image-fit: contain; }
+        Label { x: 76px; y: 29px; height: 34px; width: root.rail-width - 80px; text: "符择"; color: #e1c68c; font-size: root.narrow ? 23px : 25px; font-weight: 700; letter-spacing: 5px; }
+        Label { x: 76px; y: 67px; height: 14px; text: "FUZE"; color: #9f875a; font-size: 10px; letter-spacing: 5px; }
+        VerticalLayout {
+            x: 12px; y: 115px; width: parent.width - 24px; height: 189px; spacing: 12px;
+            Navigation { enabled: !root.quit-open; icon: @image-url("assets/overview.svg"); label: "对局助手"; selected: root.page == 0; clicked => { root.page = 0; root.scroll-y = 0px; } }
+            Navigation { enabled: !root.quit-open; icon: @image-url("assets/history.svg"); label: "战绩查询"; selected: root.page == 1; clicked => { root.page = 1; root.scroll-y = 0px; } }
+            Navigation { enabled: !root.quit-open; icon: @image-url("assets/settings.svg"); label: "偏好设置"; selected: root.page == 2; clicked => { root.page = 2; root.scroll-y = 0px; } }
         }
-        content := Rectangle {
-            HorizontalLayout { padding: 28px;
-                ScrollView {
-                    VerticalLayout {
-                        spacing: 18px;
-                        Text { text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询 · 界面验证" : "偏好设置 · 界面验证"; color: Palette.text; font-size: 28px; font-weight: 600; }
-                        Text { text: "保留原中文版布局 · 所有状态与数值均为固定示例"; color: Palette.muted; }
-                        if root.backend-note != "": Text { text: root.backend-note; color: Palette.gold; wrap: word-wrap; }
-                        Rectangle {
-                            height: 145px; border-width: 1px; border-color: Palette.gold;
-                            background: root.paused ? #302b1c : root.health == 0 ? #15352e : root.health == 1 ? #172e43 : root.health == 2 ? #3b321b : #3d2028;
-                            HorizontalLayout {
-                                padding: 22px; spacing: 20px;
-                                VerticalLayout {
-                                    Text { text: "实时状态 · 示例"; color: Palette.gold; }
-                                    Text { text: root.paused ? "识别已暂停（示例）" : root.health == 0 ? "识别正常 · 推荐已就绪" : root.health == 1 ? "正在准备识别" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: Palette.text; font-size: 24px; font-weight: 600; }
-                                    Text { text: "此原型只验证界面，不访问客户端、账号或游戏画面。"; color: Palette.muted; wrap: word-wrap; }
-                                }
-                                VerticalLayout {
-                                    alignment: center; spacing: 10px;
-                                    GoldButton { label: root.paused ? "继续（示例）" : "暂停（示例）"; clicked => { root.paused = !root.paused; } }
-                                    GoldButton { label: "切换示例状态"; clicked => { root.cycle-health(); } }
-                                }
-                            }
-                        }
-                        module-row := HorizontalLayout {
-                            height: 114px; spacing: 12px;
-                            Module { label: "客户端连接"; value: "离线示例"; detail: "未执行 LCU 连接"; }
-                            Module { label: "游戏画面"; value: "固定测试画面"; detail: "未捕获屏幕或游戏"; }
-                            Module { label: "中文识别"; value: "未启动 OCR"; detail: "仅验证中文排版"; }
-                            Module { label: "推荐数据"; value: "16.20.1 · 示例"; detail: "非当前游戏版本检测"; }
-                        }
-                        Text { text: "本局最近识别 · 示例"; color: Palette.gold; font-size: 18px; }
-                        HorizontalLayout {
-                            height: 124px; spacing: 12px;
-                            for title in ["裁决使", "超凡邪恶", "神射法师"]: Module { label: title; value: "整体胜率 56.3%"; detail: "固定示例 · 不代表实际领取"; }
-                        }
-                        Text { text: "中文输入验证 · 请手动输入，内容不保存"; color: Palette.gold; }
-                        LineEdit { text <=> root.query; placeholder-text: "搜索英雄：格温／深海泰坦／繁體中文"; edited(value) => { root.query-edited(value); } }
-                        Text { text: "当前输入：" + root.query; color: Palette.text; wrap: word-wrap; }
-                        if root.page != 0: Text { text: "本页仅验证导航与输入状态；没有接入真实战绩或设置写入。"; color: Palette.muted; wrap: word-wrap; }
-                        if root.about: AboutSlint { }
+        Image { x: 21px; y: parent.height - 50px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: #42c6cc; }
+        Label { x: 36px; y: parent.height - 58px; height: 24px; text: "离线界面预览"; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: parent.height - 34px; height: 20px; text: "未连接游戏"; color: #83929d; font-size: 10px; }
+    }
+    Rectangle { y: 0px;
+        x: root.rail-width; width: root.width - self.x; height: 42px;
+        Rectangle { x: 0px; y: 41px; height: 1px; background: #253340; }
+        Label { y: 0px; x: root.inset; height: 41px; text: root.page == 0 ? "对局助手" : root.page == 1 ? "战绩查询" : "偏好设置"; color: #91a0ac; font-size: 11px; }
+        TouchArea { x: 0px; y: 0px; width: parent.width - 92px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
+        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open; quiet: true; label: "−"; clicked => { root.minimize(); } }
+        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; quiet: true; label: "×"; clicked => { root.quit-open = true; } }
+    }
+    FocusScope {
+    enabled: !root.quit-open;
+    content := Rectangle {
+        x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px;
+        scroll := Flickable { x: 0px; y: 0px;
+            width: parent.width; height: parent.height;
+            viewport-width: self.width; viewport-height: body.height + 48px;
+            body := VerticalLayout {
+                height: self.preferred-height;
+                x: root.inset; y: 24px; width: scroll.width - 2 * root.inset - 10px;
+                spacing: 18px;
+                Rectangle {
+                    height: 95px;
+                    Label { x: 0px; y: 0px; height: 15px; text: "海克斯大乱斗助手"; color: Theme.gold; font-size: 10px; font-weight: 600; letter-spacing: 2px; }
+                    Label { x: 0px; y: 21px; height: 41px; text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询" : "按你的习惯设置"; font-size: 27px; font-weight: 700; letter-spacing: 1px; }
+                    Label { x: 0px; y: 66px; height: 23px; text: "连接、识别与推荐，进度一目了然。"; color: Theme.muted; }
+                    if !root.narrow: Rectangle { x: parent.width - 104px; y: 31px; width: 104px; height: 29px; background: transparent; border-width: 1px; border-color: #5e523a;
+                        Label { x: 0px; y: 0px; text: "符择 / 离线预览"; width: parent.width; height: parent.height; horizontal-alignment: center; color: #c7b386; font-size: 10px; }
                     }
                 }
+                if root.page == 0: VerticalLayout {
+                    spacing: 18px;
+                    Rectangle {
+                        height: 164px; border-width: 1px; border-color: root.tone;
+                        background: @linear-gradient(110deg, root.tone-background, #0d1b28);
+                        Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 1px; border-color: #091724; background: transparent; }
+                        Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
+                        Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }
+                        Label { x: 44px; y: 22px; height: 24px; text: "实时状态"; color: Theme.gold; font-size: 10px; letter-spacing: 2px; }
+                        Label { x: 27px; y: 47px; width: parent.width - 170px; height: 36px; text: root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "识别正常 · 推荐已就绪" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: root.tone; font-size: 22px; font-weight: 700; }
+                        Label { x: 27px; y: 88px; width: parent.width - 170px; height: 28px; text: root.paused ? "已暂停识别。继续后恢复自动识别。" : root.health == 0 ? "客户端通信正常。进入对局后才会开始截图识别。" : root.health == 2 ? "保留卡位，等待下一次识别；可能被遮挡或正在刷新。" : root.health == 3 ? "暂时无法连接客户端，等待重连。" : "已展示识别结果。仅作推荐，不自动选择。"; color: #bacbd0; wrap: word-wrap; }
+                        Label { x: 27px; y: 126px; height: 18px; text: "最近连接验证 · 固定预览状态，非本机连接结果"; color: #91afb6; font-size: 10px; }
+                        Action { x: parent.width - 130px; y: 63px; width: 103px; primary: true; label: root.paused ? "继续识别" : "暂停识别"; clicked => { root.paused = !root.paused; } }
+                    }
+                    VerticalLayout {
+                        spacing: 3px;
+                        Label { height: 14px; text: "整体胜率 · 正式领取轮次未确认"; color: #98a9b3; font-size: 10px; }
+                        module-grid := Rectangle {
+                            height: root.narrow ? 202px : 137px;
+                            for item[index] in [
+                                {label: "客户端连接", value: root.health == 3 ? "连接异常" : "通信已验证", hint: root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: root.health == 3 ? Theme.red : Theme.green},
+                                {label: "游戏画面", value: root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "中文识别", value: root.paused ? "已暂停" : root.health == 0 ? "正常待命" : root.health == 2 ? "部分卡位暂不可读" : "识别结果已就绪", hint: "预览不启动识别引擎", icon: @image-url("assets/recognition.svg"), tone: root.paused || root.health == 2 ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "推荐数据", value: "16.20.1 · 示例", hint: "保留数据版本 · 使用整体胜率", icon: @image-url("assets/data.svg"), tone: Theme.green}
+                            ]: Module {
+                                x: mod(index, root.narrow ? 2 : 4) * (self.width + 12px);
+                                y: root.narrow && index >= 2 ? 107px : 0px;
+                                width: (parent.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2 : 4);
+                                height: root.narrow ? 95px : 137px;
+                                label: item.label; value: item.value; detail: item.hint; icon: item.icon; tone: item.tone; compact: root.narrow;
+                            }
+                        }
+                    }
+                    Panel {
+                        height: 273px;
+                        SectionTitle { x: 21px; y: 18px; height: 25px; text: "本局最近识别"; }
+                        Label { x: 21px; y: 46px; height: 21px; text: "只有实际识别出的强化符文才会出现在这里。"; color: Theme.muted; font-size: 11px; }
+                        HorizontalLayout {
+                            x: 21px; y: 85px; width: parent.width - 42px; height: 166px; spacing: 13px;
+                            for name[index] in ["裁决使", "超凡邪恶", "神射法师"]: Rectangle {
+                                background: #091724; border-width: 1px; border-color: #3f4c54;
+                                Label { x: 15px; y: 13px; height: 20px; text: "选项 " + (index + 1); color: #91a6b2; font-size: 10px; }
+                                Image { x: (parent.width - 43px)/2; y: 47px; width: 43px; height: 43px; source: @image-url("assets/rune.svg"); }
+                                Label { x: 0px; y: 100px; width: parent.width; height: 24px; horizontal-alignment: center; text: root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "此位置暂不可读" : name) : "等待海克斯出现"; color: #b4c0c5; font-size: 13px; }
+                                Label { x: 10px; y: 131px; width: parent.width - 20px; height: 24px; horizontal-alignment: center; wrap: word-wrap; text: root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #8fa3ae; font-size: 10px; }
+                            }
+                        }
+                    }
+                    Panel {
+                        height: 166px;
+                        SectionTitle { x: 21px; y: 17px; height: 26px; text: "运行开销"; }
+                        Label { x: parent.width - 130px; y: 17px; height: 26px; text: "等待首次采样"; color: Theme.muted; font-size: 11px; }
+                        HorizontalLayout { x: 21px; y: 60px; width: parent.width - 42px; height: 58px; spacing: 12px;
+                            for metric in ["CPU", "内存", "截图次数", "最近识别耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 10px; } Label { text: "—"; font-size: 24px; } }
+                        }
+                        Label { x: 21px; y: 130px; height: 22px; text: "仅统计本软件及其识别进程；离线预览不采集运行数据。"; color: #98a9b3; font-size: 10px; }
+                    }
+                    Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
+                    Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：16.20.1（示例） · 实际补丁与来源接入宿主后显示。"; }
+                }
+                if root.page == 1: HistoryPage { sample: root.history-sample; }
+                if root.page == 2: SettingsPage { }
+                Rectangle { height: 30px;
+                    Label { x: 0px; y: 0px; height: 30px; text: "状态更新 · 离线预览"; color: #8698a5; font-size: 10px; }
+                    Label { y: 0px; x: parent.width - 190px; width: 190px; height: 30px; text: "符择 · 中文版结构恢复"; horizontal-alignment: right; color: #8698a5; font-size: 10px; }
+                }
+                if root.backend-note != "": Panel {
+                    height: 180px;
+                    VerticalLayout { x: 0px; y: 0px; padding: 20px; spacing: 10px;
+                        Label { text: root.backend-note; color: Theme.gold; wrap: word-wrap; }
+                        LineEdit { text <=> root.query; placeholder-text: "中文输入验证 · 内容不保存"; edited(value) => { root.query-edited(value); } }
+                        Action { label: "切换预览状态"; clicked => { root.cycle-health(); } }
+                    }
+                }
+                if root.about: AboutSlint { }
+            }
+        }
+        if scroll.viewport-height > scroll.height: Rectangle {
+            x: parent.width - 7px; y: 6px + (-scroll.viewport-y / scroll.viewport-height) * (scroll.height - 12px);
+            width: 5px; height: max(28px, (scroll.height / scroll.viewport-height) * (scroll.height - 12px)); border-radius: 2px; background: #635638;
+        }
+    }
+    }
+    if root.quit-open: Rectangle { x: 0px; y: 0px;
+        background: #000000b8;
+        TouchArea { x: 0px; y: 0px; clicked => { root.quit-open = false; } }
+        Panel { x: (root.width - 360px) / 2; y: (root.height - 174px) / 2; width: 360px; height: 174px;
+            TouchArea { x: 0px; y: 0px; }
+            SectionTitle { x: 26px; y: 22px; height: 25px; text: "退出软件"; }
+            Label { x: 26px; y: 62px; height: 24px; text: "关闭此离线预览，不影响现有稳定版。"; color: Theme.muted; }
+            HorizontalLayout { x: 166px; y: 109px; width: 168px; height: 38px; spacing: 10px;
+                Action { min-width: 0px; label: "取消"; clicked => { root.quit-open = false; } }
+                Action { min-width: 0px; primary: true; label: "退出软件"; clicked => { root.close-requested(); } }
             }
         }
     }

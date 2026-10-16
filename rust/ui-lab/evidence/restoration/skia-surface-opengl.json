@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "before_present": {
+        "count": 12,
+        "median_ms": 2.6744999999999997,
+        "p95_ms": 3.6478
+      },
+      "idle_redraws": 0,
+      "logical_width": 1120,
+      "present_and_finish": {
+        "count": 12,
+        "median_ms": 14.0199,
+        "p95_ms": 14.4583
+      },
+      "process_cpu_ms": 171.875,
+      "render_and_finish": {
+        "count": 12,
+        "median_ms": 16.6933,
+        "p95_ms": 16.9739
+      },
+      "scale": 1.0
+    },
+    {
+      "before_present": {
+        "count": 12,
+        "median_ms": 2.8655,
+        "p95_ms": 9.4275
+      },
+      "idle_redraws": 0,
+      "logical_width": 1120,
+      "present_and_finish": {
+        "count": 12,
+        "median_ms": 13.7721,
+        "p95_ms": 14.5467
+      },
+      "process_cpu_ms": 187.5,
+      "render_and_finish": {
+        "count": 12,
+        "median_ms": 16.6763,
+        "p95_ms": 17.1633
+      },
+      "scale": 1.5
+    },
+    {
+      "before_present": {
+        "count": 12,
+        "median_ms": 2.7357,
+        "p95_ms": 3.1058000000000003
+      },
+      "idle_redraws": 0,
+      "logical_width": 920,
+      "present_and_finish": {
+        "count": 12,
+        "median_ms": 14.0422,
+        "p95_ms": 14.825899999999999
+      },
+      "process_cpu_ms": 187.5,
+      "render_and_finish": {
+        "count": 12,
+        "median_ms": 16.670399999999997,
+        "p95_ms": 16.9142
+      },
+      "scale": 1.0
+    }
+  ],
+  "explicit_context_recreation": true,
+  "foreground_unchanged_observed": true,
+  "game_access": false,
+  "graphics": {
+    "api": "OpenGL",
+    "renderer": "NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2",
+    "vendor": "NVIDIA Corporation",
+    "version": "OpenGL ES 3.2 NVIDIA 617.14"
+  },
+  "hidden": true,
+  "mode": "opengl",
+  "physical_dpi_verified": false,
+  "real_device_loss": false,
+  "same_winit_event_loop": false,
+  "system_input": false,
+  "visible_presentation_verified": false
+}
