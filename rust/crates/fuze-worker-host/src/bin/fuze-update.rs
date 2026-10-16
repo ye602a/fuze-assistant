@@ -198,6 +198,13 @@ fn run() -> Result<(), &'static str> {
     }
     install::safe_dir(&stage)?;
     let result = (|| {
+        // One budget spans map, delta and fallback, rather than restarting per phase.
+        let started = std::time::Instant::now();
+        let cancelled = || {
+            fuze_worker_host::update_progress::cancelled()
+                || started.elapsed() > std::time::Duration::from_secs(600)
+        };
+        fuze_worker_host::update_progress::reset_transfer();
         let destination = stage.join("package.fuz");
         let baseline = state
             .current
@@ -213,14 +220,24 @@ fn run() -> Result<(), &'static str> {
             .filter(|(p, _)| p.is_file());
         // Blockmaps are optional optimization; failed/missing maps cause one full download.
         let map = session
-            .bytes(
-                &release.map,
-                8 * 1024 * 1024,
-                &fuze_worker_host::update_progress::cancelled,
-            )
-            .unwrap_or_default();
+            .bytes(&release.map, 8 * 1024 * 1024, &cancelled)
+            .or_else(|e| {
+                if matches!(
+                    e,
+                    "update-cancelled-or-timeout"
+                        | "update-access-or-release"
+                        | "update-redirect-policy"
+                        | "update-redirect-limit"
+                        | "private-url"
+                        | "update-auth-policy"
+                ) {
+                    Err(e)
+                } else {
+                    Ok(Vec::new())
+                }
+            })?;
         fuze_worker_host::update_progress::STAGE.store(2, std::sync::atomic::Ordering::Release);
-        let transfer = update_channel::fetch_with(
+        let transfer = update_channel::fetch_observed(
             &release.manifest,
             &destination,
             old,
@@ -231,29 +248,41 @@ fn run() -> Result<(), &'static str> {
                     &release.archive,
                     length as usize,
                     Some((offset, offset + length - 1, release.manifest.size)),
-                    &mut b,
-                    &fuze_worker_host::update_progress::cancelled,
+                    &mut fuze_worker_host::update_progress::Counted(&mut b),
+                    &cancelled,
                 )?;
                 Ok(b)
             },
             &|out| {
-                session.archive(
+                session.archive_observed(
                     &release.archive,
                     release.manifest.size,
                     out,
-                    &fuze_worker_host::update_progress::cancelled,
+                    &cancelled,
+                    &fuze_worker_host::update_progress::received,
                 )
             },
-            &fuze_worker_host::update_progress::cancelled,
+            &cancelled,
+            &fuze_worker_host::update_progress::transfer_event,
         )?;
         fuze_worker_host::update_progress::STAGE.store(3, std::sync::atomic::Ordering::Release);
         let extracted = stage.join("version");
         install::unpack(&destination, &extracted, &release.manifest.revision)?;
         install::check_bundle(&extracted)?;
+        if fuze_worker_host::update_progress::cancelled() {
+            return Err("update-cancelled");
+        }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
-        if !message(&fuze_worker_host::update_progress::translated("下载与离线 OCR 自检通过（{}，下载 {} MB）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", &[transfer.mode.to_string(), (transfer.downloaded/1024/1024).to_string()]),true){return Ok(());}
+        let summary = fuze_worker_host::update_progress::transfer_summary(
+            transfer.mode,
+            fuze_worker_host::update_progress::received_bytes(),
+        );
+        if !message(&fuze_worker_host::update_progress::translated("下载与离线 OCR 自检通过（{}）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", &[summary]),true){return Ok(());}
+        if fuze_worker_host::update_progress::cancelled() {
+            return Err("update-cancelled");
+        }
         let versions = root.join("versions");
         install::safe_dir(&versions)?;
         let target = versions.join(&release.manifest.revision);
@@ -341,7 +370,9 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
+        if !fuze_worker_host::update_progress::cancelled() {
+            message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
+        }
         std::process::exit(1);
     }
     #[cfg(not(windows))]

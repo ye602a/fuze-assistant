@@ -2,7 +2,7 @@
 use std::{
     ptr::{null, null_mut},
     sync::{
-        atomic::{AtomicBool, AtomicIsize, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicIsize, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex,
     },
 };
@@ -12,6 +12,113 @@ use windows_sys::Win32::{
 pub static CANCEL: AtomicBool = AtomicBool::new(false);
 pub static STAGE: AtomicU8 = AtomicU8::new(0);
 pub static OWNER: AtomicIsize = AtomicIsize::new(0);
+// Only the separate updater uses these counters. No timer or IO in the game loop.
+static BYTES: AtomicU64 = AtomicU64::new(0);
+static SIZE: AtomicU64 = AtomicU64::new(0);
+static REUSE: AtomicU64 = AtomicU64::new(0);
+static MODE: AtomicU8 = AtomicU8::new(0);
+pub fn reset_transfer() {
+    BYTES.store(0, Ordering::Relaxed);
+    SIZE.store(0, Ordering::Relaxed);
+    REUSE.store(0, Ordering::Relaxed);
+    MODE.store(0, Ordering::Release);
+}
+pub fn transfer_event(event: crate::update_channel::TransferEvent) {
+    use crate::update_channel::TransferEvent::*;
+    match event {
+        Delta { size, reuse } => {
+            SIZE.store(size, Ordering::Relaxed);
+            REUSE.store(reuse, Ordering::Relaxed);
+            MODE.store(1, Ordering::Release);
+        }
+        Full { size, fallback } => {
+            SIZE.store(size, Ordering::Relaxed);
+            REUSE.store(0, Ordering::Relaxed);
+            MODE.store(if fallback { 3 } else { 2 }, Ordering::Release);
+        }
+        Verify => MODE.store(4, Ordering::Release),
+    }
+}
+/// Count accepted package bytes, including a failed delta attempt before fallback.
+/// This deliberately excludes response headers, TLS overhead and the small blockmap.
+pub struct Counted<'a>(pub &'a mut dyn std::io::Write);
+pub fn received(count: u64) {
+    BYTES.fetch_add(count, Ordering::Relaxed);
+}
+impl std::io::Write for Counted<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let count = self.0.write(bytes)?;
+        received(count as u64);
+        Ok(count)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct View {
+    stage: u8,
+    mode: u8,
+    received: u64,
+    size: u64,
+    reuse: u64,
+}
+fn snapshot() -> View {
+    let mode = MODE.load(Ordering::Acquire);
+    View {
+        stage: STAGE.load(Ordering::Acquire),
+        mode,
+        received: BYTES.load(Ordering::Relaxed),
+        size: SIZE.load(Ordering::Relaxed),
+        reuse: REUSE.load(Ordering::Relaxed),
+    }
+}
+fn mib(bytes: u64) -> String {
+    format!("{:.1}", bytes as f64 / 1048576.0)
+}
+fn status_text(view: View) -> String {
+    if view.stage != 2 {
+        return crate::i18n::text(match view.stage {
+            1 => "正在检查固定 Rust 频道",
+            3 => "正在解包并验证 OCR · 不连接游戏",
+            4 => "正在切换版本指针 · 保留上一版本",
+            _ => "等待确认 · 随时可以取消，旧版本保留",
+        })
+        .into();
+    }
+    let title = crate::i18n::text(match view.mode {
+        1 => "差分下载 · 复用旧包内容",
+        2 => "全量下载 · 没有可用差分基线",
+        3 => "已回退全量下载 · 差分未成功",
+        4 => "正在校验完整包 · 校验通过前不会安装",
+        _ => "正在准备下载方案",
+    });
+    format!(
+        "{}\n{}",
+        title,
+        translated(
+            "完整包 {} MiB · 预计复用 {} MiB\n已接收包数据 {} MiB（含失败尝试，不含协议开销）",
+            &[mib(view.size), mib(view.reuse), mib(view.received)]
+        )
+    )
+}
+pub fn transfer_summary(mode: &str, received: u64) -> String {
+    translated(
+        "{} · 已接收包数据 {} MiB",
+        &[
+            crate::i18n::text(if mode == "delta" {
+                "差分更新"
+            } else {
+                "全量更新"
+            })
+            .into(),
+            mib(received),
+        ],
+    )
+}
+pub fn received_bytes() -> u64 {
+    BYTES.load(Ordering::Relaxed)
+}
 pub fn cancelled() -> bool {
     CANCEL.load(Ordering::Acquire)
 }
@@ -58,7 +165,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             720,
-            230,
+            270,
             null_mut(),
             null_mut(),
             instance,
@@ -76,7 +183,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             20,
             20,
             660,
-            80,
+            120,
             hwnd,
             1usize as HMENU,
             instance,
@@ -88,7 +195,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             wide("取消").as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             560,
-            130,
+            170,
             110,
             30,
             hwnd,
@@ -105,7 +212,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                 *slot = Some(r);
             }
         });
-        let mut previous = 255;
+        let mut previous = None;
         loop {
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
@@ -118,17 +225,10 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                 UnregisterClassW(class.as_ptr(), instance);
                 return value;
             }
-            let stage = STAGE.load(Ordering::Acquire);
-            if stage != previous && !cancelled() {
-                let text = match stage {
-                    1 => "正在检查固定 Rust 频道",
-                    2 => "正在下载 · 优先复用旧包，失败一次全量回退",
-                    3 => "正在解包并验证 OCR · 不连接游戏",
-                    4 => "正在切换版本指针 · 保留上一版本",
-                    _ => "等待确认 · 随时可以取消，旧版本保留",
-                };
-                SetWindowTextW(GetDlgItem(hwnd, 1), wide(text).as_ptr());
-                previous = stage;
+            let view = snapshot();
+            if previous != Some(view) && !cancelled() {
+                SetWindowTextW(GetDlgItem(hwnd, 1), wide(&status_text(view)).as_ptr());
+                previous = Some(view);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -161,6 +261,116 @@ pub fn translated(template: &str, values: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hidden_native_progress_text_fits_without_input() {
+        use super::*;
+        use windows_sys::Win32::Graphics::Gdi::*;
+        unsafe {
+            // Own hidden STATIC window only; no screen capture, show, focus or input calls.
+            let hwnd = CreateWindowExW(
+                0,
+                wide("STATIC").as_ptr(),
+                wide("").as_ptr(),
+                WS_POPUP,
+                0,
+                0,
+                660,
+                120,
+                null_mut(),
+                null_mut(),
+                GetModuleHandleW(null()),
+                null(),
+            );
+            assert!(!hwnd.is_null());
+            let dc = GetDC(hwnd);
+            assert!(!dc.is_null());
+            let mut fits = true;
+            for locale in ["zh-CN", "zh-TW", "en-US"] {
+                crate::i18n::set(locale);
+                for mode in 1..=4 {
+                    let text = status_text(View {
+                        stage: 2,
+                        mode,
+                        received: 1024 * 1048576,
+                        size: 512 * 1048576,
+                        reuse: 511 * 1048576,
+                    });
+                    let mut value = wide(&text);
+                    SetWindowTextW(hwnd, value.as_ptr());
+                    let mut actual = vec![0u16; value.len()];
+                    let length = GetWindowTextW(hwnd, actual.as_mut_ptr(), actual.len() as i32);
+                    fits &= length as usize == value.len() - 1
+                        && actual[..length as usize] == value[..value.len() - 1];
+                    let mut rect = RECT {
+                        left: 0,
+                        top: 0,
+                        right: 660,
+                        bottom: 120,
+                    };
+                    let height = DrawTextW(
+                        dc,
+                        value.as_mut_ptr(),
+                        (value.len() - 1) as i32,
+                        &mut rect,
+                        DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX,
+                    );
+                    fits &= height > 0 && rect.bottom <= 120 && rect.right <= 660;
+                }
+            }
+            let hidden = IsWindowVisible(hwnd) == 0;
+            ReleaseDC(hwnd, dc);
+            DestroyWindow(hwnd);
+            crate::i18n::set("zh-CN");
+            assert!(
+                hidden && fits,
+                "native text layout must fit the hidden progress control"
+            );
+        }
+    }
+    #[test]
+    fn transfer_status_counts_partial_writes_and_keeps_failed_attempts() {
+        use super::*;
+        use std::io::Write;
+        reset_transfer();
+        STAGE.store(2, Ordering::Release);
+        transfer_event(crate::update_channel::TransferEvent::Delta { size: 8, reuse: 4 });
+        let mut output = Vec::new();
+        Counted(&mut output).write_all(b"CCCC").unwrap();
+        transfer_event(crate::update_channel::TransferEvent::Full {
+            size: 8,
+            fallback: true,
+        });
+        assert_eq!(received_bytes(), 4);
+        assert_eq!(snapshot().reuse, 0);
+        Counted(&mut output).write_all(b"AAAACCCC").unwrap();
+        assert_eq!(received_bytes(), 12);
+        struct Partial;
+        impl Write for Partial {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Ok(1)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        Counted(&mut Partial).write(b"four").unwrap();
+        assert_eq!(received_bytes(), 13);
+        for locale in ["zh-CN", "zh-TW", "en-US"] {
+            crate::i18n::set(locale);
+            let text = status_text(View {
+                stage: 2,
+                mode: 3,
+                received: 3 * 1048576,
+                size: 2 * 1048576,
+                reuse: 0,
+            });
+            assert!(text.contains("3.0"));
+            assert!(!text.contains("{}"));
+            assert!(!transfer_summary("delta", 1048576).contains("{}"));
+        }
+        crate::i18n::set("zh-CN");
+        reset_transfer();
+    }
     #[test]
     fn templates_preserve_values_without_recursive_substitution() {
         crate::i18n::set("en-US");

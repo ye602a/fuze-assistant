@@ -22,7 +22,9 @@
 | #56 | `feat/slint-champion-records` | 攻略、装备方案、选人图片、未绑定摘要 | 本批复核 Windows 编译 CI 成功 |
 | #57 | `feat/slint-observation-overlay`，基于 #56 | 完整未绑定事件/名称、三卡说明/拖动/记忆 | Windows CI 38879586045 已复核成功 |
 | #58 | `feat/slint-runtime-closure`，基于 #57 | 无窗口推荐控制、显式诊断、集中验收与 Slint 载荷选择 | 完整 Windows CI 38882908984 已通过 |
-| 本批 | `feat/slint-renderer-recovery`，基于 #58 | 图形失败单次回退、暂停恢复、受管启动/更新交接 | 证据见 RENDERER_RECOVERY.md；不发布安装包 |
+| #59 | `feat/slint-renderer-recovery`，基于 #58 | 图形失败单次回退、暂停恢复、受管启动/更新交接 | 证据见 RENDERER_RECOVERY.md；不发布安装包 |
+
+本批继续 `feat/rust-update-transfer-status`，基于 #59：差分终止/回退分类、十分钟下载总预算、真实包字节接收计数和三语言更新状态；专项验收见 `rust/ui-lab/evidence/UPDATE_TRANSFER_STATUS.md`。PR #59 的 Windows CI 38887171672 尚在构建，未记为通过。
 
 这是堆叠 PR，不能跳过依赖只合并最后一项。按顺序核对后再处理基分支调整与合并。本批开始时已有 `docs/STAGE_STATISTICS.md` 修改和未跟踪的 `docs/LOCAL_VALIDATION_NEXT.md`，均未纳入本批提交，不得覆盖、清理或顺手上传。
 

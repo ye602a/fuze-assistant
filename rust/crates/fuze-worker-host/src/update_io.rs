@@ -24,6 +24,13 @@ fn handle(p: *mut c_void) -> Result<Handle> {
         Ok(Handle(p))
     }
 }
+fn network_error() -> &'static str {
+    if unsafe { windows_sys::Win32::Foundation::GetLastError() } == ERROR_WINHTTP_TIMEOUT {
+        "update-cancelled-or-timeout"
+    } else {
+        "update-network"
+    }
+}
 pub fn digest(bytes: &[u8], sha512: bool) -> Result<Vec<u8>> {
     let mut result = vec![0; if sha512 { 64 } else { 32 }];
     if bytes.len() > u32::MAX as usize {
@@ -175,7 +182,7 @@ pub(crate) fn transfer(
             std::ptr::write_volatile(c, 0);
         }
         if sent == 0 || WinHttpReceiveResponse(request.0, null_mut()) == 0 {
-            return Err("update-network");
+            return Err(network_error());
         }
         let mut code = 0u32;
         let mut len = 4u32;
@@ -259,7 +266,7 @@ pub(crate) fn transfer(
             // WinHTTP receive timeouts apply per network packet, not per ReadData call.
             let mut available = 0u32;
             if WinHttpQueryDataAvailable(request.0, &mut available) == 0 {
-                return Err("update-network");
+                return Err(network_error());
             }
             check()?;
             let mut read = 0;
@@ -270,7 +277,7 @@ pub(crate) fn transfer(
                 &mut read,
             ) == 0
             {
-                return Err("update-network");
+                return Err(network_error());
             }
             if read == 0 {
                 break;

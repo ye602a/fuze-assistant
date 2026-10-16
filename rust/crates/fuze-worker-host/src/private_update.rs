@@ -133,6 +133,27 @@ pub fn reconstruct<R: Read + Seek, W: Read + Write + Seek>(
     fetch: &dyn Fn(u64, u64) -> Result<Vec<u8>>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<u64> {
+    reconstruct_observed(
+        old,
+        out,
+        operations,
+        size,
+        expected_sha512,
+        fetch,
+        cancel,
+        &|| {},
+    )
+}
+pub fn reconstruct_observed<R: Read + Seek, W: Read + Write + Seek>(
+    old: &mut R,
+    out: &mut W,
+    operations: &[Operation],
+    size: u64,
+    expected_sha512: &[u8],
+    fetch: &dyn Fn(u64, u64) -> Result<Vec<u8>>,
+    cancel: &dyn Fn() -> bool,
+    before_verify: &dyn Fn(),
+) -> Result<u64> {
     if size == 0
         || size > 512 * 1024 * 1024
         || expected_sha512.len() != 64
@@ -193,6 +214,7 @@ pub fn reconstruct<R: Read + Seek, W: Read + Write + Seek>(
     }
     out.seek(SeekFrom::Start(0)).map_err(|_| "delta-write")?;
     // BCrypt streaming hash: only one 64 KiB buffer, never the whole installer in memory.
+    before_verify();
     let actual = hash_reader(out, cancel)?;
     if actual != expected_sha512 {
         return Err("delta-final-hash");

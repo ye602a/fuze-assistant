@@ -15,6 +15,20 @@ pub const RELEASE: &str =
 pub struct Session {
     secret: Option<Secret>,
 }
+struct Received<'a> {
+    out: &'a mut dyn Write,
+    progress: &'a (dyn Fn(u64) + Sync),
+}
+impl Write for Received<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let count = self.out.write(bytes)?;
+        (self.progress)(count as u64);
+        Ok(count)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
+}
 impl Session {
     /// Explicit developer verification uses an anonymous pipe, never argv or a saved credential.
     pub fn with_secret(secret: Secret) -> Self {
@@ -38,6 +52,16 @@ impl Session {
         out: &mut dyn Write,
         cancel: &dyn Fn() -> bool,
     ) -> Result<()> {
+        self.download_with(url, out, &|host, path, auth, output| {
+            update_io::transfer(host, path, limit, auth, range, cancel, output)
+        })
+    }
+    fn download_with(
+        &self,
+        url: &str,
+        out: &mut dyn Write,
+        transfer: &dyn Fn(&str, &str, Option<&str>, &mut dyn Write) -> Result<Option<String>>,
+    ) -> Result<()> {
         let mut current = url.to_owned();
         let mut cdn = false;
         for _ in 0..4 {
@@ -51,7 +75,7 @@ impl Session {
                 }
                 _ => return Err("update-redirect-policy"),
             };
-            match update_io::transfer(host, path, limit, auth, range, cancel, out)? {
+            match transfer(host, path, auth, out)? {
                 None => return Ok(()),
                 Some(next) => {
                     if !matches!(private_update::target(&next)?, Target::Cdn { .. }) {
@@ -77,6 +101,16 @@ impl Session {
         out: &mut dyn Write,
         cancel: &(dyn Fn() -> bool + Sync),
     ) -> Result<()> {
+        self.archive_observed(url, size, out, cancel, &|_| {})
+    }
+    pub fn archive_observed(
+        &self,
+        url: &str,
+        size: u64,
+        out: &mut dyn Write,
+        cancel: &(dyn Fn() -> bool + Sync),
+        progress: &(dyn Fn(u64) + Sync),
+    ) -> Result<()> {
         if size == 0 || size > 512 * 1024 * 1024 {
             return Err("update-size");
         }
@@ -88,7 +122,10 @@ impl Session {
                 url,
                 length as usize,
                 Some((offset, offset + length - 1, size)),
-                &mut bytes,
+                &mut Received {
+                    out: &mut bytes,
+                    progress,
+                },
                 &cancelled,
             )?;
             Ok(bytes)
@@ -98,7 +135,13 @@ impl Session {
             Ok(bytes) => out.write_all(&bytes).map_err(|_| "update-write")?,
             // Probe once before concurrency; no partial 200 body has been written.
             Err("update-http-status") => {
-                return self.download(url, size as usize, None, out, &cancelled)
+                return self.download(
+                    url,
+                    size as usize,
+                    None,
+                    &mut Received { out, progress },
+                    &cancelled,
+                )
             }
             Err(error) => return Err(error),
         }
@@ -251,6 +294,30 @@ pub struct Transfer {
 }
 type RangeFetch<'a> = dyn Fn(u64, u64) -> Result<Vec<u8>> + 'a;
 type FullFetch<'a> = dyn Fn(&mut File) -> Result<()> + 'a;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TransferEvent {
+    Delta { size: u64, reuse: u64 },
+    Full { size: u64, fallback: bool },
+    Verify,
+}
+// Local output failures, cancellation, access and redirect-policy errors must not
+// silently start another download. Only recoverable delta/transport faults retry.
+fn can_retry_full(error: &str) -> bool {
+    matches!(
+        error,
+        "update-map-hash"
+            | "delta-map-gzip"
+            | "delta-map-limit"
+            | "delta-map-format"
+            | "delta-baseline"
+            | "delta-range"
+            | "delta-final-hash"
+            | "delta-size"
+            | "update-network"
+            | "update-http-status"
+            | "update-range"
+    )
+}
 /// Caller owns a new staging file; cancellation is terminal and never triggers a full retry.
 pub fn fetch_with(
     manifest: &Manifest,
@@ -260,6 +327,27 @@ pub fn fetch_with(
     range: &RangeFetch<'_>,
     full: &FullFetch<'_>,
     cancel: &dyn Fn() -> bool,
+) -> Result<Transfer> {
+    fetch_observed(
+        manifest,
+        destination,
+        baseline,
+        new_map,
+        range,
+        full,
+        cancel,
+        &|_| {},
+    )
+}
+pub fn fetch_observed(
+    manifest: &Manifest,
+    destination: &Path,
+    baseline: Option<(&Path, &[u8])>,
+    new_map: &[u8],
+    range: &RangeFetch<'_>,
+    full: &FullFetch<'_>,
+    cancel: &dyn Fn() -> bool,
+    notify: &dyn Fn(TransferEvent),
 ) -> Result<Transfer> {
     manifest.validate()?;
     if cancel() {
@@ -285,7 +373,18 @@ pub fn fetch_with(
                 new_map,
                 manifest.size,
             )?;
-            private_update::reconstruct(
+            let reuse = plan
+                .iter()
+                .map(|op| match op {
+                    private_update::Operation::Copy { length, .. } => *length,
+                    _ => 0,
+                })
+                .sum();
+            notify(TransferEvent::Delta {
+                size: manifest.size,
+                reuse,
+            });
+            private_update::reconstruct_observed(
                 &mut old,
                 &mut output,
                 &plan,
@@ -293,6 +392,7 @@ pub fn fetch_with(
                 &expected,
                 range,
                 cancel,
+                &|| notify(TransferEvent::Verify),
             )
         })();
         match attempt {
@@ -304,9 +404,12 @@ pub fn fetch_with(
                     fallback: false,
                 });
             }
-            Err(_) => {
+            Err(error) => {
                 if cancel() {
                     return Err("update-cancelled");
+                }
+                if !can_retry_full(error) {
+                    return Err(error);
                 }
                 fallback = true;
             }
@@ -316,6 +419,13 @@ pub fn fetch_with(
             .seek(SeekFrom::Start(0))
             .map_err(|_| "update-stage")?;
     }
+    if cancel() {
+        return Err("update-cancelled");
+    }
+    notify(TransferEvent::Full {
+        size: manifest.size,
+        fallback,
+    });
     full(&mut output)?;
     if cancel() {
         return Err("update-cancelled");
@@ -323,6 +433,7 @@ pub fn fetch_with(
     if output.metadata().map_err(|_| "update-stage")?.len() != manifest.size {
         return Err("update-size");
     }
+    notify(TransferEvent::Verify);
     output
         .seek(SeekFrom::Start(0))
         .map_err(|_| "update-stage")?;
@@ -352,6 +463,179 @@ pub fn bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    #[test]
+    fn redirects_strip_authorization_and_never_return_to_api() {
+        let session = Session::with_secret(Secret::new(b"fixture".to_vec()).unwrap());
+        let calls = Cell::new(0);
+        let mut output = Vec::new();
+        session
+            .download_with(RELEASE, &mut output, &|host, _, auth, out| {
+                calls.set(calls.get() + 1);
+                if host == "api.github.com" {
+                    assert!(auth.is_some());
+                    Ok(Some(
+                        "https://release-assets.githubusercontent.com/fixture".into(),
+                    ))
+                } else {
+                    assert!(auth.is_none());
+                    out.write_all(b"fixture").unwrap();
+                    Ok(None)
+                }
+            })
+            .unwrap();
+        assert_eq!(calls.get(), 2);
+        assert_eq!(output, b"fixture");
+        assert_eq!(
+            session.download_with(
+                "https://release-assets.githubusercontent.com/fixture",
+                &mut Vec::new(),
+                &|_, _, auth, _| {
+                    assert!(auth.is_none());
+                    Ok(Some(RELEASE.into()))
+                }
+            ),
+            Err("update-redirect-policy")
+        );
+        let calls = Cell::new(0);
+        assert_eq!(
+            Session::public().download_with(RELEASE, &mut Vec::new(), &|_, _, auth, _| {
+                assert!(auth.is_none());
+                calls.set(calls.get() + 1);
+                Ok(Some(
+                    "https://release-assets.githubusercontent.com/loop".into(),
+                ))
+            }),
+            Err("update-redirect-limit")
+        );
+        assert_eq!(calls.get(), 4);
+    }
+    fn blockmap(last: &str) -> Vec<u8> {
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        serde_json::to_writer(
+            &mut gzip,
+            &serde_json::json!({"version":"2","files":[{
+            "name":"file","offset":0,"sizes":[4,4],"checksums":["same",last]}]}),
+        )
+        .unwrap();
+        gzip.finish().unwrap()
+    }
+    #[test]
+    fn delta_progress_and_terminal_errors_preserve_retry_boundary() {
+        let dir =
+            std::env::temp_dir().join(format!("fuze-transfer-boundary-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let old = dir.join("old");
+        std::fs::write(&old, b"AAAABBBB").unwrap();
+        let old_map = blockmap("old");
+        let map = blockmap("new");
+        let payload = b"AAAACCCC";
+        let manifest = Manifest {
+            schema: 1,
+            channel: "rust-preview".into(),
+            revision: "0123456789ab".into(),
+            sequence: 2,
+            archive: "Fuze-Rust-0123456789ab.fuz".into(),
+            size: 8,
+            sha512: update_io::hex(&update_io::digest(payload, true).unwrap()),
+            blockmap_sha256: update_io::hex(&update_io::digest(&map, false).unwrap()),
+        };
+        let events = std::cell::RefCell::new(Vec::new());
+        let path = dir.join("delta");
+        let result = fetch_observed(
+            &manifest,
+            &path,
+            Some((&old, &old_map)),
+            &map,
+            &|offset, length| {
+                assert_eq!((offset, length), (4, 4));
+                Ok(b"CCCC".to_vec())
+            },
+            &|_| panic!("valid delta must not download full"),
+            &|| false,
+            &|e| events.borrow_mut().push(e),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Transfer {
+                mode: "delta",
+                downloaded: 4,
+                fallback: false
+            }
+        );
+        assert_eq!(
+            *events.borrow(),
+            vec![
+                TransferEvent::Delta { size: 8, reuse: 4 },
+                TransferEvent::Verify
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), payload);
+        std::fs::remove_file(path).unwrap();
+        for error in [
+            "update-cancelled-or-timeout",
+            "delta-cancelled",
+            "update-access-or-release",
+            "update-redirect-policy",
+            "private-url",
+            "update-write",
+            "delta-write",
+            "delta-hash",
+        ] {
+            let path = dir.join("terminal");
+            assert_eq!(
+                fetch_with(
+                    &manifest,
+                    &path,
+                    Some((&old, &old_map)),
+                    &map,
+                    &|_, _| Err(error),
+                    &|_| panic!("terminal error must not retry"),
+                    &|| false
+                ),
+                Err(error)
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+        // The copied baseline is corrupt: reuse must not bypass the final package digest.
+        std::fs::write(&old, b"XXXXBBBB").unwrap();
+        let full = Cell::new(0);
+        let path = dir.join("fallback");
+        events.borrow_mut().clear();
+        let result = fetch_observed(
+            &manifest,
+            &path,
+            Some((&old, &old_map)),
+            &map,
+            &|_, _| Ok(b"CCCC".to_vec()),
+            &|out| {
+                full.set(full.get() + 1);
+                out.write_all(payload).unwrap();
+                Ok(())
+            },
+            &|| false,
+            &|e| events.borrow_mut().push(e),
+        )
+        .unwrap();
+        assert_eq!(full.get(), 1);
+        assert!(result.fallback);
+        assert_eq!(
+            *events.borrow(),
+            vec![
+                TransferEvent::Delta { size: 8, reuse: 4 },
+                TransferEvent::Verify,
+                TransferEvent::Full {
+                    size: 8,
+                    fallback: true
+                },
+                TransferEvent::Verify
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), payload);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(old).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
     #[test]
     fn bounded_parallel_chunks_preserve_order_and_reject_short_ranges() {
         let total = 4 * 1024 * 1024 + 17;

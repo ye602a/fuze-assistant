@@ -28,6 +28,16 @@ pub fn text(s: &str) -> &str {
 }
 // One row is one key, so every supported locale has identical coverage.
 const MESSAGES: &[[&str; 3]] = &[
+    ["差分下载 · 复用旧包内容", "差分下載 · 重用舊包內容", "Delta download · reusing the previous package"],
+    ["全量下载 · 没有可用差分基线", "完整下載 · 沒有可用差分基準", "Full download · no usable delta baseline"],
+    ["已回退全量下载 · 差分未成功", "已改為完整下載 · 差分未成功", "Falling back to a full download · delta failed"],
+    ["正在校验完整包 · 校验通过前不会安装", "正在驗證完整包 · 通過前不會安裝", "Verifying the complete package · installation has not started"],
+    ["正在准备下载方案", "正在準備下載方案", "Preparing the download plan"],
+    ["完整包 {} MiB · 预计复用 {} MiB\n已接收包数据 {} MiB（含失败尝试，不含协议开销）", "完整包 {} MiB · 預計重用 {} MiB\n已接收包資料 {} MiB（含失敗嘗試，不含通訊開銷）", "Package {} MiB · planned reuse {} MiB\nPackage data received: {} MiB (including failed attempts; excluding protocol overhead)"],
+    ["{} · 已接收包数据 {} MiB", "{} · 已接收包資料 {} MiB", "{} · package data received: {} MiB"],
+    ["差分更新", "差分更新", "Delta update"],
+    ["全量更新", "完整更新", "Full update"],
+    ["下载与离线 OCR 自检通过（{}）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", "下載與離線 OCR 自我檢查通過（{}）。要安裝到獨立 Rust 目錄嗎？保留上一版，下次啟動前再次檢查，失敗自動回復。", "Download and offline OCR checks passed ({}). Install into the separate Rust directory? Keep the previous version and verify again before the next launch, rolling back on failure."],
     ["开关即时保存，目录单独保存；仅识别相关设置会重建识别链路。","開關立即儲存，目錄另行儲存；僅辨識相關設定會重建辨識流程。","Toggles save immediately; save the directory separately. Only recognition settings restart the pipeline."],
     ["保存后自动应用；自动发现始终优先。","儲存後自動套用；優先自動探索。","Applied after saving; automatic discovery takes priority."],
     ["偏好已保存，正在应用。","偏好已儲存，正在套用。","Preferences saved; applying."],
