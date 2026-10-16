@@ -129,24 +129,113 @@ pub fn remote(
     old_archive: &Path,
     old_map: &Path,
 ) -> Result<serde_json::Value> {
+    let (manifest, mut report) = transfer_check(session, root, old_archive, old_map)?;
+    lifecycle(
+        &root.join("installation"),
+        baseline,
+        &root.join("delta.fuz"),
+        &manifest,
+    )?;
+    for key in [
+        "installed",
+        "repeat_launch",
+        "health_failure_rollback",
+        "process_start_failure_rollback",
+        "hidden_native_window",
+    ] {
+        report[key] = true.into();
+    }
+    Ok(report)
+}
+
+/// Real production transport, but no extraction, process launch, installation or credential store.
+pub fn transport(
+    session: Session,
+    root: &Path,
+    old_archive: &Path,
+    old_map: &Path,
+) -> Result<serde_json::Value> {
+    transfer_check(session, root, old_archive, old_map).map(|(_, report)| report)
+}
+
+fn transfer_check(
+    session: Session,
+    root: &Path,
+    old_archive: &Path,
+    old_map: &Path,
+) -> Result<(Manifest, serde_json::Value)> {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{Duration, Instant},
+    };
+    struct Received<'a> {
+        output: &'a mut Vec<u8>,
+        bytes: &'a AtomicU64,
+    }
+    impl Write for Received<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.output.extend_from_slice(bytes);
+            self.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let started = Instant::now();
+    let cancel = || started.elapsed() >= Duration::from_secs(600);
+    // Fail locally before opening a network connection if the baseline is missing.
+    let old_map = update_channel::bounded(old_map, 8 * 1024 * 1024)?;
+    let old_bytes = fs::metadata(old_archive)
+        .map_err(|_| "validation-baseline")?
+        .len();
+    if old_bytes == 0 || old_bytes > 512 * 1024 * 1024 {
+        return Err("validation-baseline");
+    }
     fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
     install::safe_dir(root)?;
-    let release = session.check(&|| false)?;
-    let map = session.bytes(&release.map, 8 * 1024 * 1024, &|| false)?;
-    let old_map = update_channel::bounded(old_map, 8 * 1024 * 1024)?;
+    let release = session.check(&cancel)?;
+    let map = session.bytes(&release.map, 8 * 1024 * 1024, &cancel)?;
+    // Avoid a redundant full transfer when the supplied baseline cannot exercise real reuse.
+    let plan = crate::private_update::plan(&old_map, old_bytes, &map, release.manifest.size)?;
+    let reused: u64 = plan
+        .iter()
+        .map(|op| match op {
+            crate::private_update::Operation::Copy { length, .. } => *length,
+            _ => 0,
+        })
+        .sum();
+    if reused == 0 || reused == release.manifest.size {
+        return Err("validation-real-range-required");
+    }
+    let received = AtomicU64::new(0);
+    let requests = AtomicU64::new(0);
     let range = |offset, length| {
+        requests.fetch_add(1, Ordering::Relaxed);
         let mut bytes = Vec::new();
         session.download(
             &release.archive,
             length as usize,
             Some((offset, offset + length - 1, release.manifest.size)),
-            &mut bytes,
-            &|| false,
+            &mut Received {
+                output: &mut bytes,
+                bytes: &received,
+            },
+            &cancel,
         )?;
         Ok(bytes)
     };
     let full = |out: &mut fs::File| {
-        session.archive(&release.archive, release.manifest.size, out, &|| false)
+        session.archive_observed(
+            &release.archive,
+            release.manifest.size,
+            out,
+            &cancel,
+            &|bytes| {
+                received.fetch_add(bytes, Ordering::Relaxed);
+            },
+        )
     };
     let delta_path = root.join("delta.fuz");
     let delta = update_channel::fetch_with(
@@ -156,10 +245,18 @@ pub fn remote(
         &map,
         &range,
         &full,
-        &|| false,
+        &cancel,
     )?;
     if delta.mode != "delta" || delta.downloaded == 0 || delta.downloaded >= release.manifest.size {
         return Err("validation-real-range-required");
+    }
+    let delta_received = received.load(Ordering::Relaxed);
+    let delta_requests = requests.load(Ordering::Relaxed);
+    let delta_ms = started.elapsed().as_millis();
+    if std::env::var_os("FUZE_UPDATE_VERIFY_TRACE").is_some() {
+        eprintln!(
+            "validation-delta bytes={delta_received} requests={delta_requests} ms={delta_ms}"
+        );
     }
     let full_path = root.join("full.fuz");
     let fallback = update_channel::fetch_with(
@@ -169,21 +266,18 @@ pub fn remote(
         &map,
         &range,
         &full,
-        &|| false,
+        &cancel,
     )?;
     if !fallback.fallback || fallback.mode != "full" {
         return Err("validation-full-fallback");
     }
-    lifecycle(
-        &root.join("installation"),
-        baseline,
-        &delta_path,
-        &release.manifest,
-    )?;
-    Ok(serde_json::json!({
+    let report = serde_json::json!({
+        "revision":release.manifest.revision, "package_bytes":release.manifest.size,
         "private_download":true, "real_range_bytes":delta.downloaded, "full_bytes":fallback.downloaded,
-        "full_fallback":true, "installed":true, "repeat_launch":true,
-        "health_failure_rollback":true, "process_start_failure_rollback":true,
-        "hidden_native_window":true, "game_access":false, "credential_persisted":false
-    }))
+        "delta_received_bytes":delta_received, "fallback_received_bytes":received.load(Ordering::Relaxed)-delta_received,
+        "delta_range_requests":delta_requests, "delta_ms":delta_ms, "total_ms":started.elapsed().as_millis(),
+        "final_hashes_verified":true, "full_fallback":true, "installed":false,
+        "game_access":false, "credential_persisted":false
+    });
+    Ok((release.manifest, report))
 }

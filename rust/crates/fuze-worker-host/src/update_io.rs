@@ -19,13 +19,18 @@ fn wide(s: &str) -> Vec<u16> {
 }
 fn handle(p: *mut c_void) -> Result<Handle> {
     if p.is_null() {
-        Err("update-network")
+        Err(network_error("open"))
     } else {
         Ok(Handle(p))
     }
 }
-fn network_error() -> &'static str {
-    if unsafe { windows_sys::Win32::Foundation::GetLastError() } == ERROR_WINHTTP_TIMEOUT {
+fn network_error(stage: &str) -> &'static str {
+    let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+    if std::env::var_os("FUZE_UPDATE_VERIFY_TRACE").is_some() {
+        // Fixed stage and numeric WinHTTP code only; never headers, URLs or response bodies.
+        eprintln!("update-network stage={stage} code={code}");
+    }
+    if code == ERROR_WINHTTP_TIMEOUT {
         "update-cancelled-or-timeout"
     } else {
         "update-network"
@@ -96,11 +101,17 @@ pub(crate) fn transfer(
     output: &mut dyn std::io::Write,
 ) -> Result<Option<String>> {
     let started = Instant::now();
+    let budget = request_budget(limit, range.is_some());
     let check = || {
-        if cancel()
-            || started.elapsed()
-                > Duration::from_secs(if limit > 8 * 1024 * 1024 { 600 } else { 45 })
-        {
+        let cancelled = cancel();
+        if cancelled || started.elapsed() > budget {
+            if std::env::var_os("FUZE_UPDATE_VERIFY_TRACE").is_some() {
+                eprintln!(
+                    "update-budget scope={} ms={}",
+                    if cancelled { "caller" } else { "request" },
+                    started.elapsed().as_millis()
+                );
+            }
             Err("update-cancelled-or-timeout")
         } else {
             Ok(())
@@ -181,8 +192,11 @@ pub(crate) fn transfer(
         for c in headers.as_bytes_mut() {
             std::ptr::write_volatile(c, 0);
         }
-        if sent == 0 || WinHttpReceiveResponse(request.0, null_mut()) == 0 {
-            return Err(network_error());
+        if sent == 0 {
+            return Err(network_error("send"));
+        }
+        if WinHttpReceiveResponse(request.0, null_mut()) == 0 {
+            return Err(network_error("receive"));
         }
         let mut code = 0u32;
         let mut len = 4u32;
@@ -266,7 +280,7 @@ pub(crate) fn transfer(
             // WinHTTP receive timeouts apply per network packet, not per ReadData call.
             let mut available = 0u32;
             if WinHttpQueryDataAvailable(request.0, &mut available) == 0 {
-                return Err(network_error());
+                return Err(network_error("available"));
             }
             check()?;
             let mut read = 0;
@@ -277,7 +291,7 @@ pub(crate) fn transfer(
                 &mut read,
             ) == 0
             {
-                return Err(network_error());
+                return Err(network_error("read"));
             }
             if read == 0 {
                 break;
@@ -295,5 +309,30 @@ pub(crate) fn transfer(
             return Err("update-range");
         }
         Ok(None)
+    }
+}
+
+fn request_budget(limit: usize, ranged: bool) -> Duration {
+    // A 1 MiB archive range is still a package transfer, not a metadata request.
+    // Its caller shares a 600 s budget across metadata/delta/full. WinHTTP's existing
+    // connect/send/receive timeouts remain active even while this wall budget is larger.
+    Duration::from_secs(if ranged || limit > 8 * 1024 * 1024 {
+        600
+    } else {
+        45
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn archive_ranges_keep_package_budget_without_relaxing_metadata() {
+        assert_eq!(request_budget(1024 * 1024, true), Duration::from_secs(600));
+        assert_eq!(request_budget(1024 * 1024, false), Duration::from_secs(45));
+        assert_eq!(
+            request_budget(48 * 1024 * 1024, false),
+            Duration::from_secs(600)
+        );
     }
 }

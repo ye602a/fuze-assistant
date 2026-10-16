@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -9,6 +9,7 @@ on:
       - 'scripts/package-rust-preview.mjs'
       - 'scripts/package-rust-update.mjs'
       - 'scripts/check-rust-desktop.mjs'
+      - 'scripts/check-rust-private-transfer.mjs'
       - 'public/fuze.png'
       - '.github/workflows/ui-framework-lab.yml'
   workflow_dispatch:
@@ -41,7 +42,7 @@ jobs:
           cargo +1.90.0 check --locked --features gpu -j 2
           exit $LASTEXITCODE
   windows-prototype:
-    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation')
+    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation' && github.base_ref != 'fix/rust-locale-context')
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -98,7 +99,7 @@ jobs:
         run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-worker-host --lib selective_preview_never_adds_unreviewed_matches_or_claims --locked -j 2
 
   windows-update:
-    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/slint-renderer-recovery'
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/slint-renderer-recovery' || github.base_ref == 'fix/rust-locale-context'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -121,6 +122,10 @@ jobs:
           cargo +1.90.0 test -p fuze-worker-host --lib i18n::tests --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 build -p fuze-worker-host --bin fuze-update --locked -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build -p fuze-worker-host --bin fuze-update-verify --locked -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check ../scripts/check-rust-private-transfer.mjs
           exit $LASTEXITCODE
 
   windows-locale:
