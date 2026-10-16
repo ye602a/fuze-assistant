@@ -1,0 +1,32 @@
+{
+  "elapsed_including_400ms_timer": 704.7090000000001,
+  "first_raster_snapshot_ms": 4.7200999999999995,
+  "foreground_unchanged_observed": true,
+  "gpu_performance_verified": false,
+  "hidden_native_resize": [
+    {
+      "logical_height": 760,
+      "logical_width": 920,
+      "physical_height": 760,
+      "physical_width": 920,
+      "still_hidden": true
+    },
+    {
+      "logical_height": 860,
+      "logical_width": 1120,
+      "physical_height": 860,
+      "physical_width": 1120,
+      "still_hidden": true
+    }
+  ],
+  "native_window_created": true,
+  "real_ime_verified": false,
+  "requested_backend": "skia-software",
+  "visible": false,
+  "warm_process_cpu_ms": 31.25,
+  "warm_raster_snapshot": {
+    "count": 12,
+    "median_ms": 3.5232,
+    "p95_ms": 4.2087
+  }
+}

@@ -17,7 +17,9 @@ pub fn native_review(
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     use slint::winit_030::WinitWindowAccessor;
     use std::cell::RefCell;
-    if !matches!(renderer, "software" | "skia") || (renderer == "skia" && !cfg!(feature = "gpu")) {
+    if !matches!(renderer, "software" | "skia" | "skia-software")
+        || (renderer != "software" && !cfg!(feature = "gpu"))
+    {
         return Err("unsupported renderer or missing gpu feature".into());
     }
     std::fs::create_dir_all(output)?;
@@ -74,10 +76,27 @@ pub fn native_review(
             } else {
                 None
             };
+            let mut resize_checks = Vec::new();
+            for (width, height) in [(920, 760), (1120, 860)] {
+                let logical = slint::LogicalSize::new(width as f32, height as f32);
+                let expected = logical.to_physical(ui.window().scale_factor());
+                ui.window().set_size(logical);
+                let actual = ui
+                    .window()
+                    .with_winit_window(|w| (w.inner_size(), w.is_visible()))
+                    .ok_or("native window lost during resize")?;
+                if actual.0.width != expected.width
+                    || actual.0.height != expected.height
+                    || actual.1 != Some(false)
+                {
+                    return Err("native hidden resize mismatch".into());
+                }
+                resize_checks.push(serde_json::json!({"logical_width":width,"logical_height":height,"physical_width":actual.0.width,"physical_height":actual.0.height,"still_hidden":true}));
+            }
             let foreground_unchanged =
                 before == unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
             Ok(
-                serde_json::json!({"requested_backend":name,"native_window_created":true,"visible":false,"foreground_unchanged_observed":foreground_unchanged,"elapsed_including_400ms_timer":start.elapsed().as_secs_f64()*1000.,"first_raster_snapshot_ms":snapshot_ms,"warm_raster_snapshot":crate::telemetry::samples(&timings),"warm_process_cpu_ms":cpu_ms,"gpu_performance_verified":false,"real_ime_verified":false}),
+                serde_json::json!({"requested_backend":name,"native_window_created":true,"visible":false,"foreground_unchanged_observed":foreground_unchanged,"hidden_native_resize":resize_checks,"elapsed_including_400ms_timer":start.elapsed().as_secs_f64()*1000.,"first_raster_snapshot_ms":snapshot_ms,"warm_raster_snapshot":crate::telemetry::samples(&timings),"warm_process_cpu_ms":cpu_ms,"gpu_performance_verified":false,"real_ime_verified":false}),
             )
         })();
         *returned.borrow_mut() = Some(checked);

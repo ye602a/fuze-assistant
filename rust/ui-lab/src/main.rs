@@ -1,4 +1,8 @@
 mod direct;
+mod font_probe;
+mod manual_profile;
+#[cfg(feature = "gpu")]
+mod skia_surface_probe;
 mod slint_probe;
 mod telemetry;
 slint::include_modules!();
@@ -6,6 +10,19 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--manual-profile") if args.len()==3 => manual_profile::run(&args[1],std::path::Path::new(&args[2]))?,
+        #[cfg(feature="gpu")]
+        Some("--review-skia-surface") if args.len()==3 => {
+            println!("{}",skia_surface_probe::review(&args[1],std::path::Path::new(&args[2]))?);
+        }
+        Some("--profile-fonts") if args.len() == 4 => {
+            if !matches!(args[2].as_str(), "file" | "resident") {return Err("unknown font mode".into());}
+            let font=font_probe::prepare(args[2]=="resident")?;
+            let mut result=slint_probe::native_review(&args[1],std::path::Path::new(&args[3]))?;
+            result["font_probe"]=font;
+            std::fs::write(std::path::Path::new(&args[3]).join("font-profile.json"),serde_json::to_vec_pretty(&result)?)?;
+            println!("{}",result);
+        }
         Some("--review-native") if args.len() == 3 => {
             println!("{}", slint_probe::native_review(&args[1], std::path::Path::new(&args[2]))?);
         }
@@ -29,9 +46,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", report);
         }
         Some("--interactive") if args.len() <= 2 => {
-            let renderer = args.get(1).map(String::as_str).unwrap_or("software");
-            if !matches!(renderer, "software" | "skia") { return Err("unsupported renderer".into()); }
-            if renderer == "skia" && !cfg!(feature = "gpu") { return Err("build with --features gpu first".into()); }
+            let renderer = args.get(1).map(String::as_str).unwrap_or(if cfg!(feature="gpu") {"skia"} else {"software"});
+            if !matches!(renderer, "software" | "skia" | "skia-software") { return Err("unsupported renderer".into()); }
+            if renderer != "software" && !cfg!(feature = "gpu") { return Err("build with --features gpu first".into()); }
             slint::BackendSelector::new().backend_name("winit".into()).renderer_name(renderer.into()).select()?;
             let ui = Workbench::new()?;
             slint_probe::connect(&ui);

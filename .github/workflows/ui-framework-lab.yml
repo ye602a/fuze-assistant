@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab]
     paths:
       - 'rust/ui-lab/**'
       - 'public/fuze.png'
@@ -26,6 +26,7 @@ jobs:
         with:
           path: rust/ui-lab/target
           key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+          restore-keys: ui-lab-win-1.90-
       - name: Format and build software and Skia entry points
         working-directory: rust/ui-lab
         run: |
@@ -39,5 +40,9 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-native software artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-native skia-software artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
           exit $LASTEXITCODE
       # No installers, upload-artifact, release publication or game/LCU access.

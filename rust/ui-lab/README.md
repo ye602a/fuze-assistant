@@ -2,11 +2,11 @@
 
 这是独立原型，不是新版本或安装包。没有接入 LCU、截图、OCR、账号、网络更新或用户设置，不影响现有宿主。所有中文状态、推荐和输入均为测试内容。界面结构以中文版 FUZE 为基准，英雄候选网格继续属于选人窗口，不混入主界面。
 
-本轮 [本机证据与结论](evidence/README.md)：两个原型编译运行通过；软件渲染主界面的绘制成本不理想，Skia 值得优先继续验证。整体结论为“原型部分验收通过，全面迁移未放行”。
+首轮 [本机证据](evidence/README.md) 保留作基线。后续 [Skia 性能与窗口验证](evidence/PERFORMANCE_FOLLOWUP.md) 已定位软件字体访问开销，并验证隐藏 Skia 实际图形表面与上下文重建。整体仍为“原型部分验收通过，全面迁移未放行”；下一步按 [人工验收清单](MANUAL_ACCEPTANCE.md) 验证中文输入和真实跨屏。
 
 - Slint 主窗口：原侧栏、大状态区、四模块、三卡；保留深蓝、金色和品牌资源。支持四种示例状态、暂停、导航、中文输入框与键盘焦点。导航仅切换原型标题，不是假装完成战绩/设置迁移。
 - Direct2D / DirectWrite 浮窗：三卡顺序固定、左侧图片、右侧选取率和胜率、粗进度条、缺失卡位占位；不依赖 Slint 创建浮窗。品牌图片仅为清楚标记的渲染占位，不冒充符文图标。
-- 默认软件后端；`gpu` 特性增加 Skia 入口。固定 Slint 1.13.1 与现有 Rust 1.90 工具链配合，不以版本号代替兼容性验收。
+- `gpu` 构建的交互入口默认选择 Skia；可显式选择 `skia-software` 对照。未启用该特性时仍使用 Slint software。固定 Slint 1.13.1 与现有 Rust 1.90 工具链配合，不以版本号代替兼容性验收。
 
 ## 开发运行
 
@@ -18,15 +18,23 @@ cargo fmt -- --check
 ./target/release/fuze-ui-lab.exe --review artifacts
 ./target/release/fuze-ui-lab.exe --review-native software artifacts
 ./target/release/fuze-ui-lab.exe --review-native skia artifacts
+./target/release/fuze-ui-lab.exe --review-native skia-software artifacts
+./target/release/fuze-ui-lab.exe --review-skia-surface opengl artifacts
+./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
+./target/release/fuze-ui-lab.exe --profile-fonts software file artifacts/font-file
+./target/release/fuze-ui-lab.exe --profile-fonts software resident artifacts/font-resident
 ```
 
 `--review` 只生成原型自己的离屏画面，创建并销毁隐藏自有窗口。不会截取桌面/游戏或模拟输入。`--review-native` 初始化真实 Winit 窗口，始终隐藏、不调用组件 show/run；其 snapshot 是光栅化，**不是 GPU 帧耗时**。每种后端单独进程运行。
+
+`--review-skia-surface` 在独立的隐藏 HWND 上实际 render/present，记录图形驱动与提交前/呈现等待耗时；不等价于可见 Winit 窗口测试。`--profile-fonts` 是同字体文件/内存副本对照实验，副本最多 48 MiB，只驻留本进程；不会导出字体或改变生产默认。内部 Slint API 只用于本验证工程。
 
 以下命令**仅供玩家空闲时手动启动**，会显示原型，但不会连接游戏：
 
 ```powershell
 ./target/release/fuze-ui-lab.exe --interactive software
 ./target/release/fuze-ui-lab.exe --interactive skia
+./target/release/fuze-ui-lab.exe --manual-profile skia artifacts/manual
 ./target/release/fuze-ui-lab.exe --overlay
 ```
 
@@ -48,7 +56,7 @@ cargo fmt -- --check
 
 1. 原型在本机中文输入和真实 DPI/窗口行为通过，且不抢游戏焦点。
 2. 可见窗口同口径测量无持续空闲重绘；主界面隐藏时停止无必要绘制，浮窗仅数据/暴露/DPI变化重绘。设定性能预算后再比较，不拿隐藏窗口数据充当性能达标。
-3. 根据验收选择 Slint 后端与降级策略；当前手动选择 software/skia **不是已完成自动 GPU 回退**。
+3. 根据验收选择 Slint 后端与降级策略；优先验证 Skia 硬件与 Skia 软件备选。当前手动选择后端 **不是已完成自动 GPU 回退**。
 4. 下一 PR 仅替换 UI 适配层，沿用现有 Rust 状态/命令契约；先主页面再选人与战绩，功能对照 v0.6.3，候选区按“五人＋网格”例外保留。
 5. 实际领取轮次仍未知；推荐继续整体胜率。三卡缺失提示不意味着已证明遮挡原因。
 6. 阶段验收完成才制作测试安装包。原型 PR 不触发打包，不修改稳定版本、生产依赖锁或运行配置。
