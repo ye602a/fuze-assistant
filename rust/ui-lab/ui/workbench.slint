@@ -1,13 +1,14 @@
+import { MaintenanceConfirm } from "maintenance.slint";
 import { Palette } from "std-widgets.slint";
-export { HostState, ShellState } from "host-state.slint";
-import { HostState, ShellState } from "host-state.slint";
+export { HostState, ShellState, MaintenanceState } from "host-state.slint";
+import { HostState, ShellState, MaintenanceState } from "host-state.slint";
 export { ChampionWindow } from "champion.slint";
 import { SettingsPage, HistoryPage } from "pages.slint";
 import { LineEdit, AboutSlint } from "std-widgets.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar } from "components.slint";
 
 export component Workbench inherits Window {
-    title: "符择 · 离线界面预览";
+    title: HostState.offline ? "符择 · 离线界面预览" : "符择 · 对局助手";
     preferred-width: 1120px; preferred-height: 860px; min-width: 920px; min-height: 760px;
     init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
@@ -47,24 +48,24 @@ export component Workbench inherits Window {
         Label { x: 76px; y: 67px; height: 14px; text: "FUZE"; color: #9f875a; font-size: 10px; letter-spacing: 5px; }
         VerticalLayout {
             x: 12px; y: 115px; width: parent.width - 24px; height: 189px; spacing: 12px;
-            Navigation { enabled: !root.quit-open; icon: @image-url("assets/overview.svg"); label: "对局助手"; selected: root.page == 0; clicked => { root.page = 0; root.scroll-y = 0px; } }
-            Navigation { enabled: !root.quit-open; icon: @image-url("assets/history.svg"); label: "战绩查询"; selected: root.page == 1; clicked => { root.page = 1; root.scroll-y = 0px; } }
-            Navigation { enabled: !root.quit-open; icon: @image-url("assets/settings.svg"); label: "偏好设置"; selected: root.page == 2; clicked => { root.page = 2; root.scroll-y = 0px; } }
+            Navigation { enabled: !root.quit-open && MaintenanceState.confirmation == ""; icon: @image-url("assets/overview.svg"); label: "对局助手"; selected: root.page == 0; clicked => { root.page = 0; root.scroll-y = 0px; } }
+            Navigation { enabled: !root.quit-open && MaintenanceState.confirmation == ""; icon: @image-url("assets/history.svg"); label: "战绩查询"; selected: root.page == 1; clicked => { root.page = 1; root.scroll-y = 0px; } }
+            Navigation { enabled: !root.quit-open && MaintenanceState.confirmation == ""; icon: @image-url("assets/settings.svg"); label: "偏好设置"; selected: root.page == 2; clicked => { root.page = 2; root.scroll-y = 0px; } }
         }
         Image { x: 21px; y: parent.height - 50px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: #42c6cc; }
-        Label { x: 36px; y: parent.height - 58px; height: 24px; text: "离线界面预览"; color: Theme.muted; font-size: 11px; }
-        Label { x: 21px; y: parent.height - 34px; height: 20px; text: "未连接游戏"; color: #83929d; font-size: 10px; }
+        Label { x: 36px; y: parent.height - 58px; height: 24px; text: HostState.offline ? "离线界面预览" : "Rust 测试版"; color: Theme.muted; font-size: 11px; }
+        Label { x: 21px; y: parent.height - 34px; width: parent.width - 32px; height: 20px; text: HostState.offline ? "未连接游戏" : HostState.connection-value; color: #83929d; font-size: 10px; }
     }
     Rectangle { y: 0px;
         x: root.rail-width; width: root.width - self.x; height: 42px;
         Rectangle { x: 0px; y: 41px; height: 1px; background: #253340; }
         Label { y: 0px; x: root.inset; height: 41px; text: root.page == 0 ? "对局助手" : root.page == 1 ? "战绩查询" : "偏好设置"; color: #91a0ac; font-size: 11px; }
         TouchArea { x: 0px; y: 0px; width: parent.width - 92px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
-        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open; quiet: true; label: "−"; description: "最小化窗口"; clicked => { root.minimize(); } }
-        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; enabled: !root.quit-open; quiet: true; label: "×"; description: "关闭窗口"; clicked => { root.request-close(); } }
+        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == ""; quiet: true; label: "−"; description: "最小化窗口"; clicked => { root.minimize(); } }
+        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == ""; quiet: true; label: "×"; description: "关闭窗口"; clicked => { root.request-close(); } }
     }
     content-focus := FocusScope {
-    enabled: !root.quit-open;
+    enabled: !root.quit-open && MaintenanceState.confirmation == "";
     content := Rectangle {
         x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px;
         scroll := Flickable { x: 0px; y: 0px;
@@ -80,7 +81,7 @@ export component Workbench inherits Window {
                     Label { x: 0px; y: 21px; height: 41px; text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询" : "按你的习惯设置"; font-size: 27px; font-weight: 700; letter-spacing: 1px; }
                     Label { x: 0px; y: 66px; height: 23px; text: "连接、识别与推荐，进度一目了然。"; color: Theme.muted; }
                     if !root.narrow: Rectangle { x: parent.width - 104px; y: 31px; width: 104px; height: 29px; background: transparent; border-width: 1px; border-color: #5e523a;
-                        Label { x: 0px; y: 0px; text: "符择 / 离线预览"; width: parent.width; height: parent.height; horizontal-alignment: center; color: #c7b386; font-size: 10px; }
+                        Label { x: 0px; y: 0px; text: HostState.offline ? "符择 / 离线预览" : "符择 / Rust 测试版"; width: parent.width; height: parent.height; horizontal-alignment: center; color: #c7b386; font-size: 10px; }
                     }
                 }
                 if HostState.notice != "": Panel { height: 62px;
@@ -154,7 +155,7 @@ export component Workbench inherits Window {
                 if root.page == 1: HistoryPage { sample: root.history-sample; }
                 if root.page == 2: SettingsPage { }
                 Rectangle { height: 30px;
-                    Label { x: 0px; y: 0px; height: 30px; text: "状态更新 · 离线预览"; color: #8698a5; font-size: 10px; }
+                    Label { x: 0px; y: 0px; height: 30px; text: HostState.offline ? "状态更新 · 离线预览" : "状态来自本机运行服务"; color: #8698a5; font-size: 10px; }
                     Label { y: 0px; x: parent.width - 190px; width: 190px; height: 30px; text: "符择 · 中文版结构恢复"; horizontal-alignment: right; color: #8698a5; font-size: 10px; }
                 }
                 if root.backend-note != "": Panel {
@@ -193,4 +194,9 @@ export component Workbench inherits Window {
         }
         }
     }
+    out property <bool> maintenance-cancel-focused: maintenance-confirm.cancel-focused;
+    private property <bool> maintenance-open: MaintenanceState.confirmation != "";
+    changed maintenance-open => { if !root.maintenance-open { content-focus.focus(); } }
+    maintenance-confirm := MaintenanceConfirm { x: 0px; y: 0px; }
+
 }

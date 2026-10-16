@@ -1,4 +1,19 @@
 export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
+export global MaintenanceState {
+    in-out property <bool> attached: false;
+    in-out property <bool> offline: true;
+    in-out property <bool> busy: false;
+    in-out property <bool> private-channel: true;
+    in-out property <bool> installable: false;
+    in-out property <bool> can-clean: false;
+    in-out property <string> confirmation;
+    in-out property <string> notice;
+    in-out property <string> current-version: "未打包开发构建";
+    in-out property <string> update-status: "尚未检查更新";
+    in-out property <string> storage-summary: "尚未扫描。暂停识别后可查看本地占用。";
+    in-out property <[string]> storage-rows;
+    callback action(string);
+}
 export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool }
 export struct DetailRow { title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }

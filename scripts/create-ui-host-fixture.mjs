@@ -19,4 +19,6 @@ await mkdir(path.join(prefix, 'champion-shards'), {recursive: true})
 for (const [name, document] of Object.entries(documents)) await writeFile(path.join(prefix, name), JSON.stringify(document))
 await writeFile(path.join(prefix, 'manifest.json'), JSON.stringify({...common, files: Object.keys(documents).map(p => ({path: p}))}))
 await writeFile(path.join(root, 'current.json'), JSON.stringify(common))
+// Explicit smoke config: dummy worker paths are never started in offline mode.
+await writeFile(path.join(root, 'preview.json'), JSON.stringify({bundled_data: '.', cache_data: null, locale: 'zh-CN', worker: 'unused-worker.exe', ort: 'unused-ort.dll', model: 'unused-model.onnx', dictionary: 'unused-dictionary.txt', backend: 'cpu'}))
 console.log('Created synthetic UI-host fixtures; no network or personal data.')

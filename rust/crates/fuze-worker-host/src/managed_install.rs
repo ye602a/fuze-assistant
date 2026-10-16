@@ -168,6 +168,7 @@ pub(crate) fn allowed(path: &str) -> bool {
     }
     [
         "fuze-rust-host.exe",
+        "fuze-ui-lab.exe",
         "fuze-ocr-worker.exe",
         "fuze-update.exe",
         "onnxruntime.dll",
@@ -300,6 +301,7 @@ pub fn unpack(archive: &Path, destination: &Path, revision: &str) -> Result<()> 
     Ok(())
 }
 pub fn check_bundle(directory: &Path) -> Result<()> {
+    desktop_program(directory)?;
     let mut child = Command::new(directory.join("fuze-rust-host.exe"))
         .arg("--check-bundle")
         .arg(directory.join("preview.json"))
@@ -564,8 +566,26 @@ fn start(directory: &Path) -> Result<()> {
 pub(crate) fn start_smoke(directory: &Path) -> Result<()> {
     start_mode(directory, true)
 }
+pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
+    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &directory.join("build.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-build")?;
+    let name = match build.get("uiFrontend").and_then(|v| v.as_str()) {
+        None if build.get("uiFrontend").is_none() => "fuze-rust-host.exe",
+        Some("win32") => "fuze-rust-host.exe",
+        Some("slint") => "fuze-ui-lab.exe",
+        _ => return Err("install-frontend"),
+    };
+    let path = directory.join(name);
+    if !path.is_file() {
+        return Err("install-frontend-missing");
+    }
+    Ok(path)
+}
 fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
-    let mut child = Command::new(directory.join("fuze-rust-host.exe"))
+    let mut child = Command::new(desktop_program(directory)?)
         .arg(if smoke {
             "--desktop-smoke"
         } else {
@@ -644,6 +664,38 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frontend_selection_preserves_legacy_and_rejects_unknown_or_missing() {
+        let root =
+            std::env::temp_dir().join(format!("fuze-frontend-selection-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("fuze-rust-host.exe"), b"fixture").unwrap();
+        for document in [r#"{}"#, r#"{"uiFrontend":"win32"}"#] {
+            fs::write(root.join("build.json"), document).unwrap();
+            assert_eq!(
+                desktop_program(&root).unwrap(),
+                root.join("fuze-rust-host.exe")
+            );
+        }
+        fs::write(root.join("build.json"), br#"{"uiFrontend":"slint"}"#).unwrap();
+        assert_eq!(desktop_program(&root), Err("install-frontend-missing"));
+        fs::write(root.join("fuze-ui-lab.exe"), b"fixture").unwrap();
+        assert_eq!(
+            desktop_program(&root).unwrap(),
+            root.join("fuze-ui-lab.exe")
+        );
+        for document in [
+            r#"{"uiFrontend":null}"#,
+            r#"{"uiFrontend":"../../foreign.exe"}"#,
+        ] {
+            fs::write(root.join("build.json"), document).unwrap();
+            assert_eq!(desktop_program(&root), Err("install-frontend"));
+        }
+        for name in ["fuze-rust-host.exe", "fuze-ui-lab.exe", "build.json"] {
+            fs::remove_file(root.join(name)).unwrap();
+        }
+        fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn retirement_keeps_current_previous_and_unrecognized_files() {
         let root = std::env::temp_dir().join(format!("fuze-retention-{}", std::process::id()));

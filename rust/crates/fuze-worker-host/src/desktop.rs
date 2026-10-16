@@ -79,6 +79,7 @@ const SIDE: usize = 109;
 const TRAY: u32 = WM_APP + 1;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
+    pub initialized: bool,
     pub history: crate::account_history::View,
     pub records: Vec<crate::local_records::Row>,
     pub record_error: Option<&'static str>,
@@ -100,6 +101,7 @@ pub struct Status {
 impl Default for Status {
     fn default() -> Self {
         Self {
+            initialized: false,
             history: Default::default(),
             records: Vec::new(),
             record_error: None,
@@ -280,6 +282,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
         if fixture {
             s.history = fixture_history;
         }
+        s.initialized = true;
         s.available = initial_available;
         s.preferences = preferences.clone();
         s.ui_locale = match preferences.locale.as_str() {

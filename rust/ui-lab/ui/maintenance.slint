@@ -1,0 +1,57 @@
+import { HostState, MaintenanceState } from "host-state.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Toggle } from "components.slint";
+export component MaintenancePage inherits VerticalLayout {
+    spacing: 18px;
+    Panel { height: 382px;
+        SectionTitle { x: 23px; y: 18px; height: 26px; text: "软件更新"; }
+        Label { x: 23px; y: 55px; width: parent.width - 46px; height: 28px; text: "当前版本 · " + MaintenanceState.current-version; font-size: 18px; }
+        Label { x: 23px; y: 92px; width: parent.width - 46px; height: 48px; text: HostState.running ? "请先在首页暂停识别，再检查更新或管理存储。" : MaintenanceState.update-status; wrap: word-wrap; color: Theme.muted; }
+        HorizontalLayout { x: 23px; y: 152px; width: parent.width - 46px; height: 36px; spacing: 10px;
+            Action { label: MaintenanceState.busy ? "正在处理…" : "检查新版"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("check"); } }
+            Action { label: "退出并打开更新程序"; enabled: MaintenanceState.installable && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("install"); } }
+        }
+        Label { x: 23px; y: 202px; width: parent.width - 92px; height: 24px; text: MaintenanceState.private-channel ? "私有更新频道" : "公开更新频道"; }
+        Toggle { x: parent.width - 67px; y: 203px; checked: MaintenanceState.private-channel; enabled: !MaintenanceState.busy; label: "使用私有更新频道"; toggled => { MaintenanceState.private-channel = !MaintenanceState.private-channel; MaintenanceState.installable = false; MaintenanceState.update-status = "频道已切换，请重新检查更新。"; } }
+        HorizontalLayout { x: 23px; y: 244px; width: 280px; height: 34px; spacing: 10px;
+            Action { label: "设置私有授权"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("credentials"); } }
+            Action { label: "移除授权"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("forget"); } }
+        }
+        Label { x: 23px; y: 292px; width: parent.width - 46px; height: 70px; wrap: word-wrap; text: "检查不会下载。更新程序会显示下载进度，并分别确认下载与安装。优先差分，失败回退全量，保留可回滚版本。\n私有令牌由 Windows 安全存储保管，不在页面显示。"; color: Theme.muted; font-size: 11px; }
+    }
+    if MaintenanceState.notice != "": Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
+    Panel { height: 190px + MaintenanceState.storage-rows.length * 30px;
+        SectionTitle { x: 23px; y: 18px; height: 26px; text: "存储管理"; }
+        Label { x: 23px; y: 55px; width: parent.width - 46px; height: 48px; wrap: word-wrap; text: MaintenanceState.storage-summary; color: Theme.muted; }
+        VerticalLayout { x: 23px; y: 112px; width: parent.width - 46px; height: MaintenanceState.storage-rows.length * 30px; spacing: 0px;
+            for row in MaintenanceState.storage-rows: Label { height: 30px; text: row; font-size: 12px; }
+        }
+        HorizontalLayout { x: 23px; y: parent.height - 55px; width: 280px; height: 36px; spacing: 10px;
+            Action { label: "扫描本地占用"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("scan"); } }
+            Action { label: "清理可回收文件"; enabled: MaintenanceState.can-clean && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("clean"); } }
+        }
+    }
+}
+export component MaintenanceConfirm inherits Rectangle {
+    in property <bool> opened: MaintenanceState.confirmation != "";
+    out property <bool> cancel-focused: cancel.focused;
+    visible: root.opened;
+    background: #000000b8;
+    changed opened => { if root.opened { cancel.focus(); } }
+    TouchArea { clicked => { MaintenanceState.action("cancel"); } }
+    FocusScope { enabled: root.opened;
+        key-pressed(event) => {
+            if event.text == Key.Escape { MaintenanceState.action("cancel"); return accept; }
+            if event.text == Key.Tab || event.text == Key.Backtab { if cancel.focused { confirm.focus(); } else { cancel.focus(); } return accept; }
+            return reject;
+        }
+        Panel { x: (root.width - 420px)/2; y: (root.height - 238px)/2; width: 420px; height: 238px;
+            TouchArea { }
+            SectionTitle { x: 24px; y: 20px; height: 26px; text: MaintenanceState.confirmation == "clean" ? "确认清理" : MaintenanceState.confirmation == "forget" ? "移除私有授权" : "打开更新程序"; }
+            Label { x: 24px; y: 62px; width: 372px; height: 100px; wrap: word-wrap; text: MaintenanceState.confirmation == "clean" ? MaintenanceState.storage-summary + "\n仅清理已预览的过期文件；保留个人记录、设置、当前数据和回滚数据。" : MaintenanceState.confirmation == "forget" ? "移除后再次访问私有频道需要重新授权。不会影响公开频道或本地推荐。" : "将退出本次 Rust 会话并打开更新程序。下载与安装还需分别确认；不会退出游戏或替换 Electron 稳定版。"; color: Theme.muted; }
+            HorizontalLayout { x: 196px; y: 180px; width: 200px; height: 38px; spacing: 10px;
+                cancel := Action { label: "取消"; enabled: root.opened; clicked => { MaintenanceState.action("cancel"); } }
+                confirm := Action { label: "确认"; primary: true; enabled: root.opened; clicked => { MaintenanceState.action("confirm"); } }
+            }
+        }
+    }
+}

@@ -2,24 +2,8 @@
 //! Explicit, finite developer entry point. Never invoked by offline CI or the stable app.
 #[cfg(windows)]
 fn run() -> Result<(), &'static str> {
-    use fuze_worker_host::controller::{Config, Controller, Monitor};
-    use std::{
-        io::Read,
-        path::PathBuf,
-        time::{Duration, Instant},
-    };
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Input {
-        bundled_data: PathBuf,
-        cache_data: Option<PathBuf>,
-        locale: String,
-        worker: PathBuf,
-        ort: PathBuf,
-        model: PathBuf,
-        dictionary: PathBuf,
-        backend: String,
-    }
+    use fuze_worker_host::controller::{Controller, Monitor};
+    use std::time::{Duration, Instant};
     let mut args: Vec<_> = std::env::args().skip(1).collect();
     if args.is_empty() {
         let exe = std::env::current_exe().map_err(|_| "config-path")?;
@@ -60,57 +44,7 @@ fn run() -> Result<(), &'static str> {
             .filter(|v| (1..=3600).contains(v))
             .ok_or("duration-invalid")?
     };
-    let mut bytes = Vec::new();
-    std::fs::File::open(&args[1])
-        .map_err(|_| "config-read")?
-        .take(16385)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "config-read")?;
-    if bytes.len() > 16384 {
-        return Err("config-limit");
-    }
-    let input: Input = serde_json::from_slice(&bytes).map_err(|_| "config-invalid")?;
-    let config_path = std::fs::canonicalize(&args[1]).map_err(|_| "config-read")?;
-    let directory = config_path.parent().ok_or("config-path")?;
-    let resolve = |path: PathBuf| {
-        if path.is_absolute() {
-            path
-        } else {
-            directory.join(path)
-        }
-    };
-    let locale = match input.locale.as_str() {
-        "auto" => None,
-        "zh-CN" => Some(fuze_data::Locale::ZhCn),
-        "zh-TW" => Some(fuze_data::Locale::ZhTw),
-        "en-US" => Some(fuze_data::Locale::EnUs),
-        _ => return Err("locale-invalid"),
-    };
-    if !["cpu", "auto", "dml", "dml-strict"].contains(&input.backend.as_str()) {
-        return Err("backend-invalid");
-    }
-    let mut roots = vec![fuze_data::Root {
-        path: resolve(input.bundled_data),
-        source: fuze_data::Source::Bundled,
-    }];
-    if let Some(path) = input.cache_data {
-        roots.push(fuze_data::Root {
-            path: resolve(path),
-            source: fuze_data::Source::Cache,
-        });
-    }
-    let config = Config {
-        icon_downloads: false,
-        level_gate: true,
-        augment_overlay: true,
-        roots,
-        locale,
-        worker: resolve(input.worker),
-        ort: resolve(input.ort),
-        model: resolve(input.model),
-        dictionary: resolve(input.dictionary),
-        backend: input.backend,
-    };
+    let config = fuze_worker_host::host_config::load(std::path::Path::new(&args[1]))?;
     if desktop {
         return fuze_worker_host::desktop::run(
             config,

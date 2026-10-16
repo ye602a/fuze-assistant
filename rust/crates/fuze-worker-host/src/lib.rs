@@ -305,3 +305,6 @@ pub mod recognition_sources;
 
 #[cfg(windows)]
 pub mod resources;
+
+#[cfg(windows)]
+pub mod host_config;

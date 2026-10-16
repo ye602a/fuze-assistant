@@ -1,11 +1,13 @@
 //! Toolkit-independent access to the existing desktop engine. No second OCR/LCU loop.
 //! The offline constructor never reads preferences/accounts or starts discovery.
 use super::*;
+use std::sync::atomic::AtomicBool;
 
 pub struct Session {
     shared: Arc<Shared>,
     worker: Option<thread::JoinHandle<()>>,
     offline: bool,
+    maintenance: AtomicBool,
 }
 
 impl Session {
@@ -33,6 +35,7 @@ impl Session {
             shared,
             worker: Some(worker),
             offline,
+            maintenance: AtomicBool::new(false),
         })
     }
     /// Account keys never need to be logged or serialized by a frontend.
@@ -40,7 +43,8 @@ impl Session {
         self.shared.status()
     }
     pub fn busy(&self) -> bool {
-        self.shared.desired.load(Ordering::Acquire) > EXIT
+        self.maintenance.load(Ordering::Acquire)
+            || self.shared.desired.load(Ordering::Acquire) > EXIT
     }
     pub fn set_running(&self, enabled: bool) -> Result<()> {
         if self.busy() || self.shared.desired.load(Ordering::Acquire) == EXIT {
@@ -56,6 +60,9 @@ impl Session {
     }
     /// Pending values are committed by the existing engine only after validation succeeds.
     pub fn apply(&self, value: crate::preferences::Preferences) -> Result<()> {
+        if self.maintenance.load(Ordering::Acquire) {
+            return Err("frontend-busy");
+        }
         value.validate()?;
         let guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
         let mode = self.shared.desired.load(Ordering::Acquire);
@@ -78,7 +85,26 @@ impl Session {
     pub fn update_data(&self) -> Result<()> {
         self.request_idle(DATA)
     }
+    pub fn begin_maintenance(&self) -> Result<()> {
+        let status = self.snapshot();
+        if !status.initialized
+            || status.mode != PAUSED
+            || self.shared.desired.load(Ordering::Acquire) != PAUSED
+        {
+            return Err("frontend-pause-required");
+        }
+        if self.maintenance.swap(true, Ordering::AcqRel) {
+            return Err("frontend-busy");
+        }
+        Ok(())
+    }
+    pub fn end_maintenance(&self) {
+        self.maintenance.store(false, Ordering::Release);
+    }
     fn request_idle(&self, mode: u8) -> Result<()> {
+        if self.maintenance.load(Ordering::Acquire) {
+            return Err("frontend-busy");
+        }
         let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
         if self.shared.desired.load(Ordering::Acquire) != PAUSED {
             return Err("frontend-pause-required");

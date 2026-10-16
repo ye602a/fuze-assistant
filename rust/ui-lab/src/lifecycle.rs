@@ -53,6 +53,8 @@ fn reveal(ui: &Workbench, interactive: bool) {
     });
 }
 fn close(ui: &Workbench, shell: &Shell, session: &Session, interactive: bool) {
+    ui.global::<crate::MaintenanceState>()
+        .set_confirmation("".into());
     if session.snapshot().preferences.close_to_tray && shell.tray_available() {
         ui.set_quit_open(false);
         if interactive {
@@ -140,6 +142,8 @@ pub fn attach(
             }
             "quit" => {
                 reveal(&ui, interactive);
+                ui.global::<crate::MaintenanceState>()
+                    .set_confirmation("".into());
                 ui.set_quit_open(true);
             }
             "availability" => {

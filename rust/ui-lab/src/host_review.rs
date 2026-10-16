@@ -27,6 +27,13 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     crate::slint_probe::connect(&ui);
     let binding = crate::host_bridge::attach(&ui, crate::host_bridge::offline_config(data), true)?;
     let session = binding.session.clone();
+    let maintenance_root = crate::maintenance_review::fixture(output)?;
+    let _maintenance = crate::maintenance_bridge::attach(
+        &ui,
+        session.clone(),
+        true,
+        Some(maintenance_root.clone()),
+    )?;
     let lifecycle = crate::lifecycle::attach(&ui, session.clone(), true, false)?;
     if lifecycle.shell.tray_available()
         || lifecycle.shell.hotkey_available()
@@ -247,7 +254,70 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         {
                             return Err("foreground-changed".into());
                         }
-                        // The same confirm callback stops this isolated engine before ending the loop.
+                        ui.set_quit_open(false);
+                        ui.set_page(2);
+                        ui.set_scroll_y(0.);
+                        ui.global::<crate::MaintenanceState>()
+                            .invoke_action("scan".into());
+                        step.set(10);
+                    }
+                    10 if !ui.global::<crate::MaintenanceState>().get_busy() => {
+                        let maintenance = ui.global::<crate::MaintenanceState>();
+                        if !maintenance.get_can_clean() {
+                            return Err("storage-scan-missing-candidates".into());
+                        }
+                        save("maintenance-update")?;
+                        ui.set_scroll_y(-460.);
+                        save("maintenance-storage")?;
+                        maintenance.invoke_action("clean".into());
+                        step.set(11);
+                    }
+                    11 => {
+                        let maintenance = ui.global::<crate::MaintenanceState>();
+                        if maintenance.get_confirmation() != "clean"
+                            || !ui.get_maintenance_cancel_focused()
+                        {
+                            return Err("storage-confirmation-focus".into());
+                        }
+                        save("maintenance-confirmation")?;
+                        maintenance.invoke_action("cancel".into());
+                        if !maintenance_root.join("client-data/versions/1.0.0").exists() {
+                            return Err("storage-cancel-deleted".into());
+                        }
+                        maintenance.invoke_action("clean".into());
+                        maintenance.invoke_action("confirm".into());
+                        if !session.busy() || session.set_running(true).is_ok() {
+                            return Err("maintenance-session-reservation".into());
+                        }
+                        step.set(12);
+                    }
+                    12 if !ui.global::<crate::MaintenanceState>().get_busy() => {
+                        if !crate::maintenance_review::preserved(&maintenance_root) {
+                            return Err("storage-preservation".into());
+                        }
+                        ui.global::<crate::MaintenanceState>()
+                            .invoke_action("check".into());
+                        step.set(13);
+                    }
+                    13 if !ui.global::<crate::MaintenanceState>().get_busy() => {
+                        let maintenance = ui.global::<crate::MaintenanceState>();
+                        if maintenance.get_installable()
+                            || !maintenance.get_notice().contains("离线验证")
+                        {
+                            return Err("maintenance-offline-check".into());
+                        }
+                        save("maintenance-complete")?;
+                        ui.window().set_size(slint::LogicalSize::new(920., 760.));
+                        ui.set_scroll_y(0.);
+                        step.set(14);
+                    }
+                    14 if ui.get_content_width() < 800. => {
+                        save("maintenance-narrow")?;
+                        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }
+                            != before
+                        {
+                            return Err("maintenance-foreground".into());
+                        }
                         ui.invoke_close_requested();
                         return Ok(true);
                     }
@@ -275,7 +345,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
         std::thread::sleep(Duration::from_millis(10));
     }
     drop(binding);
-    let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false});
+    let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false,"storage_scan_clean_preservation":true,"maintenance_offline_network_rejected":true,"maintenance_confirmation_cancel_focus":true});
     std::fs::write(
         output.join("host-review.json"),
         serde_json::to_vec_pretty(&report)?,

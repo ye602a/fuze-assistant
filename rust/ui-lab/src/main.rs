@@ -5,6 +5,8 @@ mod game_windows;
 mod host_bridge;
 mod host_review;
 mod lifecycle;
+mod maintenance_bridge;
+mod maintenance_review;
 mod manual_profile;
 mod native_shell;
 mod overlay_review;
@@ -13,6 +15,7 @@ mod public_art;
 mod skia_surface_probe;
 mod slint_probe;
 mod stage_bridge;
+mod startup;
 mod status_view;
 mod telemetry;
 slint::include_modules!();
@@ -20,6 +23,7 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--desktop" | "--managed-desktop" | "--desktop-smoke" | "--managed-desktop-smoke") if args.len()==2 => startup::run(std::path::Path::new(&args[1]),args[0].ends_with("smoke"),args[0].starts_with("--managed"))?,
         Some("--review-host") if args.len() == 3 => println!("{}", host_review::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[2]))?),
         Some("--host-offline") if args.len() == 2 => {
             slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).with_winit_window_attributes_hook(|a|a.with_active(false)).select()?;
@@ -27,6 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             slint_probe::connect(&ui);
             let binding = host_bridge::attach(&ui, host_bridge::offline_config(std::path::Path::new(&args[1])), true)?;
             let _lifecycle = lifecycle::attach(&ui,binding.session.clone(),true,true)?;
+            let _maintenance = maintenance_bridge::attach(&ui,binding.session.clone(),true,None)?;
             ui.show()?;
             slint::run_event_loop_until_quit()?;
         }
@@ -75,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui.run()?;
         }
         Some("--overlay") if args.len() == 1 => direct::interactive()?,
-        _ => println!("FUZE 界面原型：--review 输出目录（离屏/隐藏自有窗口）；--interactive [software|skia]；--overlay（需用户手动运行）。不访问游戏，不保存输入。"),
+        _ => println!("FUZE 开发入口：--review 输出目录（离线/隐藏自有窗口）；--desktop-smoke 配置文件（隔离启动检查）；--interactive [software|skia]（离线预览）；--desktop 配置文件（真实宿主，需空闲时主动运行）。阶段验收前不替换稳定版。"),
     }
     Ok(())
 }
