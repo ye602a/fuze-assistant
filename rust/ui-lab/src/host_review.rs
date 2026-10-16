@@ -27,6 +27,13 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     crate::slint_probe::connect(&ui);
     let binding = crate::host_bridge::attach(&ui, crate::host_bridge::offline_config(data), true)?;
     let session = binding.session.clone();
+    let lifecycle = crate::lifecycle::attach(&ui, session.clone(), true, false)?;
+    if lifecycle.shell.tray_available()
+        || lifecycle.shell.hotkey_available()
+        || !lifecycle.shell.hidden()
+    {
+        return Err("review-shell-isolation".into());
+    }
     let champion = crate::ChampionWindow::new()?;
     champion
         .window()
@@ -208,6 +215,32 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         {
                             return Err("selection-not-cleared".into());
                         }
+                        ui.set_page(0);
+                        ui.set_scroll_y(0.);
+                        ui.invoke_request_close();
+                        step.set(9);
+                    }
+                    9 => {
+                        save("close-confirmation")?;
+                        if !ui.get_quit_open() || !ui.get_quit_cancel_focused() {
+                            return Err("close-fallback-focus".into());
+                        }
+                        ui.set_quit_open(false);
+                        if ui.get_quit_open() {
+                            return Err("close-cancel".into());
+                        }
+                        ui.global::<crate::ShellState>()
+                            .invoke_action("quit".into());
+                        if !ui.get_quit_open() {
+                            return Err("tray-quit-confirmation".into());
+                        }
+                        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }
+                            != before
+                        {
+                            return Err("foreground-changed".into());
+                        }
+                        // The same confirm callback stops this isolated engine before ending the loop.
+                        ui.invoke_close_requested();
                         return Ok(true);
                     }
                     _ => (),
@@ -226,8 +259,15 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     slint::run_event_loop_until_quit()?;
     timer.stop();
     result.borrow_mut().take().ok_or("review-incomplete")??;
+    let stopped = Instant::now();
+    while !binding.session.snapshot().done {
+        if stopped.elapsed() > Duration::from_secs(3) {
+            return Err("session-exit-timeout".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     drop(binding);
-    let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"disk_save_verified":false,"production_parity_complete":false});
+    let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false});
     std::fs::write(
         output.join("host-review.json"),
         serde_json::to_vec_pretty(&report)?,

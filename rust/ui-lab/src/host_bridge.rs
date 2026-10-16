@@ -418,70 +418,21 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
             ])).into());
             state.set_sampled(next.resources.sampled.as_deref().unwrap_or("等待首次采样").into());
             state.set_schedule(format!("当前等级 {} · 跳过截图 {} 次\n等级不可读时恢复基础检测；等级不是实际领取轮次。",next.pipeline.level.map(|n|n.to_string()).unwrap_or("—".into()),next.pipeline.skipped_frames).into());
-            let connected = matches!(
-                next.connection,
-                Some(fuze_lcu::reconnect::State::Connected(_))
-            );
-            state.set_connection_value(
-                if offline {
-                    "隔离状态样例"
-                } else if connected {
-                    "通信已验证"
-                } else {
-                    "尚未验证"
-                }
-                .into(),
-            );
-            state.set_capture_value(
-                if next.mode == 0 {
-                    "已暂停"
-                } else if next.pipeline.frame_age.is_some() {
-                    "画面已获取"
-                } else {
-                    "正常待命"
-                }
-                .into(),
-            );
-            state.set_ocr_value(
-                match next.pipeline.backend {
-                    Some(fuze_contract::wire::ActiveBackend::Cpu) => "CPU 已就绪",
-                    Some(_) => "DirectML 已就绪",
-                    None => "正常待命",
-                }
-                .into(),
-            );
-            let failed = next.pipeline.error.is_some();
-            ui.set_health(if failed {
-                3
-            } else if next.pipeline.recent.is_some() {
-                1
-            } else {
-                0
-            });
-            state.set_status_title(
-                if next.mode == 0 {
-                    "识别已暂停"
-                } else if failed {
-                    "识别异常 · 等待恢复"
-                } else if offline {
-                    "隔离宿主 · 等待对局样例"
-                } else if connected {
-                    "已连接 · 等待识别"
-                } else {
-                    "等待英雄联盟客户端"
-                }
-                .into(),
-            );
-            state.set_status_hint(
-                if offline {
-                    "已连接 Rust 宿主服务，使用固定样例；不访问游戏、不读取个人数据。"
-                } else if failed {
-                    "识别链路暂不可用，原有设置与数据继续保留。"
-                } else {
-                    "自动连接客户端，仅在允许的对局阶段识别强化符文。"
-                }
-                .into(),
-            );
+            let view=crate::status_view::present(&next,offline);
+            state.set_connection_value(view.connection.into());
+            state.set_connection_hint(view.phase.into());
+            state.set_connection_tone(view.connection_tone);
+            state.set_capture_value(view.capture.into());
+            state.set_capture_hint(view.capture_hint.into());
+            state.set_capture_tone(view.capture_tone);
+            state.set_ocr_value(view.ocr.into());
+            state.set_ocr_hint(view.ocr_hint.into());
+            state.set_ocr_tone(view.ocr_tone);
+            state.set_verified(if offline { "隔离验证，未连接游戏".into() } else { next.verified_time.as_deref().unwrap_or("尚未验证").into() });
+            ui.set_health(view.health);
+            state.set_status_title(view.title.into());
+            state.set_status_hint(view.hint.into());
+            ui.global::<crate::ShellState>().invoke_sync(next.preferences.pause_hotkey,next.mode==1);
             drop(old);
             *previous.borrow_mut() = Some(next);
         },

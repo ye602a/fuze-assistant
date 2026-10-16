@@ -1,5 +1,5 @@
 import { ComboBox, LineEdit } from "std-widgets.slint";
-import { HostState } from "host-state.slint";
+import { HostState, ShellState } from "host-state.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
@@ -24,7 +24,7 @@ export component SettingsPage inherits VerticalLayout {
                 height: 78px;
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.stroke; }
                 Label { x: 0px; y: 11px; width: parent.width - 75px; height: 24px; text: pref.title; font-size: 13px; }
-                Label { x: 0px; y: 38px; width: parent.width - 75px; height: 30px; wrap: word-wrap; text: pref.hint; color: Theme.muted; font-size: 11px; }
+                Label { x: 0px; y: 38px; width: parent.width - 75px; height: 30px; wrap: word-wrap; text: ShellState.attached && pref.key == "pause_hotkey" ? ShellState.hotkey-hint : ShellState.attached && pref.key == "close_to_tray" ? ShellState.tray-hint : pref.hint; color: Theme.muted; font-size: 11px; }
                 Toggle { x: parent.width - 44px; y: 24px; label: pref.title; checked: pref.checked; enabled: HostState.connected && !HostState.busy; toggled => { HostState.preference(pref.key, !pref.checked); } }
             }
             Rectangle { height: 62px;

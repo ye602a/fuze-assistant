@@ -15,6 +15,7 @@ export component Label inherits Text {
     color: Theme.ivory; font-size: 12px; vertical-alignment: center; overflow: elide;
 }
 export component Action inherits Rectangle {
+    out property <bool> focused: focus.has-focus;
     in property <string> label;
     in property <string> description: root.label;
     in property <bool> primary: false;

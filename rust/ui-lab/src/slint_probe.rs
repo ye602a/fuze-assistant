@@ -256,6 +256,12 @@ impl Platform for Offscreen {
 pub fn connect(ui: &Workbench) {
     use slint::winit_030::WinitWindowAccessor;
     let weak = ui.as_weak();
+    ui.on_request_close(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_quit_open(true);
+        }
+    });
+    let weak = ui.as_weak();
     ui.on_minimize(move || {
         if let Some(ui) = weak.upgrade() {
             ui.window()

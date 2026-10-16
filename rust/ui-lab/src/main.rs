@@ -3,11 +3,14 @@ mod direct;
 mod font_probe;
 mod host_bridge;
 mod host_review;
+mod lifecycle;
 mod manual_profile;
+mod native_shell;
 mod public_art;
 #[cfg(feature = "gpu")]
 mod skia_surface_probe;
 mod slint_probe;
+mod status_view;
 mod telemetry;
 slint::include_modules!();
 
@@ -19,8 +22,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).select()?;
             let ui = Workbench::new()?;
             slint_probe::connect(&ui);
-            let _binding = host_bridge::attach(&ui, host_bridge::offline_config(std::path::Path::new(&args[1])), true)?;
-            ui.run()?;
+            let binding = host_bridge::attach(&ui, host_bridge::offline_config(std::path::Path::new(&args[1])), true)?;
+            let _lifecycle = lifecycle::attach(&ui,binding.session.clone(),true,true)?;
+            ui.show()?;
+            slint::run_event_loop_until_quit()?;
         }
         Some("--manual-profile") if args.len()==3 => manual_profile::run(&args[1],std::path::Path::new(&args[2]))?,
         #[cfg(feature="gpu")]

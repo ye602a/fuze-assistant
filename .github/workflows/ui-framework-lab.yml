@@ -35,6 +35,8 @@ jobs:
           cargo +1.90.0 fmt -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 build --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --release --locked --features gpu -j 2 status_view::tests
           exit $LASTEXITCODE
       - name: Offscreen images and hidden own-window invariants
         working-directory: rust/ui-lab

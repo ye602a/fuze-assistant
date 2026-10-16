@@ -1541,6 +1541,7 @@ dependencies = [
  "slint-build",
  "windows 0.61.3",
  "windows-numerics",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -3,6 +3,15 @@ export struct MatchRow { title: string, result: string, kda: string, duration: s
 export struct DetailRow { title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }
 export struct SlotRow { name: string, hint: string }
+export global ShellState {
+    in-out property <bool> attached: false;
+    in-out property <bool> tray-available: false;
+    in-out property <string> tray-hint;
+    in-out property <string> hotkey-hint;
+    in-out property <string> notice;
+    callback action(string);
+    callback sync(bool, bool);
+}
 export global HostState {
     in-out property <[SlotRow]> slots;
     in-out property <[string]> resources: ["—", "—", "—", "—"];
@@ -31,6 +40,12 @@ export global HostState {
     in-out property <string> connection-value;
     in-out property <string> capture-value;
     in-out property <string> ocr-value;
+    in-out property <string> connection-hint;
+    in-out property <string> capture-hint;
+    in-out property <string> ocr-hint;
+    in-out property <int> connection-tone;
+    in-out property <int> capture-tone;
+    in-out property <int> ocr-tone;
     in-out property <string> verified;
     callback preference(string, bool);
     callback backend-changed(int);
