@@ -6,12 +6,12 @@ const checks = {
     ['secrets', '源码隐私检查'], ['build', '格式、契约测试与编译'],
     ['ocr', '离线 OCR 与原生窗口'], ['worker', '工作进程与 IPC 生命周期'],
     ['capture', '原生捕获与 GPU ROI'], ['pipeline', '捕获到 OCR 完整链路'],
-    ['fallback', 'CPU 对照与回退'], ['package', '打包、更新与安装回滚'],
+    ['fallback', 'CPU 对照与回退'], ['contracts', '工作流与数据契约'], ['package', '阶段验收：打包、更新与安装回滚'],
     ['desktop', '原生桌面交互'], ['upload_scan', '上传内容隐私检查'],
   ],
   electron: [
     ['secrets', '源码隐私检查'], ['lint', '代码规范'], ['types', '类型检查'],
-    ['tests', '单元测试'], ['ocr', 'OCR 回归'], ['stages', '阶段统计缓存'],
+    ['tests', '单元测试'], ['build', '应用编译'], ['contracts', '工作流契约'], ['ocr', 'OCR 回归'], ['stages', '阶段统计缓存'],
     ['signals', '阶段信号隐私与传输'], ['differential', '差分更新回归'],
     ['download', '私有频道下载'], ['package', 'Windows 安装包构建'],
     ['upload_scan', '安装包隐私检查'], ['desktop', '安装包窗口验证'],
@@ -33,7 +33,7 @@ export function renderSummary(kind, status, steps = {}) {
     `作业状态（生成摘要前）：${state(status)}。\n\n` +
     `| 验证项目 | 结果 |\n| --- | --- |\n${rows(checks[kind])}\n\n` +
     `| 可选交付 | 结果 |\n| --- | --- |\n${rows(delivery.filter(([id]) => Object.hasOwn(steps, id)))}\n\n` +
-    '普通 PR 保留完整构建与验证，不上传下载附件。测试包由手动工作流按需保留；正式版本通过标签发布到 Releases。\n\n' +
+    '普通 PR 只编译和执行代码及离线链路检查，不生成安装包或更新包。完整打包、安装回滚与安装包界面验证仅在明确的阶段验收执行；跳过不代表验收通过。正式版本通过标签发布到 Releases。\n\n' +
     '此摘要只包含固定项目名称和步骤状态，不包含步骤输出或运行数据。离线与自有测试窗口通过不代表真实对局验证，也不代表附件配额已恢复。\n'
 }
 

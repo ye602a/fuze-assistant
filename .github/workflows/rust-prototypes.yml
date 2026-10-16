@@ -26,10 +26,14 @@ on:
       - '.github/workflows/rust-prototypes.yml'
   workflow_dispatch:
     inputs:
+      stage_acceptance:
+        description: '阶段版本验收：生成测试包和更新包，验证安装回滚与完整桌面'
+        type: boolean
+        default: false
       artifacts:
-        description: '保留下载产物：none 仅验证，preview 测试 ZIP，full 含更新包和诊断工具'
+        description: '阶段验收附件：none 不保留，preview 测试 ZIP，full 含更新包和诊断工具'
         type: choice
-        default: preview
+        default: none
         options: [none, preview, full]
 permissions:
   contents: read
@@ -94,13 +98,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
-      - name: Assemble and self-check isolated Rust preview
-        id: package
+      - name: Validate workflow policy and data preparation contracts
+        id: contracts
         run: |
           node --test tests/unit/actions-validation-summary.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-data-preparation.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          exit $LASTEXITCODE
+      - name: Assemble and self-check milestone Rust preview
+        id: package
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
+        run: |
           node scripts/prepare-rust-data.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-preview.mjs
@@ -111,6 +119,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Native desktop pause and exit (own window only)
         id: desktop
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
         env:
           FUZE_RUST_CI_TRAY: '1'
         run: node scripts/check-rust-desktop.mjs
@@ -119,7 +128,7 @@ jobs:
         run: npm run security:check
       - name: Upload requested preview ZIP (not a stable installer)
         id: upload_preview
-        if: github.event_name == 'workflow_dispatch' && inputs.artifacts != 'none'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts != 'none'
         uses: actions/upload-artifact@v4
         with:
           name: rust-development-preview
@@ -129,7 +138,7 @@ jobs:
           retention-days: 3
       - name: Upload requested native update bundle
         id: upload_update
-        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: rust-update-bundle
@@ -140,7 +149,7 @@ jobs:
           retention-days: 3
       - name: Upload sanitized prototype reports
         id: upload_evidence
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: rust-prototype-evidence
@@ -174,14 +183,14 @@ jobs:
             rust/artifacts/worker-validation.json
           if-no-files-found: ignore
       - name: Prepare isolated prototype executables
-        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
         run: |
           New-Item -ItemType Directory -Force rust/artifacts/tools | Out-Null
           Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-ocr-worker.exe,rust/target/release/fuze-worker-host.exe,rust/target/release/fuze-rust-host.exe,rust/target/release/fuze-native-overlay.exe,rust/target/release/fuze-capture.exe rust/artifacts/tools/
           Get-ChildItem rust/artifacts/tools/*.exe | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -Encoding ascii rust/artifacts/tools/SHA256SUMS.txt
       - name: Upload isolated test tools (not a release installer)
         id: upload_tools
-        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: rust-prototype-tools

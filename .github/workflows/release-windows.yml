@@ -9,6 +9,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      stage_acceptance:
+        description: '阶段版本验收：生成安装包并执行安装包窗口验证'
+        type: boolean
+        default: false
       upload_artifacts:
         description: '保留安装包和窗口诊断供下载（正式标签直接发布到 Releases）'
         type: boolean
@@ -78,6 +82,14 @@ jobs:
         id: tests
         run: npm run test:unit
 
+      - name: Compile application without packaging
+        id: build
+        run: npm run build
+
+      - name: Validate workflow policy
+        id: contracts
+        run: node --test tests/unit/actions-validation-summary.test.mjs
+
       - name: OCR fixture regression
         id: ocr
         run: npm run test:augment-ocr
@@ -96,17 +108,20 @@ jobs:
 
       - name: Verify private release differential download
         id: download
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         env:
           FUZE_UPDATE_TEST_ACCESS: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/test-private-update-live.mjs
 
       - name: Package Windows installer
         id: package
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         shell: pwsh
         run: |
           $env:ELECTRON_CACHE = Join-Path $env:RUNNER_TEMP 'electron-cache'
           $env:ELECTRON_BUILDER_CACHE = Join-Path $env:RUNNER_TEMP 'electron-builder-cache'
           npm run pack
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $localeBundles = @(
             @{ Locale = 'zh-CN'; Pointer = 'current.json'; VersionPrefix = 'versions' },
@@ -149,16 +164,18 @@ jobs:
 
       - name: Check packaged upload secrets
         id: upload_scan
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         run: npm run security:check -- --packaged
 
       - name: Smoke test packaged Windows application
         id: desktop
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         timeout-minutes: 4
         run: npm run test:packaged-windows
 
       - name: Upload packaged smoke diagnostics
         id: upload_evidence
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_artifacts
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fuze-window-smoke
@@ -168,7 +185,7 @@ jobs:
 
       - name: Upload workflow artifact
         id: upload_preview
-        if: github.event_name == 'workflow_dispatch' && inputs.upload_artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fuze-windows
