@@ -239,3 +239,57 @@ impl Drop for Session {
         }
     }
 }
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+    #[test]
+    fn locale_activation_publishes_only_committed_state_and_clears_old_pipeline() {
+        let fixture = crate::preferences::locale_tests::Fixture::new();
+        fixture.dataset("zh-CN", "1.0", true);
+        fixture.dataset("en-US", "1.0", false);
+        let session = Session::start(fixture.config(), true).unwrap();
+        let wait = |ready: &dyn Fn(&Status) -> bool| {
+            let start = Instant::now();
+            loop {
+                let status = session.snapshot();
+                if ready(&status) {
+                    return status;
+                }
+                assert!(start.elapsed() < Duration::from_secs(5));
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let before = wait(&|s| s.initialized);
+        {
+            let mut s = session.shared.status.lock().unwrap();
+            s.pipeline.error = Some("old-language-fixture");
+        }
+        let p = crate::preferences::Preferences {
+            locale: "en-US".into(),
+            ..before.preferences.clone()
+        };
+        session.apply(p.clone()).unwrap();
+        let failed = wait(&|s| !session.busy() && s.update_error.is_some());
+        assert_eq!(failed.preferences, before.preferences);
+        assert_eq!(failed.ui_locale, before.ui_locale);
+        assert_eq!(failed.available, before.available);
+        fixture.dataset("en-US", "1.0", true);
+        session.apply(p).unwrap();
+        let applied = wait(&|s| !session.busy() && s.preferences.locale == "en-US");
+        assert_eq!(applied.ui_locale, "en-US");
+        assert_eq!(applied.available.as_deref(), Some("en-US@1.0"));
+        assert!(applied.pipeline.overlay.is_none());
+        assert!(applied.pipeline.recent.is_none());
+        assert!(applied.pipeline.dataset.is_none());
+        assert!(applied.pipeline.error.is_none());
+        assert_eq!(applied.pipeline.analyses, 0);
+        assert!(applied.selection.is_none());
+        assert!(applied.playing.is_none());
+        assert!(applied.connection.is_none());
+        assert!(applied.verified_time.is_none());
+        assert_eq!(applied.mode, PAUSED);
+        assert!(applied.update_error.is_none());
+        session.stop();
+        wait(&|s| s.done);
+    }
+}

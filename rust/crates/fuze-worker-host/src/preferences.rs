@@ -78,22 +78,81 @@ impl Preferences {
     }
     pub fn apply(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
-        let locale = match self.locale.as_str() {
+        if let Some(locale) = self.selected_locale() {
+            fuze_data::prepare(&config.roots, locale, fuze_data::Scope::Champions)?;
+        }
+        self.apply_values(config);
+        Ok(())
+    }
+    fn selected_locale(&self) -> Option<fuze_data::Locale> {
+        match self.locale.as_str() {
             "zh-CN" => Some(fuze_data::Locale::ZhCn),
             "zh-TW" => Some(fuze_data::Locale::ZhTw),
             "en-US" => Some(fuze_data::Locale::EnUs),
             _ => None,
-        };
-        if let Some(locale) = locale {
-            fuze_data::prepare(&config.roots, locale, fuze_data::Scope::Champions)?;
         }
+    }
+    fn apply_values(&self, config: &mut Config) {
         config.level_gate = self.level_gate;
         config.augment_overlay = self.augment_overlay;
         config.icon_downloads = self.icon_downloads;
         config.backend.clone_from(&self.backend);
-        config.locale = locale;
-        Ok(())
+        config.locale = self.selected_locale();
     }
+}
+/// Prepare first, persist second, publish last. No settings/catalogue are changed on failure.
+/// Full locale validation only runs for an explicit language change, never per frame or
+/// when toggling unrelated UI preferences. Images remain optional, locally cached assets.
+pub(crate) fn commit_change(
+    current: &mut Preferences,
+    config: &mut Config,
+    candidate: Preferences,
+    path: Option<&Path>,
+) -> Result<bool> {
+    candidate.validate()?;
+    let restart = current.recognition_changed(&candidate);
+    let mut next = config.clone();
+    if candidate.locale != current.locale {
+        if let Some(locale) = candidate.selected_locale() {
+            let complete = fuze_data::prepare(&next.roots, locale, fuze_data::Scope::Full)?;
+            let shards = complete
+                .document("champion-shards/index.json")
+                .and_then(|d| d.get("shards"))
+                .and_then(serde_json::Value::as_array)
+                .ok_or("preferences-locale-incomplete")?;
+            if shards.len() > 512 {
+                return Err("preferences-locale-incomplete");
+            }
+            for shard in shards {
+                let path = shard
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("preferences-locale-incomplete")?;
+                if !path.starts_with("champion-shards/")
+                    || path == "champion-shards/index.json"
+                    || complete.document(path).is_none()
+                {
+                    return Err("preferences-locale-incomplete");
+                }
+            }
+            let foreground = fuze_data::prepare(&next.roots, locale, fuze_data::Scope::Ocr)?;
+            // A newer partial cache must not supply OCR while details fall back to an older bundle.
+            if complete.identity() != foreground.identity()
+                || complete.source() != foreground.source()
+            {
+                return Err("preferences-locale-incomplete");
+            }
+        }
+        candidate.apply_values(&mut next);
+    } else if restart {
+        candidate.apply(&mut next)?;
+    }
+    if let Some(path) = path {
+        save(path, &candidate)?;
+    }
+    *config = next;
+    *current = candidate;
+    Ok(restart)
 }
 pub fn path() -> Result<PathBuf> {
     Ok(
@@ -186,6 +245,9 @@ pub(crate) fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
     }
     result
 }
+#[cfg(test)]
+#[path = "locale_activation_tests.rs"]
+pub(crate) mod locale_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

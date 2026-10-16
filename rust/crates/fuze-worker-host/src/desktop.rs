@@ -625,17 +625,12 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 if desired == APPLY {
                     p.automatic = preferences.automatic;
                 }
-                let mut next = config.clone();
-                let restart = preferences.recognition_changed(&p);
-                p.validate()?;
-                if restart {
-                    p.apply(&mut next)?;
-                }
-                if let Some(path) = preference_path.as_ref() {
-                    crate::preferences::save(path, &p)?;
-                }
-                config = next;
-                preferences = p;
+                let restart = crate::preferences::commit_change(
+                    &mut preferences,
+                    &mut config,
+                    p,
+                    preference_path.as_deref(),
+                )?;
                 preferences_valid = true;
                 if restart {
                     reconfigured = true;
@@ -656,6 +651,8 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     }
                     champion_catalog = None;
                     champion_locale = None;
+                    last_selection = None;
+                    selection_view = None;
                     champion_retry = Instant::now();
                 }
                 Ok::<(), &'static str>(())
@@ -686,6 +683,10 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 s.available = data;
                 if reconfigured {
                     s.selection = None;
+                    s.playing = None;
+                    s.pipeline = PipelineStatus::default();
+                    s.connection = None;
+                    s.verified_time = None;
                 }
                 s.update_error = result.err();
                 s.notice = Some(if s.update_error.is_none() {
