@@ -54,9 +54,18 @@ await text('Export-feedback.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --launch\r\n')
 // A targeted test must not silently route through a previously installed revision.
-await text('Start-this-build.cmd',frontend==='slint'
- ? '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0fuze-ui-lab.exe" --desktop "%~dp0preview.json"\r\n'
- : '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0fuze-rust-host.exe" --desktop "%~dp0preview.json"\r\n')
+await text('Start-this-build.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Start-this-build.ps1"\r\n')
+await text('Start-this-build.ps1',[
+ "$ErrorActionPreference = 'Stop'",
+ '$start = New-Object System.Diagnostics.ProcessStartInfo',
+ "$start.FileName = Join-Path $PSScriptRoot '"+(frontend==='slint'?'fuze-ui-lab.exe':'fuze-rust-host.exe')+"'",
+ "$start.Arguments = '--desktop preview.json'",
+ '$start.WorkingDirectory = $PSScriptRoot',
+ '$start.UseShellExecute = $false',
+ '$start.CreateNoWindow = $true',
+ '[void][System.Diagnostics.Process]::Start($start)',
+ ''
+].join('\r\n'))
 await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
 await text('Uninstall-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --uninstall-local\r\n')
 await text('Install-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --install-local\r\n')
