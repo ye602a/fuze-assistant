@@ -218,9 +218,17 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         ui.set_page(0);
                         ui.set_scroll_y(0.);
                         ui.invoke_request_close();
+                        champion.set_inspected_id(4);
+                        champion.set_detail_champion(4);
+                        champion.invoke_stage_request(false);
                         step.set(9);
                     }
-                    9 => {
+                    9 if !champion.get_stage_busy() => {
+                        if !champion.get_stage_status().contains("离线验证") {
+                            return Err("stage-offline-isolation".into());
+                        }
+                        crate::overlay_review::stage(&champion, &destination)?;
+                        crate::overlay_review::run(&data_root, &destination)?;
                         save("close-confirmation")?;
                         if !ui.get_quit_open() || !ui.get_quit_cancel_focused() {
                             return Err("close-fallback-focus".into());

@@ -121,6 +121,7 @@ impl Default for Status {
     }
 }
 struct Shared {
+    external_overlays: bool,
     automatic_change: AtomicU8,
     resume_apply: AtomicU8,
     wake: Condvar,
@@ -290,7 +291,13 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
     if preferences.starts_automatically(fixture, preferences_valid) {
         shared.finish_request(PAUSED, RUNNING);
     }
-    let mut controller = Controller::new(config.clone());
+    let mut controller = Controller::new({
+        let mut c = config.clone();
+        if shared.external_overlays {
+            c.augment_overlay = false;
+        }
+        c
+    });
     if preferences.local_records && !fixture {
         controller.enable_local_records();
     }
@@ -599,7 +606,13 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         *control = None;
                     }
                     monitor = None;
-                    controller = Controller::new(config.clone());
+                    controller = Controller::new({
+                        let mut c = config.clone();
+                        if shared.external_overlays {
+                            c.augment_overlay = false;
+                        }
+                        c
+                    });
                     if preferences.local_records && !fixture {
                         controller.enable_local_records();
                     }
@@ -2663,6 +2676,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
     };
     let shared = Arc::new(Shared {
+        external_overlays: false,
         automatic_change: AtomicU8::new(0),
         resume_apply: AtomicU8::new(PAUSED),
         wake: Condvar::new(),

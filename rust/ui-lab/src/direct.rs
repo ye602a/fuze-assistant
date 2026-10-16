@@ -1,5 +1,16 @@
 //! Isolated Direct2D/DirectWrite probe; never attaches to another application's window.
+use fuze_contract::Slot;
+use fuze_worker_host::overlay_frame::Frame;
 use std::{path::Path, time::Instant};
+#[derive(Clone, PartialEq, Default)]
+struct Card {
+    id: Option<u32>,
+    title: String,
+    win: String,
+    pick: String,
+    score: Option<f64>,
+    icon: String,
+}
 use windows::{
     core::{w, Result},
     Win32::{
@@ -70,6 +81,9 @@ struct Scene {
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
     icons: Vec<image::RgbaImage>,
+    cards: [Card; 3],
+    caption: String,
+    image_cache: std::collections::HashMap<String, image::RgbaImage>,
 }
 impl Scene {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -102,6 +116,16 @@ impl Scene {
                 factory,
                 formats,
                 icons,
+                cards: std::array::from_fn(|i| Card {
+                    id: Some(i as u32 + 1),
+                    title: ["巨像的勇气", "尖端发明家", "回归基本功"][i].into(),
+                    win: ["52.0%", "53.0%", "54.0%"][i].into(),
+                    pick: "12.0%".into(),
+                    score: Some([0.62, 0.72, 0.82][i]),
+                    icon: String::new(),
+                }),
+                caption: "整体胜率 · 离线预览，非实际领取".into(),
+                image_cache: Default::default(),
             })
         }
     }
@@ -181,7 +205,7 @@ impl Surface {
         self.text(
             scene,
             target,
-            "整体胜率 · 离线预览，非实际领取",
+            &scene.caption,
             0,
             rect(169., 5., 490., 22.),
             MUTED,
@@ -202,17 +226,18 @@ impl Surface {
             1.,
             None,
         );
-        for (i, title) in ["巨像的勇气", "尖端发明家", "回归基本功"]
-            .iter()
-            .enumerate()
-        {
+        for (i, card) in scene.cards.iter().enumerate() {
             let x = 9. + i as f32 * 250.;
-            let best = i == 2;
+            let best = card.score.is_some()
+                && scene
+                    .cards
+                    .iter()
+                    .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
             self.fill(target, rect(x, 34., 242., 127.), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
             target.DrawRectangle(&rect(x, 34., 242., 127.), &self.brush, 1., None);
-            if partial && i == 1 {
+            if (partial && i == 1) || card.id.is_none() {
                 self.text(
                     scene,
                     target,
@@ -239,18 +264,21 @@ impl Surface {
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                 None,
             );
-            self.text(scene, target, title, 1, rect(x + 85., 47., 147., 23.), TEXT);
+            self.text(
+                scene,
+                target,
+                &card.title,
+                1,
+                rect(x + 85., 47., 147., 23.),
+                TEXT,
+            );
             for (j, label) in ["选取率", "胜率"].iter().enumerate() {
                 let sx = x + 85. + j as f32 * 75.;
                 self.text(scene, target, label, 0, rect(sx, 74., 72., 17.), MUTED);
                 self.text(
                     scene,
                     target,
-                    if j == 0 {
-                        "12.0%"
-                    } else {
-                        ["52.0%", "53.0%", "54.0%"][i]
-                    },
+                    if j == 0 { &card.pick } else { &card.win },
                     2,
                     rect(sx, 89., 72., 27.),
                     if best { GOLD } else { TEXT },
@@ -259,7 +287,7 @@ impl Surface {
             self.text(
                 scene,
                 target,
-                "海克斯推荐 · 示例",
+                "整体胜率参考",
                 0,
                 rect(x + 10., 119., 134., 18.),
                 MUTED,
@@ -267,7 +295,10 @@ impl Surface {
             self.text(
                 scene,
                 target,
-                ["必选 · 62", "必选 · 72", "优先推荐 · 82"][i],
+                &card
+                    .score
+                    .map(|v| format!("推荐度 {:.0}", v * 100.))
+                    .unwrap_or_else(|| "暂无评级".into()),
                 0,
                 rect(x + 145., 119., 90., 18.),
                 if best { GOLD } else { TEXT },
@@ -275,7 +306,12 @@ impl Surface {
             self.fill(target, rect(x + 10., 141., 222., 8.), 0x24343e);
             self.fill(
                 target,
-                rect(x + 11., 142., 220. * [0.62, 0.72, 0.82][i], 6.),
+                rect(
+                    x + 11.,
+                    142.,
+                    220. * card.score.unwrap_or(0.).clamp(0., 1.) as f32,
+                    6.,
+                ),
                 if best { GOLD } else { 0x42c6cc },
             );
         }
@@ -289,6 +325,9 @@ struct Native {
     backend: &'static str,
     paints: u32,
     error: bool,
+    managed: bool,
+    dismissed: bool,
+    deadline: Option<Instant>,
 }
 impl Native {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -299,6 +338,9 @@ impl Native {
             backend: "uninitialized",
             paints: 0,
             error: false,
+            managed: false,
+            dismissed: false,
+            deadline: None,
         })
     }
     unsafe fn draw(&mut self, hwnd: HWND) -> Result<()> {
@@ -363,6 +405,18 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
     }
     let state = &mut *pointer;
     match message {
+        WM_TIMER if wp.0 == 73 => {
+            if state.deadline.is_some_and(|t| Instant::now() >= t) {
+                KillTimer(Some(hwnd), 73).ok();
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            LRESULT(0)
+        }
+        WM_CLOSE if state.managed => {
+            state.dismissed = true;
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            LRESULT(0)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_PAINT => {
             let mut paint = PAINTSTRUCT::default();
@@ -410,7 +464,12 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             let x = (lp.0 as u32 & 0xffff) as f32 / scale;
             let y = ((lp.0 as u32 >> 16) & 0xffff) as f32 / scale;
             if x >= 720. && x <= WIDTH as f32 && y < 30. {
-                let _ = DestroyWindow(hwnd);
+                if state.managed {
+                    state.dismissed = true;
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                } else {
+                    let _ = DestroyWindow(hwnd);
+                }
             }
             LRESULT(0)
         }
@@ -489,6 +548,229 @@ impl Drop for OwnWindow {
             if IsWindow(Some(self.hwnd)).as_bool() {
                 let _ = DestroyWindow(self.hwnd);
             }
+        }
+    }
+}
+/// Owned by the Slint event thread. Input frames have already passed capture/classification retention.
+pub struct HostOverlay {
+    window: OwnWindow,
+    _com: Com,
+    frame: Option<std::sync::Arc<Frame>>,
+    last_accepted: Option<std::sync::Arc<Frame>>,
+    gate: Option<fuze_contract::ContextGate>,
+    context: u64,
+    generation: u64,
+    dataset: String,
+    ids: [Option<u32>; 3],
+    revisions: u64,
+}
+impl HostOverlay {
+    pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
+        let com = Com::new()?;
+        let mut window = OwnWindow::new()?;
+        window.state.managed = true;
+        Ok(Self {
+            window,
+            _com: com,
+            frame: None,
+            last_accepted: None,
+            gate: None,
+            context: 0,
+            generation: 0,
+            dataset: String::new(),
+            ids: [None; 3],
+            revisions: 0,
+        })
+    }
+    pub fn update(
+        &mut self,
+        frame: Option<std::sync::Arc<Frame>>,
+        visible: bool,
+    ) -> std::result::Result<bool, Box<dyn std::error::Error>> {
+        let Some(frame) = frame else {
+            self.frame = None;
+            self.ids = [None; 3];
+            self.window.state.dismissed = false;
+            unsafe {
+                KillTimer(Some(self.window.hwnd), 73).ok();
+                let _ = ShowWindow(self.window.hwnd, SW_HIDE);
+            }
+            return Ok(true);
+        };
+        let same = self.last_accepted.as_deref() == Some(&frame);
+        if same && self.frame.is_some() {
+            let should_show = visible
+                && !self.window.state.dismissed
+                && !frame.deadline.is_some_and(|t| Instant::now() >= t);
+            if unsafe { IsWindowVisible(self.window.hwnd).as_bool() } == should_show {
+                return Ok(true);
+            }
+        }
+        if !same {
+            if frame.context < self.context
+                || (frame.context == self.context
+                    && (frame.snapshot.generation < self.generation
+                        || frame.snapshot.dataset_version != self.dataset))
+            {
+                return Ok(false);
+            }
+            if frame.context > self.context
+                || frame.snapshot.generation > self.generation
+                || self.gate.is_none()
+            {
+                let mut gate = fuze_contract::ContextGate::new(
+                    frame.snapshot.generation,
+                    frame.snapshot.dataset_version.clone(),
+                );
+                if !gate.accept(&frame.snapshot) {
+                    return Ok(false);
+                }
+                self.gate = Some(gate);
+                self.context = frame.context;
+                self.generation = frame.snapshot.generation;
+                self.dataset = frame.snapshot.dataset_version.clone();
+                self.window.state.dismissed = false;
+            } else if !self.gate.as_mut().unwrap().accept(&frame.snapshot) {
+                return Ok(false);
+            }
+        }
+        if !same || self.frame.is_none() {
+            let rate = |v: Option<f64>| {
+                v.map(|n| format!("{:.1}%", n * 100.))
+                    .unwrap_or_else(|| "—".into())
+            };
+            let cards = std::array::from_fn(|i| match &frame.snapshot.slots[i] {
+                Slot::Known { id, name, .. } => Card {
+                    id: Some(*id),
+                    title: name.clone(),
+                    win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
+                    pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
+                    score: frame.scores[i],
+                    icon: frame.cards[i]
+                        .as_ref()
+                        .map(|a| a.icon.clone())
+                        .unwrap_or_default(),
+                },
+                _ => Card::default(),
+            });
+            let ids = cards.each_ref().map(|c| c.id);
+            if ids != self.ids {
+                self.window.state.dismissed = false;
+                self.ids = ids;
+            }
+            let caption = if frame.retained {
+                "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
+            } else {
+                "整体胜率 · 实际领取轮次未确认"
+            }
+            .to_string();
+            let scene = &mut self.window.state.scene;
+            if cards != scene.cards || caption != scene.caption {
+                scene.icons = cards
+                    .iter()
+                    .map(|card| {
+                        if let Some(image) = scene.image_cache.get(&card.icon) {
+                            return image.clone();
+                        }
+                        let image = crate::public_art::bytes(&card.icon)
+                            .and_then(|b| image::load_from_memory(b).ok())
+                            .map(|i| i.into_rgba8())
+                            .unwrap_or_else(|| image::RgbaImage::new(1, 1));
+                        if scene.image_cache.len() >= 128 {
+                            scene.image_cache.clear();
+                        }
+                        scene.image_cache.insert(card.icon.clone(), image.clone());
+                        image
+                    })
+                    .collect();
+                scene.cards = cards;
+                scene.caption = caption;
+                self.window.state.surface = None;
+                // Existing target survives data changes. Only target-bound bitmaps/brush are refreshed.
+                if let Some(target) = &self.window.state.target {
+                    unsafe {
+                        self.window.state.surface =
+                            Some(Surface::new(&self.window.state.scene, target)?);
+                    }
+                }
+                self.revisions += 1;
+                unsafe {
+                    let _ = InvalidateRect(Some(self.window.hwnd), None, false);
+                }
+            }
+        }
+        self.window.state.deadline = frame.deadline;
+        let expired = frame.deadline.is_some_and(|t| Instant::now() >= t);
+        unsafe {
+            KillTimer(Some(self.window.hwnd), 73).ok();
+            let mut show = visible && !expired && !self.window.state.dismissed;
+            if show {
+                if let Some(deadline) = frame.deadline {
+                    let ms = deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .saturating_add(1)
+                        .clamp(1, 2500) as u32;
+                    if SetTimer(Some(self.window.hwnd), 73, ms, None) == 0 {
+                        show = false;
+                    }
+                }
+            }
+            // SW_SHOWNOACTIVATE is mandatory, including repeat shows and preference changes.
+            let _ = ShowWindow(
+                self.window.hwnd,
+                if show { SW_SHOWNOACTIVATE } else { SW_HIDE },
+            );
+        }
+        self.last_accepted = Some(frame.clone());
+        self.frame = Some(frame);
+        Ok(true)
+    }
+    pub fn dismiss(&mut self) {
+        self.window.state.dismissed = true;
+        unsafe {
+            let _ = ShowWindow(self.window.hwnd, SW_HIDE);
+        }
+    }
+    pub fn ids(&self) -> [Option<u32>; 3] {
+        self.ids
+    }
+    pub fn revisions(&self) -> u64 {
+        self.revisions
+    }
+    pub fn hidden(&self) -> bool {
+        unsafe { !IsWindowVisible(self.window.hwnd).as_bool() }
+    }
+    pub fn dismissed(&self) -> bool {
+        self.window.state.dismissed
+    }
+    pub fn render(&self, path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        unsafe {
+            let imaging: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let bitmap = imaging.CreateBitmap(
+                WIDTH,
+                HEIGHT,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )?;
+            let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
+            props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+            let target = self
+                .window
+                .state
+                .scene
+                .factory
+                .CreateWicBitmapRenderTarget(&bitmap, &props)?;
+            let surface = Surface::new(&self.window.state.scene, &target)?;
+            surface.draw(&self.window.state.scene, &target, false)?;
+            let mut pixels = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
+            bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            image::save_buffer(path, &pixels, WIDTH, HEIGHT, image::ColorType::Rgba8)?;
+            Ok(())
         }
     }
 }

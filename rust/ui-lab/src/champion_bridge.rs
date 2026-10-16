@@ -18,7 +18,8 @@ struct Loaded {
 }
 #[derive(Default)]
 struct Work {
-    wanted: Option<(u64, u32)>,
+    wanted: Option<(u64, u32, String)>,
+    expected: String,
     generation: u64,
     stop: bool,
     invalidate: bool,
@@ -29,13 +30,9 @@ struct Worker {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Worker {
-    fn new(data: &Path) -> Result<Self, &'static str> {
+    fn new(roots: Vec<fuze_data::Root>) -> Result<Self, &'static str> {
         let shared = Arc::new((Mutex::new(Work::default()), Condvar::new()));
         let task = shared.clone();
-        let roots = vec![fuze_data::Root {
-            path: data.into(),
-            source: fuze_data::Source::Bundled,
-        }];
         let thread = std::thread::Builder::new()
             .name("fuze-slint-details".into())
             .spawn(move || {
@@ -55,7 +52,7 @@ impl Worker {
                     if s.stop {
                         return;
                     }
-                    let (generation, id) = s.wanted.take().unwrap();
+                    let (generation, id, expected) = s.wanted.take().unwrap();
                     let invalidate = std::mem::take(&mut s.invalidate);
                     drop(s);
                     if invalidate {
@@ -68,9 +65,16 @@ impl Worker {
                         (|| {
                             let data = fuze_data::prepare(
                                 &roots,
-                                fuze_data::Locale::ZhCn,
+                                match expected.split('@').next() {
+                                    Some("zh-TW") => fuze_data::Locale::ZhTw,
+                                    Some("en-US") => fuze_data::Locale::EnUs,
+                                    _ => fuze_data::Locale::ZhCn,
+                                },
                                 fuze_data::Scope::Detail(id),
                             )?;
+                            if !expected.is_empty() && data.identity() != expected {
+                                return Err("detail-version-mismatch");
+                            }
                             let detail = data.champion_detail(id)?;
                             let mut icons = HashMap::new();
                             for url in detail.augments.iter().map(|a| a.icon.as_str()).chain(
@@ -129,7 +133,7 @@ impl Worker {
     fn request(&self, id: u32) {
         if let Ok(mut s) = self.shared.0.lock() {
             s.generation = s.generation.wrapping_add(1);
-            s.wanted = Some((s.generation, id));
+            s.wanted = Some((s.generation, id, s.expected.clone()));
             s.reply = None;
             self.shared.1.notify_one();
         }
@@ -147,6 +151,7 @@ impl Drop for Worker {
     }
 }
 pub struct Binding {
+    _stage: crate::stage_bridge::Binding,
     _worker: Rc<Worker>,
     _timer: Rc<slint::Timer>,
     state: Rc<RefCell<Presentation>>,
@@ -161,6 +166,7 @@ impl Binding {
         view: Option<&fuze_worker_host::champ_select::View>,
     ) {
         let Some(view) = view else {
+            ui.invoke_stage_reset();
             if let Ok(mut s) = self._worker.shared.0.lock() {
                 s.generation = s.generation.wrapping_add(1);
                 s.wanted = None;
@@ -170,6 +176,7 @@ impl Binding {
             self.state.borrow_mut().loaded = None;
             ui.set_team(Default::default());
             ui.set_bench(Default::default());
+            ui.set_expanded_augment(-1);
             ui.set_augments(Default::default());
             ui.set_build_lines(Default::default());
             ui.set_local_id(0);
@@ -206,6 +213,7 @@ impl Binding {
             *self.version.borrow_mut() = view.version.clone();
             if let Ok(mut s) = self._worker.shared.0.lock() {
                 s.invalidate = true;
+                s.expected = view.version.clone();
             }
         }
         let local = view
@@ -239,6 +247,8 @@ impl Binding {
                 } else {
                     ui.get_inspected_id()
                 });
+                // Automatic hero/context changes start at the five-player overview.
+                ui.set_scroll_y(0.);
             } else {
                 if let Ok(mut s) = self._worker.shared.0.lock() {
                     s.generation = s.generation.wrapping_add(1);
@@ -247,6 +257,7 @@ impl Binding {
                 }
                 self._timer.stop();
                 self.state.borrow_mut().loaded = None;
+                ui.invoke_stage_reset();
                 ui.set_inspected_id(0);
                 ui.set_detail_champion(0);
                 ui.set_inspected_name("等待选择英雄".into());
@@ -369,7 +380,19 @@ fn builds(ui: &ChampionWindow, p: &Presentation) {
     ui.set_build_lines(Rc::new(VecModel::from(lines)).into());
 }
 pub fn attach(ui: &ChampionWindow, data: &Path) -> Result<Binding, &'static str> {
-    let worker = Rc::new(Worker::new(data)?);
+    attach_roots(
+        ui,
+        vec![fuze_data::Root {
+            path: data.into(),
+            source: fuze_data::Source::Bundled,
+        }],
+    )
+}
+pub fn attach_roots(
+    ui: &ChampionWindow,
+    roots: Vec<fuze_data::Root>,
+) -> Result<Binding, &'static str> {
+    let worker = Rc::new(Worker::new(roots.clone())?);
     let state = Rc::new(RefCell::new(Presentation {
         loaded: None,
         icons: HashMap::new(),
@@ -387,11 +410,13 @@ pub fn attach(ui: &ChampionWindow, data: &Path) -> Result<Binding, &'static str>
                 .chain(ui.get_bench().iter())
                 .find(|h| h.id == id);
             if let Some(hero) = found {
+                ui.invoke_stage_reset();
                 current.borrow_mut().loaded = None;
                 ui.set_inspected_id(id);
                 ui.set_build_route(0);
                 ui.set_build_routes(Default::default());
                 ui.set_detail_champion(0);
+                ui.set_expanded_augment(-1);
                 ui.set_inspected_name(hero.name);
                 ui.set_inspected_win(hero.win);
                 ui.set_inspected_pick(hero.pick);
@@ -399,7 +424,7 @@ pub fn attach(ui: &ChampionWindow, data: &Path) -> Result<Binding, &'static str>
                 ui.set_augments(Default::default());
                 ui.set_build_lines(Default::default());
                 ui.set_detail_status("正在读取本地英雄数据…".into());
-                ui.set_scroll_y(-480.);
+                ui.set_scroll_y(-ui.get_detail_offset());
                 service.request(id as u32);
                 reload.restart();
             }
@@ -478,8 +503,13 @@ pub fn attach(ui: &ChampionWindow, data: &Path) -> Result<Binding, &'static str>
             }
         },
     );
-    worker.request(ui.get_inspected_id() as u32);
+    if ui.get_inspected_id() > 0 {
+        worker.request(ui.get_inspected_id() as u32);
+    } else {
+        timer.stop();
+    }
     Ok(Binding {
+        _stage: crate::stage_bridge::attach(ui, roots, ui.get_offline()),
         _worker: worker,
         _timer: timer,
         state,

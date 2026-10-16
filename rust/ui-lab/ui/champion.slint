@@ -4,15 +4,31 @@ import { DetailRow, BuildRow } from "host-state.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Scrollbar } from "components.slint";
 import { ChampionFixture, ChampionChoice } from "champion-fixture.slint";
 
+export struct StageRow { name: string, win: string, pick: string, samples: string }
+
 export component ChampionWindow inherits Window {
-    title: "符择 · 选人界面预览";
+    title: root.side-mode ? "符择 · 局内符文资料" : "符择 · 英雄详情";
     init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
     preferred-width: 420px; preferred-height: 640px; min-width: 380px; min-height: 600px;
     background: Theme.background;
     default-font-family: "Microsoft YaHei"; default-font-size: 12px;
     in-out property <length> scroll-y <=> scroll.viewport-y;
+    out property <length> scroll-limit: max(0px, scroll.viewport-height - scroll.height);
+    out property <length> detail-offset: hero-summary.y + 13px;
     in-out property <int> detail-tab: 0;
+    in-out property <bool> side-mode:false;
+    in-out property <bool> offline:true;
+    callback drag-window;
+    in-out property <bool> stage-open: false;
+    in-out property <int> stage-index: 0;
+    in-out property <bool> stage-busy: false;
+    in-out property <string> stage-status: "手动参考，不改变三卡推荐";
+    in-out property <[StageRow]> stage-rows;
+    callback stage-request(bool);
+    callback stage-select(int);
+    callback stage-reset;
+
     in-out property <[ChampionChoice]> team: ChampionFixture.team;
     in-out property <[ChampionChoice]> bench: ChampionFixture.bench;
     in-out property <int> local-id: 4;
@@ -37,7 +53,8 @@ export component ChampionWindow inherits Window {
     callback close-requested;
     Rectangle { x: 0px; y: 0px; height: 42px; background: #172c3c;
         Label { x: 15px; y: 0px; height: 42px; text: "FUZE"; color: #79d6ce; font-size: 10px; letter-spacing: 2px; }
-        Label { x: 76px; y: 0px; height: 42px; text: "英雄详情 · 离线预览"; font-weight: 600; }
+        Label { x: 76px; y: 0px; height: 42px; text: root.side-mode ? "局内符文资料" : root.offline ? "英雄详情 · 离线预览" : "选人英雄详情"; font-weight: 600; }
+        TouchArea { width: parent.width - 42px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
         Action { x: parent.width - 42px; y: 0px; width: 42px; height: 42px; label: "×"; quiet: true; clicked => { root.close-requested(); } }
     }
     scroll := Flickable {
@@ -45,7 +62,7 @@ export component ChampionWindow inherits Window {
         viewport-width: self.width; viewport-height: body.height + 26px;
         body := VerticalLayout {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
-            Panel { height: 231px + ceil(root.bench.length / 3) * 59px;
+            if !root.side-mode: Panel { height: 231px + ceil(root.bench.length / 3) * 59px;
                 SectionTitle { x: 12px; y: 10px; height: 24px; text: "选人参考"; font-size: 13px; }
                 Label { x: 12px; y: 42px; height: 20px; text: "我方阵容 · 五人选择"; color: Theme.gold; font-size: 11px; }
                 HorizontalLayout { x: 12px; y: 70px; width: parent.width - 24px; height: 90px; spacing: 5px;
@@ -77,10 +94,10 @@ export component ChampionWindow inherits Window {
                     }
                 }
             }
-            Panel { height: 86px;
+            hero-summary := Panel { height: 86px;
                 Image { x: 16px; y: 16px; width: 54px; height: 54px; source: root.inspected-icon; }
                 Label { x: 84px; y: 18px; height: 32px; text: root.inspected-name; font-size: 23px; color: #79d6ce; }
-                Label { x: 84px; y: 55px; height: 18px; text: "公开数据预览 · 非当前选人"; color: Theme.muted; font-size: 10px; }
+                Label { x: 84px; y: 55px; height: 18px; text: root.offline ? "公开数据预览 · 非当前选人" : root.inspected-id == root.local-id ? "当前英雄 · 整体胜率参考" : "候选英雄 · 只读查看"; color: Theme.muted; font-size: 10px; }
             }
             HorizontalLayout { height: 55px; spacing: 8px;
                 for metric in [{label:"胜率",value:root.inspected-win},{label:"选取率",value:root.inspected-pick},{label:"场次",value:"—"}]: Panel {
@@ -128,7 +145,22 @@ export component ChampionWindow inherits Window {
                     HorizontalLayout { x: 12px; y: 98px; height: 35px; width: min(parent.width - 24px, line.icons.length * 42px); spacing: 7px; for icon in line.icons: Image { source: icon; width: 35px; height: 35px; image-fit: contain; } }
                 }
             }
-            Disclosure { label: "分阶段胜率参考"; detail: "实际领取轮次未确认，自动推荐继续整体胜率。\n阶段统计页面尚待迁入。"; }
+            Action { label: root.stage-open ? "收起分阶段胜率参考" : "查看分阶段胜率参考"; clicked => { root.stage-open = !root.stage-open; if root.stage-open { root.stage-request(false); } } }
+            if root.stage-open: VerticalLayout { spacing: 9px;
+                Label { height: 42px; wrap: word-wrap; text: "手动参考 · 不自动判断领取轮次\n三卡推荐仍使用整体胜率。"; color: Theme.gold; font-size: 11px; }
+                HorizontalLayout { height: 32px; spacing: 4px;
+                    for title[index] in ["整体", "第 1 次", "第 2 次", "第 3 次", "第 4 次"]: Action { min-width: 0px; label: title; primary: root.stage-index == index; clicked => { root.stage-select(index); } }
+                }
+                Label { height: 65px; wrap: word-wrap; text: root.stage-status; color: Theme.muted; font-size: 11px; }
+                Action { label: root.stage-busy ? "正在读取…" : "刷新公开统计"; enabled: !root.stage-busy; clicked => { root.stage-request(true); } }
+                ListView { height: 280px;
+                    for row in root.stage-rows: Panel { height: 66px;
+                        Label { x: 10px; y: 6px; width: parent.width - 92px; height: 24px; text: row.name; }
+                        Label { x: 10px; y: 34px; width: parent.width - 20px; height: 20px; text: "选 " + row.pick + " · 样本 " + row.samples; color: Theme.muted; font-size: 11px; }
+                        Label { x: parent.width - 82px; y: 6px; width: 70px; height: 28px; text: row.win; color: Theme.gold; font-size: 20px; horizontal-alignment: right; }
+                    }
+                }
+            }
         }
     }
     if root.expanded-augment >= 0 && root.detail-tab == 0: Panel {
@@ -142,7 +174,7 @@ export component ChampionWindow inherits Window {
     }
     Scrollbar { x: root.width - 13px; y: 48px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     Rectangle { x: 0px; y: root.height - 61px; height: 61px; background: #101e2a;
-        Action { x: 10px; y: 8px; width: parent.width - 20px; label: "配置装备方案 · 预览不可用"; enabled: false; }
-        Label { x: 10px; y: 46px; height: 14px; text: "只展示公开样例，不操作游戏。"; color: Theme.muted; font-size: 10px; }
+        Action { x: 10px; y: 8px; width: parent.width - 20px; label: root.offline ? "配置装备方案 · 预览不可用" : "配置装备方案 · 暂不可用"; enabled: false; }
+        Label { x: 10px; y: 46px; height: 14px; text: root.offline ? "只展示公开样例，不操作游戏。" : "资料查看不会更换游戏内英雄或选择符文。"; color: Theme.muted; font-size: 10px; }
     }
 }

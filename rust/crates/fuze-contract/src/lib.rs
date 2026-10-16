@@ -19,7 +19,7 @@ pub enum ActualStage {
     Unknown,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
     pub schema_version: u16,

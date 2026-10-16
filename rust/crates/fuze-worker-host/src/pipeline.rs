@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub frames: crate::overlay_frame::Publisher,
     tiers: std::collections::HashMap<u32, u64>,
     pub(crate) art: Option<crate::overlay_art::Art>,
     retention: crate::retention::Retention,
@@ -59,16 +60,22 @@ impl Pipeline {
         persist: bool,
     ) -> Result<Self> {
         let dataset = data.identity();
-        let tiers = data
-            .champion_detail(champion)
-            .ok()
-            .into_iter()
-            .flat_map(|d| d.augments)
+        let detail = data.champion_detail(champion).unwrap_or_default();
+        let tiers = detail
+            .augments
+            .iter()
             .filter_map(|a| a.tier.filter(|t| *t > 0).map(|t| (a.id, t)))
             .collect();
         let mut session = Session::new(dataset.clone())?;
         session.update_phase(Phase::Loading)?;
         let stats = data.recommendations(champion)?;
+        let frames = crate::overlay_frame::Publisher::new(
+            detail.augments,
+            stats
+                .iter()
+                .filter_map(|(id, r)| r.score.map(|s| (*id, s)))
+                .collect(),
+        );
         let overlay = if persist {
             HiddenOverlay::with_placement(
                 session.generation(),
@@ -80,6 +87,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            frames,
             tiers,
             art: None,
             retention: Default::default(),
@@ -108,6 +116,7 @@ impl Pipeline {
         self.capture = None;
         self.worker.stop()?;
         self.closed = true;
+        self.frames.clear();
         Ok(true)
     }
     pub fn dataset(&self) -> &str {
@@ -144,6 +153,7 @@ impl Pipeline {
     pub fn phase(&mut self, phase: Phase) -> Result<()> {
         if let Some(cleanup) = self.session.update_phase(phase)? {
             self.retention = Default::default();
+            self.frames.clear();
             if cleanup.stop_capture {
                 self.capture = None;
             }
@@ -156,6 +166,7 @@ impl Pipeline {
             if matches!(phase, Phase::Disconnected | Phase::PostGame) {
                 self.worker.stop()?;
                 self.closed = true;
+                self.frames.clear();
             }
         }
         Ok(())
@@ -172,6 +183,7 @@ impl Pipeline {
         }
         self.capture = None;
         self.retention = Default::default();
+        self.frames.clear();
         let cleanup = self.session.capture_replaced()?;
         if !self
             .overlay
@@ -198,6 +210,7 @@ impl Pipeline {
         }
         self.capture = None;
         self.retention = Default::default();
+        self.frames.clear();
         let cleanup = self.session.capture_replaced()?;
         if !self
             .overlay
@@ -275,6 +288,14 @@ impl Pipeline {
             "receiving"
         };
         shown.slots = display.slots;
+        self.frames.publish(
+            shown.clone(),
+            display.visible,
+            display.retained,
+            self.retention
+                .deadline()
+                .map(|ms| self.epoch + Duration::from_millis(ms)),
+        );
         if let Some(art) = self.art.as_mut() {
             art.request(&shown.slots);
             art.poll(&self.overlay);
@@ -303,6 +324,7 @@ impl Pipeline {
             return Ok(None);
         }
         if self.retention.expire(self.now()) {
+            self.frames.clear();
             self.overlay.visible(false)?;
             self.capture_state = "waiting-frame";
         }
@@ -330,6 +352,7 @@ impl Pipeline {
             FrameStatus::Resized => {
                 self.capture_state = "resizing";
                 self.retention = Default::default();
+                self.frames.clear();
                 let cleanup = self.session.capture_replaced()?;
                 if !self
                     .overlay
@@ -353,6 +376,7 @@ impl Pipeline {
             FrameStatus::Suspended => {
                 self.capture_state = "suspended";
                 self.retention = Default::default();
+                self.frames.clear();
                 self.overlay.visible(false)?;
                 self.next_capture_at = self.now().saturating_add(500);
                 Ok(None)
@@ -370,6 +394,7 @@ impl Pipeline {
         if matches!(result, Err("capture-frame" | "capture-atlas")) {
             self.capture_state = "recovering";
             self.retention = Default::default();
+            self.frames.clear();
             let cleanup = self.session.capture_replaced()?;
             self.overlay
                 .reset(cleanup.generation, self.dataset.clone())?;

@@ -49,6 +49,8 @@ pub mod managed_install;
 #[cfg(windows)]
 mod overlay_art;
 #[cfg(windows)]
+pub mod overlay_frame;
+#[cfg(windows)]
 pub mod pipeline;
 #[cfg(windows)]
 mod post_game_history;

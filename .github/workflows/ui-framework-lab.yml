@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'

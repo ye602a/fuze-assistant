@@ -33,6 +33,9 @@ fn notice(ui: &Workbench, result: Result<(), &'static str>) {
     if let Err(e) = result {
         ui.global::<HostState>().set_notice(
             match e {
+                "champion-selection-unavailable" => {
+                    "当前没有已确认的选人信息，请进入选人阶段后查看。"
+                }
                 "frontend-busy" => "当前操作尚未结束，请稍候。",
                 "frontend-pause-required" => "请先暂停识别，再执行此操作。",
                 "frontend-offline-operation" => "离线验证不会查询账号或下载数据。",
@@ -222,10 +225,11 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
     );
 }
 pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, &'static str> {
-    let data_root = config.roots.first().map(|r| r.path.clone());
-    let popup = Rc::new(RefCell::new(
-        None::<(crate::ChampionWindow, crate::champion_bridge::Binding)>,
-    ));
+    let popup = Rc::new(RefCell::new(crate::game_windows::Manager::new(
+        config.roots.clone(),
+        offline,
+        !offline,
+    )));
     let session = Rc::new(Session::start(config, offline)?);
     let state = ui.global::<HostState>();
     state.set_connected(true);
@@ -272,33 +276,9 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
     state.on_command(move |command| {
         if let Some(ui) = weak.upgrade() {
             if command == "preview-champion" {
-                let opened = (|| -> Result<(), &'static str> {
-                    if popup_action.borrow().is_none() {
-                        let window = crate::ChampionWindow::new().map_err(|_| "champion-window")?;
-                        let details = crate::champion_bridge::attach(
-                            &window,
-                            data_root.as_deref().ok_or("data-root")?,
-                        )?;
-                        let weak = window.as_weak();
-                        window.on_close_requested(move || {
-                            if let Some(w) = weak.upgrade() {
-                                let _ = w.hide();
-                            }
-                        });
-                        if let Some(view) = service.snapshot().selection.as_ref() {
-                            details.selection(&window, Some(view));
-                        }
-                        *popup_action.borrow_mut() = Some((window, details));
-                    }
-                    popup_action
-                        .borrow()
-                        .as_ref()
-                        .unwrap()
-                        .0
-                        .show()
-                        .map_err(|_| "champion-window")?;
-                    Ok(())
-                })();
+                let opened = popup_action
+                    .borrow_mut()
+                    .preview(service.snapshot().selection.as_ref());
                 notice(&ui, opened);
                 return;
             }
@@ -351,9 +331,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
                 return;
             }
             let old = previous.borrow();
-            if old.as_ref().is_none_or(|s|s.selection!=next.selection) {
-                if let Some((window, details))=popup.borrow().as_ref(){details.selection(window,next.selection.as_ref());}
-            }
+            if let Err(error)=popup.borrow_mut().update(&next){notice(&ui,Err(error));}
             if old
                 .as_ref()
                 .is_none_or(|s| s.preferences != next.preferences || s.mode != next.mode || s.update_error != next.update_error || completed)

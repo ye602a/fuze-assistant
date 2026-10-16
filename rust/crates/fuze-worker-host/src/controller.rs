@@ -386,6 +386,7 @@ impl Retry {
 }
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PipelineStatus {
+    pub overlay: Option<std::sync::Arc<crate::overlay_frame::Frame>>,
     pub schedule: Option<(fuze_runtime::gate::Mode, u64, Option<u8>)>,
     pub recent_tiers: [Option<u64>; 3],
     pub recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
@@ -430,6 +431,7 @@ impl Controller {
     }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
+            overlay: self.pipeline.as_ref().and_then(|p| p.frames.current()),
             skipped_frames: self
                 .pipeline
                 .as_ref()

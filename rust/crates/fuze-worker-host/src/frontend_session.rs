@@ -11,6 +11,7 @@ pub struct Session {
 impl Session {
     pub fn start(config: Config, offline: bool) -> Result<Self> {
         let shared = Arc::new(Shared {
+            external_overlays: true,
             automatic_change: AtomicU8::new(0),
             resume_apply: AtomicU8::new(PAUSED),
             wake: Condvar::new(),

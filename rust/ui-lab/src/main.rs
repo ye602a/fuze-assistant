@@ -1,15 +1,18 @@
 mod champion_bridge;
 mod direct;
 mod font_probe;
+mod game_windows;
 mod host_bridge;
 mod host_review;
 mod lifecycle;
 mod manual_profile;
 mod native_shell;
+mod overlay_review;
 mod public_art;
 #[cfg(feature = "gpu")]
 mod skia_surface_probe;
 mod slint_probe;
+mod stage_bridge;
 mod status_view;
 mod telemetry;
 slint::include_modules!();
@@ -19,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.first().map(String::as_str) {
         Some("--review-host") if args.len() == 3 => println!("{}", host_review::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[2]))?),
         Some("--host-offline") if args.len() == 2 => {
-            slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).select()?;
+            slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).with_winit_window_attributes_hook(|a|a.with_active(false)).select()?;
             let ui = Workbench::new()?;
             slint_probe::connect(&ui);
             let binding = host_bridge::attach(&ui, host_bridge::offline_config(std::path::Path::new(&args[1])), true)?;
