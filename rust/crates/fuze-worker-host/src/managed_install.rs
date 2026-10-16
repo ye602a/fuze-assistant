@@ -585,7 +585,15 @@ pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
-    let mut child = Command::new(desktop_program(directory)?)
+    let program = desktop_program(directory)?;
+    // Slint can perform one bounded graphics recovery before committing readiness.
+    let readiness_seconds =
+        if program.file_name().and_then(|s| s.to_str()) == Some("fuze-ui-lab.exe") {
+            45
+        } else {
+            15
+        };
+    let mut child = Command::new(program)
         .arg(if smoke {
             "--desktop-smoke"
         } else {
@@ -634,7 +642,7 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
         });
     });
     let acknowledgement = rx
-        .recv_timeout(Duration::from_secs(15))
+        .recv_timeout(Duration::from_secs(readiness_seconds))
         .unwrap_or(Err("install-launch-readiness"));
     if acknowledgement == Err("install-launch-cancelled") {
         return acknowledgement;

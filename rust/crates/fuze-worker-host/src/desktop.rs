@@ -127,6 +127,7 @@ impl Default for Status {
 }
 struct Shared {
     external_overlays: bool,
+    start_paused: bool,
     automatic_change: AtomicU8,
     resume_apply: AtomicU8,
     wake: Condvar,
@@ -295,7 +296,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
         }
         .into();
     }
-    if preferences.starts_automatically(fixture, preferences_valid) {
+    if !shared.start_paused && preferences.starts_automatically(fixture, preferences_valid) {
         shared.finish_request(PAUSED, RUNNING);
     }
     let mut controller = Controller::new({
@@ -2715,6 +2716,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
     };
     let shared = Arc::new(Shared {
         external_overlays: false,
+        start_paused: false,
         automatic_change: AtomicU8::new(0),
         resume_apply: AtomicU8::new(PAUSED),
         wake: Condvar::new(),

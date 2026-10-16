@@ -179,7 +179,7 @@ pub struct Handoff {
     private: bool,
 }
 impl Handoff {
-    fn prepare(private: bool) -> Result<Self, &'static str> {
+    pub(crate) fn prepare(private: bool) -> Result<Self, &'static str> {
         let helper = std::env::current_exe()
             .map_err(|_| "update-location")?
             .with_file_name("fuze-update.exe");
@@ -203,6 +203,9 @@ impl Handoff {
             .spawn()
             .map_err(|_| "update-helper-start")?;
         Ok(())
+    }
+    pub(crate) fn private_channel(&self) -> bool {
+        self.private
     }
 }
 pub struct Binding {

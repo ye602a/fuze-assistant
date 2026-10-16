@@ -7,6 +7,14 @@ use windows_sys::Win32::System::JobObjects::*;
 pub struct Job(OwnedHandle);
 impl Job {
     pub fn new() -> Result<Self> {
+        Self::with_flags(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    }
+    /// Own only the UI session. Browser/file-manager launches must survive it;
+    /// OCR children are separately assigned to their own strict worker job.
+    pub fn for_ui_session() -> Result<Self> {
+        Self::with_flags(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)
+    }
+    fn with_flags(flags: u32) -> Result<Self> {
         unsafe {
             let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if handle.is_null() {
@@ -14,7 +22,7 @@ impl Job {
             }
             let job = Self(OwnedHandle::from_raw_handle(handle));
             let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            limits.BasicLimitInformation.LimitFlags = flags;
             if SetInformationJobObject(
                 job.0.as_raw_handle(),
                 JobObjectExtendedLimitInformation,

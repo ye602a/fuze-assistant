@@ -3,6 +3,7 @@ mod champion_actions;
 mod champion_art;
 mod champion_bridge;
 mod closure_review;
+mod desktop_runner;
 mod diagnostic_bridge;
 mod direct;
 mod font_probe;
@@ -30,7 +31,13 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("--desktop" | "--managed-desktop" | "--desktop-smoke" | "--managed-desktop-smoke") if args.len()==2 => startup::run(std::path::Path::new(&args[1]),args[0].ends_with("smoke"),args[0].starts_with("--managed"))?,
+        Some("--desktop" | "--managed-desktop" | "--desktop-smoke" | "--managed-desktop-smoke") if args.len()==2 => {
+            let smoke=args[0].ends_with("smoke");
+            let report=desktop_runner::run(std::path::Path::new(&args[1]),smoke,args[0].starts_with("--managed"),"none")?;
+            if smoke { println!("{report}"); }
+        },
+        Some("--render-session") => desktop_runner::child(&args[1..])?,
+        Some("--review-recovery") if args.len()==3 => println!("{}",desktop_runner::review(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-host") if args.len() == 3 => println!("{}", host_review::run(std::path::Path::new(&args[1]), std::path::Path::new(&args[2]))?),
         Some("--host-offline") if args.len() == 2 => {
             slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if cfg!(feature="gpu") {"skia"} else {"software"}.into()).with_winit_window_attributes_hook(|a|a.with_active(false)).select()?;

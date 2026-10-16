@@ -1,13 +1,14 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
       - 'scripts/create-ui-host-fixture.mjs'
       - 'scripts/package-rust-preview.mjs'
       - 'scripts/package-rust-update.mjs'
+      - 'scripts/check-rust-desktop.mjs'
       - 'public/fuze.png'
       - '.github/workflows/ui-framework-lab.yml'
   workflow_dispatch:
@@ -89,6 +90,8 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-host artifacts/host-data artifacts/host-review
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --desktop-smoke artifacts/host-data/preview.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-recovery artifacts/host-data/preview.json artifacts/renderer-recovery
           exit $LASTEXITCODE
       - name: Selective history import boundary
         working-directory: rust/ui-lab

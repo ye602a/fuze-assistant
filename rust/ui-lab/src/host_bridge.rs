@@ -236,13 +236,21 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
     ui.global::<crate::RecordState>().invoke_refresh();
 }
 pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, &'static str> {
+    attach_recovered(ui, config, offline, false)
+}
+pub fn attach_recovered(
+    ui: &Workbench,
+    config: Config,
+    offline: bool,
+    start_paused: bool,
+) -> Result<Binding, &'static str> {
     let popup = Rc::new(RefCell::new(crate::game_windows::Manager::new(
         config.roots.clone(),
         offline,
         !offline,
     )));
     let unbound = crate::unbound_bridge::attach(ui, config.roots.clone());
-    let session = Rc::new(Session::start(config, offline)?);
+    let session = Rc::new(Session::start_with_recovery(config, offline, start_paused)?);
     let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
     let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();

@@ -45,7 +45,13 @@ fn owns_foreground() -> bool {
         process == std::process::id()
     }
 }
-pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_session(
+    config: &Path,
+    smoke: bool,
+    software: bool,
+    start_paused: bool,
+    fault: &str,
+) -> Result<Option<crate::maintenance_bridge::Handoff>, Box<dyn std::error::Error>> {
     let foreground = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     let config = fuze_worker_host::host_config::load(config)?;
     if !smoke {
@@ -64,18 +70,26 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
     let instance_name = if smoke {
         format!("Local\\FuzeSlintSmoke-{}", std::process::id())
     } else {
-        "Local\\FuzeRustDesktopPreview".into()
+        "Local\\FuzeRustDesktopSession".into()
     };
     let instance = Instance::acquire(&instance_name)?;
     if smoke && Instance::acquire(&instance_name).is_ok() {
         return Err("desktop-smoke-instance".into());
     }
-    let v2 = managed && std::env::var("FUZE_MANAGED_HEALTH_PROTOCOL").as_deref() == Ok("2");
+    if smoke && fault == "ordinary" && !software {
+        return Err("desktop-fixture-ordinary".into());
+    }
+    if smoke && fault == "exit" {
+        return Ok(None);
+    }
+    if smoke && (fault == "both" || fault == "gpu-start" && !software) {
+        return Err(Box::new(crate::desktop_runner::GraphicsFault));
+    }
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name(
             if cfg!(feature = "gpu") {
-                if smoke {
+                if software || smoke && fault == "gpu-runtime" {
                     "skia-software"
                 } else {
                     "skia"
@@ -86,15 +100,24 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
             .into(),
         )
         .with_winit_window_attributes_hook(move |a| a.with_active(false).with_visible(!smoke))
-        .select()?;
-    let ui = Workbench::new()?;
+        .select()
+        .map_err(crate::desktop_runner::graphics)?;
+    let ui = Workbench::new().map_err(crate::desktop_runner::graphics)?;
     crate::slint_probe::connect(&ui);
-    let binding = host_bridge::attach(&ui, config, smoke)?;
+    let binding = host_bridge::attach_recovered(&ui, config, smoke, start_paused)?;
     let session = binding.session.clone();
     let lifecycle = lifecycle::attach(&ui, session.clone(), smoke, !smoke)?;
+    // RenderingNotifier disables Skia partial rendering and is absent on some surfaces.
+    // Use the existing native event hook; a draw error exits the loop before health commits.
+    let redraw = lifecycle.redraw_observed.clone();
     let maintenance = crate::maintenance_bridge::attach(&ui, session.clone(), smoke, None)?;
+    if software {
+        ui.global::<crate::ShellState>().set_notice(if start_paused {
+            "界面渲染异常后已切换兼容模式，自动识别保持暂停。请确认界面正常后再继续识别；OCR 后端设置未改变。"
+        } else { "界面使用软件兼容模式；OCR 后端设置未改变。" }.into());
+    }
     if !smoke {
-        ui.show()?;
+        ui.show().map_err(crate::desktop_runner::graphics)?;
     }
     let started = Instant::now();
     let resumed = Rc::new(Cell::new(false));
@@ -111,6 +134,7 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
     let engine = session.clone();
     let timer = Rc::new(slint::Timer::default());
     let ready_timer = Rc::downgrade(&timer);
+    let injected_runtime_failure = smoke && fault == "gpu-runtime" && !software;
     timer.start(
         slint::TimerMode::Repeated,
         Duration::from_millis(100),
@@ -123,9 +147,17 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
                 return;
             }
             let status = engine.snapshot();
+            if !smoke && !redraw.get() {
+                if started.elapsed() > Duration::from_secs(10) {
+                    *error.borrow_mut() = Some("desktop-first-render");
+                    engine.stop();
+                    let _ = slint::quit_event_loop();
+                }
+                return;
+            }
             if ready.get().is_none() && status.initialized && status.available.is_some() {
-                // Render the real component through its selected backend before acknowledging UI readiness.
-                if ui.window().take_snapshot().is_err() {
+                // Offline snapshots are raster evidence; live readiness also requires a native redraw and healthy event loop.
+                if smoke && ui.window().take_snapshot().is_err() {
                     *error.borrow_mut() = Some("desktop-first-render");
                     engine.stop();
                     let _ = slint::quit_event_loop();
@@ -135,13 +167,7 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
                 if smoke {
                     let _ = engine.set_running(true);
                 }
-                if managed && !smoke {
-                    emit(if v2 {
-                        "FUZE_DESKTOP_READY_2"
-                    } else {
-                        "FUZE_DESKTOP_READY_1"
-                    });
-                }
+                emit("FUZE_DESKTOP_READY_2");
             }
             if smoke && status.mode == 1 && !smoke_resumed.get() {
                 smoke_resumed.set(true);
@@ -161,8 +187,12 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
                 if let Some(timer) = ready_timer.upgrade() {
                     timer.stop();
                 }
-                if v2 && !smoke {
-                    emit("FUZE_DESKTOP_HEALTHY_2");
+                emit("FUZE_DESKTOP_HEALTHY_2");
+                if injected_runtime_failure {
+                    *error.borrow_mut() = Some("desktop-first-render");
+                    engine.stop();
+                    let _ = slint::quit_event_loop();
+                    return;
                 }
                 if smoke {
                     engine.stop();
@@ -179,7 +209,7 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
     let result = slint::run_event_loop_until_quit();
     timer.stop();
     drop(timer);
-    if v2 && !smoke && !healthy.get() {
+    if !healthy.get() {
         emit("FUZE_DESKTOP_CLOSED_2");
     }
     let handoff = maintenance.take_handoff();
@@ -206,8 +236,11 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
     let owned_foreground = smoke && owns_foreground();
     drop(ui);
     drop(instance);
-    result?;
+    result.map_err(crate::desktop_runner::graphics)?;
     if let Some(error) = *failure.borrow() {
+        if error == "desktop-first-render" {
+            return Err(Box::new(crate::desktop_runner::GraphicsFault));
+        }
         return Err(error.into());
     }
     if smoke {
@@ -231,8 +264,5 @@ pub fn run(config: &Path, smoke: bool, managed: bool) -> Result<(), Box<dyn std:
         );
     }
     // No updater can start while this session still owns the host mutex or worker.
-    if let Some(handoff) = handoff {
-        handoff.launch()?;
-    }
-    Ok(())
+    Ok(handoff)
 }

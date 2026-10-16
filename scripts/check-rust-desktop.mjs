@@ -3,7 +3,25 @@ import {readFile,writeFile} from 'node:fs/promises'
 import path from 'node:path'
 import {root} from './rust-prototype-tools.mjs'
 const revision=spawnSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).stdout.trim()
-const folder=path.join(root,'rust/artifacts/preview',`fuze-rust-preview-${revision}`)
+const previewRoot=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview'))
+const folder=path.join(previewRoot,`fuze-rust-preview-${revision}`)
+const build=JSON.parse(await readFile(path.join(folder,'build.json'),'utf8'))
+const frontend=Object.hasOwn(build,'uiFrontend')?build.uiFrontend:'win32'
+if(!['win32','slint'].includes(frontend))throw new Error('Invalid UI frontend')
+if(frontend==='slint') {
+ // Use the selected packaged entry. Never substitute Win32 locale coverage for Slint.
+ const child=spawnSync(path.join(folder,'fuze-ui-lab.exe'),['--managed-desktop-smoke',path.join(folder,'preview.json')],{
+  cwd:root,windowsHide:true,timeout:50000,encoding:'utf8',maxBuffer:65536
+ })
+ const lines=child.stdout?.trim().split(/\r?\n/)
+ let report;try{report=JSON.parse(lines?.[2])}catch{}
+ if(child.status!==0||lines?.[0]!=='FUZE_DESKTOP_READY_2'||lines?.[1]!=='FUZE_DESKTOP_HEALTHY_2'||
+    !report?.desktop_ready||!report.pause_resume_exit||report.game_access!==false||report.hidden!==true)
+  throw new Error('Slint managed desktop lifecycle failed')
+ report={...report,frontend,managed_ui_health:true,ui_locales:['zh-CN'],full_translation:false}
+ await writeFile(path.join(previewRoot,'desktop-validation.json'),JSON.stringify(report,null,2))
+ console.log(JSON.stringify(report))
+} else {
 await writeFile(path.join(root,'rust/artifacts/desktop.png'),Buffer.alloc(0))
 const child=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--desktop-smoke',path.join(folder,'preview.json')],{
  cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,
@@ -40,3 +58,4 @@ if(health.status!==0||lines?.[0]!=='FUZE_DESKTOP_READY_2'||lines?.[1]!=='FUZE_DE
 report.managed_ui_health=true
 await writeFile(path.join(root,'rust/artifacts/desktop-validation.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify(report))
+}

@@ -1,4 +1,4 @@
-> 最新进度见 [运行收口与集中验收](evidence/RUNTIME_CLOSURE.md) 和 [阶段清单](../../docs/RUST_TEST_STAGE_HANDOFF.md)。当前继续原会话，完成整个移植且功能稳定后才换会话。此前记录见 [完整观察与三卡交互](evidence/OBSERVATION_OVERLAY.md)、[选人操作与按需图片](evidence/CHAMPION_ACTIONS.md)、[战绩与迁移](evidence/RECORD_ACTIONS.md)、[启动与维护](evidence/STARTUP_MAINTENANCE.md)。隔离开发验收不等于实战成功，本轮不发布安装包。
+> 最新进度见 [图形恢复与受管启动](evidence/RENDERER_RECOVERY.md)、[运行收口与集中验收](evidence/RUNTIME_CLOSURE.md) 和 [阶段清单](../../docs/RUST_TEST_STAGE_HANDOFF.md)。当前继续原会话，完成整个移植且功能稳定后才换会话。此前记录见 [完整观察与三卡交互](evidence/OBSERVATION_OVERLAY.md)、[选人操作与按需图片](evidence/CHAMPION_ACTIONS.md)、[战绩与迁移](evidence/RECORD_ACTIONS.md)、[启动与维护](evidence/STARTUP_MAINTENANCE.md)。隔离开发验收不等于实战成功，本轮不发布安装包。
 
 # FUZE UI 技术验证
 

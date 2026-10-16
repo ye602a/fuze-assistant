@@ -17,6 +17,7 @@ use std::{
 
 pub struct Binding {
     pub shell: Rc<Shell>,
+    pub redraw_observed: Rc<Cell<bool>>,
     _geometry: Rc<RefCell<Memory>>,
     _debounce: Rc<slint::Timer>,
     window: slint::Weak<Workbench>,
@@ -177,7 +178,12 @@ pub fn attach(
     let saved = memory.clone();
     let delay = debounce.clone();
     let weak = ui.as_weak();
+    let redraw_observed = Rc::new(Cell::new(false));
+    let redraw = redraw_observed.clone();
     ui.window().on_winit_window_event(move |_, event| {
+        if matches!(event, WindowEvent::RedrawRequested) {
+            redraw.set(true);
+        }
         if interactive && matches!(event, WindowEvent::Focused(true)) {
             let weak = weak.clone();
             slint::Timer::single_shot(Duration::ZERO, move || {
@@ -242,6 +248,7 @@ pub fn attach(
         .invoke_sync(snapshot.preferences.pause_hotkey, snapshot.mode == 1);
     Ok(Binding {
         shell,
+        redraw_observed,
         _geometry: memory,
         _debounce: debounce,
         window: ui.as_weak(),

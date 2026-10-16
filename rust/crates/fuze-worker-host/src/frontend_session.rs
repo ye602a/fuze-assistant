@@ -13,8 +13,13 @@ pub struct Session {
 
 impl Session {
     pub fn start(config: Config, offline: bool) -> Result<Self> {
+        Self::start_with_recovery(config, offline, false)
+    }
+    /// A recovered UI must not resume capture before the player explicitly continues.
+    pub fn start_with_recovery(config: Config, offline: bool, start_paused: bool) -> Result<Self> {
         let shared = Arc::new(Shared {
             external_overlays: true,
+            start_paused,
             automatic_change: AtomicU8::new(0),
             resume_apply: AtomicU8::new(PAUSED),
             wake: Condvar::new(),
