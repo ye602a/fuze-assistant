@@ -194,16 +194,22 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         control(&ui, "选人阶段窗口置顶", || {
                             state.invoke_preference("champ_topmost".into(), false)
                         })?;
+                        if !state.get_busy() || !state.get_notice().contains("正在保存") {
+                            return Err("settings-no-immediate-feedback".into());
+                        }
                         step.set(1);
                     }
-                    1 if !session.busy() && !session.snapshot().preferences.champ_topmost => {
+                    1 if !session.busy()
+                        && !state.get_busy()
+                        && !session.snapshot().preferences.champ_topmost =>
+                    {
                         #[cfg(feature = "ui-audit")]
                         crate::control_review::select_next(&ui, "识别后端")?;
                         #[cfg(not(feature = "ui-audit"))]
                         state.invoke_backend_changed(1);
                         step.set(2);
                     }
-                    2 if !session.busy() && state.get_backend() == 1 => {
+                    2 if !session.busy() && !state.get_busy() && state.get_backend() == 1 => {
                         ui.set_page(2);
                         save("settings")?;
                         ui.set_scroll_y(-660.);
@@ -229,6 +235,11 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         step.set(3);
                     }
                     3 => {
+                        if !state.get_notice().contains("目录无效")
+                            || !ui.get_feedback().contains("目录无效")
+                        {
+                            return Err("directory-error-not-visible".into());
+                        }
                         save("settings-error")?;
                         ui.set_page(1);
                         ui.set_scroll_y(0.);
@@ -619,6 +630,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     report["component_pointer_navigation_two_widths"] = true.into();
     report["component_pointer_modal_cancel"] = true.into();
     report["component_navigation_keyboard"] = true.into();
+    report["immediate_pending_and_fixed_feedback"] = true.into();
     report["anonymous_share_preview"] = true.into();
     report["record_selection_clears_previous"] = true.into();
     report["clipboard_offline_rejected"] = true.into();

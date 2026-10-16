@@ -370,7 +370,7 @@ pub fn attach(
     let reserved = lease.clone();
     ui.global::<RecordState>().on_action(move |action,index| {
         let Some(ui)=weak.upgrade() else {return}; let state=ui.global::<RecordState>(); let host=ui.global::<HostState>();
-        if action=="cancel-confirm" { state.set_confirmation("".into()); model.borrow_mut().settings=None; return; }
+        if action=="cancel-confirm" { state.set_confirmation("".into()); model.borrow_mut().settings=None; state.set_notice("已取消确认，未写入任何数据。".into()); return; }
         if state.get_busy() {return;}
         let selected=host.get_history().row_data(index.max(0) as usize).map(|r|r.source_index as usize);
         if action=="select" {
@@ -398,13 +398,13 @@ pub fn attach(
             if action=="confirm" {
                 let kind=state.get_confirmation(); state.set_confirmation("".into());
                 if kind=="settings" {
-                    let p=model.borrow_mut().settings.take().ok_or("legacy-settings-missing")?; engine.apply(p)?;
-                    state.set_notice("已提交设置变更；应用结果以设置页反馈为准。".into()); return Ok(());
+                    let p=model.borrow_mut().settings.take().ok_or("legacy-settings-missing")?;
+                    crate::host_bridge::submitted(&ui,engine.apply(p),"settings"); return Ok(());
                 }
-                if kind=="import" { return engine.confirm_history(if state.get_journal_preview() {vec![]}else{model.borrow().chosen.iter().copied().collect()}); }
+                if kind=="import" { crate::host_bridge::submitted(&ui,engine.confirm_history(if state.get_journal_preview() {vec![]}else{model.borrow().chosen.iter().copied().collect()}),"history"); return Ok(()); }
                 return Ok(());
             }
-            if action=="cancel-import" { return engine.cancel_history(); }
+            if action=="cancel-import" { crate::host_bridge::submitted(&ui,engine.cancel_history(),"history"); return Ok(()); }
             if action=="share" {
                 if model.borrow().view.pending>0 { return Err("history-import-selection"); }
                 let i=selected.ok_or("record-selection")?; engine.begin_maintenance()?; reserved.set(true);
@@ -421,16 +421,16 @@ pub fn attach(
                 if action=="save" {
                     if !state.get_share_ready() {return Err("record-selection");}
                     let path=unsafe {record_export::choose(hwnd)};
-                    let Some(path)=path else {engine.end_maintenance();reserved.set(false);return Ok(())};
+                    let Some(path)=path else {engine.end_maintenance();reserved.set(false);state.set_notice("已取消保存，没有创建文件。".into());return Ok(())};
                     let s=model.borrow(); let bytes=if path.extension().is_some_and(|e|e=="png") {s.png.clone()}else{s.json.clone()};
                     service.request(Task::Save(record_export::Request {path,bytes}));
                 } else if matches!(action.as_str(),"import-history"|"import-journal"|"import-settings") {
                     let path=unsafe {fuze_worker_host::legacy_preferences::choose(hwnd)};
-                    let Some(path)=path else {engine.end_maintenance();reserved.set(false);return Ok(())};
+                    let Some(path)=path else {engine.end_maintenance();reserved.set(false);state.set_notice("已取消选择，没有导入或修改任何数据。".into());return Ok(())};
                     if action=="import-settings" {service.request(Task::Settings(path,engine.snapshot().preferences));}
                     else {
                         let game=if action=="import-journal" {Some(selected.and_then(|i|model.borrow().view.rows.get(i).map(|r|r.game_id)).ok_or("record-selection")?)}else{None};
-                        engine.end_maintenance();reserved.set(false);engine.preview_history(path,game)?;return Ok(());
+                        engine.end_maintenance();reserved.set(false);crate::host_bridge::submitted(&ui,engine.preview_history(path,game),"history");return Ok(());
                     }
                 } else { return Err("record-action"); }
             }
@@ -463,7 +463,7 @@ pub fn attach(
                 state.set_share_image(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(preview.as_raw(),preview.width(),preview.height())));
                 let mut s=model.borrow_mut();s.png=png;s.json=json;state.set_share_ready(true);state.set_notice("匿名图片预览已生成；尚未复制、保存或上传。".into());
             }
-            Ok(Reply::Settings(p))=>{model.borrow_mut().settings=Some(p);state.set_confirm_text("仅导入识别后端、等级门禁、浮窗和目录等受支持偏好。\n保留当前语言及启动状态，不复制密钥、账号或战绩。原设置文件保持不变。".into());state.set_confirmation("settings".into());}
+            Ok(Reply::Settings(p))=>{model.borrow_mut().settings=Some(p);state.set_notice("旧设置已读取，等待你确认后才会应用。".into());state.set_confirm_text("仅导入识别后端、等级门禁、浮窗和目录等受支持偏好。\n保留当前语言及启动状态，不复制密钥、账号或战绩。原设置文件保持不变。".into());state.set_confirmation("settings".into());}
             Ok(Reply::Saved)=>state.set_notice("已保存到你选择的新文件；未上传。".into()),
             Err(e)=>state.set_notice(message(e).into()),
         }

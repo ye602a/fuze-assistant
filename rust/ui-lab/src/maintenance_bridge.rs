@@ -22,6 +22,7 @@ enum Action {
 }
 #[derive(Default)]
 struct Reply {
+    notice: String,
     storage: Option<storage::Preview>,
     update: Option<String>,
     installable: bool,
@@ -58,6 +59,16 @@ fn perform(
                 storage::scan(&root)?
             };
             *preview = Some(scanned.clone());
+            reply.notice = if matches!(action, Action::Clean) {
+                "清理完成，已重新扫描；当前数据和个人记录保留。".into()
+            } else if scanned.removable == 0 {
+                "扫描完成，目前没有符合安全清理条件的文件。".into()
+            } else {
+                format!(
+                    "扫描完成，可回收 {:.1} MB；确认清理后才会删除。",
+                    scanned.reclaimable as f64 / 1048576.
+                )
+            };
             reply.storage = Some(scanned);
         }
         Action::Check(private) => {
@@ -95,14 +106,17 @@ fn perform(
             } else {
                 "当前没有可安装的新版本。".into()
             });
+            reply.notice = reply.update.clone().unwrap_or_default();
         }
         Action::Credentials => {
             fuze_worker_host::update_credential::prompt()?;
-            reply.update = Some("授权操作已结束；请再次检查新版确认访问权限。".into());
+            reply.update = Some("授权已安全保存；请再次检查新版确认访问权限。".into());
+            reply.notice = reply.update.clone().unwrap_or_default();
         }
         Action::Forget => {
             fuze_worker_host::update_credential::remove()?;
             reply.update = Some("已移除私有频道令牌。".into());
+            reply.notice = reply.update.clone().unwrap_or_default();
         }
     }
     Ok(reply)
@@ -140,9 +154,16 @@ impl Worker {
                     drop(s);
                     let result = perform(action, offline, &fixture_root, &mut preview, &cancel);
                     if let Ok(mut s) = task.0.lock() {
-                        s.reply = Some(result.unwrap_or_else(|e| Reply {
-                            error: Some(e),
-                            ..Default::default()
+                        s.reply = Some(result.unwrap_or_else(|e| {
+                            Reply {
+                                error: Some(e),
+                                update: matches!(
+                                    action,
+                                    Action::Check(_) | Action::Credentials | Action::Forget
+                                )
+                                .then(|| message(e).to_owned()),
+                                ..Default::default()
+                            }
                         }));
                     }
                 }
@@ -231,6 +252,18 @@ fn message(error: &str) -> &'static str {
         "frontend-busy" => "当前操作尚未结束，请稍候。",
         "maintenance-offline" => "离线验证不会访问网络、令牌或个人目录。",
         "credential-unavailable" => "尚未保存私有频道令牌，请先设置授权。",
+        "credential-cancelled" => "已取消授权输入，原授权保持不变。",
+        "credential-format" => "授权格式无效，未保存。请使用 GitHub 访问令牌。",
+        "credential-save" | "credential-delete" => "Windows 安全存储操作未完成，请稍后重试。",
+        "update-access-or-release" => {
+            "无法读取频道版本：请检查授权是否有仓库读取权限，以及频道是否已发布 Rust 测试版。"
+        }
+        "update-cancelled-or-timeout" | "update-http-status" => {
+            "更新检查未完成，请检查网络后重试；当前版本仍可使用。"
+        }
+        "update-release-assets" | "update-release-channel" | "update-manifest-policy" => {
+            "频道尚未提供适用的完整 Rust 更新包，当前版本继续保留。"
+        }
         "storage-preview-required" | "storage-preview-expired" | "storage-changed" => {
             "清理预览已失效，请重新扫描后确认。"
         }
@@ -272,6 +305,7 @@ pub fn attach(
         let state = ui.global::<MaintenanceState>();
         if name == "cancel" {
             state.set_confirmation("".into());
+            state.set_notice("已取消本次操作。".into());
             return;
         }
         if state.get_busy() {
@@ -337,7 +371,16 @@ pub fn attach(
         };
         state.set_busy(true);
         ui.global::<HostState>().set_busy(true);
-        state.set_notice("正在处理，请稍候…".into());
+        state.set_notice(
+            match action {
+                Action::Scan => "正在扫描本地占用，不会删除文件…",
+                Action::Clean => "正在清理已确认的可回收文件…",
+                Action::Check(_) => "正在检查更新频道，不会下载或安装…",
+                Action::Credentials => "请在 Windows 授权窗口填写令牌；取消会保留原授权。",
+                Action::Forget => "正在从 Windows 安全存储移除授权…",
+            }
+            .into(),
+        );
         if matches!(action, Action::Scan | Action::Clean) {
             state.set_can_clean(false);
         }
@@ -368,7 +411,7 @@ pub fn attach(
             let state = ui.global::<MaintenanceState>();
             state.set_busy(false);
             ui.global::<HostState>().set_busy(engine.busy());
-            state.set_notice(reply.error.map(message).unwrap_or("操作完成。").into());
+            state.set_notice(reply.error.map(message).unwrap_or(&reply.notice).into());
             if let Some(preview) = reply.storage {
                 state.set_storage_summary(
                     format!(

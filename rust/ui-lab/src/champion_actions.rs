@@ -72,7 +72,7 @@ pub fn attach(ui: &ChampionWindow) -> Binding {
     let poll = timer.clone();
     ui.on_player_action(move |action,index| {
         let Some(ui)=weak.upgrade() else{return};
-        if action=="cancel" { shared.borrow_mut().pending=None;ui.set_item_confirm(false);return; }
+        if action=="cancel" { shared.borrow_mut().pending=None;ui.set_item_confirm(false);ui.set_action_notice("已取消配置，未修改客户端装备方案。".into());return; }
         if ui.get_action_busy() {return;}
         let result=(|| -> Result<(), &'static str> {
             // The offline harness cannot launch a browser or discover/connect to a client.

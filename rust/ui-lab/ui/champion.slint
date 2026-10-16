@@ -59,6 +59,7 @@ export component ChampionWindow inherits Window {
     in-out property <bool> item-confirm: false;
     in-out property <string> item-summary;
     in-out property <bool> action-busy: false;
+    out property <float> content-bottom: (scroll.y + scroll.height) / 1px;
     in-out property <string> action-notice;
     callback player-action(string, int);
     changed item-confirm => { if root.item-confirm { cancel-items.focus(); } else { content-focus.focus(); } }
@@ -70,7 +71,7 @@ export component ChampionWindow inherits Window {
         Action { x: parent.width - 42px; y: 0px; width: 42px; height: 42px; label: "×"; quiet: true; clicked => { root.close-requested(); } }
     }
     scroll := Flickable {
-        x: 0px; y: 42px; width: root.width; height: root.height - 103px;
+        x: 0px; y: 42px; width: root.width; height: root.height - 103px - (root.action-notice != "" ? 64px : 0px);
         viewport-width: self.width; viewport-height: body.height + 26px;
         body := VerticalLayout {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
@@ -125,7 +126,7 @@ export component ChampionWindow inherits Window {
                 SectionTitle { height: 25px; text: "相关攻略"; font-size: 13px; }
                 for title[index] in root.guides: Action { label: title; description: "在默认浏览器打开攻略：" + title; enabled: !root.offline && !root.action-busy; clicked => { root.player-action("guide", index); } }
             }
-            if root.action-notice != "": Label { height: 56px; text: root.action-notice; wrap: word-wrap; color: Theme.gold; }
+
             Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 11px; }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
                 LineEdit { accessible-label: "搜索强化符文"; text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
@@ -191,8 +192,11 @@ export component ChampionWindow inherits Window {
         }
     }
     Scrollbar { x: root.width - 13px; y: 48px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
+    if root.action-notice != "": Panel { x: 10px; y: root.height - 125px; width: root.width - 20px; height: 60px;
+        Label { x: 10px; y: 5px; width: parent.width - 20px; height: 50px; text: root.action-notice; wrap: word-wrap; color: Theme.gold; }
+    }
     Rectangle { x: 0px; y: root.height - 61px; height: 61px; background: #101e2a;
-        Action { x: 10px; y: 8px; width: parent.width - 20px; label: root.action-busy ? "正在配置装备方案…" : root.offline ? "配置装备方案 · 预览不可用" : root.item-count > 0 ? "配置 " + root.item-count + " 套装备方案" : "暂无装备方案"; enabled: !root.offline && !root.side-mode && !root.action-busy && root.item-count > 0 && root.inspected-id == root.local-id && root.detail-champion == root.local-id; clicked => { root.player-action("prepare-items",0); } }
+        Action { x: 10px; y: 8px; width: parent.width - 20px; label: root.action-busy ? "正在配置装备方案…" : root.offline ? "配置装备方案 · 预览不可用" : root.side-mode ? "局内资料 · 只读参考" : root.inspected-id != root.local-id ? "查看本人英雄后可配置装备" : root.item-count > 0 ? "配置 " + root.item-count + " 套装备方案" : "暂无装备方案"; enabled: !root.offline && !root.side-mode && !root.action-busy && root.item-count > 0 && root.inspected-id == root.local-id && root.detail-champion == root.local-id; clicked => { root.player-action("prepare-items",0); } }
         Label { x: 10px; y: 46px; height: 14px; text: root.offline ? "只展示公开样例，不操作游戏。" : "资料查看不会更换游戏内英雄或选择符文。"; color: Theme.muted; font-size: 10px; }
     }
     }

@@ -73,6 +73,8 @@ export global HostState {
     in-out property <bool> busy: false;
     in-out property <bool> offline: true;
     in-out property <bool> running: false;
+    // Explicit host transaction; separate from background notices and maintenance.
+    in-out property <string> pending-action;
     in-out property <string> notice;
     in-out property <string> data-version: "—";
     in-out property <[PreferenceRow]> preferences;

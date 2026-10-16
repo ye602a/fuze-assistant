@@ -573,7 +573,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 }
             })();
             let mut view = result.unwrap_or_else(|e| {
-                let mut preserved = history_before_import.take().unwrap_or_default();
+                let mut preserved = history_before_import
+                    .take()
+                    .unwrap_or_else(|| shared.status().history);
                 preserved.error = Some(e);
                 preserved.pending = 0;
                 preserved.journal_preview = false;

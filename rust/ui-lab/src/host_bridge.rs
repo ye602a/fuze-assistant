@@ -59,6 +59,27 @@ fn notice(ui: &Workbench, result: Result<(), &'static str>) {
         );
     }
 }
+/// A queued operation is not a successful operation. Completion comes from the host poll.
+pub(crate) fn submitted(ui: &Workbench, result: Result<(), &'static str>, action: &str) {
+    if result.is_ok() {
+        let state = ui.global::<HostState>();
+        state.set_pending_action(action.into());
+        state.set_busy(true);
+        state.set_notice(
+            match action {
+                "pause" => "正在暂停识别…",
+                "resume" => "正在恢复自动识别…",
+                "directory" => "正在校验并保存目录；连接结果仍以客户端状态为准…",
+                "data-update" => "正在更新推荐数据与字典；旧数据继续保留…",
+                "history" => "正在读取战绩，请稍候…",
+                _ => "正在保存并应用设置…",
+            }
+            .into(),
+        );
+    } else {
+        notice(ui, result);
+    }
+}
 fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
     let values = [
         (
@@ -273,8 +294,19 @@ pub fn attach_recovered(
                 let mut p = service.snapshot().preferences;
                 change(&mut p, &key, value).and_then(|_| service.apply(p))
             };
-            notice(&ui, result);
-            ui.global::<HostState>().set_busy(service.busy());
+            submitted(
+                &ui,
+                result,
+                if key == "automatic" {
+                    if value {
+                        "resume"
+                    } else {
+                        "pause"
+                    }
+                } else {
+                    "settings"
+                },
+            );
         }
     });
     let weak = ui.as_weak();
@@ -284,8 +316,7 @@ pub fn attach_recovered(
             let mut p = service.snapshot().preferences;
             if let Some(backend) = ["auto", "cpu", "dml"].get(index as usize) {
                 p.backend = (*backend).into();
-                notice(&ui, service.apply(p));
-                ui.global::<HostState>().set_busy(service.busy());
+                submitted(&ui, service.apply(p), "settings");
             }
         }
     });
@@ -295,8 +326,7 @@ pub fn attach_recovered(
         if let Some(ui) = weak.upgrade() {
             let mut p = service.snapshot().preferences;
             p.manual_directory = directory.trim().into();
-            notice(&ui, service.apply(p));
-            ui.global::<HostState>().set_busy(service.busy());
+            submitted(&ui, service.apply(p), "directory");
         }
     });
     let weak = ui.as_weak();
@@ -331,10 +361,12 @@ pub fn attach_recovered(
                 return;
             }
             if command == "show-reference" {
-                notice(
-                    &ui,
-                    popup_action.borrow_mut().reference(&service.snapshot()),
-                );
+                let result = popup_action.borrow_mut().reference(&service.snapshot());
+                if result.is_ok() {
+                    ui.global::<HostState>()
+                        .set_notice("已打开本局英雄资料；关闭后可在这里重新打开。".into());
+                }
+                notice(&ui, result);
                 return;
             }
             if command == "preview-cards" {
@@ -359,7 +391,21 @@ pub fn attach_recovered(
                 "data-update" => service.update_data(),
                 _ => Err("frontend-command"),
             };
-            notice(&ui, result);
+            submitted(
+                &ui,
+                result,
+                match command.as_str() {
+                    "toggle-running" => {
+                        if ui.get_paused() {
+                            "resume"
+                        } else {
+                            "pause"
+                        }
+                    }
+                    "data-update" => "data-update",
+                    _ => "history",
+                },
+            );
         }
     });
     let weak = ui.as_weak();
@@ -398,13 +444,21 @@ pub fn attach_recovered(
                 service.stop();
                 return;
             };
+            // Read completion first: a completed request has published its result before this snapshot.
+            let engine_busy = service.busy();
             let next = service.snapshot();
             unbound.borrow_mut().update(&ui, &next, offline);
             diagnostics.borrow_mut().poll(&ui);
             if let Err(error) = popup.borrow_mut().placement() { notice(&ui, Err(error)); }
             let state = ui.global::<HostState>();
-            let completed = state.get_busy() && !service.busy();
-            state.set_busy(service.busy());
+            let action = state.get_pending_action();
+            let operation_completed = !action.is_empty() && !engine_busy && match action.as_str() {
+                "pause" => next.mode == 0,
+                "resume" => next.mode == 1,
+                _ => true,
+            };
+            let completed = state.get_busy() && !engine_busy;
+            state.set_busy(engine_busy || (!action.is_empty() && !operation_completed));
             if previous.borrow().as_ref() == Some(&next) && !completed {
                 return;
             }
@@ -442,10 +496,21 @@ pub fn attach_recovered(
                     state.set_directory(prefs.manual_directory.into());
                 }
             }
-            if old.as_ref().is_none_or(|s| s.history != next.history) {
+            if old.as_ref().is_none_or(|s| s.history != next.history) || (operation_completed && action == "history") {
                 history(&ui, &next.history, 0);
             }
-            if old
+            if operation_completed {
+                state.set_pending_action("".into());
+                let message = match action.as_str() {
+                    "pause" | "resume" if !offline && next.preferences.automatic != (action == "resume") => "识别状态已切换，但未能保存，下次启动可能恢复旧状态。",
+                    "pause" => "识别已暂停，现在可以更新、导入或管理存储。",
+                    "resume" => "自动识别已恢复；正在等待客户端与对局状态。",
+                    "history" => "",
+                    _ if offline => "设置已在隔离会话中应用；未写入稳定版设置。",
+                    _ => next.notice.unwrap_or("操作已结束，请查看当前模块状态。"),
+                };
+                state.set_notice(if action == "history" { state.get_history_note() } else { message.into() });
+            } else if old
                 .as_ref()
                 .is_none_or(|s| s.notice != next.notice || s.update_error != next.update_error)
             {

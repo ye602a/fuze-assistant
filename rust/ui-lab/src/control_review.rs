@@ -19,10 +19,14 @@ fn model<T: Clone + 'static>(v: Vec<T>) -> ModelRc<T> {
     Rc::new(VecModel::from(v)).into()
 }
 pub(crate) trait Surface: ComponentHandle {
+    fn bottom(&self) -> f32;
     fn offset(&self) -> f32;
     fn scroll(&self, y: f32);
 }
 impl Surface for Workbench {
+    fn bottom(&self) -> f32 {
+        self.get_content_bottom()
+    }
     fn offset(&self) -> f32 {
         self.get_scroll_y()
     }
@@ -31,6 +35,9 @@ impl Surface for Workbench {
     }
 }
 impl Surface for ChampionWindow {
+    fn bottom(&self) -> f32 {
+        self.get_content_bottom()
+    }
     fn offset(&self) -> f32 {
         self.get_scroll_y()
     }
@@ -122,6 +129,7 @@ fn click_at(window: &slint::Window, x: f32, y: f32) {
 }
 fn target(ui: &impl Surface, label: &str) -> Result<(f32, f32)> {
     for _ in 0..4 {
+        i_slint_core::properties::ChangeTracker::run_change_handlers();
         let _ = ui.window().take_snapshot()?;
         let h = ui
             .window()
@@ -138,13 +146,14 @@ fn target(ui: &impl Surface, label: &str) -> Result<(f32, f32)> {
                 ) && i
                     .accessible_string_property(Prop::Label)
                     .is_some_and(|v| v == label)
-                    && (i.is_visible() || y < 42. || y > h - 70.)
+                    && (i.is_visible() || y < 42. || y > ui.bottom() - 6.)
             })
             .ok_or_else(|| format!("control-not-found:{label}"))?;
         let (x, y) = point(&item);
-        let fixed =
-            matches!(label, "最小化窗口" | "关闭窗口" | "×") || label.contains("套装备方案");
-        if (45. ..h - 70.).contains(&y) || (fixed && y >= 0. && y < h) {
+        let fixed = matches!(label, "最小化窗口" | "关闭窗口" | "×")
+            || label.contains("套装备方案")
+            || matches!(label, "关闭操作反馈" | "局内资料 · 只读参考");
+        if (45. ..ui.bottom() - 6.).contains(&y) || (fixed && y >= 0. && y < h) {
             if !item.is_visible() {
                 return Err(format!("control-clipped:{label}").into());
             }
@@ -320,22 +329,47 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         a.click(ui, label, Some("host:toggle-running"));
     }
     s.set_notice("测试提示".into());
-    a.click(ui, "关闭提示", None);
+    a.click(ui, "关闭操作反馈", None);
     a.check("关闭提示结果", s.get_notice().is_empty(), "notice cleared");
     ui.global::<ShellState>().set_notice("测试提示".into());
-    a.click(ui, "关闭窗口提示", None);
+    a.click(ui, "关闭操作反馈", None);
     a.check(
         "关闭窗口提示结果",
         ui.global::<ShellState>().get_notice().is_empty(),
         "notice cleared",
     );
     r.set_notice("测试提示".into());
-    a.click(ui, "关闭记录提示", None);
+    a.click(ui, "关闭操作反馈", None);
     a.check(
         "关闭记录提示结果",
         r.get_notice().is_empty(),
         "notice cleared",
     );
+    // Feedback remains in the viewport even when the triggering control is far down a page.
+    ui.set_page(2);
+    ui.set_scroll_y(-2000.);
+    m.set_notice("扫描完成，目前没有符合安全清理条件的文件。".into());
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
+    let _ = ui.window().take_snapshot()?;
+    a.check(
+        "滚动后维护反馈",
+        ui.get_feedback().contains("扫描完成"),
+        "fixed feedback, no scroll-to-top",
+    );
+    a.click(ui, "关闭操作反馈", None);
+    a.check(
+        "关闭维护反馈",
+        m.get_notice().is_empty() && ui.get_feedback().is_empty(),
+        "dismissed",
+    );
+    s.set_running(true);
+    ui.set_page(1);
+    a.disabled(ui, "刷新战绩");
+    a.disabled(ui, "本地缓存");
+    a.click(ui, "暂停并管理", Some("host:toggle-running"));
+    s.set_running(false);
+    ui.set_page(0);
+    ui.set_scroll_y(0.);
     for label in ["等级调度 · 等待对局", "数据来源与版本"] {
         a.click(ui, label, None);
         a.check(
@@ -724,7 +758,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     );
     ui.set_item_confirm(false);
     ui.set_side_mode(true);
-    a.disabled(ui, "配置 4 套装备方案");
+    a.disabled(ui, "局内资料 · 只读参考");
     ui.set_side_mode(false);
     a.click(ui, "×", Some("champion:close"));
     Ok(())

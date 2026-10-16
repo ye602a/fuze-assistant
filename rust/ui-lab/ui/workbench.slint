@@ -26,6 +26,15 @@ export component Workbench inherits Window {
     out property <bool> quit-cancel-focused: cancel-exit.focused;
     in-out property <bool> level-open: false;
     in-out property <bool> sources-open: false;
+    in-out property <string> feedback;
+    private property <string> host-notice: HostState.notice;
+    private property <string> record-notice: RecordState.notice;
+    private property <string> shell-notice: ShellState.notice;
+    private property <string> maintenance-notice: MaintenanceState.notice;
+    changed host-notice => { if root.host-notice != "" { root.feedback = root.host-notice; } }
+    changed record-notice => { if root.record-notice != "" { root.feedback = root.record-notice; } }
+    changed shell-notice => { if root.shell-notice != "" { root.feedback = root.shell-notice; } }
+    changed maintenance-notice => { if root.maintenance-notice != "" { root.feedback = root.maintenance-notice; } }
     in-out property <length> scroll-y <=> scroll.viewport-y;
     callback query-edited(string);
     callback cycle-health;
@@ -38,6 +47,7 @@ export component Workbench inherits Window {
     private property <length> inset: root.narrow ? 20px : 30px;
     private property <color> tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : root.health == 1 ? Theme.green : root.health == 2 ? Theme.yellow : Theme.red;
     private property <color> tone-background: root.paused ? #49391b : root.health == 0 ? #12324b : root.health == 1 ? #123d34 : root.health == 2 ? #49391b : #4b222b;
+    out property <float> content-bottom: (content.y + content.height) / 1px;
     out property <float> content-width: content.width / 1px;
     out property <float> module-width: (body.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2px : 4px);
 
@@ -68,7 +78,7 @@ export component Workbench inherits Window {
     content-focus := FocusScope { focus-on-click: false;
     enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
     content := Rectangle {
-        x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px;
+        x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px - (root.feedback != "" ? 78px : 0px);
         scroll := Flickable { x: 0px; y: 0px;
             width: parent.width; height: parent.height;
             viewport-width: self.width; viewport-height: body.height + 48px;
@@ -84,18 +94,6 @@ export component Workbench inherits Window {
                     if !root.narrow: Rectangle { x: parent.width - 104px; y: 31px; width: 104px; height: 29px; background: transparent; border-width: 1px; border-color: #5e523a;
                         Label { x: 0px; y: 0px; text: HostState.offline ? "符择 / 离线预览" : "符择 / Rust 测试版"; width: parent.width; height: parent.height; horizontal-alignment: center; color: #c7b386; font-size: 10px; }
                     }
-                }
-                if HostState.notice != "": Panel { height: 62px;
-                    Label { x: 14px; y: 8px; width: parent.width - 65px; height: 46px; text: HostState.notice; wrap: word-wrap; color: Theme.yellow; }
-                    Action { x: parent.width - 47px; y: 8px; width: 38px; min-width: 0px; quiet: true; label: "×"; description: "关闭提示"; clicked => { HostState.notice = ""; } }
-                }
-                if ShellState.notice != "": Panel { height: 62px;
-                    Label { x: 14px; y: 8px; width: parent.width - 65px; height: 46px; text: ShellState.notice; wrap: word-wrap; color: Theme.yellow; }
-                    Action { x: parent.width - 47px; y: 8px; width: 38px; min-width: 0px; quiet: true; label: "×"; description: "关闭窗口提示"; clicked => { ShellState.notice = ""; } }
-                }
-                if RecordState.notice != "": Panel { height: 62px;
-                    Label { x: 14px; y: 8px; width: parent.width - 65px; height: 46px; text: RecordState.notice; wrap: word-wrap; color: Theme.yellow; }
-                    Action { x: parent.width - 47px; y: 8px; width: 38px; min-width: 0px; quiet: true; label: "×"; description: "关闭记录提示"; clicked => { RecordState.notice = ""; } }
                 }
                 if root.page == 0: VerticalLayout {
                     spacing: 18px;
@@ -176,6 +174,14 @@ export component Workbench inherits Window {
         }
         Scrollbar { x: parent.width - 13px; y: 6px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     }
+    }
+    if root.feedback != "": Panel {
+        x: root.rail-width + 16px; y: root.height - 72px; width: root.width - root.rail-width - 32px; height: 64px;
+        Label { x: 14px; y: 7px; width: parent.width - 68px; height: 50px; text: root.feedback; wrap: word-wrap; color: Theme.yellow; }
+        Action { x: parent.width - 48px; y: 13px; width: 36px; min-width: 0px; height: 36px; quiet: true; label: "×"; description: "关闭操作反馈";
+            enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
+            clicked => { HostState.notice = ""; RecordState.notice = ""; ShellState.notice = ""; MaintenanceState.notice = ""; root.feedback = ""; }
+        }
     }
     changed quit-open => { if root.quit-open { cancel-exit.focus(); } else { content-focus.focus(); } }
     Rectangle { x: 0px; y: 0px; visible: root.quit-open;
