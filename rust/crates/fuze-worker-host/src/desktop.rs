@@ -309,11 +309,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
     if preferences.local_records && !fixture {
         controller.enable_local_records();
     }
-    let mut champion_catalog = None;
-    let mut champion_locale = None;
-    let mut champion_retry = Instant::now();
-    let mut last_selection = None;
-    let mut selection_view = None;
+    let mut champions = crate::catalog_session::Session::new();
     let mut monitor = None;
     let mut last_mode = PAUSED;
     let mut resource_sampler = crate::resources::Sampler::default();
@@ -410,9 +406,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .unwrap_or(fuze_data::Locale::ZhCn),
             ) {
                 if result.as_ref().is_ok_and(|o| o.updated) {
-                    champion_catalog = None;
-                    champion_locale = None;
-                    champion_retry = Instant::now();
+                    champions.invalidate();
                 }
                 let supplemental = crate::recognition_sources::load(&roots)
                     .ok()
@@ -435,8 +429,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             }
         }
         if desired == PAUSED {
-            last_selection = None;
-            selection_view = None;
+            champions.clear_selection();
             if last_mode != PAUSED {
                 controller.suspend();
             }
@@ -649,11 +642,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     if preferences.local_records && !fixture {
                         controller.enable_local_records();
                     }
-                    champion_catalog = None;
-                    champion_locale = None;
-                    last_selection = None;
-                    selection_view = None;
-                    champion_retry = Instant::now();
+                    champions.invalidate();
                 }
                 Ok::<(), &'static str>(())
             })();
@@ -714,9 +703,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 })
             };
             let refreshed_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
-            champion_catalog = None;
-            champion_locale = None;
-            champion_retry = Instant::now();
+            champions.invalidate();
             if let Ok(mut s) = shared.status.lock() {
                 s.available = refreshed_available;
                 if let Ok((_, summary)) = crate::recognition_sources::load(&roots) {
@@ -735,29 +722,24 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .compare_exchange(DATA, PAUSED, Ordering::AcqRel, Ordering::Acquire);
         } else if fixture {
             // Explicit offline entry only. No discovery or game access exists in this branch.
-            if champion_catalog.is_none() {
-                champion_catalog = crate::champ_select::Catalog::load(
-                    &roots,
-                    config.locale.unwrap_or(fuze_data::Locale::ZhCn),
-                )
-                .ok();
-            }
+            let mut selection = fuze_lcu::context::Selection {
+                team: [1, 4, 17, 51, 157],
+                local_slot: Some(1),
+                bench: [0; 20],
+                count: 12,
+            };
+            selection.bench[..12].copy_from_slice(&[2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+            champions.refresh(
+                &roots,
+                Some(config.locale.unwrap_or(fuze_data::Locale::ZhCn)),
+                Some(selection),
+            );
             if let Ok(mut status) = shared.status.lock() {
                 status.mode = RUNNING;
                 status.connection = Some(Connection::Connected(
                     fuze_runtime::session::Phase::ClientReady,
                 ));
-                if let Some(c) = champion_catalog.as_ref() {
-                    let mut selection = fuze_lcu::context::Selection {
-                        team: [1, 4, 17, 51, 157],
-                        local_slot: Some(1),
-                        bench: [0; 20],
-                        count: 12,
-                    };
-                    selection.bench[..12]
-                        .copy_from_slice(&[2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-                    status.selection = Some(c.view(selection));
-                }
+                status.selection = champions.selection();
             }
         } else {
             if last_mode != RUNNING {
@@ -799,47 +781,26 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 let _ = controller.tick(m);
                 let selection = m.selection().filter(|_| preferences.champ_select);
                 let selected_locale = config.locale.or_else(|| m.data_locale());
-                if selected_locale.is_some() && champion_locale != selected_locale {
-                    champion_catalog = None;
-                    last_selection = None;
-                    selection_view = None;
-                    champion_retry = Instant::now();
-                    champion_locale = selected_locale;
-                }
-                if selected_locale.is_some()
-                    && champion_catalog.is_none()
-                    && Instant::now() >= champion_retry
-                {
-                    champion_catalog = selected_locale
-                        .and_then(|l| crate::champ_select::Catalog::load(&roots, l).ok());
-                    champion_retry = Instant::now() + Duration::from_secs(30);
-                }
-                if selection != last_selection || selection_view.is_none() {
-                    selection_view =
-                        selection.and_then(|s| champion_catalog.as_ref().map(|c| c.view(s)));
-                    last_selection = selection;
-                }
+                champions.refresh(&roots, selected_locale, selection);
                 if let Ok(mut s) = shared.status.lock() {
                     s.mode = RUNNING;
                     s.connection = m.state();
                     s.verified_time = m.verified_age().map(crate::resources::clock_ago);
                     s.pipeline = controller.status();
-                    s.selection = selection_view.clone();
-                    s.playing = m
-                        .playing_champion()
-                        .and_then(|id| champion_catalog.as_ref().map(|c| c.playing(id)));
+                    s.selection = champions.selection();
+                    s.playing = m.playing_champion().and_then(|id| champions.playing(id));
                     // Only change interface language after that locale's catalogue is ready.
-                    if let Some(c) = champion_catalog.as_ref() {
-                        if let Some(locale) = c.identity().split('@').next() {
+                    if let Some(identity) = champions.identity() {
+                        if let Some(locale) = identity.split('@').next() {
                             if preferences.locale != "auto" {
                                 s.ui_locale = locale.into();
                             }
                         }
-                        s.available = Some(c.identity().into());
+                        s.available = Some(identity.into());
                     }
                     if selection.is_some() && selected_locale.is_none() {
                         s.notice = Some("选人参考等待客户端语言，暂不混用不同语言数据。");
-                    } else if selection.is_some() && champion_catalog.is_none() {
+                    } else if selection.is_some() && champions.identity().is_none() {
                         s.notice = Some("选人数据暂不可用，30 秒后重试；可暂停后更新推荐数据。");
                     } else if s.update_error.is_none() {
                         s.notice = None;

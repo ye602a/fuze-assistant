@@ -115,6 +115,30 @@ impl Review {
             return Err("unbound-legacy-fabrication".into());
         }
         save(ui, &output.join("closure-unbound-legacy.png"))?;
+        self.status.available = None;
+        self.binding.borrow_mut().update(ui, &self.status, true);
+        let unknown = state
+            .get_unbound_events()
+            .row_data(0)
+            .ok_or("unbound-context-missing")?;
+        if !state.get_unbound_names().starts_with("等待名称数据版本")
+            || unknown.cards.contains("回归基本功")
+            || !unknown.cards.contains("#3（名称暂缺）")
+        {
+            return Err("unbound-context-old-names".into());
+        }
+        save(ui, &output.join("closure-unbound-unknown-version.png"))?;
+        self.status.available = Some("en-US@missing-fixture".into());
+        self.binding.borrow_mut().update(ui, &self.status, true);
+        if state
+            .get_unbound_events()
+            .row_data(0)
+            .unwrap()
+            .cards
+            .contains("回归基本功")
+        {
+            return Err("unbound-context-language-fallback".into());
+        }
         self.status.unbound_records = Default::default();
         self.binding.borrow_mut().update(ui, &self.status, true);
         if state.get_unbound_selected() != -1 || state.get_unbound_events().row_count() != 0 {
@@ -151,7 +175,7 @@ impl Review {
             output.join("closure-review.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
                 "synthetic_only":true,"unbound_names_and_partial_slots":true,"unbound_80_events_paged":true,
-                "legacy_metadata_not_invented":true,"stale_detail_cleared":true,"probe_offline_rejected":true,
+                "legacy_metadata_not_invented":true,"stale_detail_cleared":true,"names_cleared_on_unknown_or_changed_identity":true,"probe_offline_rejected":true,
                 "probe_summary_sanitized":true,"native_visible_interaction_verified":false,"production_parity_complete":false
             }))?,
         )?;

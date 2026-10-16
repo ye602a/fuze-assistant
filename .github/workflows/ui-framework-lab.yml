@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -41,7 +41,7 @@ jobs:
           cargo +1.90.0 check --locked --features gpu -j 2
           exit $LASTEXITCODE
   windows-prototype:
-    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status')
+    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation')
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -124,9 +124,9 @@ jobs:
           exit $LASTEXITCODE
 
   windows-locale:
-    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/rust-update-transfer-status'
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/rust-update-transfer-status' || github.base_ref == 'feat/rust-locale-activation'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Check tracked privacy boundary
@@ -143,9 +143,27 @@ jobs:
         run: |
           cargo +1.90.0 fmt -p fuze-worker-host -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test -p fuze-worker-host --lib locale_activation --locked -j 2
+          cargo +1.90.0 test -p fuze-worker-host --lib locale_ --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test -p fuze-worker-host --lib preferences::tests --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 check -p fuze-worker-host --bins --locked -j 2
+          exit $LASTEXITCODE
+      - uses: actions/cache@v4
+        if: github.base_ref == 'feat/rust-locale-activation'
+        with:
+          path: rust/ui-lab/target
+          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+          restore-keys: ui-lab-win-1.90-
+      - name: Hidden Slint host and observation identity transitions
+        if: github.base_ref == 'feat/rust-locale-activation'
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../../scripts/create-ui-host-fixture.mjs artifacts/host-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-host artifacts/host-data artifacts/host-review
           exit $LASTEXITCODE

@@ -1,41 +1,11 @@
 //! Device-only observations. No identity lookup, personal-file read or claim inference here.
 use crate::{ObservationRow, RecordState, Workbench};
-use fuze_worker_host::{desktop::Status, history_detail, local_records::UnboundSnapshot};
+use fuze_worker_host::{
+    desktop::Status, history_detail, local_records::UnboundSnapshot, observation_names::Names,
+};
 use slint::{ComponentHandle, VecModel};
 use std::{cell::RefCell, rc::Rc, thread::JoinHandle};
 
-struct Names {
-    version: String,
-    champions: std::collections::HashMap<u32, String>,
-    augments: std::collections::HashMap<u32, String>,
-}
-fn labels(data: &fuze_data::Prepared, file: &str) -> std::collections::HashMap<u32, String> {
-    let Some(doc) = data.document(file) else {
-        return Default::default();
-    };
-    let doc = doc.get("data").unwrap_or(doc);
-    let mut out = std::collections::HashMap::new();
-    if let Some(rows) = doc.as_array() {
-        for row in rows.iter().take(10000) {
-            let id = row["id"]
-                .as_u64()
-                .and_then(|id| u32::try_from(id).ok())
-                .or_else(|| row["id"].as_str().and_then(|id| id.parse().ok()));
-            if let Some(id) = id.filter(|id| *id > 0) {
-                out.insert(id, history_detail::name(row, id));
-            }
-        }
-    } else if let Some(rows) = doc.as_object() {
-        for (id, row) in rows.iter().take(10000) {
-            if let Ok(id) = id.parse::<u32>() {
-                if id > 0 {
-                    out.insert(id, history_detail::name(row, id));
-                }
-            }
-        }
-    }
-    out
-}
 type NamesJob = JoinHandle<Option<Names>>;
 pub struct Binding {
     roots: Vec<fuze_data::Root>,
@@ -73,20 +43,18 @@ impl Binding {
                 }
             }
         }
-        if self.open && !self.attempted && self.job.is_none() && !self.snapshot.0.is_empty() {
+        if self.open
+            && !self.attempted
+            && self.job.is_none()
+            && !self.snapshot.0.is_empty()
+            && self.version.is_some()
+        {
             self.attempted = true;
             let roots = self.roots.clone();
+            let expected = self.version.clone().unwrap();
             self.job = std::thread::Builder::new()
                 .name("fuze-observation-names".into())
-                .spawn(move || {
-                    fuze_data::prepare(&roots, fuze_data::Locale::ZhCn, fuze_data::Scope::History)
-                        .ok()
-                        .map(|data| Names {
-                            version: data.identity(),
-                            champions: labels(&data, "champions.json"),
-                            augments: labels(&data, "augments.json"),
-                        })
-                })
+                .spawn(move || Names::load(&roots, &expected).ok())
                 .ok()
                 .map(|job| (self.version.clone(), job));
             refresh = true;
@@ -177,12 +145,14 @@ impl Binding {
             ))
             .into(),
         );
-        state.set_unbound_names(if self.job.is_some() {
-            "正在加载中文名称，事件可先查看。".into()
+        state.set_unbound_names(if self.version.is_none() {
+            "等待名称数据版本，事件编号可先查看。".into()
+        } else if self.job.is_some() {
+            "正在加载对应版本的名称，事件可先查看。".into()
         } else if let Some(names) = &self.names {
             format!("名称数据：{} · 观察顺序不等于领取轮次", names.version).into()
         } else {
-            "中文名称暂不可用，保留原始编号；可收起后重新打开重试。".into()
+            "对应版本名称暂不可用，保留原始编号；可收起后重新打开重试。".into()
         });
         let Some(segment) = self.snapshot.0.get(state.get_unbound_selected() as usize) else {
             state.set_unbound_events(Default::default());

@@ -122,7 +122,13 @@ impl Monitor {
         context.supported.then_some(context.champion).flatten()
     }
     pub fn data_locale(&self) -> Option<fuze_data::Locale> {
-        Some(match self.latest.lock().ok()?.locale? {
+        let latest = self.latest.lock().ok()?;
+        if latest.updated.elapsed() >= Duration::from_secs(8)
+            || !matches!(latest.state, fuze_lcu::reconnect::State::Connected(_))
+        {
+            return None;
+        }
+        Some(match latest.locale? {
             fuze_lcu::locale::Locale::ZhCn => fuze_data::Locale::ZhCn,
             fuze_lcu::locale::Locale::ZhTw => fuze_data::Locale::ZhTw,
             fuze_lcu::locale::Locale::EnUs => fuze_data::Locale::EnUs,
@@ -369,9 +375,7 @@ impl Config {
         if self.augment_overlay {
             pipeline.art = crate::overlay_art::Art::new(&data, false).ok();
         }
-        pipeline
-            .overlay
-            .locale(self.locale.unwrap_or(fuze_data::Locale::ZhCn).code())?;
+        pipeline.overlay.locale(locale.code())?;
         Ok(pipeline)
     }
 }
@@ -690,6 +694,46 @@ impl Drop for Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn locale_context_requires_fresh_connected_detection() {
+        let latest = Arc::new(Mutex::new(Observation {
+            journal: None,
+            locale: Some(fuze_lcu::locale::Locale::EnUs),
+            state: fuze_lcu::reconnect::State::Connected(Phase::ChampSelect),
+            context: None,
+            root: None,
+            revision: 0,
+            updated: Instant::now(),
+            cancellation: None,
+        }));
+        let monitor = Monitor {
+            control: MonitorControl {
+                wake: None,
+                enabled: Arc::new(AtomicBool::new(false)),
+                latest: latest.clone(),
+            },
+            latest: latest.clone(),
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        assert_eq!(monitor.data_locale(), Some(fuze_data::Locale::EnUs));
+        latest.lock().unwrap().updated = Instant::now() - Duration::from_secs(9);
+        assert_eq!(monitor.data_locale(), None);
+        {
+            let mut s = latest.lock().unwrap();
+            s.updated = Instant::now();
+            s.state = fuze_lcu::reconnect::State::Waiting;
+        }
+        assert_eq!(monitor.data_locale(), None);
+        {
+            let mut s = latest.lock().unwrap();
+            s.state = fuze_lcu::reconnect::State::Connected(Phase::ChampSelect);
+            s.set_locale(Some(fuze_lcu::locale::Locale::ZhTw));
+        }
+        assert_eq!(monitor.data_locale(), Some(fuze_data::Locale::ZhTw));
+        latest.lock().unwrap().set_locale(None);
+        assert_eq!(monitor.data_locale(), None);
+    }
     #[test]
     fn loading_handoff_reuses_only_same_game_hero_root_and_locale() {
         let context = |phase, hero, game| {

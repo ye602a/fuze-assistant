@@ -24,6 +24,8 @@ mod background_data;
 #[cfg(windows)]
 pub mod cache_maintenance;
 #[cfg(windows)]
+mod catalog_session;
+#[cfg(windows)]
 pub mod champ_select;
 #[cfg(windows)]
 pub mod champion_assets;
@@ -38,6 +40,8 @@ pub mod history_detail;
 pub mod i18n;
 #[cfg(windows)]
 mod job;
+#[cfg(windows)]
+pub mod observation_names;
 #[cfg(windows)]
 pub use job::Job as ChildJob;
 #[cfg(windows)]
