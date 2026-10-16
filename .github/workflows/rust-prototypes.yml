@@ -20,9 +20,17 @@ on:
       - 'scripts/check-rust-pipeline.mjs'
       - 'scripts/check-rust-worker.mjs'
       - 'scripts/compare-rust-shapes.mjs'
+      - 'scripts/actions-validation-summary.mjs'
+      - 'tests/unit/actions-validation-summary.test.mjs'
       - '!rust/**/*.md'
       - '.github/workflows/rust-prototypes.yml'
   workflow_dispatch:
+    inputs:
+      artifacts:
+        description: '保留下载产物：none 仅验证，preview 测试 ZIP，full 含更新包和诊断工具'
+        type: choice
+        default: preview
+        options: [none, preview, full]
 permissions:
   contents: read
 concurrency:
@@ -35,6 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify no private runtime data or secrets are tracked
+        id: secrets
         run: node scripts/check-secrets.mjs
       - uses: actions/setup-node@v4
         with:
@@ -51,6 +60,7 @@ jobs:
           key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
           restore-keys: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-
       - name: Format, contracts and build
+        id: build
         working-directory: rust
         run: |
           cargo fmt --all -- --check
@@ -62,25 +72,33 @@ jobs:
           cargo build --workspace --release --locked -j 2
           exit $LASTEXITCODE
       - name: Offline ONNX and hidden native window
+        id: ocr
         run: node scripts/check-rust-prototypes.mjs
       - name: Persistent worker, raw atlas IPC and bounded lifecycle
+        id: worker
         env:
           FUZE_RUST_CI_VISIBLE: '1'
         run: node scripts/check-rust-worker.mjs
       - name: Native capture boundary and generated GPU ROI readback
+        id: capture
         run: node scripts/check-rust-capture.mjs
       - name: Native atlas to OCR and own-window capture lifecycle
+        id: pipeline
         env:
           FUZE_RUST_CI_VISIBLE: '1'
         run: node scripts/check-rust-pipeline.mjs
       - name: Same-input CPU comparison and automatic fallback
+        id: fallback
         run: |
           node --test scripts/test-rust-host.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
       - name: Assemble and self-check isolated Rust preview
+        id: package
         run: |
+          node --test tests/unit/actions-validation-summary.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-data-preparation.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/prepare-rust-data.mjs
@@ -92,24 +110,37 @@ jobs:
           node scripts/check-rust-update.mjs
           exit $LASTEXITCODE
       - name: Native desktop pause and exit (own window only)
+        id: desktop
         env:
           FUZE_RUST_CI_TRAY: '1'
         run: node scripts/check-rust-desktop.mjs
-      - name: Upload isolated development preview (not a stable installer)
+      - name: Scan upload content
+        id: upload_scan
+        run: npm run security:check
+      - name: Upload requested preview ZIP (not a stable installer)
+        id: upload_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.artifacts != 'none'
         uses: actions/upload-artifact@v4
         with:
           name: rust-development-preview
           path: |
             rust/artifacts/preview/*.zip
             rust/artifacts/preview/*.sha256
+          retention-days: 3
+      - name: Upload requested native update bundle
+        id: upload_update
+        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-update-bundle
+          path: |
             rust/artifacts/preview/*.fuz
             rust/artifacts/preview/*.blockmap
             rust/artifacts/preview/rust-update.json
-          retention-days: 7
-      - name: Scan upload content
-        run: npm run security:check
+          retention-days: 3
       - name: Upload sanitized prototype reports
-        if: always()
+        id: upload_evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: rust-prototype-evidence
@@ -143,13 +174,23 @@ jobs:
             rust/artifacts/worker-validation.json
           if-no-files-found: ignore
       - name: Prepare isolated prototype executables
+        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
         run: |
           New-Item -ItemType Directory -Force rust/artifacts/tools | Out-Null
           Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-ocr-worker.exe,rust/target/release/fuze-worker-host.exe,rust/target/release/fuze-rust-host.exe,rust/target/release/fuze-native-overlay.exe,rust/target/release/fuze-capture.exe rust/artifacts/tools/
           Get-ChildItem rust/artifacts/tools/*.exe | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -Encoding ascii rust/artifacts/tools/SHA256SUMS.txt
       - name: Upload isolated test tools (not a release installer)
+        id: upload_tools
+        if: github.event_name == 'workflow_dispatch' && inputs.artifacts == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: rust-prototype-tools
           path: rust/artifacts/tools/
-          retention-days: 7
+          retention-days: 3
+      - name: Keep validation results in the job summary
+        if: always()
+        env:
+          FUZE_CI_KIND: rust
+          FUZE_CI_STATUS: ${{ job.status }}
+          FUZE_CI_STEPS: ${{ toJSON(steps) }}
+        run: node scripts/actions-validation-summary.mjs
