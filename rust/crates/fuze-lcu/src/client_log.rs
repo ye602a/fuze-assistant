@@ -39,11 +39,17 @@ fn parse(pid: u32, text: &str) -> Result<Credentials> {
     Err(Error::AuthInput)
 }
 
-pub(crate) fn credentials(root: &Path, pid: u32, started: SystemTime) -> Result<Credentials> {
-    // Known client layouts only; no recursive disk scan. A retained process handle
-    // and creation time prevent reading another client or a previous reused PID.
+pub(crate) fn credentials(
+    root: &Path,
+    pid: u32,
+    started: Option<SystemTime>,
+) -> Result<Credentials> {
+    // Known client layouts only; no recursive disk scan. Caller supplies a live PID.
+    // A log can be created before UX starts; require recent writes, not a newer
+    // file creation time. Metadata denial must not disable directory fallback.
     let mut dirs = vec![
         root.to_owned(),
+        root.join("LeagueClient"),
         root.join("Logs/LeagueClient Logs"),
         root.join("Logs"),
     ];
@@ -52,11 +58,12 @@ pub(crate) fn credentials(root: &Path, pid: u32, started: SystemTime) -> Result<
         .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("LeagueClient"))
     {
         if let Some(parent) = root.parent() {
+            dirs.push(parent.to_owned());
             dirs.push(parent.join("Logs/LeagueClient Logs"));
             dirs.push(parent.join("Logs"));
         }
     }
-    let mut inspected = 0;
+    let mut candidates = Vec::new();
     for dir in dirs {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -68,33 +75,38 @@ pub(crate) fn credentials(root: &Path, pid: u32, started: SystemTime) -> Result<
             if !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            let Ok(file) = fs::File::open(entry.path()) else {
+            let Ok(meta) = entry.metadata() else {
                 continue;
             };
-            let Ok(meta) = file.metadata() else {
-                continue;
-            };
-            if !meta.is_file() || !meta.created().is_ok_and(|t| t >= started) {
-                continue;
-            }
-            inspected += 1;
-            let mut buffer = Secret(Vec::with_capacity(MAX_BYTES));
-            if file
-                .take(MAX_BYTES as u64)
-                .read_to_end(&mut buffer.0)
-                .is_ok()
+            if !meta.is_file()
+                || started.is_some_and(|start| !meta.modified().is_ok_and(|t| t >= start))
             {
-                // Decode borrowed text; no copy of the full sensitive log.
-                let bytes = match std::str::from_utf8(&buffer.0) {
-                    Ok(text) => text,
-                    Err(e) => std::str::from_utf8(&buffer.0[..e.valid_up_to()]).unwrap_or(""),
-                };
-                if let Ok(credentials) = parse(pid, bytes) {
-                    return Ok(credentials);
-                }
+                continue;
             }
-            if inspected >= 3 {
-                return Err(Error::Discovery);
+            candidates.push((
+                meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                entry.path(),
+            ));
+        }
+    }
+    candidates.sort_by(|a, b| b.cmp(a));
+    for (_, path) in candidates.into_iter().take(3) {
+        let Ok(file) = fs::File::open(path) else {
+            continue;
+        };
+        let mut buffer = Secret(Vec::with_capacity(MAX_BYTES));
+        if file
+            .take(MAX_BYTES as u64)
+            .read_to_end(&mut buffer.0)
+            .is_ok()
+        {
+            // Decode borrowed text; no copy of the full sensitive log.
+            let bytes = match std::str::from_utf8(&buffer.0) {
+                Ok(text) => text,
+                Err(e) => std::str::from_utf8(&buffer.0[..e.valid_up_to()]).unwrap_or(""),
+            };
+            if let Ok(credentials) = parse(pid, bytes) {
+                return Ok(credentials);
             }
         }
     }
@@ -146,18 +158,27 @@ mod tests {
             "Creating ux window https://riot:fixture@127.0.0.1:58124/bootstrap.html",
         )
         .unwrap();
-        assert!(credentials(&root, 12, started).is_ok());
-        assert!(credentials(&root, 13, started).is_err());
+        assert!(credentials(&root, 12, Some(started)).is_ok());
+        assert!(credentials(&root, 13, Some(started)).is_err());
+        // Pre-created startup files written by the current UX must remain usable.
+        let later_start = SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(later_start))
+            .unwrap();
+        assert!(credentials(&root, 12, Some(later_start)).is_ok());
         assert!(credentials(
             &root,
             12,
-            SystemTime::now() + std::time::Duration::from_secs(1)
+            Some(later_start + std::time::Duration::from_secs(1))
         )
         .is_err());
         let mut large = vec![b' '; MAX_BYTES];
         large.extend_from_slice(b"https://riot:fixture@127.0.0.1:58124/");
         fs::write(&path, large).unwrap();
-        assert!(credentials(&root, 12, started).is_err());
+        assert!(credentials(&root, 12, Some(started)).is_err());
         fs::remove_file(path).unwrap();
         fs::remove_dir(root.join("Logs/LeagueClient Logs")).unwrap();
         fs::remove_dir(root.join("Logs")).unwrap();

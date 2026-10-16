@@ -188,9 +188,7 @@ pub fn read(path: &Path) -> Result<Preferences> {
 pub fn save(path: &Path, value: &Preferences) -> Result<()> {
     value.validate()?;
     if !value.manual_directory.is_empty()
-        && !Path::new(&value.manual_directory)
-            .join("LeagueClient.exe")
-            .is_file()
+        && !fuze_lcu::install::is_client_directory(Path::new(&value.manual_directory))
     {
         return Err("preferences-directory-client-missing");
     }
@@ -272,6 +270,40 @@ mod tests {
         assert!(p.validate().is_err());
         p.manual_directory = "../private".into();
         assert!(p.validate().is_err());
+    }
+    #[test]
+    fn manual_directory_saves_root_and_nested_layouts_without_process_access() {
+        let dir = std::env::temp_dir().join(format!(
+            "fuze-directory-settings-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join("client/LeagueClient")).unwrap();
+        fs::write(dir.join("client/LeagueClient/LeagueClient.exe"), b"fixture").unwrap();
+        let path = dir.join("preferences.json");
+        for root in [dir.join("client"), dir.join("client/LeagueClient")] {
+            let mut value = Preferences::default();
+            value.manual_directory = root.to_string_lossy().into_owned();
+            save(&path, &value).unwrap();
+            assert_eq!(read(&path).unwrap(), value);
+        }
+        let previous = read(&path).unwrap();
+        let mut invalid = previous.clone();
+        invalid.manual_directory = dir.join("missing").to_string_lossy().into_owned();
+        assert_eq!(
+            save(&path, &invalid),
+            Err("preferences-directory-client-missing")
+        );
+        assert_eq!(read(&path).unwrap(), previous);
+        // Only the files created by this test.
+        fs::remove_file(path).unwrap();
+        fs::remove_file(dir.join("client/LeagueClient/LeagueClient.exe")).unwrap();
+        fs::remove_dir(dir.join("client/LeagueClient")).unwrap();
+        fs::remove_dir(dir.join("client")).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
     #[test]
     fn preferences_roundtrip_reject_invalid_and_preserve_on_locked_commit() {

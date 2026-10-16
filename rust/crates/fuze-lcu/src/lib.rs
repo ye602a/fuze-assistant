@@ -7,11 +7,16 @@ mod client_log;
 mod command_line;
 pub mod context;
 #[cfg(windows)]
+mod directory_auth;
+#[cfg(windows)]
 pub mod discovery;
 pub mod events;
 pub mod history;
+pub mod install;
 pub mod item_sets;
 pub mod locale;
+#[cfg(windows)]
+mod process_watch;
 pub mod reconnect;
 pub mod stage_probe;
 #[cfg(windows)]

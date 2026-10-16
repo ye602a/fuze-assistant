@@ -1,0 +1,31 @@
+name: Rust LCU regression
+on:
+  pull_request:
+    paths:
+      - 'rust/crates/fuze-lcu/**'
+      - 'rust/crates/fuze-worker-host/src/preferences.rs'
+      - '.github/workflows/rust-lcu-regression.yml'
+permissions:
+  contents: read
+concurrency:
+  group: rust-lcu-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-lcu:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upload privacy
+        run: node scripts/check-secrets.mjs
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: rust/target
+          key: lcu-win-1.90-${{ hashFiles('rust/Cargo.lock') }}
+      - name: Check formatting
+        run: cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-lcu -p fuze-worker-host -- --check
+      - name: Directory fallback and host settings regressions
+        run: cargo +1.90.0 test --manifest-path rust/Cargo.toml -p fuze-lcu -p fuze-worker-host --lib --locked -j 2
+      # No game access, UI automation, installer generation or artifact uploads.

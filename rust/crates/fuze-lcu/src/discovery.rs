@@ -1,6 +1,7 @@
 //! Explicit opt-in native discovery; never invoked by offline prototypes or tests.
 //! Process metadata, adjacent lockfile, then PID-scoped WMI command arguments. No dumps, memory reads or shell.
 use crate::{
+    process_watch::{Handle, Watch},
     reconnect::{Reconnect, State},
     transport::ReadOnlyClient,
     wipe, Credentials, Error, Result,
@@ -16,14 +17,6 @@ use windows_sys::Win32::{
     Foundation::*,
     System::{Diagnostics::ToolHelp::*, Threading::*},
 };
-struct Handle(HANDLE);
-impl Drop for Handle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
-        }
-    }
-}
 struct Secret(Vec<u8>);
 impl Drop for Secret {
     fn drop(&mut self) {
@@ -31,14 +24,14 @@ impl Drop for Secret {
     }
 }
 struct Candidate {
-    process: Handle,
+    process: Watch,
     pid: u32,
     credentials: Credentials,
     root: PathBuf,
 }
-/// Explicit user-requested history IO only; retains the discovered process handle.
+/// Explicit user-requested history IO only; checks the discovered process identity.
 pub struct HistorySession {
-    process: Handle,
+    process: Watch,
     pid: u32,
     client: ReadOnlyClient,
 }
@@ -63,13 +56,13 @@ impl HistorySession {
         champion: u32,
         sets: &[serde_json::Value],
     ) -> crate::history::Result<()> {
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("item-sets-client-unavailable");
         }
         self.client.install_item_sets(self.pid, champion, sets)
     }
     pub fn owner(&self) -> crate::history::Result<crate::history::Owner> {
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("history-client-unavailable");
         }
         self.client.history_owner(self.pid)
@@ -85,11 +78,11 @@ impl HistorySession {
         owner: &crate::history::Owner,
         start: u32,
     ) -> crate::history::Result<Vec<crate::history::Match>> {
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("history-client-unavailable");
         }
         let result = self.client.history_sgp(self.pid, owner, start);
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("history-client-unavailable");
         }
         result
@@ -101,11 +94,11 @@ impl HistorySession {
     ) -> crate::history::Result<Vec<crate::history::Match>> {
         // The host brackets this request with owner()/phase verification.
         // Parsing independently rejects any participant belonging to a different owner.
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("history-client-unavailable");
         }
         let result = self.client.history_rows(self.pid, owner, start);
-        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_TIMEOUT {
+        if !self.process.alive() {
             return Err("history-client-unavailable");
         }
         result
@@ -113,35 +106,57 @@ impl HistorySession {
 }
 impl Candidate {
     fn alive(&self) -> bool {
-        // A retained kernel handle binds the original process even if its PID is later reused.
-        unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_TIMEOUT }
+        self.process.alive()
     }
 }
-fn discover_sources(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
-    match discover_lockfile(manual) {
+fn discover_sources() -> Result<Option<Candidate>> {
+    match discover_lockfile() {
         Ok(Some(c)) => Ok(Some(c)),
         Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
-        previous => match discover_command(manual) {
+        previous => match discover_command() {
             Ok(None) => previous,
             other => other,
         },
     }
 }
 fn discover(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
-    let automatic = discover_sources(None);
+    let automatic = discover_sources();
+    with_directory_fallback(automatic, manual, |root| {
+        let observed = crate::process_watch::observations(true)?;
+        let Some(found) = crate::directory_auth::discover(root, &observed)? else {
+            return Ok(None);
+        };
+        let pid = found.observation.pid;
+        let process = Watch::from_observation(found.observation);
+        if !process.alive() {
+            return Err(Error::Discovery);
+        }
+        Ok(Some(Candidate {
+            process,
+            pid,
+            credentials: found.credentials,
+            root: found.root,
+        }))
+    })
+}
+pub(crate) fn with_directory_fallback<T>(
+    automatic: Result<Option<T>>,
+    manual: Option<&std::path::Path>,
+    read: impl FnOnce(&std::path::Path) -> Result<Option<T>>,
+) -> Result<Option<T>> {
     match automatic {
         Ok(Some(c)) => Ok(Some(c)),
         Err(Error::AmbiguousClient) => Err(Error::AmbiguousClient),
         other => {
             if let Some(root) = manual {
-                discover_sources(Some(root))
+                read(root)
             } else {
                 other
             }
         }
     }
 }
-fn discover_command(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
+fn discover_command() -> Result<Option<Candidate>> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -177,27 +192,12 @@ fn discover_command(manual: Option<&std::path::Path>) -> Result<Option<Candidate
                     let mut length = path.len() as u32;
                     let readable =
                         QueryFullProcessImageNameW(p, 0, path.as_mut_ptr(), &mut length) != 0;
-                    let image = if readable {
-                        Some(PathBuf::from(String::from_utf16_lossy(
-                            &path[..length as usize],
-                        )))
-                    } else {
-                        manual
-                            .filter(|r| r.join("LeagueClientUx.exe").is_file())
-                            .map(|r| r.join("LeagueClientUx.exe"))
-                    };
+                    let image = readable
+                        .then(|| PathBuf::from(String::from_utf16_lossy(&path[..length as usize])));
                     if image.is_none() {
                         denied = true;
                     }
                     if let Some(image) = image {
-                        if let Some(root) = manual {
-                            if readable
-                                && std::fs::canonicalize(root).ok()
-                                    != image.parent().and_then(|p| std::fs::canonicalize(p).ok())
-                            {
-                                return Err(Error::Discovery);
-                            }
-                        }
                         if !image.file_name().is_some_and(|s| {
                             s.to_string_lossy()
                                 .eq_ignore_ascii_case("LeagueClientUx.exe")
@@ -212,33 +212,16 @@ fn discover_command(manual: Option<&std::path::Path>) -> Result<Option<Candidate
                         // Read only this live UX process's startup log as the last fallback.
                         let credentials = crate::command_line::credentials(row.th32ProcessID)
                             .or_else(|_| {
-                                let mut created: FILETIME = zeroed();
-                                let mut exited: FILETIME = zeroed();
-                                let mut kernel: FILETIME = zeroed();
-                                let mut user: FILETIME = zeroed();
-                                if GetProcessTimes(
-                                    p,
-                                    &mut created,
-                                    &mut exited,
-                                    &mut kernel,
-                                    &mut user,
-                                ) == 0
-                                {
-                                    return Err(Error::Discovery);
-                                }
-                                let ticks = ((created.dwHighDateTime as u64) << 32)
-                                    | created.dwLowDateTime as u64;
-                                let since_unix = ticks
-                                    .checked_sub(116444736000000000)
-                                    .ok_or(Error::Discovery)?;
-                                let started = std::time::UNIX_EPOCH
-                                    + std::time::Duration::from_nanos(since_unix * 100);
-                                crate::client_log::credentials(&root, row.th32ProcessID, started)
+                                crate::client_log::credentials(
+                                    &root,
+                                    row.th32ProcessID,
+                                    crate::process_watch::started(p),
+                                )
                             });
                         match credentials {
                             Ok(credentials) => {
                                 let candidate = Candidate {
-                                    process,
+                                    process: Watch::Retained(process),
                                     pid: row.th32ProcessID,
                                     credentials,
                                     root,
@@ -268,7 +251,7 @@ fn discover_command(manual: Option<&std::path::Path>) -> Result<Option<Candidate
         Ok(found)
     }
 }
-fn discover_lockfile(manual: Option<&std::path::Path>) -> Result<Option<Candidate>> {
+fn discover_lockfile() -> Result<Option<Candidate>> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -305,27 +288,12 @@ fn discover_lockfile(manual: Option<&std::path::Path>) -> Result<Option<Candidat
                     let readable =
                         QueryFullProcessImageNameW(process.0, 0, path.as_mut_ptr(), &mut length)
                             != 0;
-                    let image = if readable {
-                        Some(PathBuf::from(String::from_utf16_lossy(
-                            &path[..length as usize],
-                        )))
-                    } else {
-                        manual
-                            .filter(|r| r.join("LeagueClient.exe").is_file())
-                            .map(|r| r.join("LeagueClient.exe"))
-                    };
+                    let image = readable
+                        .then(|| PathBuf::from(String::from_utf16_lossy(&path[..length as usize])));
                     if image.is_none() {
                         denied = true;
                     }
                     if let Some(image) = image {
-                        if let Some(root) = manual {
-                            if readable
-                                && std::fs::canonicalize(root).ok()
-                                    != image.parent().and_then(|p| std::fs::canonicalize(p).ok())
-                            {
-                                return Err(Error::Discovery);
-                            }
-                        }
                         if image.file_name().is_some_and(|n| {
                             n.to_string_lossy().eq_ignore_ascii_case("LeagueClient.exe")
                         }) {
@@ -346,7 +314,7 @@ fn discover_lockfile(manual: Option<&std::path::Path>) -> Result<Option<Candidat
                             match credentials {
                                 Ok(credentials) => {
                                     let candidate = Candidate {
-                                        process,
+                                        process: Watch::Retained(process),
                                         pid: row.th32ProcessID,
                                         credentials,
                                         root: image.parent().ok_or(Error::Discovery)?.to_path_buf(),
@@ -381,7 +349,7 @@ fn discover_lockfile(manual: Option<&std::path::Path>) -> Result<Option<Candidat
 struct Connected {
     socket: Option<crate::websocket::Socket>,
     socket_retry: u64,
-    process: Handle,
+    process: Watch,
     pid: u32,
     client: ReadOnlyClient,
     root: PathBuf,
@@ -421,13 +389,11 @@ impl AutoClient {
             .connection
             .as_ref()
             .ok_or("journal-client-unavailable")?;
-        if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
+        if !c.process.alive() {
             return Err("journal-client-unavailable");
         }
         let result = c.client.journal_owner(c.pid)?;
-        if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT
-            || self.context.and_then(|c| c.observed_game_id()) != Some(result.1)
-        {
+        if !c.process.alive() || self.context.and_then(|c| c.observed_game_id()) != Some(result.1) {
             return Err("journal-context-changed");
         }
         Ok(result)
@@ -499,7 +465,9 @@ impl AutoClient {
         self.dirty = false;
         let result = (|| {
             if let Some(c) = &self.connection {
-                if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
+                // Without a retained handle, do not retain credentials across polls.
+                // Re-read the live PID's files and authenticate again after the backoff.
+                if c.process.refresh_required() || !c.process.alive() {
                     self.connection = None;
                 }
             }
@@ -520,7 +488,7 @@ impl AutoClient {
             let c = self.connection.as_mut().ok_or(Error::Discovery)?;
             let context = c.client.context(c.pid)?;
             let locale = c.client.locale(c.pid).ok();
-            if unsafe { WaitForSingleObject(c.process.0, 0) } != WAIT_TIMEOUT {
+            if !c.process.alive() {
                 return Err(Error::Discovery);
             }
             self.context = Some(context);
