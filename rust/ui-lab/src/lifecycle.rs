@@ -53,6 +53,8 @@ fn reveal(ui: &Workbench, interactive: bool) {
     });
 }
 fn close(ui: &Workbench, shell: &Shell, session: &Session, interactive: bool) {
+    ui.global::<crate::RecordState>()
+        .invoke_action("cancel-confirm".into(), 0);
     ui.global::<crate::MaintenanceState>()
         .set_confirmation("".into());
     if session.snapshot().preferences.close_to_tray && shell.tray_available() {
@@ -142,6 +144,8 @@ pub fn attach(
             }
             "quit" => {
                 reveal(&ui, interactive);
+                ui.global::<crate::RecordState>()
+                    .invoke_action("cancel-confirm".into(), 0);
                 ui.global::<crate::MaintenanceState>()
                     .set_confirmation("".into());
                 ui.set_quit_open(true);

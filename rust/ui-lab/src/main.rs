@@ -1,3 +1,4 @@
+mod art_cache;
 mod champion_bridge;
 mod direct;
 mod font_probe;
@@ -11,6 +12,7 @@ mod manual_profile;
 mod native_shell;
 mod overlay_review;
 mod public_art;
+mod record_bridge;
 #[cfg(feature = "gpu")]
 mod skia_surface_probe;
 mod slint_probe;

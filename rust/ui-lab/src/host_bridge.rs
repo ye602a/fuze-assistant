@@ -10,6 +10,7 @@ use std::{cell::RefCell, path::Path, rc::Rc, time::Duration};
 
 pub struct Binding {
     pub session: Rc<Session>,
+    pub records: Rc<crate::record_bridge::Binding>,
     _timer: slint::Timer,
 }
 pub fn offline_config(root: &Path) -> Config {
@@ -110,12 +111,6 @@ fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
             "观察到的卡片不作为已领取，按账号隔离保存。",
             p.local_records,
         ),
-        (
-            "private_updates",
-            "私有更新频道",
-            "令牌由系统安全存储管理，不写入偏好文件。",
-            p.private_updates,
-        ),
     ];
     Rc::new(VecModel::from(
         values
@@ -176,6 +171,12 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
         "隔离固定样例 · 非个人战绩".into()
     } else if view.error.is_some() {
         fuze_worker_host::account_history::error_label(view.error).into()
+    } else if view.pending > 0 {
+        format!(
+            "导入预览 · {} 项 · 尚未写入，请选择后确认或取消。",
+            view.pending
+        )
+        .into()
     } else if view.cached {
         "显示本地缓存，未据此确认当前登录账号。".into()
     } else {
@@ -190,6 +191,12 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
                 .map(|(i, r)| {
                     let d = view.details.get(i);
                     MatchRow {
+                        source_index: i as i32,
+                        date: fuze_worker_host::history_detail::date(r.created).into(),
+                        icon: Default::default(),
+                        items: Default::default(),
+                        augments: Default::default(),
+                        chosen: false,
                         title: d
                             .map(|d| d.title.clone())
                             .unwrap_or_else(|| format!("英雄 #{}", r.champion))
@@ -223,6 +230,7 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
         ))
         .into(),
     );
+    ui.global::<crate::RecordState>().invoke_refresh();
 }
 pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, &'static str> {
     let popup = Rc::new(RefCell::new(crate::game_windows::Manager::new(
@@ -231,6 +239,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
         !offline,
     )));
     let session = Rc::new(Session::start(config, offline)?);
+    let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();
     state.set_connected(true);
     state.set_offline(offline);
@@ -297,6 +306,9 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
     let service = session.clone();
     state.on_history_turn(move |direction| {
         if let Some(ui) = weak.upgrade() {
+            if ui.global::<crate::RecordState>().get_busy() {
+                return;
+            }
             let page = (ui.global::<HostState>().get_history_page() + direction).max(0) as usize;
             history(&ui, &service.snapshot().history, page);
         }
@@ -305,6 +317,9 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
     let service = session.clone();
     state.on_history_filter(move |query, result| {
         if let Some(ui) = weak.upgrade() {
+            if ui.global::<crate::RecordState>().get_busy() {
+                return;
+            }
             let state = ui.global::<HostState>();
             state.set_history_query(query);
             state.set_history_result(result);
@@ -339,6 +354,12 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
                 let mut prefs = next.preferences.clone();
                 prefs.automatic = next.mode == 1;
                 state.set_preferences(rows(&prefs));
+                let maintenance = ui.global::<crate::MaintenanceState>();
+                if maintenance.get_private_channel() != prefs.private_updates {
+                    maintenance.set_private_channel(prefs.private_updates);
+                    maintenance.set_installable(false);
+                    maintenance.set_update_status("频道已切换，请重新检查更新。".into());
+                }
                 state.set_backend(
                     ["auto", "cpu", "dml"]
                         .iter()
@@ -417,6 +438,7 @@ pub fn attach(ui: &Workbench, config: Config, offline: bool) -> Result<Binding, 
     );
     Ok(Binding {
         session,
+        records,
         _timer: timer,
     })
 }

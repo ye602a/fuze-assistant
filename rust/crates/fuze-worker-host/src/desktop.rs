@@ -51,6 +51,7 @@ const HISTORY_OFFLINE: u8 = 9;
 const JOURNAL_PREVIEW: u8 = 10;
 const EXPORT: u8 = 11;
 const HISTORY_MORE: u8 = 12;
+const HISTORY_CANCEL: u8 = 13;
 const EXPORT_MATCH: usize = 222;
 const LEVEL_GATE: usize = 223;
 const AUGMENT_OVERLAY: usize = 224;
@@ -134,6 +135,7 @@ struct Shared {
     pending: Mutex<Option<crate::preferences::Preferences>>,
     import_path: Mutex<Option<std::path::PathBuf>>,
     import_game: Mutex<Option<u64>>,
+    import_selection: Mutex<Option<Vec<u64>>>,
     export: Mutex<Option<crate::record_export::Request>>,
 }
 impl Shared {
@@ -315,6 +317,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
     let mut background = crate::background_data::Refresh::new();
     let mut history_background = crate::post_game_history::Refresh::default();
     let mut history_import: Option<crate::account_history::Import> = None;
+    let mut history_before_import: Option<crate::account_history::View> = None;
     let mut history_account_index = 0;
     loop {
         let automatic = shared.automatic_change.swap(0, Ordering::AcqRel);
@@ -473,6 +476,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             HISTORY_CONFIRM,
             HISTORY_OFFLINE,
             JOURNAL_PREVIEW,
+            HISTORY_CANCEL,
         ]
         .contains(&desired)
         {
@@ -483,12 +487,21 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             let manual = (!preferences.manual_directory.is_empty())
                 .then(|| std::path::Path::new(&preferences.manual_directory));
             let result = (|| -> Result<crate::account_history::View> {
+                if desired == HISTORY_CANCEL {
+                    history_import = None;
+                    let mut previous = history_before_import.take().unwrap_or_default();
+                    previous.cached = true; // Cancelling does not revalidate the logged-in account.
+                    return Ok(previous);
+                }
                 if fixture {
                     return Err("history-fixture-disabled");
                 }
                 let path = crate::account_history::path()?;
                 match desired {
                     JOURNAL_PREVIEW => {
+                        if history_before_import.is_none() {
+                            history_before_import = Some(shared.status().history);
+                        }
                         history_import = None;
                         let source = shared
                             .import_path
@@ -510,12 +523,14 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     }
                     HISTORY_OFFLINE => {
                         history_import = None;
+                        history_before_import = None;
                         let view = crate::account_history::offline(&path, history_account_index)?;
                         history_account_index = history_account_index.wrapping_add(1);
                         Ok(view)
                     }
                     HISTORY | HISTORY_MORE => {
                         history_import = None;
+                        history_before_import = None;
                         let previous = shared.status().history;
                         if desired == HISTORY_MORE {
                             Ok(crate::account_history::refresh_page(
@@ -530,6 +545,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         }
                     }
                     HISTORY_PREVIEW => {
+                        if history_before_import.is_none() {
+                            history_before_import = Some(shared.status().history);
+                        }
                         history_import = None;
                         let source = shared
                             .import_path
@@ -542,15 +560,29 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         history_import = Some(pending);
                         Ok(view)
                     }
-                    _ => history_import
-                        .take()
-                        .ok_or("history-import-missing")?
-                        .confirm(manual, &path),
+                    _ => {
+                        let mut pending = history_import.take().ok_or("history-import-missing")?;
+                        if let Some(selected) = shared
+                            .import_selection
+                            .lock()
+                            .map_err(|_| "frontend-lock")?
+                            .take()
+                        {
+                            pending = pending.select(&selected)?;
+                        }
+                        let confirmed = pending.confirm(manual, &path)?;
+                        history_before_import = None;
+                        Ok(confirmed)
+                    }
                 }
             })();
-            let mut view = result.unwrap_or_else(|e| crate::account_history::View {
-                error: Some(e),
-                ..Default::default()
+            let mut view = result.unwrap_or_else(|e| {
+                let mut preserved = history_before_import.take().unwrap_or_default();
+                preserved.error = Some(e);
+                preserved.pending = 0;
+                preserved.journal_preview = false;
+                preserved.cached = true;
+                preserved
             });
             let history_locale = match shared.status().ui_locale.as_str() {
                 "en-US" => fuze_data::Locale::EnUs,
@@ -2690,6 +2722,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         pending: Mutex::new(None),
         import_path: Mutex::new(None),
         import_game: Mutex::new(None),
+        import_selection: Mutex::new(None),
         export: Mutex::new(None),
     });
     let mut champion_roots = config.roots.clone();

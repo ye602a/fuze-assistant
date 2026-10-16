@@ -11,7 +11,7 @@ export component MaintenancePage inherits VerticalLayout {
             Action { label: "退出并打开更新程序"; enabled: MaintenanceState.installable && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("install"); } }
         }
         Label { x: 23px; y: 202px; width: parent.width - 92px; height: 24px; text: MaintenanceState.private-channel ? "私有更新频道" : "公开更新频道"; }
-        Toggle { x: parent.width - 67px; y: 203px; checked: MaintenanceState.private-channel; enabled: !MaintenanceState.busy; label: "使用私有更新频道"; toggled => { MaintenanceState.private-channel = !MaintenanceState.private-channel; MaintenanceState.installable = false; MaintenanceState.update-status = "频道已切换，请重新检查更新。"; } }
+        Toggle { x: parent.width - 67px; y: 203px; checked: MaintenanceState.private-channel; enabled: HostState.connected && !HostState.busy && !MaintenanceState.busy; label: "使用私有更新频道"; toggled => { HostState.preference("private_updates", !MaintenanceState.private-channel); } }
         HorizontalLayout { x: 23px; y: 244px; width: 280px; height: 34px; spacing: 10px;
             Action { label: "设置私有授权"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("credentials"); } }
             Action { label: "移除授权"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("forget"); } }

@@ -27,6 +27,9 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     crate::slint_probe::connect(&ui);
     let binding = crate::host_bridge::attach(&ui, crate::host_bridge::offline_config(data), true)?;
     let session = binding.session.clone();
+    let records = binding.records.clone();
+    let settings_fixture = output.join("legacy-settings-fixture.json");
+    std::fs::write(&settings_fixture, br#"{"championInsight":{"pinDuringChampSelect":true},"app":{"locale":"en-US"},"autoScreenshotGameflowControl":true}"#)?;
     let maintenance_root = crate::maintenance_review::fixture(output)?;
     let _maintenance = crate::maintenance_bridge::attach(
         &ui,
@@ -318,6 +321,128 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         {
                             return Err("maintenance-foreground".into());
                         }
+                        ui.set_page(1);
+                        ui.set_scroll_y(0.);
+                        state.invoke_history_filter("".into(), 0);
+                        step.set(15);
+                    }
+                    15 if records.idle() => {
+                        let row = state.get_history().row_data(0).ok_or("record-row")?;
+                        if row.icon.size().width == 0 || row.items.row_count() == 0 {
+                            return Err("record-icons-missing".into());
+                        }
+                        let record = ui.global::<crate::RecordState>();
+                        record.invoke_action("select".into(), 0);
+                        if record.get_observations().row_count() != 5
+                            || !record
+                                .get_observations()
+                                .row_data(0)
+                                .unwrap()
+                                .cards
+                                .contains("此位置未识别")
+                        {
+                            return Err("record-observation-boundary".into());
+                        }
+                        ui.set_scroll_y(-360.);
+                        save("records-detail")?;
+                        record.invoke_action("observation-page".into(), 1);
+                        if record.get_observations().row_count() != 3 {
+                            return Err("observation-pagination".into());
+                        }
+                        ui.set_scroll_y(-610.);
+                        save("records-observations")?;
+                        record.invoke_action("share".into(), 0);
+                        if !session.busy() || session.set_running(true).is_ok() {
+                            return Err("share-reservation".into());
+                        }
+                        step.set(16);
+                    }
+                    16 if records.idle() => {
+                        let record = ui.global::<crate::RecordState>();
+                        if !record.get_share_ready() {
+                            return Err("share-preview-missing".into());
+                        }
+                        let (png, json) = records.share_bytes();
+                        let value: serde_json::Value = serde_json::from_slice(&json)?;
+                        let text = String::from_utf8(json)?;
+                        if !value["actualClaimRound"].is_null()
+                            || value["recommendationScope"] != "overall"
+                            || value["candidateObservations"].as_array().map(|a| a.len()) != Some(8)
+                            || [
+                                "demo0001",
+                                "HN1",
+                                "game_id",
+                                "observed_at",
+                                "created",
+                                "platform",
+                            ]
+                            .iter()
+                            .any(|s| text.contains(s))
+                        {
+                            return Err("share-privacy-boundary".into());
+                        }
+                        std::fs::write(destination.join("records-anonymous-share.png"), png)?;
+                        ui.set_scroll_y(-1010.);
+                        save("records-share")?;
+                        record.invoke_action("copy".into(), 0);
+                        if !record.get_notice().contains("离线验证") {
+                            return Err("clipboard-offline-boundary".into());
+                        }
+                        record.invoke_action("select".into(), 1);
+                        if record.get_share_ready()
+                            || record.get_observations().row_count() != 0
+                            || !records.share_bytes().0.is_empty()
+                        {
+                            return Err("record-selection-stale".into());
+                        }
+                        record.set_notice("".into());
+                        ui.set_page(2);
+                        ui.set_scroll_y(0.);
+                        records.preview_settings_fixture(settings_fixture.clone())?;
+                        step.set(17);
+                    }
+                    17 if records.idle() => {
+                        step.set(18);
+                    }
+                    18 => {
+                        let record = ui.global::<crate::RecordState>();
+                        if record.get_confirmation() != "settings"
+                            || !ui.get_record_cancel_focused()
+                        {
+                            return Err("settings-preview-focus".into());
+                        }
+                        save("records-settings-confirmation")?;
+                        record.invoke_action("cancel-confirm".into(), 0);
+                        if session.snapshot().preferences.champ_topmost {
+                            return Err("settings-cancel-applied".into());
+                        }
+                        records.preview_settings_fixture(settings_fixture.clone())?;
+                        step.set(19);
+                    }
+                    19 if records.idle() => {
+                        ui.global::<crate::RecordState>()
+                            .invoke_action("confirm".into(), 0);
+                        step.set(20);
+                    }
+                    20 if !session.busy() => {
+                        let p = session.snapshot().preferences;
+                        if !p.champ_topmost || p.locale == "en-US" || state.get_running() {
+                            return Err("settings-import-policy".into());
+                        }
+                        state.invoke_preference("private_updates".into(), false);
+                        step.set(21);
+                    }
+                    21 if !session.busy()
+                        && !ui.global::<crate::MaintenanceState>().get_private_channel() =>
+                    {
+                        if session.snapshot().preferences.private_updates {
+                            return Err("update-channel-not-persisted".into());
+                        }
+                        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }
+                            != before
+                        {
+                            return Err("record-foreground-changed".into());
+                        }
                         ui.invoke_close_requested();
                         return Ok(true);
                     }
@@ -346,6 +471,13 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
     }
     drop(binding);
     let report = serde_json::json!({"hidden_window":true,"foreground_unchanged":true,"game_access":false,"system_input":false,"personal_data_read":false,"host_preferences_apply":true,"invalid_preferences_preserved":true,"history_detail_and_paging":true,"offline_network_command_rejected":true,"pause_resume":true,"champion_latest_request":true,"augment_filter":true,"public_build_details":true,"bench_replace_and_clear":true,"detail_idle_timer_stopped":true,"history_filter":true,"close_fallback_and_cancel":true,"close_default_focus":true,"tray_quit_confirmation_callback":true,"confirm_stops_session":true,"native_shell_hidden":true,"tray_registration_tested":false,"global_hotkey_registered":false,"disk_save_verified":false,"production_parity_complete":false,"storage_scan_clean_preservation":true,"maintenance_offline_network_rejected":true,"maintenance_confirmation_cancel_focus":true});
+    let mut report = report;
+    report["record_icons_and_observation_paging"] = true.into();
+    report["anonymous_share_preview"] = true.into();
+    report["record_selection_clears_previous"] = true.into();
+    report["clipboard_offline_rejected"] = true.into();
+    report["settings_import_cancel_confirm"] = true.into();
+    report["update_channel_preference_synced"] = true.into();
     std::fs::write(
         output.join("host-review.json"),
         serde_json::to_vec_pretty(&report)?,

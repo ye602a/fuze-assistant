@@ -1,12 +1,18 @@
 import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
-import { HostState, ShellState } from "host-state.slint";
+import { HostState, ShellState, RecordState } from "host-state.slint";
+import { RecordDetails } from "records.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
     in-out property <bool> manual-open: false;
     spacing: 18px;
     MaintenancePage { }
+    Panel { height: 130px;
+        SectionTitle { x: 21px; y: 17px; height: 25px; text: "迁移旧版偏好"; }
+        Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "只读取你选择的旧配置；预览确认后导入受支持偏好，保留当前语言与启动状态。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Action { x: 21px; y: 88px; width: 165px; height: 30px; label: "选择旧设置并预览"; enabled: HostState.connected && !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-settings",0); } }
+    }
     Panel {
         height: HostState.preferences.length * 78px + 136px;
         VerticalLayout { x: 21px; y: 5px; width: parent.width - 42px; height: parent.height - 10px; spacing: 0px;
@@ -63,7 +69,7 @@ export component SettingsPage inherits VerticalLayout {
 export component HistoryPage inherits VerticalLayout {
     in property <bool> sample: false;
     spacing: 18px;
-    Panel { height: 220px;
+    Panel { height: 262px;
         SectionTitle { x: 21px; y: 18px; height: 26px; text: "海克斯大乱斗战绩"; }
         Label { x: 21px; y: 55px; width: parent.width - 42px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；区服未确认时不猜测。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 98px; width: 330px; height: 38px; spacing: 10px;
@@ -71,26 +77,56 @@ export component HistoryPage inherits VerticalLayout {
             Action { label: "本地缓存"; enabled: HostState.connected && !HostState.busy && !HostState.offline; clicked => { HostState.command("history-cached"); } }
             Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.offline; clicked => { HostState.command("history-more"); } }
         }
-        Label { x: 21px; y: 160px; width: parent.width - 42px; height: 42px; text: HostState.history-note; wrap: word-wrap; color: Theme.yellow; }
+        Action { x: 21px; y: 148px; width: 170px; height: 34px; label: "选择旧战绩并预览"; enabled: HostState.connected && !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-history",0); } }
+        Label { x: 21px; y: 201px; width: parent.width - 42px; height: 42px; text: HostState.history-note; wrap: word-wrap; color: Theme.yellow; }
+    }
+    if RecordState.import-count > 0: Panel { height: 137px;
+        SectionTitle { x: 21px; y: 17px; height: 25px; text: "导入预览 · 已选 " + RecordState.chosen-count + " / " + RecordState.import-count; }
+        Label { x: 21px; y: 49px; width: parent.width - 42px; height: 30px; text: "仅导入预览中选中的记录。确认前再次核对当前账号与区服；取消不写入。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        HorizontalLayout { x: 21px; y: 88px; width: 310px; height: 34px; spacing: 12px;
+            Action { label: "取消导入"; enabled: !HostState.busy; clicked => { RecordState.action("cancel-import",0); } }
+            Action { label: "确认导入所选"; enabled: !HostState.busy && RecordState.chosen-count > 0; primary: true; clicked => { RecordState.action("confirm-import",0); } }
+        }
     }
     HorizontalLayout { height: 36px; spacing: 12px;
-        LineEdit { text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
-        ComboBox { width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
+        LineEdit { enabled: !RecordState.busy; text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
+        ComboBox { enabled: !RecordState.busy; width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
     }
     if HostState.history.length == 0: Label { text: "暂无符合条件的战绩"; height: 42px; color: Theme.muted; }
-    Disclosure { label: "本地选择记录 · 观察不等于领取"; detail: "按已确认账号与区服隔离。\n属性碎片、刷新及观察到的卡片都不证明实际领取。"; }
     for match[index] in HostState.history: Panel {
-        height: HostState.history-selected == index ? 300px : 132px;
-        SectionTitle { x: 21px; y: 17px; width: parent.width - 280px; height: 32px; text: match.title; }
-        Label { x: 21px; y: 51px; height: 25px; text: "海克斯大乱斗 · " + match.duration; color: Theme.muted; }
+        height: HostState.history-selected == index ? 374px + 165px + RecordState.observations.length * 90px + (RecordState.share-ready ? 623px : 0px) : 146px;
+        Rectangle { x: 21px; y: 18px; width: 48px; height: 48px; background: Theme.background; border-width: 1px; border-color: Theme.stroke;
+            Image { source: match.icon; image-fit: contain; }
+        }
+        SectionTitle { x: 82px; y: 17px; width: parent.width - 350px; height: 32px; text: match.title; }
+        Label { x: 82px; y: 51px; height: 25px; text: "海克斯大乱斗 · " + match.duration; color: Theme.muted; }
         Label { x: parent.width - 260px; y: 23px; width: 75px; height: 30px; text: match.result; color: match.won ? Theme.green : Theme.red; font-size: 18px; }
         Label { x: parent.width - 170px; y: 23px; width: 150px; height: 30px; text: match.kda; font-size: 20px; }
-        Action { x: 21px; y: 83px; width: 114px; height: 30px; label: HostState.history-selected == index ? "收起详情" : "查看详情"; clicked => { HostState.history-selected = HostState.history-selected == index ? -1 : index; } }
-        if HostState.history-selected == index: Label { x: 21px; y: 137px; width: parent.width - 42px; height: 143px; wrap: word-wrap; text: match.detail; color: Theme.muted; }
+        Label { x: 21px; y: 86px; height: 20px; text: match.date; color: Theme.muted; font-size: 11px; }
+        Action { x: parent.width - 135px; y: 100px; width: 114px; height: 30px; enabled: !RecordState.busy; label: HostState.history-selected == index ? "收起详情" : "查看详情"; clicked => { RecordState.action("select",index); } }
+        if RecordState.import-count > 0: Action { x: 21px; y: 110px; width: 110px; height: 28px; label: match.chosen ? "已选 · 点击取消" : "选择导入"; primary: match.chosen; enabled: !HostState.busy; clicked => { RecordState.action("choose",index); } }
+        if HostState.history-selected == index: Rectangle { y: 151px; height: 190px;
+            HorizontalLayout { x: 21px; y: 0px; height: 38px; width: 6 * 42px; spacing: 4px;
+                for icon in match.items: Image { source: icon; width: 38px; height: 38px; image-fit: contain; }
+            }
+            HorizontalLayout { x: parent.width - 205px; y: 0px; height: 38px; width: 184px; spacing: 4px;
+                for icon in match.augments: Image { source: icon; width: 38px; height: 38px; image-fit: contain; }
+            }
+            Label { x: 21px; y: 49px; width: parent.width - 42px; height: 88px; wrap: word-wrap; text: match.detail; color: Theme.muted; }
+            if RecordState.import-count == 0: HorizontalLayout { x: 21px; y: 149px; width: 370px; height: 34px; spacing: 12px;
+                Action { label: "生成匿名分享预览"; enabled: !HostState.busy && !HostState.running; clicked => { RecordState.action("share",index); } }
+                Action { label: "导入本场旧观察记录"; enabled: !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-journal",index); } }
+            }
+        }
+        if HostState.history-selected == index: RecordDetails {
+            x: 21px; y: 356px; width: parent.width - 42px;
+            height: 165px + RecordState.observations.length * 90px + (RecordState.share-ready ? 623px : 0px);
+        }
     }
     HorizontalLayout { height: 38px; spacing: 12px;
-        Action { label: "上一页"; enabled: HostState.history-page > 0; clicked => { HostState.history-turn(-1); } }
+        Action { label: "上一页"; enabled: !RecordState.busy && HostState.history-page > 0; clicked => { HostState.history-turn(-1); } }
         Label { text: "第 " + (HostState.history-page + 1) + " / " + HostState.history-pages + " 页"; horizontal-alignment: center; }
-        Action { label: "下一页"; enabled: HostState.history-page + 1 < HostState.history-pages; clicked => { HostState.history-turn(1); } }
+        Action { label: "下一页"; enabled: !RecordState.busy && HostState.history-page + 1 < HostState.history-pages; clicked => { HostState.history-turn(1); } }
     }
+    if RecordState.journal-preview: RecordDetails { }
 }

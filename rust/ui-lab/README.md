@@ -1,4 +1,4 @@
-> 最新接线进度见 [启动与维护页面](evidence/STARTUP_MAINTENANCE.md)，此前记录见 [HOST_INTERACTIONS.md](evidence/HOST_INTERACTIONS.md) 和 [LIVE_OVERLAYS.md](evidence/LIVE_OVERLAYS.md)。完整生产迁移仍未通过，不发布安装包。
+> 最新接线进度和剩余清单见 [战绩、观察记录与显式迁移](evidence/RECORD_ACTIONS.md)，此前记录见 [启动与维护页面](evidence/STARTUP_MAINTENANCE.md)、[HOST_INTERACTIONS.md](evidence/HOST_INTERACTIONS.md) 和 [LIVE_OVERLAYS.md](evidence/LIVE_OVERLAYS.md)。完整生产迁移仍未通过，不发布安装包。
 
 # FUZE UI 技术验证
 

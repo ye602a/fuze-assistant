@@ -14,7 +14,25 @@ export global MaintenanceState {
     in-out property <[string]> storage-rows;
     callback action(string);
 }
-export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool }
+export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool, source-index: int, date: string, icon: image, items: [image], augments: [image], chosen: bool }
+export struct ObservationRow { title: string, cards: string, hint: string }
+export global RecordState {
+    in-out property <bool> busy: false;
+    in-out property <string> notice;
+    in-out property <[ObservationRow]> observations;
+    in-out property <int> observation-page: 0;
+    in-out property <int> observation-pages: 1;
+    in-out property <string> observation-note: "观察记录不等于实际领取。";
+    in-out property <bool> share-ready: false;
+    in-out property <image> share-image;
+    in-out property <int> import-count: 0;
+    in-out property <int> chosen-count: 0;
+    in-out property <bool> journal-preview: false;
+    in-out property <string> confirmation;
+    in-out property <string> confirm-text;
+    callback refresh;
+    callback action(string, int);
+}
 export struct DetailRow { title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }
 export struct SlotRow { name: string, hint: string }

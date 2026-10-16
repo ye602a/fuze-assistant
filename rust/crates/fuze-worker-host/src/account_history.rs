@@ -373,6 +373,9 @@ pub fn preview(manual: Option<&Path>, source: &Path) -> Result<Import> {
     let bytes = crate::update_channel::bounded(source, 6 * 1024 * 1024)?;
     let value = serde_json::from_slice(&bytes).map_err(|_| "history-legacy-schema")?;
     let rows = fuze_lcu::history::legacy(&owner, &value)?;
+    if rows.is_empty() {
+        return Err("history-import-empty");
+    }
     if session.owner()? != owner {
         return Err("history-account-changed");
     }
@@ -398,8 +401,30 @@ pub fn preview_journal(manual: Option<&Path>, source: &Path, game: u64) -> Resul
     })
 }
 impl Import {
+    /// Select only reviewed rows from the same preview; never accept arbitrary match IDs.
+    pub fn select(mut self, games: &[u64]) -> Result<Self> {
+        if self.observation.is_some() {
+            return if games.is_empty() {
+                Ok(self)
+            } else {
+                Err("history-import-selection")
+            };
+        }
+        let selected: std::collections::HashSet<_> = games.iter().copied().collect();
+        if selected.is_empty()
+            || selected.len() != games.len()
+            || selected
+                .iter()
+                .any(|id| !self.rows.iter().any(|r| r.game_id == *id))
+        {
+            return Err("history-import-selection");
+        }
+        self.rows.retain(|r| selected.contains(&r.game_id));
+        Ok(self)
+    }
     pub fn view(&self) -> View {
         View {
+            rows: self.rows.clone().into(),
             account: key(&self.owner)
                 .map(|k| k[..8].to_owned())
                 .unwrap_or_default(),
@@ -484,6 +509,22 @@ fn save_observation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selective_preview_never_adds_unreviewed_matches_or_claims() {
+        let make = || Import {
+            owner: owner("fixture-account", "HN1"),
+            rows: vec![row(1), row(2)],
+            observation: None,
+        };
+        assert_eq!(make().view().rows.len(), 2);
+        assert!(make().select(&[]).is_err());
+        assert!(make().select(&[1, 1]).is_err());
+        assert!(make().select(&[3]).is_err());
+        let chosen = make().select(&[2]).unwrap().view();
+        assert_eq!(chosen.pending, 1);
+        assert_eq!(chosen.rows[0].game_id, 2);
+        assert!(chosen.observations.is_empty());
+    }
     #[test]
     fn new_cache_keeps_legacy_bytes_and_rejects_corrupt_new_schema() {
         let root = std::env::temp_dir().join(format!("fuze-history-v2-{}", std::process::id()));

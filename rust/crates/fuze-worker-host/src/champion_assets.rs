@@ -270,7 +270,7 @@ pub(crate) fn icon_path(url: &str) -> Result<&str> {
     }
     Ok(p)
 }
-pub(crate) fn decode(bytes: &[u8]) -> Result<Picture> {
+pub fn decode(bytes: &[u8]) -> Result<Picture> {
     let mut reader =
         image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
     let mut limits = image::Limits::default();
@@ -294,7 +294,8 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Picture> {
     }
     Ok(Picture { bgra })
 }
-fn picture(
+/// Bounded public image cache access for native frontends. Call only on a worker thread.
+pub fn picture(
     url: &str,
     key: &str,
     cache: Option<&PathBuf>,

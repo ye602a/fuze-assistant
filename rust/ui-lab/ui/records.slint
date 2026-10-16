@@ -1,0 +1,53 @@
+import { HostState, RecordState } from "host-state.slint";
+import { Theme, Label, Action, Panel, SectionTitle } from "components.slint";
+export component RecordDetails inherits VerticalLayout {
+    spacing: 18px;
+    if HostState.history-selected >= 0 || RecordState.journal-preview: Panel {
+        height: 165px + RecordState.observations.length * 90px;
+        SectionTitle { x: 21px; y: 16px; height: 25px; text: "本场候选观察 · 不等于实际领取"; }
+        Label { x: 21px; y: 52px; width: parent.width - 42px; height: 45px; text: RecordState.observation-note; wrap: word-wrap; color: Theme.muted; }
+        VerticalLayout { x: 21px; y: 104px; width: parent.width - 42px; height: RecordState.observations.length * 90px;
+            for row in RecordState.observations: Rectangle { height: 90px;
+                Label { x: 0px; y: 0px; height: 24px; text: row.title; color: Theme.gold; }
+                Label { y: 26px; height: 32px; width: parent.width; wrap: word-wrap; text: row.cards; }
+                Label { y: 61px; height: 22px; text: row.hint; color: Theme.muted; font-size: 11px; }
+            }
+        }
+        HorizontalLayout { x: 21px; y: parent.height - 48px; width: 340px; height: 32px; spacing: 12px;
+            Action { label: "上一组"; enabled: RecordState.observation-page > 0; clicked => { RecordState.action("observation-page",-1); } }
+            Label { text: (RecordState.observation-page + 1) + " / " + RecordState.observation-pages; horizontal-alignment: center; }
+            Action { label: "下一组"; enabled: RecordState.observation-page + 1 < RecordState.observation-pages; clicked => { RecordState.action("observation-page",1); } }
+        }
+    }
+    if RecordState.share-ready: Panel { height: 605px;
+        SectionTitle { x: 21px; y: 16px; height: 25px; text: "匿名分享预览"; }
+        Image { x: 21px; y: 52px; width: parent.width - 42px; height: 450px; source: RecordState.share-image; image-fit: contain; }
+        Label { x: 21px; y: 510px; width: parent.width - 42px; height: 35px; wrap: word-wrap; text: "图片不含账号、区服、对局编号和时间。JSON 另含匿名候选观察；不会自动上传。"; color: Theme.muted; font-size: 11px; }
+        HorizontalLayout { x: 21px; y: 554px; width: 310px; height: 34px; spacing: 12px;
+            Action { label: "保存图片 / JSON"; enabled: !HostState.busy && !HostState.offline; clicked => { RecordState.action("save",0); } }
+            Action { label: "复制图片"; enabled: !HostState.busy && !HostState.offline; clicked => { RecordState.action("copy",0); } }
+        }
+    }
+}
+export component RecordConfirm inherits Rectangle {
+    in property <bool> opened: RecordState.confirmation != "";
+    out property <bool> cancel-focused: cancel.focused;
+    visible: root.opened; background: #000000b8;
+    changed opened => { if root.opened { cancel.focus(); } }
+    TouchArea { clicked => { RecordState.action("cancel-confirm",0); } }
+    FocusScope { enabled: root.opened;
+        key-pressed(event) => {
+            if event.text == Key.Escape { RecordState.action("cancel-confirm",0); return accept; }
+            if event.text == Key.Tab || event.text == Key.Backtab { if cancel.focused { confirm.focus(); } else { cancel.focus(); } return accept; } return reject;
+        }
+        Panel { x: (root.width - 440px)/2; y: (root.height - 260px)/2; width: 440px; height: 260px;
+            TouchArea { }
+            SectionTitle { x: 24px; y: 20px; height: 26px; text: RecordState.confirmation == "settings" ? "确认导入旧设置" : "确认导入所选记录"; }
+            Label { x: 24px; y: 64px; width: 392px; height: 115px; wrap: word-wrap; text: RecordState.confirm-text; color: Theme.muted; }
+            HorizontalLayout { x: 216px; y: 202px; width: 200px; height: 38px; spacing: 10px;
+                cancel := Action { label: "取消"; enabled: root.opened; clicked => { RecordState.action("cancel-confirm",0); } }
+                confirm := Action { label: "确认导入"; primary: true; enabled: root.opened; clicked => { RecordState.action("confirm",0); } }
+            }
+        }
+    }
+}

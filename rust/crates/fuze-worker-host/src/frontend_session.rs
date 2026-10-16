@@ -24,6 +24,7 @@ impl Session {
             pending: Mutex::new(None),
             import_path: Mutex::new(None),
             import_game: Mutex::new(None),
+            import_selection: Mutex::new(None),
             export: Mutex::new(None),
         });
         let owned = shared.clone();
@@ -84,6 +85,66 @@ impl Session {
     }
     pub fn update_data(&self) -> Result<()> {
         self.request_idle(DATA)
+    }
+    pub fn preview_history(&self, path: std::path::PathBuf, game: Option<u64>) -> Result<()> {
+        self.history_request(
+            if game.is_some() {
+                JOURNAL_PREVIEW
+            } else {
+                HISTORY_PREVIEW
+            },
+            Some(path),
+            game,
+            None,
+        )
+    }
+    pub fn confirm_history(&self, games: Vec<u64>) -> Result<()> {
+        if self.snapshot().history.pending == 0 {
+            return Err("history-import-missing");
+        }
+        self.history_request(HISTORY_CONFIRM, None, None, Some(games))
+    }
+    pub fn cancel_history(&self) -> Result<()> {
+        if self.snapshot().history.pending == 0 {
+            return Err("history-import-missing");
+        }
+        self.request_idle(HISTORY_CANCEL)
+    }
+    fn history_request(
+        &self,
+        mode: u8,
+        path: Option<std::path::PathBuf>,
+        game: Option<u64>,
+        selection: Option<Vec<u64>>,
+    ) -> Result<()> {
+        let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
+        if self.busy() {
+            return Err("frontend-busy");
+        }
+        if self.shared.desired.load(Ordering::Acquire) != PAUSED || self.snapshot().mode != PAUSED {
+            return Err("frontend-pause-required");
+        }
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        *self
+            .shared
+            .import_path
+            .lock()
+            .map_err(|_| "frontend-lock")? = path;
+        *self
+            .shared
+            .import_game
+            .lock()
+            .map_err(|_| "frontend-lock")? = game;
+        *self
+            .shared
+            .import_selection
+            .lock()
+            .map_err(|_| "frontend-lock")? = selection;
+        self.shared.desired.store(mode, Ordering::Release);
+        self.shared.wake.notify_one();
+        Ok(())
     }
     pub fn begin_maintenance(&self) -> Result<()> {
         let status = self.snapshot();
