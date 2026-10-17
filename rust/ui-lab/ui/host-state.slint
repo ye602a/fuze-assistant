@@ -1,5 +1,7 @@
 export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
 export global ClaimState {
+    in-out property <[string]> details;
+    in-out property <bool> details-open: false;
     in-out property <int> scenario: 0;
     in-out property <bool> busy: false;
     in-out property <bool> can-mark: false;
@@ -7,6 +9,13 @@ export global ClaimState {
     in-out property <string> summary: "尚未检查；这项检查不会确认领取轮次。";
     in-out property <string> notice;
     in-out property <string> comparison;
+    callback action(string);
+}
+export global DiagnosticState {
+    in-out property <bool> open: false;
+    in-out property <bool> busy: false;
+    in-out property <[string]> rows;
+    in-out property <string> summary: "本次启动尚未收到状态；仅存内存，退出后清空。";
     callback action(string);
 }
 export global MaintenanceState {

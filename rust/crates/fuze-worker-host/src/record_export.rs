@@ -124,6 +124,41 @@ pub fn save(request: Request) -> Result<()> {
     }
     Ok(())
 }
+/// A JSON-only save dialog, owned by the requesting FUZE window.
+pub unsafe fn choose_feedback(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+) -> Result<Option<PathBuf>> {
+    use windows_sys::Win32::UI::Controls::Dialogs::*;
+    let mut file = [0u16; 32768];
+    for (target, value) in file.iter_mut().zip("Fuze-feedback.json".encode_utf16()) {
+        *target = value;
+    }
+    let filter: Vec<u16> = "脱敏反馈 JSON\0*.json\0\0".encode_utf16().collect();
+    let extension: Vec<u16> = "json\0".encode_utf16().collect();
+    let title: Vec<u16> = "导出脱敏反馈（不覆盖已有文件）\0".encode_utf16().collect();
+    let mut dialog: OPENFILENAMEW = std::mem::zeroed();
+    dialog.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    dialog.hwndOwner = hwnd;
+    dialog.lpstrFilter = filter.as_ptr();
+    dialog.lpstrDefExt = extension.as_ptr();
+    dialog.lpstrTitle = title.as_ptr();
+    dialog.lpstrFile = file.as_mut_ptr();
+    dialog.nMaxFile = file.len() as u32;
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
+    if GetSaveFileNameW(&mut dialog) == 0 {
+        return if CommDlgExtendedError() == 0 {
+            Ok(None)
+        } else {
+            Err("export-dialog")
+        };
+    }
+    let n = file.iter().position(|c| *c == 0).ok_or("export-path")?;
+    let path = PathBuf::from(String::from_utf16_lossy(&file[..n]));
+    if path.extension().and_then(|s| s.to_str()) != Some("json") {
+        return Err("export-path");
+    }
+    Ok(Some(path))
+}
 pub unsafe fn choose(hwnd: windows_sys::Win32::Foundation::HWND) -> Option<PathBuf> {
     use windows_sys::Win32::UI::Controls::Dialogs::*;
     let mut file = [0u16; 32768];

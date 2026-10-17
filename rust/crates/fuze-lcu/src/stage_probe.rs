@@ -165,6 +165,40 @@ pub fn compare(a: &Report, b: &Report, now: u64) -> Comparison {
     }
     c
 }
+/// Export only known field shapes, never raw values, account data, context IDs or timestamps.
+pub fn feedback(report: &Report, baseline: Option<&Report>, scenario: u8) -> Value {
+    let endpoint = |value: &str| match value {
+        "ok" => "ok",
+        "too-large" => "too-large",
+        "invalid-json" => "invalid-json",
+        "http-error" => "http-error",
+        _ => "unavailable",
+    };
+    let shapes =
+        FIELDS
+            .iter()
+            .filter_map(|name| {
+                report.player_fields.iter().find(|s| &s.field == name).map(|s| {
+            let kind = match s.kind {
+                "null" | "boolean" | "number" | "string" | "array" | "object" => s.kind,
+                _ => "unknown",
+            };
+            serde_json::json!({"field":name,"kind":kind,"count":s.count.map(|n|n.min(32)),
+                "smallInteger":s.small_integer.filter(|n|*n<=4)})
+        })
+            })
+            .collect::<Vec<_>>();
+    let comparison = baseline.map(|b| compare(b, report, report.checked_at));
+    serde_json::json!({
+        "scenario": scenario.min(5), "actualClaimRound":null,"automaticEligible":false,
+        "endpoints": report.endpoints.map(endpoint),
+        "schemaFields":FIELDS.iter().filter(|f|report.schema_fields.contains(f)).collect::<Vec<_>>(),
+        "playerFields": shapes,"level":report.level.filter(|n|(1..=30).contains(n)),
+        "augmentEventCount":report.augment_event_count.min(2048),"truncated":report.truncated,
+        "stable": report.stable,"comparison":comparison,
+        "baseline":baseline.map(|b|feedback(b,None,scenario))
+    })
+}
 #[cfg(windows)]
 pub fn inspect(context: impl Fn() -> (u64, bool)) -> Report {
     let before = context();
@@ -198,6 +232,44 @@ pub fn inspect(context: impl Fn() -> (u64, bool)) -> Report {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn feedback_keeps_whitelisted_shapes_and_both_sides_without_identity() {
+        let mut before = summarize(
+            [
+                Ok(json!({})),
+                Ok(json!({"augments":["private-id"],"augmentStage":1})),
+                Ok(json!({})),
+            ],
+            991122334455,
+        );
+        before.stable = true;
+        before.revision = 99112233;
+        let mut after = before.clone();
+        after.actual_stage = Some(3);
+        after.player_fields[0].count = Some(2);
+        after.player_fields.push(Shape {
+            field: "private-name",
+            kind: "private-kind",
+            count: None,
+            small_integer: None,
+        });
+        let v = feedback(&after, Some(&before), 2);
+        assert_eq!(v["playerFields"][0]["count"], 2);
+        assert_eq!(v["baseline"]["playerFields"][0]["count"], 1);
+        assert_eq!(v["comparison"]["changed_fields"], json!(["augments"]));
+        assert_eq!(v["automaticEligible"], false);
+        assert!(v["actualClaimRound"].is_null());
+        let text = v.to_string();
+        for forbidden in [
+            "private",
+            "99112233",
+            "actual_stage",
+            "revision",
+            "checked_at",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+    }
     #[test]
     fn sanitizes_values_and_comparison_never_authorizes_stage() {
         let mut a = summarize(

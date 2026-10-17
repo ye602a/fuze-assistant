@@ -264,6 +264,9 @@ fn bind(ui: &Workbench, events: &Events) {
     ui.global::<ClaimState>()
         .on_action(move |v| e.borrow_mut().push(format!("claim:{v}")));
     let e = events.clone();
+    ui.global::<crate::DiagnosticState>()
+        .on_action(move |v| e.borrow_mut().push(format!("diagnostic:{v}")));
+    let e = events.clone();
     ui.global::<RecordState>()
         .on_action(move |v, i| e.borrow_mut().push(format!("record:{v}:{i}")));
     let e = events.clone();
@@ -453,6 +456,21 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     c.set_can_mark(true);
     a.click(ui, "标记操作前", Some("claim:mark"));
     a.click(ui, "清除对比", Some("claim:clear"));
+    a.click(ui, "查看字段详情", None);
+    a.check(
+        "字段详情展开",
+        c.get_details_open(),
+        "local detail disclosure",
+    );
+    a.click(ui, "收起字段详情", None);
+    a.click(ui, "查看最近状态", None);
+    a.check(
+        "最近状态展开",
+        ui.global::<crate::DiagnosticState>().get_open(),
+        "local diagnostic disclosure",
+    );
+    a.click(ui, "收起最近状态", None);
+    a.click(ui, "导出脱敏反馈", Some("diagnostic:export"));
     c.set_cooldown(30);
     a.disabled(ui, "稍候 30 秒");
     c.set_cooldown(0);
@@ -470,6 +488,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         m.set_confirmation("".into());
     }
     s.set_running(true);
+    a.disabled(ui, "导出脱敏反馈");
     a.disabled(ui, "检查新版");
     a.disabled(ui, "扫描本地占用");
     a.disabled(ui, "更新推荐数据与字典");

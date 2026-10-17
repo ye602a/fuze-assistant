@@ -280,6 +280,8 @@ pub fn attach_recovered(
     let unbound = crate::unbound_bridge::attach(ui, config.roots.clone());
     let session = Rc::new(Session::start_with_recovery(config, offline, start_paused)?);
     let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
+    let feedback =
+        crate::feedback_bridge::attach(ui, session.clone(), diagnostics.clone(), offline);
     let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();
     state.set_connected(true);
@@ -449,6 +451,7 @@ pub fn attach_recovered(
             let next = service.snapshot();
             unbound.borrow_mut().update(&ui, &next, offline);
             diagnostics.borrow_mut().poll(&ui);
+            feedback.borrow_mut().poll(&ui, &next, offline);
             if let Err(error) = popup.borrow_mut().placement() { notice(&ui, Err(error)); }
             let state = ui.global::<HostState>();
             let action = state.get_pending_action();

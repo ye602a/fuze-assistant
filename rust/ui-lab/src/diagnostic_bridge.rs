@@ -2,7 +2,7 @@
 use crate::{ClaimState, Workbench};
 use fuze_lcu::stage_probe::{compare, Report};
 use fuze_worker_host::desktop::frontend::Session;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -17,6 +17,8 @@ pub struct Binding {
     pending: Option<(u64, Receiver<Report>)>,
     generation: u64,
     last: Option<Instant>,
+    // Retain only a sanitized snapshot for explicit export after pausing.
+    last_feedback: Option<(u64, serde_json::Value)>,
 }
 pub fn summary(report: &Report) -> String {
     let status = |s: &str| match s {
@@ -32,7 +34,56 @@ pub fn summary(report: &Report) -> String {
         if report.truncated { "（已限制读取范围）" } else { "" },
         if report.stable { "检查期间对局上下文未变化" } else { "对局上下文未确认或已经变化，不可用于前后对比" })
 }
+pub fn details(report: &Report) -> Vec<String> {
+    let value = fuze_lcu::stage_probe::feedback(report, None, 0);
+    let mut rows = vec![format!(
+        "结构声明字段：{}",
+        value["schemaFields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join("、")
+    )];
+    for field in value["playerFields"].as_array().unwrap() {
+        let kind = match field["kind"].as_str().unwrap_or("") {
+            "null" => "空值",
+            "boolean" => "布尔",
+            "number" => "数值",
+            "string" => "文本",
+            "array" => "数组",
+            "object" => "对象",
+            _ => "未知类型",
+        };
+        let suffix = if let Some(n) = field["count"].as_u64() {
+            format!(" · 数量 {n}（最多 32）")
+        } else if let Some(n) = field["smallInteger"].as_u64() {
+            format!(" · 小整数 {n}（不是确认轮次）")
+        } else {
+            String::new()
+        };
+        rows.push(format!(
+            "{}：{kind}{suffix}",
+            field["field"].as_str().unwrap_or("")
+        ));
+    }
+    if rows.len() == 1 {
+        rows.push("当前响应没有已知玩家强化字段；缺失字段不代表未领取。".into());
+    }
+    rows
+}
 impl Binding {
+    pub fn feedback(&self) -> serde_json::Value {
+        let context = self.session.diagnostic_context();
+        match &self.last_feedback {
+            Some((revision, value)) => serde_json::json!({
+                "snapshot":value,"contextCurrent":context.1 && context.0==*revision,
+                "note":"sanitized-snapshot-at-manual-check-not-current-claim"
+            }),
+            None => serde_json::json!({"status":"not-checked","actualClaimRound":null}),
+        }
+    }
     pub fn poll(&mut self, ui: &Workbench) {
         let state = ui.global::<ClaimState>();
         let remaining = self
@@ -62,11 +113,20 @@ impl Binding {
                 if let Some(mut report) = report {
                     let context = self.session.diagnostic_context();
                     report.stable &= context.1 && context.0 == report.revision;
+                    let snapshot = fuze_lcu::stage_probe::feedback(
+                        &report,
+                        self.baseline.as_ref(),
+                        state.get_scenario().clamp(0, 5) as u8,
+                    );
+                    let mut field_details = details(&report);
                     if let Some(before) = &self.baseline {
                         let result = compare(before, &report, report.checked_at);
+                        for field in &result.changed_fields {
+                            field_details.push(format!("前后变化字段：{field}（不代表领取）"));
+                        }
                         state.set_comparison(if result.status == "comparable" {
                             format!(
-                                "前后对比：{} 项字段变化，相关事件变化 {} 条。线索不代表领取。",
+                                "前后对比：{} 项字段变化，相关事件变化 {} 条。字段名见详情；线索不代表领取。",
                                 result.changed_fields.len(),
                                 result
                                     .event_delta
@@ -82,7 +142,16 @@ impl Binding {
                         }
                     }
                     state.set_summary(summary(&report).into());
-                    state.set_notice("检查完成；仅在本次会话显示，不自动保存或上传。".into());
+                    state.set_details(ModelRc::new(VecModel::from(
+                        field_details
+                            .into_iter()
+                            .map(Into::into)
+                            .collect::<Vec<_>>(),
+                    )));
+                    self.last_feedback = Some((report.revision, snapshot));
+                    state.set_notice(
+                        "检查完成；可查看字段详情，暂停后可导出脱敏反馈。不自动保存或上传。".into(),
+                    );
                     state.set_can_mark(report.stable);
                     self.report = Some(report);
                 } else {
@@ -96,7 +165,7 @@ impl Binding {
             !c.1 || c.0 != r.revision
         }) {
             self.clear(ui);
-            state.set_notice("对局上下文已变化，旧检查与基线已清除。".into());
+            state.set_notice("对局上下文已变化，当前检查与基线已清除；脱敏快照仅供手动导出，不再作为当前对局依据。".into());
         }
     }
     fn clear(&mut self, ui: &Workbench) {
@@ -107,6 +176,7 @@ impl Binding {
         state.set_summary("尚未检查；这项检查不会确认领取轮次。".into());
         state.set_comparison("".into());
         state.set_can_mark(false);
+        state.set_details(Default::default());
     }
 }
 pub fn attach(ui: &Workbench, session: Rc<Session>) -> Rc<RefCell<Binding>> {
@@ -117,6 +187,7 @@ pub fn attach(ui: &Workbench, session: Rc<Session>) -> Rc<RefCell<Binding>> {
         pending: None,
         generation: 0,
         last: None,
+        last_feedback: None,
     }));
     let handle = binding.clone();
     let weak = ui.as_weak();
@@ -129,6 +200,7 @@ pub fn attach(ui: &Workbench, session: Rc<Session>) -> Rc<RefCell<Binding>> {
         match action.as_str() {
             "clear" => {
                 b.clear(&ui);
+                b.last_feedback = None;
                 state.set_notice("已清除当前检查和基线。".into());
             }
             "mark" => {
@@ -141,6 +213,10 @@ pub fn attach(ui: &Workbench, session: Rc<Session>) -> Rc<RefCell<Binding>> {
                     b.baseline = Some(report.clone());
                     state.set_comparison(
                         "已标记操作前基线。自行完成游戏操作后，再点检查一次。".into(),
+                    );
+                } else {
+                    state.set_notice(
+                        "当前没有同一对局的有效检查，请先检查一次；未建立基线。".into(),
                     );
                 }
             }

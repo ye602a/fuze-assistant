@@ -10,6 +10,7 @@ pub struct Review {
     ui: Workbench,
     binding: Rc<RefCell<crate::unbound_bridge::Binding>>,
     _diagnostic: Rc<RefCell<crate::diagnostic_bridge::Binding>>,
+    feedback: Rc<RefCell<crate::feedback_bridge::Binding>>,
     status: Status,
     started: bool,
 }
@@ -22,7 +23,8 @@ impl Review {
         ui.global::<HostState>().set_offline(true);
         let binding =
             crate::unbound_bridge::attach(&ui, crate::host_bridge::offline_config(data).roots);
-        let diagnostic = crate::diagnostic_bridge::attach(&ui, session);
+        let diagnostic = crate::diagnostic_bridge::attach(&ui, session.clone());
+        let feedback = crate::feedback_bridge::attach(&ui, session, diagnostic.clone(), true);
         let mut status = Status::default();
         status.available = Some("zh-CN@16.20.1".into());
         status.unbound_records = UnboundSnapshot(Arc::new(vec![
@@ -60,6 +62,7 @@ impl Review {
             ui,
             binding,
             _diagnostic: diagnostic,
+            feedback,
             status,
             started: false,
         })
@@ -164,11 +167,56 @@ impl Review {
             return Err("probe-privacy".into());
         }
         claim.set_summary(summary.into());
+        claim.set_details(slint::ModelRc::new(slint::VecModel::from(
+            crate::diagnostic_bridge::details(&report)
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
+        )));
+        let mut recorder = crate::feedback::Recorder::default();
+        recorder.observe(&self.status, true);
+        let bytes = recorder.encode(fuze_lcu::stage_probe::feedback(&report, None, 0))?;
+        if String::from_utf8_lossy(&bytes).contains("private-fixture") {
+            return Err("feedback-privacy".into());
+        }
+        let path = std::path::absolute(output)?.join("safe-feedback.json");
+        fuze_worker_host::record_export::save(fuze_worker_host::record_export::Request {
+            path: path.clone(),
+            bytes: bytes.clone(),
+        })?;
+        if fuze_worker_host::record_export::save(fuze_worker_host::record_export::Request {
+            path: path.clone(),
+            bytes: vec![],
+        })
+        .is_ok()
+            || std::fs::read(path)? != bytes
+        {
+            return Err("feedback-overwrite".into());
+        }
+        self.feedback.borrow_mut().poll(ui, &self.status, true);
+        ui.global::<crate::DiagnosticState>()
+            .invoke_action("export".into());
+        if !ui.global::<HostState>().get_notice().contains("隔离验证") {
+            return Err("feedback-offline-boundary".into());
+        }
+        ui.global::<HostState>().set_notice("".into());
+        ui.set_feedback("".into());
         ui.set_page(2);
-        ui.set_scroll_y(-1200.);
+        #[cfg(feature = "ui-audit")]
+        crate::control_review::hit(ui, "查看最近状态")?;
+        #[cfg(not(feature = "ui-audit"))]
+        ui.global::<crate::DiagnosticState>().set_open(true);
+        save(ui, &output.join("closure-feedback.png"))?;
+        #[cfg(feature = "ui-audit")]
+        crate::control_review::hit(ui, "查看字段详情")?;
+        #[cfg(not(feature = "ui-audit"))]
+        claim.set_details_open(true);
         save(ui, &output.join("closure-diagnostics.png"))?;
         claim.invoke_action("clear".into());
-        if claim.get_can_mark() || !claim.get_comparison().is_empty() {
+        if claim.get_can_mark()
+            || !claim.get_comparison().is_empty()
+            || claim.get_details().row_count() != 0
+        {
             return Err("probe-clear".into());
         }
         std::fs::write(
@@ -176,7 +224,7 @@ impl Review {
             serde_json::to_vec_pretty(&serde_json::json!({
                 "synthetic_only":true,"unbound_names_and_partial_slots":true,"unbound_80_events_paged":true,
                 "legacy_metadata_not_invented":true,"stale_detail_cleared":true,"names_cleared_on_unknown_or_changed_identity":true,"probe_offline_rejected":true,
-                "probe_summary_sanitized":true,"native_visible_interaction_verified":false,"production_parity_complete":false
+                "probe_summary_sanitized":true,"feedback_export_sanitized_no_overwrite":true,"feedback_offline_dialog_rejected":true,"native_visible_interaction_verified":false,"production_parity_complete":false
             }))?,
         )?;
         Ok(true)

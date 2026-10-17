@@ -1,6 +1,6 @@
 import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
-import { HostState, ShellState, RecordState, ClaimState } from "host-state.slint";
+import { HostState, ShellState, RecordState, ClaimState, DiagnosticState } from "host-state.slint";
 import { RecordDetails } from "records.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
@@ -38,7 +38,7 @@ export component SettingsPage inherits VerticalLayout {
             }
             Rectangle { height: 62px;
                 Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "界面语言"; }
-                Label { x: parent.width - 235px; y: 13px; width: 235px; height: 42px; text: "简体中文\n其他界面语言仍在迁移中"; wrap: word-wrap; font-size: 11px; color: Theme.muted; }
+                Label { x: parent.width - 235px; y: 13px; width: 235px; height: 42px; text: "简体中文"; wrap: word-wrap; font-size: 11px; color: Theme.muted; }
                 // Keep the saved data locale; do not offer a language transaction we cannot complete.
             }
         }
@@ -64,7 +64,19 @@ export component SettingsPage inherits VerticalLayout {
             Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
         }
     }
-    Panel { height: 530px;
+    Panel { height: 222px + (DiagnosticState.open ? DiagnosticState.rows.length * 60px : 0px);
+        SectionTitle { x: 21px; y: 18px; height: 28px; text: "运行状态与反馈"; }
+        Label { x: 21px; y: 58px; width: parent.width - 42px; height: 40px; text: DiagnosticState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        HorizontalLayout { x: 21px; y: 108px; width: parent.width - 42px; height: 36px; spacing: 12px;
+            Action { label: DiagnosticState.open ? "收起最近状态" : "查看最近状态"; clicked => { DiagnosticState.open = !DiagnosticState.open; } }
+            Action { label: DiagnosticState.busy ? "正在导出…" : "导出脱敏反馈"; enabled: HostState.connected && !HostState.running && !HostState.busy && !DiagnosticState.busy; clicked => { DiagnosticState.action("export"); } }
+        }
+        Label { x: 21px; y: 156px; width: parent.width - 42px; height: 54px; text: "请在退出前暂停识别并导出。只包含状态、耗时及手动检查的字段结构，不含账号、路径或认证信息，不自动上传。下方显示最近 8 条，导出包含全部保留记录。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        if DiagnosticState.open: VerticalLayout { x: 21px; y: 214px; width: parent.width - 42px; height: DiagnosticState.rows.length * 60px;
+            for row in DiagnosticState.rows: Label { height: 60px; text: row; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
+        }
+    }
+    Panel { height: 580px + (ClaimState.details-open ? max(1, ClaimState.details.length) * 38px : 0px);
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "领取轮次验证"; }
         Label { x: 21px; y: 58px; width: parent.width - 42px; height: 44px; text: "实际领取轮次尚未确认，继续使用整体胜率。\n刷新、属性碎片和锻造器额外选择不计为正式轮次。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 123px; width: parent.width - 42px; height: 38px; spacing: 10px;
@@ -83,6 +95,11 @@ export component SettingsPage inherits VerticalLayout {
         Label { x: 21px; y: 319px; width: parent.width - 42px; height: 80px; text: ClaimState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
         Label { x: 21px; y: 407px; width: parent.width - 42px; height: 43px; text: ClaimState.comparison; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
         Label { x: 21px; y: 457px; width: parent.width - 42px; height: 55px; text: ClaimState.notice == "" ? "仅手动检查本地接口的字段类型和计数，不保存账号信息、不上传。不会代替玩家操作游戏。" : ClaimState.notice; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        Action { x: 21px; y: 525px; width: parent.width - 42px; height: 34px; label: ClaimState.details-open ? "收起字段详情" : "查看字段详情"; clicked => { ClaimState.details-open = !ClaimState.details-open; } }
+        if ClaimState.details-open: VerticalLayout { x: 21px; y: 575px; width: parent.width - 42px; height: max(1, ClaimState.details.length) * 38px;
+            if ClaimState.details.length == 0: Label { text: "尚无有效检查；字段详情不会推断领取轮次。"; color: Theme.muted; wrap: word-wrap; }
+            for detail in ClaimState.details: Label { height: 38px; text: detail; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        }
     }
 }
 

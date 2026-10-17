@@ -8,6 +8,8 @@ mod control_review;
 mod desktop_runner;
 mod diagnostic_bridge;
 mod direct;
+mod feedback;
+mod feedback_bridge;
 mod font_probe;
 mod game_windows;
 mod host_bridge;
