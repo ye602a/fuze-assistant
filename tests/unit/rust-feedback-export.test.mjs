@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {mkdtempSync, writeFileSync, readFileSync, rmSync} from 'node:fs'
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
 import {spawnSync} from 'node:child_process'
@@ -16,10 +16,18 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     const segment={binding:{key:secret,platform:secret,game:987654321},champion:1234,recognition:{analyses:4,partial:1,total_ms:1200,ocr_ms:800,token:secret},interrupted:false,capped:false,events:[{observed_at:123456789,cards:[1111,null,2222],level:6,partial:true,kind:'first',raw:secret},{cards:[null,null,null],level:secret,kind:secret}]}
     const input=JSON.stringify({token:secret,segments:Array.from({length:7},()=>segment)})
     writeFileSync(source,input)
+    const logs=path.join(dir,'logs');mkdirSync(logs)
+    const row={schema:1,event:'state',elapsed_ms:100,dropped:0,state:{connection:'discovery',phase:'unknown',capture:'waiting',ocr:'waiting',issue:'none',failure:'none',stream:'waiting',gate:'fallback',analyses:0,skipped:4,analysis_ms:null,level:null,interval_ms:1000,readable_slots:null,overlay_prepared:false}}
+    writeFileSync(path.join(logs,'runtime-v1.1.jsonl'),JSON.stringify({...row,event:'start'})+'\n')
+    writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,token:secret})+'\n'+JSON.stringify({...row,state:{...row.state,connection:secret}})+'\n{"partial":')
     let result=run()
     assert.equal(result.status,0,result.stdout)
     const raw=readFileSync(destination,'utf8'), report=JSON.parse(raw)
     assert.equal(report.segments.length,5)
+    assert.equal(report.persistentLog.status,'partial')
+    assert.equal(report.persistentLog.records.length,2)
+    assert.equal(report.persistentLog.skippedLines,2)
+    assert.equal(report.persistentLog.records[1].state.connection,'discovery')
     assert.equal(report.segments[0].meanCompletedAnalysisMs,300)
     assert.equal(report.segments[0].meanCompletedOcrMs,200)
     assert.deepEqual(report.segments[0].events[0],{kind:'first',level:6,readableSlots:[true,false,true]})
@@ -31,7 +39,9 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     assert.equal(readFileSync(destination,'utf8'),raw)
     writeFileSync(source,secret)
     result=run(path.join(dir,'invalid.json'))
-    assert.equal(result.status,1)
+    assert.equal(result.status,0)
+    assert.equal(JSON.parse(readFileSync(path.join(dir,'invalid.json'))).observationStatus,'invalid-observations')
+    assert.equal(JSON.parse(readFileSync(path.join(dir,'invalid.json'))).persistentLog.records.length,2)
     assert.ok(!(result.stdout+result.stderr).includes(secret))
     writeFileSync(source,JSON.stringify({segments:[]}))
     assert.equal(run(path.join(dir,'empty.json')).status,0)
@@ -39,6 +49,9 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     rmSync(source)
     assert.equal(run(path.join(dir,'missing.json')).status,0)
     assert.equal(JSON.parse(readFileSync(path.join(dir,'missing.json'))).observationStatus,'missing-observations')
+    writeFileSync(path.join(logs,'runtime-v1.2.jsonl'),'x'.repeat(262145))
+    assert.equal(run(path.join(dir,'bounded.json')).status,0)
+    assert.equal(JSON.parse(readFileSync(path.join(dir,'bounded.json'))).persistentLog.unavailableFiles,1)
   }finally{
     assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
     assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))

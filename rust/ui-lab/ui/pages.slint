@@ -64,15 +64,20 @@ export component SettingsPage inherits VerticalLayout {
             Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
         }
     }
-    Panel { height: 222px + (DiagnosticState.open ? DiagnosticState.rows.length * 60px : 0px);
+    Panel { height: 326px + (DiagnosticState.open ? DiagnosticState.rows.length * 60px : 0px);
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "运行状态与反馈"; }
         Label { x: 21px; y: 58px; width: parent.width - 42px; height: 40px; text: DiagnosticState.summary; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
         HorizontalLayout { x: 21px; y: 108px; width: parent.width - 42px; height: 36px; spacing: 12px;
             Action { label: DiagnosticState.open ? "收起最近状态" : "查看最近状态"; clicked => { DiagnosticState.open = !DiagnosticState.open; } }
             Action { label: DiagnosticState.busy ? "正在导出…" : "导出脱敏反馈"; enabled: HostState.connected && !HostState.running && !HostState.busy && !DiagnosticState.busy; clicked => { DiagnosticState.action("export"); } }
         }
-        Label { x: 21px; y: 156px; width: parent.width - 42px; height: 54px; text: "请在退出前暂停识别并导出。只包含状态、耗时及手动检查的字段结构，不含账号、路径或认证信息，不自动上传。下方显示最近 8 条，导出包含全部保留记录。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
-        if DiagnosticState.open: VerticalLayout { x: 21px; y: 214px; width: parent.width - 42px; height: DiagnosticState.rows.length * 60px;
+        Label { x: 21px; y: 156px; width: parent.width - 42px; height: 48px; text: DiagnosticState.log-status; wrap: word-wrap; color: DiagnosticState.log-retry ? Theme.blue : Theme.muted; font-size: 11px; }
+        HorizontalLayout { x: 21px; y: 207px; width: parent.width - 42px; height: 32px; spacing: 12px;
+            Action { label: "打开日志目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-logs"); } }
+            Action { label: "重试日志"; enabled: DiagnosticState.log-retry && !DiagnosticState.busy; clicked => { DiagnosticState.action("retry-log"); } }
+        }
+        Label { x: 21px; y: 250px; width: parent.width - 42px; height: 60px; text: "连接、画面与识别状态自动脱敏保存，约 2 秒批量写入，退出后仍可用包内反馈脚本导出。手动领取检查仅存内存，请退出前导出；不会上传账号或认证信息。"; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+        if DiagnosticState.open: VerticalLayout { x: 21px; y: 318px; width: parent.width - 42px; height: DiagnosticState.rows.length * 60px;
             for row in DiagnosticState.rows: Label { height: 60px; text: row; wrap: word-wrap; color: Theme.blue; font-size: 11px; }
         }
     }

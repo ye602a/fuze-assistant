@@ -12,6 +12,13 @@ pub struct Binding {
     pub session: Rc<Session>,
     pub records: Rc<crate::record_bridge::Binding>,
     _timer: slint::Timer,
+    feedback: Rc<RefCell<crate::feedback_bridge::Binding>>,
+}
+impl Drop for Binding {
+    fn drop(&mut self) {
+        self._timer.stop();
+        self.feedback.borrow_mut().finish();
+    }
 }
 pub fn offline_config(root: &Path) -> Config {
     Config {
@@ -282,6 +289,7 @@ pub fn attach_recovered(
     let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
     let feedback =
         crate::feedback_bridge::attach(ui, session.clone(), diagnostics.clone(), offline);
+    let feedback_lifetime = feedback.clone();
     let records = Rc::new(crate::record_bridge::attach(ui, session.clone(), offline)?);
     let state = ui.global::<HostState>();
     state.set_connected(true);
@@ -571,5 +579,6 @@ pub fn attach_recovered(
         session,
         records,
         _timer: timer,
+        feedback: feedback_lifetime,
     })
 }

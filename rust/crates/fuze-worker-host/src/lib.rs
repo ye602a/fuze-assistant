@@ -69,6 +69,8 @@ pub mod record_export;
 pub mod recovery;
 mod retention;
 #[cfg(windows)]
+pub mod runtime_log;
+#[cfg(windows)]
 pub mod update_channel;
 #[cfg(windows)]
 pub mod update_credential;

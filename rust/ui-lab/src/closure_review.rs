@@ -199,6 +199,13 @@ impl Review {
         if !ui.global::<HostState>().get_notice().contains("隔离验证") {
             return Err("feedback-offline-boundary".into());
         }
+        for action in ["open-logs", "retry-log"] {
+            ui.global::<crate::DiagnosticState>()
+                .invoke_action(action.into());
+            if !ui.global::<HostState>().get_notice().contains("隔离验证") {
+                return Err("log-offline-boundary".into());
+            }
+        }
         ui.global::<HostState>().set_notice("".into());
         ui.set_feedback("".into());
         ui.set_page(2);

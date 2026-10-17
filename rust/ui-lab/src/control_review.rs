@@ -471,6 +471,11 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     );
     a.click(ui, "收起最近状态", None);
     a.click(ui, "导出脱敏反馈", Some("diagnostic:export"));
+    a.click(ui, "打开日志目录", Some("diagnostic:open-logs"));
+    a.disabled(ui, "重试日志");
+    ui.global::<crate::DiagnosticState>().set_log_retry(true);
+    a.click(ui, "重试日志", Some("diagnostic:retry-log"));
+    ui.global::<crate::DiagnosticState>().set_log_retry(false);
     c.set_cooldown(30);
     a.disabled(ui, "稍候 30 秒");
     c.set_cooldown(0);
