@@ -60,6 +60,7 @@ fn close(ui: &Workbench, shell: &Shell, session: &Session, interactive: bool) {
         .set_confirmation("".into());
     if session.snapshot().preferences.close_to_tray && shell.tray_available() {
         ui.set_quit_open(false);
+        crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
         if interactive {
             let _ = ui.hide();
         }
@@ -130,12 +131,14 @@ pub fn attach(
             "open" => reveal(&ui, interactive),
             "hide" => {
                 if native.tray_available() && interactive {
+                    crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
                     let _ = ui.hide();
                 }
             }
             "toggle" => {
                 if ui.window().is_visible() && native.tray_available() {
                     if interactive {
+                        crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
                         let _ = ui.hide();
                     }
                 } else {
@@ -185,13 +188,34 @@ pub fn attach(
     let weak = ui.as_weak();
     let redraw_observed = Rc::new(Cell::new(false));
     let redraw = redraw_observed.clone();
+    let corners = RefCell::new(crate::window_style::Corners::for_window(ui.window(), false));
     ui.window().on_winit_window_event(move |_, event| {
+        if matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            if let Some(ui) = weak.upgrade() {
+                if let Some(handle) = hwnd(ui.window()) {
+                    let mut style = corners.borrow_mut();
+                    if let Some(style) = style.as_mut() {
+                        style.resize(handle);
+                    } else {
+                        *style = Some(crate::window_style::Corners::new(handle, false));
+                    }
+                }
+            }
+        }
         if let WindowEvent::Focused(focused) = event {
             if let Some(ui) = weak.upgrade() {
                 crate::motion::refresh(ui.global::<crate::UiMotion>(), interactive && *focused);
             }
         }
         if matches!(event, WindowEvent::Occluded(true)) {
+            if let Some(ui) = weak.upgrade() {
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
+            }
+        }
+        if matches!(event, WindowEvent::Resized(size) if size.width == 0 || size.height == 0) {
             if let Some(ui) = weak.upgrade() {
                 crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
             }

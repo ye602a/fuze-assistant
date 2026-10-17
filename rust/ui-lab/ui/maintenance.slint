@@ -1,8 +1,9 @@
 import { HostState, MaintenanceState } from "host-state.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Toggle } from "components.slint";
 export component MaintenancePage inherits VerticalLayout {
+    in property <float> entrance: 1;
     spacing: 18px;
-    Panel { height: 382px;
+    Panel { height: 382px; entrance: root.entrance;
         SectionTitle { x: 23px; y: 18px; height: 26px; text: "软件更新"; }
         Label { x: 23px; y: 55px; width: parent.width - 46px; height: 28px; text: "当前版本 · " + MaintenanceState.current-version; font-size: 18px; }
         Label { x: 23px; y: 92px; width: parent.width - 46px; height: 48px; text: HostState.running ? "请先在首页暂停识别，再检查更新或管理存储。" : MaintenanceState.update-status; wrap: word-wrap; color: Theme.muted; }
@@ -19,7 +20,7 @@ export component MaintenancePage inherits VerticalLayout {
         Label { x: 23px; y: 292px; width: parent.width - 46px; height: 70px; wrap: word-wrap; text: "检查不会下载。更新程序会显示下载进度，并分别确认下载与安装。优先差分，失败回退全量，保留可回滚版本。\n私有令牌由 Windows 安全存储保管，不在页面显示。"; color: Theme.muted; font-size: 11px; }
     }
     if MaintenanceState.notice != "": Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
-    Panel { height: 190px + MaintenanceState.storage-rows.length * 30px;
+    Panel { height: 190px + MaintenanceState.storage-rows.length * 30px; entrance: root.entrance; entrance-group: 1;
         SectionTitle { x: 23px; y: 18px; height: 26px; text: "存储管理"; }
         Label { x: 23px; y: 55px; width: parent.width - 46px; height: 48px; wrap: word-wrap; text: MaintenanceState.storage-summary; color: Theme.muted; }
         VerticalLayout { x: 23px; y: 112px; width: parent.width - 46px; height: MaintenanceState.storage-rows.length * 30px; spacing: 0px;

@@ -16,6 +16,88 @@ export global UiMotion {
     in-out property <bool> enabled: false;
     out property <duration> quick: self.enabled ? 100ms : 0ms;
     out property <duration> state: self.enabled ? 160ms : 0ms;
+    out property <duration> selection: self.enabled ? 180ms : 0ms;
+    public pure function reveal(progress: float, group: int) -> float {
+        // Three readable groups, 30ms apart, settled within 240ms. No layout movement.
+        let t = clamp((progress * 240 - group * 30) / 180, 0, 1);
+        return 0.84 + 0.16 * (1 - (1 - t) * (1 - t) * (1 - t));
+    }
+}
+
+// A finite repaint of the status surface only. Text/buttons above it update immediately.
+export component StatusSurface inherits Rectangle {
+    in property <color> fill;
+    in property <color> accent;
+    private property <color> previous: root.fill;
+    private property <color> target: root.fill;
+    private property <bool> reset: true;
+    private property <bool> pending: false;
+    private property <bool> motion: UiMotion.enabled;
+    in-out property <float> progress: 1;
+    public function settle() {
+        root.pending = false;
+        root.reset = true;
+        root.previous = root.fill;
+        root.target = root.fill;
+        root.progress = 1;
+    }
+    init => { root.settle(); }
+    changed motion => { if !root.motion { root.settle(); } }
+    changed fill => {
+        if !root.motion || root.pending || root.progress < 1 {
+            // Rapid changes supersede the in-flight transition; never queue stale colours.
+            root.settle();
+        } else {
+            root.previous = root.target;
+            root.target = root.fill;
+            root.reset = true;
+            root.progress = 0;
+            root.pending = true;
+        }
+    }
+    Timer { interval: 16ms; running: root.pending;
+        triggered => { root.pending = false; root.reset = false; root.progress = 1; }
+    }
+    animate progress { duration: root.reset || !root.motion ? 0ms : 280ms; easing: cubic-bezier(0.22, 0.8, 0.25, 1); }
+    background: @linear-gradient(110deg, root.progress >= 1 ? root.target : root.previous, #0d1b28);
+    if root.progress < 1: Rectangle { x: 0px; y: 0px; width: root.width * root.progress; height: root.height; clip: true;
+        // Keep the gradient at full size while revealing it, rather than stretching it.
+        Rectangle { x: 0px; y: 0px; width: root.width; height: root.height; background: @linear-gradient(110deg, root.target, #0d1b28); }
+    }
+    Rectangle { background: transparent; border-width: 1px; border-color: root.accent; }
+    @children
+}
+
+// One sequence per page per window lifetime. Background visits and returning pages stay still.
+export component PageEntrance inherits Rectangle {
+    in property <int> page: 0;
+    private property <bool> motion: UiMotion.enabled;
+    private property <bool> home-seen: false;
+    private property <bool> history-seen: false;
+    private property <bool> settings-seen: false;
+    private property <bool> reset: true;
+    private property <bool> pending: false;
+    in-out property <float> progress: 1;
+    width: 0px; height: 0px;
+    public function visit() {
+        let seen = root.page == 0 ? root.home-seen : root.page == 1 ? root.history-seen : root.settings-seen;
+        root.pending = false;
+        root.reset = true;
+        root.progress = 1;
+        if root.page == 0 { root.home-seen = true; }
+        else if root.page == 1 { root.history-seen = true; }
+        else { root.settings-seen = true; }
+        if root.motion && !seen { root.progress = 0; root.pending = true; }
+    }
+    changed page => { root.visit(); }
+    changed motion => {
+        if root.motion { root.visit(); }
+        else { root.pending = false; root.reset = true; root.progress = 1; }
+    }
+    Timer { interval: 16ms; running: root.pending;
+        triggered => { root.pending = false; root.reset = false; root.progress = 1; }
+    }
+    animate progress { duration: root.reset || !root.motion ? 0ms : 240ms; easing: linear; }
 }
 export component Label inherits Text {
     color: Theme.ivory; font-size: 13px; vertical-alignment: center; overflow: elide;
@@ -67,6 +149,9 @@ export component Toggle inherits Rectangle {
     focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
 }
 export component Panel inherits Rectangle {
+    in property <float> entrance: 1;
+    in property <int> entrance-group: 0;
+    opacity: UiMotion.reveal(root.entrance, root.entrance-group);
     background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
     Rectangle { x: 0px; y: 0px; height: 1px; background: #45535a; }
     @children
@@ -81,11 +166,18 @@ export component Navigation inherits Rectangle {
     height: 55px;
     background: root.selected ? @linear-gradient(90deg, #263234, #0f1c29) : touch.has-hover ? #132635 : transparent;
     border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.selected ? #75613c : transparent;
-    animate background, border-color { duration: UiMotion.quick; easing: ease-out; }
+    animate background { duration: UiMotion.selection; easing: ease-out; }
+    animate border-color { duration: focus.has-focus ? 0ms : UiMotion.selection; easing: ease-out; }
     accessible-role: button; accessible-label: root.label; forward-focus: focus;
-    if root.selected: Rectangle { x: 0px; width: 3px; y: 13px; height: parent.height - 26px; background: Theme.gold; }
-    Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7; }
-    Label { y: 0px; x: 51px; width: parent.width - 56px; height: parent.height; text: root.label; color: root.selected ? #e8ce96 : Theme.muted; font-size: 13px; }
+    Rectangle { x: 0px; width: 3px; y: 13px; height: parent.height - 26px; background: Theme.gold; opacity: root.selected ? 1 : 0;
+        animate opacity { duration: UiMotion.selection; easing: ease-out; }
+    }
+    Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7;
+        animate opacity { duration: UiMotion.selection; easing: ease-out; }
+    }
+    Label { y: 0px; x: 51px; width: parent.width - 56px; height: parent.height; text: root.label; color: root.selected ? #e8ce96 : Theme.muted; font-size: 13px;
+        animate color { duration: UiMotion.selection; easing: ease-out; }
+    }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject; } }
 }

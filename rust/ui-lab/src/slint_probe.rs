@@ -296,8 +296,25 @@ pub fn connect(ui: &Workbench) {
     // Text remains in the widget model only; no files, telemetry or network.
     ui.on_query_edited(|_| {});
     let weak = ui.as_weak();
+    let corners =
+        std::cell::RefCell::new(crate::window_style::Corners::for_window(ui.window(), false));
     ui.window().on_winit_window_event(move |_, event| {
         use slint::winit_030::{winit::event::WindowEvent, EventResult};
+        if matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            if let Some(ui) = weak.upgrade() {
+                if let Some(handle) = crate::lifecycle::hwnd(ui.window()) {
+                    let mut style = corners.borrow_mut();
+                    if let Some(style) = style.as_mut() {
+                        style.resize(handle);
+                    } else {
+                        *style = Some(crate::window_style::Corners::new(handle, false));
+                    }
+                }
+            }
+        }
         if let WindowEvent::Focused(focused) = event {
             if let Some(ui) = weak.upgrade() {
                 crate::motion::refresh(ui.global::<crate::UiMotion>(), *focused);

@@ -284,6 +284,45 @@ pub fn review(mode: &str, output: &Path) -> Result<serde_json::Value, Box<dyn st
         }
         cases.push(serde_json::json!({"logical_width":width,"scale":scale,"render_and_finish":crate::telemetry::samples(&timings),"before_present":crate::telemetry::samples(&before_present_times),"present_and_finish":crate::telemetry::samples(&present_and_finish),"process_cpu_ms":if cpu>=0. && cpu_end>=cpu{Some(cpu_end-cpu)}else{None},"idle_redraws":idle_redraws}));
     }
+    // Real hidden Skia surface, bounded motion samples. Never interpreted as game FPS.
+    ui.window()
+        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+    ui.window().set_size(slint::LogicalSize::new(1120., 860.));
+    ui.set_health(0);
+    adapter.dirty.set(true);
+    adapter.draw()?;
+    ui.global::<crate::UiMotion>().set_enabled(true);
+    let mut motion_timings = Vec::new();
+    for state in [1, 2, 3, 0] {
+        ui.set_health(state);
+        for _ in 0..22 {
+            slint::platform::update_timers_and_animations();
+            let at = Instant::now();
+            if adapter.draw()? {
+                if let Some(done) = finish.get() {
+                    unsafe {
+                        done();
+                    }
+                }
+                motion_timings.push(at.elapsed().as_secs_f64() * 1000.);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    }
+    ui.global::<crate::UiMotion>().set_enabled(false);
+    slint::platform::update_timers_and_animations();
+    adapter.draw()?;
+    let mut motion_idle_redraws = 0;
+    for _ in 0..20 {
+        slint::platform::update_timers_and_animations();
+        if adapter.draw()? {
+            motion_idle_redraws += 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if motion_idle_redraws != 0 || ui.window().has_active_animations() {
+        return Err("Skia motion did not settle".into());
+    }
     // Explicit renderer/context suspension and re-attachment, not physical device-loss simulation.
     adapter.renderer.suspend()?;
     adapter
@@ -296,6 +335,8 @@ pub fn review(mode: &str, output: &Path) -> Result<serde_json::Value, Box<dyn st
     native.check_hidden()?;
     ui.hide()?;
     let report = serde_json::json!({"mode":mode,"graphics":gpu.borrow().clone(),"cases":cases,"hidden":true,"foreground_unchanged_observed":before==unsafe{GetForegroundWindow()},"explicit_context_recreation":true,"real_device_loss":false,"visible_presentation_verified":false,"physical_dpi_verified":false,"same_winit_event_loop":false,"game_access":false,"system_input":false});
+    let mut report = report;
+    report["motion"] = serde_json::json!({"render_and_finish":crate::telemetry::samples(&motion_timings),"idle_redraws":motion_idle_redraws,"visible_presentation_verified":false});
     std::fs::write(
         output.join(format!("skia-surface-{mode}.json")),
         serde_json::to_vec_pretty(&report)?,

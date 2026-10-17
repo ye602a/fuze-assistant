@@ -1,0 +1,34 @@
+// Public synthetic content for deterministic offscreen motion acceptance only.
+import { Theme, UiMotion, StatusSurface, PageEntrance, Navigation, Panel, Label } from "components.slint";
+export component MotionReview inherits Window {
+    width: 640px; height: 320px; background: Theme.background;
+    default-font-family: "Microsoft YaHei"; default-font-size: 13px;
+    in-out property <int> health: 0;
+    in-out property <int> page: 0;
+    out property <float> sweep-progress: status.progress;
+    out property <float> entrance-progress: entrance.progress;
+    out property <string> status-text: root.health == 3 ? "连接异常 · 等待重试" : root.health == 2 ? "部分卡位暂不可读" : root.health == 1 ? "识别正常 · 推荐已就绪" : "正在准备";
+    entrance := PageEntrance { page: root.page; }
+    HorizontalLayout { x: 16px; y: 8px; width: 608px; height: 46px; spacing: 12px;
+        for title[index] in ["对局助手", "战绩查询", "偏好设置"]: Navigation {
+            label: title; selected: root.page == index;
+            icon: @image-url("assets/overview.svg");
+            clicked => { root.page = index; }
+        }
+    }
+    status := StatusSurface {
+        x: 16px; y: 66px; width: 608px; height: 146px;
+        fill: root.health == 0 ? #12324b : root.health == 1 ? #123d34 : root.health == 2 ? #49391b : #4b222b;
+        accent: root.health == 0 ? Theme.blue : root.health == 1 ? Theme.green : root.health == 2 ? Theme.yellow : Theme.red;
+        Label { x: 24px; y: 18px; text: "实时状态 · 离线动效样例"; color: Theme.gold; }
+        Label { x: 24px; y: 48px; text: root.status-text; font-size: 22px; font-weight: 600; }
+        Label { x: 24px; y: 101px; text: "固定样例，不连接客户端或启动识别。"; color: Theme.muted; }
+    }
+    HorizontalLayout { x: 16px; y: 228px; width: 608px; height: 76px; spacing: 12px;
+        for name[index] in ["客户端连接", "中文识别", "推荐数据"]: Panel {
+            entrance: entrance.progress; entrance-group: index;
+            Label { x: 12px; y: 10px; text: name; color: Theme.gold; }
+            Label { x: 12px; y: 40px; text: "公开样例 · 可立即读取"; color: Theme.muted; font-size: 12px; }
+        }
+    }
+}

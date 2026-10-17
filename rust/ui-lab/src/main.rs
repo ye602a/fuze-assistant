@@ -19,6 +19,7 @@ mod maintenance_bridge;
 mod maintenance_review;
 mod manual_profile;
 mod motion;
+mod motion_review;
 mod native_shell;
 mod overlay_review;
 mod public_art;
@@ -31,11 +32,13 @@ mod startup;
 mod status_view;
 mod telemetry;
 mod unbound_bridge;
+mod window_style;
 slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-motion") if args.len()==2 => println!("{}",motion_review::run(std::path::Path::new(&args[1]))?),
         #[cfg(feature = "ui-audit")]
         Some("--review-controls") if args.len()==2 => println!("{}",control_review::run(std::path::Path::new(&args[1]))?),
         Some("--desktop" | "--managed-desktop" | "--desktop-smoke" | "--managed-desktop-smoke") if args.len()==2 => {

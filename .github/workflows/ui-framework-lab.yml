@@ -143,6 +143,8 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review artifacts/ui-polish
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-controls artifacts/ui-polish-controls
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-motion artifacts/ui-motion
           exit $LASTEXITCODE
 
   windows-update:

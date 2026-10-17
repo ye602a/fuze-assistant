@@ -5,13 +5,14 @@ import { RecordDetails } from "records.slint";
 import { Theme, Label, Action, Panel, SectionTitle, Disclosure, Toggle } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
+    in property <float> entrance: 1;
     in-out property <bool> manual-open: false;
     spacing: 18px;
     if HostState.running: Panel { height: 90px;
         Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行。更新、清理和导入需要先暂停；其余偏好可直接调整。"; wrap: word-wrap; color: Theme.muted; }
         Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
     }
-    MaintenancePage { }
+    MaintenancePage { entrance: root.entrance; }
     Panel { height: 153px;
         SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据 · " + HostState.data-version; }
         Label { x: 21px; y: 52px; width: parent.width - 42px; height: 42px; text: "识别字典与胜率统计分别更新；失败保留可用缓存，三卡继续使用整体胜率。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
@@ -109,6 +110,7 @@ export component SettingsPage inherits VerticalLayout {
 }
 
 export component HistoryPage inherits VerticalLayout {
+    in property <float> entrance: 1;
     in property <bool> sample: false;
     spacing: 18px;
     if HostState.running: Panel { height: 90px;
@@ -138,7 +140,7 @@ export component HistoryPage inherits VerticalLayout {
             }
         }
     }
-    Panel { height: 262px;
+    Panel { height: 262px; entrance: root.entrance;
         SectionTitle { x: 21px; y: 18px; height: 26px; text: "海克斯大乱斗战绩"; }
         Label { x: 21px; y: 55px; width: parent.width - 42px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；区服未确认时不猜测。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 98px; width: 330px; height: 38px; spacing: 10px;

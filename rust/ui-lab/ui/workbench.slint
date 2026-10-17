@@ -5,9 +5,10 @@ export { HostState, ShellState, MaintenanceState, RecordState, ClaimState, Diagn
 import { HostState, ShellState, MaintenanceState, RecordState } from "host-state.slint";
 export { ChampionWindow } from "champion.slint";
 export { UiMotion } from "components.slint";
+export { MotionReview } from "motion-review.slint";
 import { SettingsPage, HistoryPage } from "pages.slint";
 import { LineEdit, AboutSlint } from "std-widgets.slint";
-import { Theme, UiMotion, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar, NoticeBar } from "components.slint";
+import { Theme, UiMotion, StatusSurface, PageEntrance, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar, NoticeBar } from "components.slint";
 
 export component Workbench inherits Window {
     title: HostState.offline ? "符择 · 离线界面预览" : "符择 · 对局助手";
@@ -44,6 +45,7 @@ export component Workbench inherits Window {
     callback request-close;
     callback drag-window;
     private property <bool> narrow: root.width <= 950px;
+    page-entrance := PageEntrance { page: root.page; }
     private property <length> rail-width: root.narrow ? 158px : 184px;
     private property <length> inset: root.narrow ? 20px : 30px;
     private property <color> tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : root.health == 1 ? Theme.green : root.health == 2 ? Theme.yellow : Theme.red;
@@ -98,10 +100,8 @@ export component Workbench inherits Window {
                 }
                 if root.page == 0: VerticalLayout {
                     spacing: 16px;
-                    Rectangle {
-                        height: 156px; border-width: 1px; border-color: root.tone;
-                        background: @linear-gradient(110deg, root.tone-background, #0d1b28);
-                        animate background, border-color { duration: UiMotion.state; easing: ease-out; }
+                    StatusSurface {
+                        height: 156px; accent: root.tone; fill: root.tone-background;
                         Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 1px; border-color: #091724; background: transparent; }
                         Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
                         Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }
@@ -115,6 +115,7 @@ export component Workbench inherits Window {
                         spacing: 3px;
                         Label { height: 14px; text: "整体胜率 · 正式领取轮次未确认"; color: #98a9b3; font-size: 10px; }
                         module-grid := Rectangle {
+                            opacity: UiMotion.reveal(page-entrance.progress, 1);
                             height: root.narrow ? 220px : 145px;
                             for item[index] in [
                                 {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "通信已验证", hint: HostState.connected ? HostState.connection-hint : root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
@@ -132,6 +133,7 @@ export component Workbench inherits Window {
                     }
                     Panel {
                         height: 273px;
+                        entrance: page-entrance.progress; entrance-group: 2;
                         SectionTitle { x: 21px; y: 18px; height: 25px; text: "本局最近识别"; }
                         Label { x: 21px; y: 46px; height: 21px; text: "只有实际识别出的强化符文才会出现在这里。"; color: Theme.muted; font-size: 12px; }
                         HorizontalLayout {
@@ -157,8 +159,8 @@ export component Workbench inherits Window {
                     Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: HostState.connected ? HostState.schedule : "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
                     Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：" + HostState.data-version + " · 实际领取轮次未确认，继续使用整体胜率。"; }
                 }
-                if root.page == 1: HistoryPage { sample: root.history-sample; }
-                if root.page == 2: SettingsPage { }
+                if root.page == 1: HistoryPage { sample: root.history-sample; entrance: page-entrance.progress; }
+                if root.page == 2: SettingsPage { entrance: page-entrance.progress; }
                 if root.backend-note != "": Panel {
                     height: 180px;
                     VerticalLayout { x: 0px; y: 0px; padding: 20px; spacing: 10px;

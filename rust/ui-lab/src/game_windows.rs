@@ -37,6 +37,7 @@ impl Panel {
             closed.set(true);
             if let Some(ui) = weak.upgrade() {
                 ui.invoke_player_action("cancel".into(), 0);
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
                 if let Some(h) = hwnd(ui.window()) {
                     unsafe {
                         ShowWindow(h, SW_HIDE);
@@ -67,7 +68,23 @@ impl Panel {
         let timer = debounce.clone();
         let saved = memory.clone();
         let weak = ui.as_weak();
+        let corners = RefCell::new(crate::window_style::Corners::for_window(ui.window(), true));
         ui.window().on_winit_window_event(move |_, event| {
+            if matches!(
+                event,
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                if let Some(ui) = weak.upgrade() {
+                    if let Some(handle) = hwnd(ui.window()) {
+                        let mut style = corners.borrow_mut();
+                        if let Some(style) = style.as_mut() {
+                            style.resize(handle);
+                        } else {
+                            *style = Some(crate::window_style::Corners::new(handle, true));
+                        }
+                    }
+                }
+            }
             if let WindowEvent::Focused(focused) = event {
                 if let Some(ui) = weak.upgrade() {
                     crate::motion::refresh(ui.global::<crate::UiMotion>(), *focused);
@@ -120,6 +137,7 @@ impl Panel {
         visible: bool,
     ) -> Result<(), &'static str> {
         if view.is_none() {
+            crate::motion::refresh(self.ui.global::<crate::UiMotion>(), false);
             if self.previous.take().is_some() {
                 self.details.selection(&self.ui, None);
             }

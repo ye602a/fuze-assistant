@@ -437,6 +437,7 @@ impl Surface {
     }
 }
 struct Native {
+    corners: Option<crate::window_style::Corners>,
     scene: Scene,
     target: Option<ID2D1HwndRenderTarget>,
     surface: Option<Surface>,
@@ -453,6 +454,7 @@ impl Native {
     fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             scene: Scene::new()?,
+            corners: None,
             target: None,
             surface: None,
             backend: "uninitialized",
@@ -676,6 +678,9 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             LRESULT(0)
         }
         WM_SIZE => {
+            if let Some(style) = &mut state.corners {
+                style.resize(hwnd.0);
+            }
             if let Some(target) = &state.target {
                 if target
                     .Resize(&D2D_SIZE_U {
@@ -757,6 +762,9 @@ impl OwnWindow {
                 _dpi: dpi,
                 memory: fuze_worker_host::window_memory::Memory::new("direct-cards", offline),
             };
+            // This is our own non-activating overlay HWND, never a game window.
+            let mut window = window;
+            window.state.corners = Some(crate::window_style::Corners::new(hwnd.0, true));
             let scale = GetDpiForWindow(hwnd) as f32 / 96.;
             SetWindowPos(
                 hwnd,
@@ -1200,6 +1208,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
         }
         let before = GetForegroundWindow();
         let mut native = OwnWindow::new(true)?;
+        let corners = crate::window_style::review(native.hwnd.0)?;
         let mut timings = Vec::new();
         native.state.draw(native.hwnd)?;
         for _ in 0..24 {
@@ -1236,7 +1245,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             return Err("hidden window invariant failed".into());
         }
         Ok(
-            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","cases":cases,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
+            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","cases":cases,"corners":corners,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
         )
     }
 }
