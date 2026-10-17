@@ -8,7 +8,7 @@ use std::{
     mem::{size_of, zeroed},
     ptr::{null, null_mut},
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Condvar, Mutex,
     },
     thread,
@@ -130,6 +130,8 @@ struct Shared {
     start_paused: bool,
     automatic_change: AtomicU8,
     resume_apply: AtomicU8,
+    history_read: Mutex<Option<crate::post_game_history::ReadRequest>>,
+    history_busy: AtomicBool,
     wake: Condvar,
     wait: Mutex<()>,
     desired: AtomicU8,
@@ -353,7 +355,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             break;
         }
         if !fixture {
-            let phase = if desired == RUNNING && preferences.local_records {
+            let phase = if desired == RUNNING {
                 monitor.as_ref().and_then(|m: &Monitor| match m.state() {
                     Some(Connection::Connected(p)) => Some(p),
                     _ => None,
@@ -363,14 +365,50 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             };
             let manual = (!preferences.manual_directory.is_empty())
                 .then(|| std::path::PathBuf::from(&preferences.manual_directory));
-            if let Some(mut view) = history_background.tick(phase, manual) {
-                crate::history_detail::populate(
-                    &mut view,
-                    &roots,
-                    config.locale.unwrap_or(fuze_data::Locale::ZhCn),
-                );
-                if let Ok(mut s) = shared.status.lock() {
-                    s.history = view;
+            if let Some(completion) =
+                history_background.tick(phase, manual.clone(), preferences.local_records)
+            {
+                if let Some(mut view) = completion.view {
+                    if !completion.explicit {
+                        crate::history_detail::populate(
+                            &mut view,
+                            &roots,
+                            config.locale.unwrap_or(fuze_data::Locale::ZhCn),
+                        );
+                    }
+                    if let Ok(mut s) = shared.status.lock() {
+                        s.history = view;
+                    }
+                }
+                if completion.explicit {
+                    shared.history_busy.store(false, Ordering::Release);
+                }
+            }
+            if !history_background.busy() {
+                let request = shared.history_read.lock().ok().and_then(|mut r| r.take());
+                if let Some(request) = request {
+                    let previous = shared.status().history;
+                    let locale = config
+                        .locale
+                        .or_else(|| monitor.as_ref().and_then(|m| m.data_locale()))
+                        .unwrap_or(fuze_data::Locale::ZhCn);
+                    let result = history_background.request(
+                        request,
+                        previous,
+                        manual,
+                        roots.clone(),
+                        locale,
+                        history_account_index,
+                    );
+                    if matches!(request, crate::post_game_history::ReadRequest::Cached) {
+                        history_account_index = history_account_index.wrapping_add(1);
+                    }
+                    if let Err(error) = result {
+                        if let Ok(mut s) = shared.status.lock() {
+                            s.history.error = Some(error);
+                        }
+                        shared.history_busy.store(false, Ordering::Release);
+                    }
                 }
             }
             // Serialize explicit cache writers behind the bounded background transaction.
@@ -2683,6 +2721,8 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         start_paused: false,
         automatic_change: AtomicU8::new(0),
         resume_apply: AtomicU8::new(PAUSED),
+        history_read: Mutex::new(None),
+        history_busy: AtomicBool::new(false),
         wake: Condvar::new(),
         wait: Mutex::new(()),
         desired: AtomicU8::new(PAUSED),

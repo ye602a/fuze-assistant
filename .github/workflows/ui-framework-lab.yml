@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -94,6 +94,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-feedback-export.test.mjs
           exit $LASTEXITCODE
+      - name: Nonblocking history reads and account cache boundaries
+        run: cargo +1.90.0 test --manifest-path rust/Cargo.toml --target-dir rust/ui-lab/target -p fuze-worker-host --lib history --locked -j 2
       - name: Windowless cancellation and context gate
         working-directory: rust/ui-lab
         run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-native-overlay --lib headless_gate_cancels_without_window_thread_or_ack --locked -j 2

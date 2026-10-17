@@ -112,7 +112,7 @@ export component HistoryPage inherits VerticalLayout {
     in property <bool> sample: false;
     spacing: 18px;
     if HostState.running: Panel { height: 90px;
-        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行。刷新、导入和分享需要先暂停；已加载的战绩仍可查看。"; wrap: word-wrap; color: Theme.muted; }
+        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行，查看缓存无需暂停；大厅可后台刷新战绩。导入和分享仍需先暂停。"; wrap: word-wrap; color: Theme.muted; }
         Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
     }
     Action { label: RecordState.unbound-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { RecordState.unbound-action("open", RecordState.unbound-open ? 0 : 1); } }
@@ -142,11 +142,11 @@ export component HistoryPage inherits VerticalLayout {
         SectionTitle { x: 21px; y: 18px; height: 26px; text: "海克斯大乱斗战绩"; }
         Label { x: 21px; y: 55px; width: parent.width - 42px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；区服未确认时不猜测。"; color: Theme.muted; wrap: word-wrap; }
         HorizontalLayout { x: 21px; y: 98px; width: 330px; height: 38px; spacing: 10px;
-            Action { label: HostState.pending-action == "history" ? "正在读取…" : "刷新战绩"; enabled: HostState.connected && !HostState.busy && !HostState.offline && !HostState.running; clicked => { HostState.command("history-refresh"); } }
-            Action { label: "本地缓存"; enabled: HostState.connected && !HostState.busy && !HostState.offline && !HostState.running; clicked => { HostState.command("history-cached"); } }
-            Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.offline && !HostState.running; clicked => { HostState.command("history-more"); } }
+            Action { label: HostState.history-busy ? "正在读取…" : "刷新战绩"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && RecordState.import-count == 0; clicked => { HostState.command("history-refresh"); } }
+            Action { label: "本地缓存"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && RecordState.import-count == 0; clicked => { HostState.command("history-cached"); } }
+            Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && HostState.history-can-more && RecordState.import-count == 0; clicked => { HostState.command("history-more"); } }
         }
-        Action { x: 21px; y: 148px; width: 170px; height: 34px; label: "选择旧战绩并预览"; enabled: HostState.connected && !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-history",0); } }
+        Action { x: 21px; y: 148px; width: 170px; height: 34px; label: "选择旧战绩并预览"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-history",0); } }
         Label { x: 21px; y: 201px; width: parent.width - 42px; height: 42px; text: HostState.history-note; wrap: word-wrap; color: Theme.yellow; }
     }
     if RecordState.import-count > 0: Panel { height: 137px;

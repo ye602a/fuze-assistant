@@ -1,7 +1,6 @@
 //! Toolkit-independent access to the existing desktop engine. No second OCR/LCU loop.
 //! The offline constructor never reads preferences/accounts or starts discovery.
 use super::*;
-use std::sync::atomic::AtomicBool;
 
 pub struct Session {
     shared: Arc<Shared>,
@@ -22,6 +21,8 @@ impl Session {
             start_paused,
             automatic_change: AtomicU8::new(0),
             resume_apply: AtomicU8::new(PAUSED),
+            history_read: Mutex::new(None),
+            history_busy: AtomicBool::new(false),
             wake: Condvar::new(),
             wait: Mutex::new(()),
             desired: AtomicU8::new(PAUSED),
@@ -110,11 +111,14 @@ impl Session {
     }
     /// Pending values are committed by the existing engine only after validation succeeds.
     pub fn apply(&self, value: crate::preferences::Preferences) -> Result<()> {
-        if self.maintenance.load(Ordering::Acquire) {
+        if self.maintenance.load(Ordering::Acquire) || self.history_busy() {
             return Err("frontend-busy");
         }
         value.validate()?;
         let guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
+        if self.history_busy() || self.maintenance.load(Ordering::Acquire) {
+            return Err("frontend-busy");
+        }
         let mode = self.shared.desired.load(Ordering::Acquire);
         if ![PAUSED, RUNNING].contains(&mode) {
             return Err("frontend-busy");
@@ -127,10 +131,53 @@ impl Session {
         Ok(())
     }
     pub fn refresh_history(&self, more: bool) -> Result<()> {
-        self.request_idle(if more { HISTORY_MORE } else { HISTORY })
+        self.request_history_read(if more {
+            crate::post_game_history::ReadRequest::More
+        } else {
+            crate::post_game_history::ReadRequest::Refresh
+        })
     }
     pub fn cached_history(&self) -> Result<()> {
-        self.request_idle(HISTORY_OFFLINE)
+        self.request_history_read(crate::post_game_history::ReadRequest::Cached)
+    }
+    pub fn history_busy(&self) -> bool {
+        self.shared.history_busy.load(Ordering::Acquire)
+    }
+    fn request_history_read(&self, request: crate::post_game_history::ReadRequest) -> Result<()> {
+        let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        if self.busy()
+            || ![PAUSED, RUNNING].contains(&self.shared.desired.load(Ordering::Acquire))
+            || self.history_busy()
+        {
+            return Err("frontend-busy");
+        }
+        let status = self.snapshot();
+        if !status.initialized {
+            return Err("frontend-busy");
+        }
+        if status.history.pending > 0 {
+            return Err("history-import-pending");
+        }
+        if matches!(request, crate::post_game_history::ReadRequest::More)
+            && status.history.next_start.is_none()
+        {
+            return Err("history-page-limit");
+        }
+        let mut pending = self
+            .shared
+            .history_read
+            .lock()
+            .map_err(|_| "frontend-lock")?;
+        // Publish busy before releasing the queue: a fast completion must not
+        // clear the flag before the requesting thread has set it.
+        self.shared.history_busy.store(true, Ordering::Release);
+        *pending = Some(request);
+        drop(pending);
+        self.shared.wake.notify_one();
+        Ok(())
     }
     pub fn update_data(&self) -> Result<()> {
         self.request_idle(DATA)
@@ -167,7 +214,7 @@ impl Session {
         selection: Option<Vec<u64>>,
     ) -> Result<()> {
         let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
-        if self.busy() {
+        if self.busy() || self.history_busy() {
             return Err("frontend-busy");
         }
         if self.shared.desired.load(Ordering::Acquire) != PAUSED || self.snapshot().mode != PAUSED {
@@ -196,6 +243,10 @@ impl Session {
         Ok(())
     }
     pub fn begin_maintenance(&self) -> Result<()> {
+        let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
+        if self.history_busy() || self.maintenance.load(Ordering::Acquire) {
+            return Err("frontend-busy");
+        }
         let status = self.snapshot();
         if !status.initialized
             || status.mode != PAUSED
@@ -212,12 +263,15 @@ impl Session {
         self.maintenance.store(false, Ordering::Release);
     }
     fn request_idle(&self, mode: u8) -> Result<()> {
-        if self.maintenance.load(Ordering::Acquire) {
+        if self.maintenance.load(Ordering::Acquire) || self.history_busy() {
             return Err("frontend-busy");
         }
         let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
         if self.shared.desired.load(Ordering::Acquire) != PAUSED {
             return Err("frontend-pause-required");
+        }
+        if self.history_busy() || self.maintenance.load(Ordering::Acquire) {
+            return Err("frontend-busy");
         }
         // Offline previews must never pretend to have queried or downloaded data.
         if self.offline {
@@ -242,6 +296,58 @@ impl Drop for Session {
 #[cfg(test)]
 mod locale_tests {
     use super::*;
+    #[test]
+    fn history_reads_keep_recognition_mode_and_pause_exit_available() {
+        // No engine, client discovery, disk access or worker: exercise the real command gate.
+        let shared = Arc::new(Shared {
+            external_overlays: true,
+            start_paused: false,
+            automatic_change: AtomicU8::new(0),
+            resume_apply: AtomicU8::new(PAUSED),
+            history_read: Mutex::new(None),
+            history_busy: AtomicBool::new(false),
+            wake: Condvar::new(),
+            wait: Mutex::new(()),
+            desired: AtomicU8::new(RUNNING),
+            status: Mutex::new(Status {
+                initialized: true,
+                mode: RUNNING,
+                ..Default::default()
+            }),
+            monitor: Mutex::new(None),
+            pending: Mutex::new(None),
+            import_path: Mutex::new(None),
+            import_game: Mutex::new(None),
+            import_selection: Mutex::new(None),
+            export: Mutex::new(None),
+        });
+        let session = Session {
+            shared: shared.clone(),
+            worker: None,
+            offline: false,
+            maintenance: AtomicBool::new(false),
+            last_probe: Mutex::new(None),
+        };
+        session.refresh_history(false).unwrap();
+        assert!(session.history_busy());
+        assert!(!session.busy());
+        assert_eq!(shared.desired.load(Ordering::Acquire), RUNNING);
+        assert_eq!(session.cached_history(), Err("frontend-busy"));
+        assert_eq!(session.apply(Default::default()), Err("frontend-busy"));
+        assert_eq!(session.begin_maintenance(), Err("frontend-busy"));
+        session.set_running(false).unwrap();
+        assert_eq!(shared.desired.load(Ordering::Acquire), PAUSED);
+        assert_eq!(session.update_data(), Err("frontend-busy"));
+        shared.history_busy.store(false, Ordering::Release);
+        shared.history_read.lock().unwrap().take();
+        shared.status.lock().unwrap().history.pending = 1;
+        assert_eq!(session.cached_history(), Err("history-import-pending"));
+        shared.status.lock().unwrap().history.pending = 0;
+        assert_eq!(session.refresh_history(true), Err("history-page-limit"));
+        session.cached_history().unwrap();
+        session.stop();
+        assert_eq!(shared.desired.load(Ordering::Acquire), EXIT);
+    }
     #[test]
     fn locale_activation_publishes_only_committed_state_and_clears_old_pipeline() {
         let fixture = crate::preferences::locale_tests::Fixture::new();

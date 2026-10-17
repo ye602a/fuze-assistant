@@ -53,6 +53,8 @@ fn notice(ui: &Workbench, result: Result<(), &'static str>) {
                 }
                 "frontend-busy" => "当前操作尚未结束，请稍候。",
                 "frontend-pause-required" => "请先暂停识别，再执行此操作。",
+                "history-import-pending" => "请先确认或取消当前导入预览，再读取战绩。",
+                "history-page-limit" => "当前来源没有可继续加载的战绩；可刷新重新查询。",
                 "overlay-position-memory" => {
                     "三卡浮窗位置未能保存，当前显示不受影响；下次移动时会重试。"
                 }
@@ -205,10 +207,18 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
     state.set_history_page(page as i32);
     state.set_history_pages(pages as i32);
     state.set_history_selected(-1);
+    state.set_history_can_more(
+        view.next_start.is_some() && !view.account.is_empty() && view.pending == 0,
+    );
     state.set_history_note(if state.get_offline() {
         "隔离固定样例 · 非个人战绩".into()
     } else if view.error.is_some() {
-        fuze_worker_host::account_history::error_label(view.error).into()
+        let error = fuze_worker_host::account_history::error_label(view.error);
+        if view.cached && !view.rows.is_empty() {
+            format!("{error}。保留列表仅作本地参考，不代表当前账号已验证。").into()
+        } else {
+            error.into()
+        }
     } else if view.pending > 0 {
         format!(
             "导入预览 · {} 项 · 尚未写入，请选择后确认或取消。",
@@ -218,7 +228,12 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
     } else if view.cached {
         "显示本地缓存，未据此确认当前登录账号。".into()
     } else {
-        "已读取战绩；观察记录不等于实际领取。".into()
+        let source = match view.source.as_str() {
+            "sgp" => "官方战绩接口",
+            "lcu" => "本地客户端接口",
+            _ => "已验证来源",
+        };
+        format!("已读取战绩 · {source}；观察记录不等于实际领取。").into()
     });
     state.set_history(
         Rc::new(VecModel::from(
@@ -393,11 +408,26 @@ pub fn attach_recovered(
                 ui.set_scroll_y(0.);
                 return;
             }
+            if matches!(
+                command.as_str(),
+                "history-refresh" | "history-more" | "history-cached"
+            ) {
+                let result = match command.as_str() {
+                    "history-refresh" => service.refresh_history(false),
+                    "history-more" => service.refresh_history(true),
+                    _ => service.cached_history(),
+                };
+                if result.is_ok() {
+                    let state = ui.global::<HostState>();
+                    state.set_history_busy(true);
+                    state.set_history_note("正在后台读取战绩；不改变识别开关，原列表保留。".into());
+                    state.set_notice("正在后台读取战绩…".into());
+                }
+                notice(&ui, result);
+                return;
+            }
             let result = match command.as_str() {
                 "toggle-running" => service.set_running(ui.get_paused()),
-                "history-refresh" => service.refresh_history(false),
-                "history-more" => service.refresh_history(true),
-                "history-cached" => service.cached_history(),
                 "data-update" => service.update_data(),
                 _ => Err("frontend-command"),
             };
@@ -456,12 +486,15 @@ pub fn attach_recovered(
             };
             // Read completion first: a completed request has published its result before this snapshot.
             let engine_busy = service.busy();
+            let history_busy = service.history_busy();
             let next = service.snapshot();
             unbound.borrow_mut().update(&ui, &next, offline);
             diagnostics.borrow_mut().poll(&ui);
             feedback.borrow_mut().poll(&ui, &next, offline);
             if let Err(error) = popup.borrow_mut().placement() { notice(&ui, Err(error)); }
             let state = ui.global::<HostState>();
+            let history_completed = state.get_history_busy() && !history_busy;
+            state.set_history_busy(history_busy);
             let action = state.get_pending_action();
             let operation_completed = !action.is_empty() && !engine_busy && match action.as_str() {
                 "pause" => next.mode == 0,
@@ -470,7 +503,7 @@ pub fn attach_recovered(
             };
             let completed = state.get_busy() && !engine_busy;
             state.set_busy(engine_busy || (!action.is_empty() && !operation_completed));
-            if previous.borrow().as_ref() == Some(&next) && !completed {
+            if previous.borrow().as_ref() == Some(&next) && !completed && !history_completed {
                 return;
             }
             let old = previous.borrow();
@@ -507,9 +540,10 @@ pub fn attach_recovered(
                     state.set_directory(prefs.manual_directory.into());
                 }
             }
-            if old.as_ref().is_none_or(|s| s.history != next.history) || (operation_completed && action == "history") {
+            if old.as_ref().is_none_or(|s| s.history != next.history) || history_completed || (operation_completed && action == "history") {
                 history(&ui, &next.history, 0);
             }
+            if history_completed && action.is_empty() { state.set_notice(state.get_history_note()); }
             if operation_completed {
                 state.set_pending_action("".into());
                 let message = match action.as_str() {

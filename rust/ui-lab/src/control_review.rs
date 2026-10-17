@@ -367,9 +367,14 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     );
     s.set_running(true);
     ui.set_page(1);
-    a.disabled(ui, "刷新战绩");
+    a.click(ui, "刷新战绩", Some("host:history-refresh"));
+    a.click(ui, "本地缓存", Some("host:history-cached"));
+    a.disabled(ui, "更多战绩");
+    s.set_history_busy(true);
+    a.disabled(ui, "正在读取…");
     a.disabled(ui, "本地缓存");
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
+    s.set_history_busy(false);
     s.set_running(false);
     ui.set_page(0);
     ui.set_scroll_y(0.);
@@ -541,6 +546,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         ("本地缓存", "history-cached"),
         ("更多战绩", "history-more"),
     ] {
+        s.set_history_can_more(true);
         a.click(ui, label, Some(&format!("host:{cmd}")));
     }
     a.click(ui, "选择旧战绩并预览", Some("record:import-history:0"));

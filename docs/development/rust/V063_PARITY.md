@@ -4,7 +4,7 @@
 
 本表起于旧 Win32/GDI 阶段；后续 Slint 接线与当前首测范围以 [阶段交接](../../RUST_TEST_STAGE_HANDOFF.md) 和 [中文首测](../../RUST_FIRST_GAME_TEST.md) 为准。下面的历史交互检查不自动代表新前端再次通过，也不把完整迁移条件当作开始首测的条件。
 
-最新 Slint 逐按钮实测和仍缺失的能力见 [当前完整性账本](../../RUST_CONTROL_ACCEPTANCE.md)。下表中旧 Win32 的三语言、详细诊断和日志描述不能当作当前 Slint 已完成。
+最新 Slint 逐按钮实测和仍缺失的能力见 [当前完整性账本](../../RUST_CONTROL_ACCEPTANCE.md)。旧 Win32 阶段说明是历史证据；当前 Slint 已补详细诊断及持久化日志，多语言已取消。全部明确差异见 [预览与完整迁移对照](../../RUST_PREVIEW_DIFFERENCES.md)。
 
 ## 功能对照与历史验证
 
