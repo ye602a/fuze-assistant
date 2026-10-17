@@ -102,6 +102,7 @@ pub fn run_session(
         .with_winit_window_attributes_hook(move |a| a.with_active(false).with_visible(!smoke))
         .select()
         .map_err(crate::desktop_runner::graphics)?;
+    crate::motion::configure(cfg!(feature = "gpu") && !software && !smoke);
     let ui = Workbench::new().map_err(crate::desktop_runner::graphics)?;
     crate::slint_probe::connect(&ui);
     let binding = host_bridge::attach_recovered(&ui, config, smoke, start_paused)?;

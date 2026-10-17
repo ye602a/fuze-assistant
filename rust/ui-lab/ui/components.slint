@@ -2,7 +2,7 @@
 export global Theme {
     out property <color> background: #07131e;
     out property <color> surface: #101e2a;
-    out property <color> stroke: #39444a;
+    out property <color> stroke: #30424d;
     out property <color> muted: #a1adb4;
     out property <color> gold: #c8aa6e;
     out property <color> ivory: #f0e6d2;
@@ -11,8 +11,14 @@ export global Theme {
     out property <color> yellow: #e5c06d;
     out property <color> red: #f19b9b;
 }
+// Disabled by default for previews, software rendering and background windows.
+export global UiMotion {
+    in-out property <bool> enabled: false;
+    out property <duration> quick: self.enabled ? 100ms : 0ms;
+    out property <duration> state: self.enabled ? 160ms : 0ms;
+}
 export component Label inherits Text {
-    color: Theme.ivory; font-size: 12px; vertical-alignment: center; overflow: elide;
+    color: Theme.ivory; font-size: 13px; vertical-alignment: center; overflow: elide;
 }
 export component Action inherits Rectangle {
     out property <bool> focused: focus.has-focus;
@@ -21,17 +27,25 @@ export component Action inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> enabled: true;
     in property <bool> quiet: false;
+    in property <bool> busy: false;
     callback clicked;
     height: 38px; min-width: 100px;
-    background: root.quiet ? (touch.has-hover ? #263340 : transparent) : root.primary ? (touch.has-hover ? #e5cc99 : Theme.gold) : (touch.has-hover ? #243742 : #122432);
-    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : #89703f;
-    border-radius: 2px; opacity: root.enabled ? 1 : 0.45;
+    private property <bool> down: root.enabled && (touch.pressed || root.key-down);
+    private property <bool> key-down: false;
+    changed enabled => { if !root.enabled { root.key-down = false; } }
+    background: root.quiet ? (root.down ? #324654 : touch.has-hover && root.enabled ? #263340 : transparent) : root.primary ? (root.down ? #ad915b : touch.has-hover && root.enabled ? #e5cc99 : Theme.gold) : (root.down ? #304952 : touch.has-hover && root.enabled ? #243742 : #122432);
+    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : touch.has-hover && root.enabled ? #89703f : #46535a;
+    animate background, border-color { duration: root.down ? 0ms : UiMotion.quick; easing: ease-out; }
+    border-radius: 2px; opacity: root.enabled || root.busy ? 1 : 0.55;
     accessible-role: button; accessible-label: root.description; forward-focus: focus;
-    Label { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #1a2025 : #dcc794; horizontal-alignment: center; }
-    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
-    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => {
-        if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject;
-    } }
+    Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 12px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
+    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled && !root.busy; clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled && !root.busy; key-pressed(event) => {
+        if event.text == " " || event.text == "\n" { root.key-down = true; root.clicked(); return accept; } return reject;
+    }
+        key-released(event) => { if event.text == " " || event.text == "\n" { root.key-down = false; return accept; } return reject; }
+        changed has-focus => { if !self.has-focus { root.key-down = false; } }
+    }
 }
 export component Toggle inherits Rectangle {
     in property <bool> checked;
@@ -40,18 +54,21 @@ export component Toggle inherits Rectangle {
     callback toggled;
     width: 44px; height: 26px;
     background: root.checked ? #557260 : #253340;
+    animate background { duration: UiMotion.state; easing: ease-out; }
     border-radius: 13px; border-width: 1px;
     border-color: focus.has-focus ? Theme.blue : root.checked ? Theme.gold : Theme.stroke;
     opacity: root.enabled ? 1 : 0.45;
     accessible-role: checkbox; accessible-label: root.label; accessible-checked: root.checked;
     forward-focus: focus;
-    Rectangle { x: root.checked ? 22px : 4px; y: 4px; width: 18px; height: 18px; border-radius: 9px; background: root.checked ? Theme.ivory : Theme.muted; }
+    Rectangle { x: root.checked ? 22px : 4px; y: 4px; width: 18px; height: 18px; border-radius: 9px; background: root.checked ? Theme.ivory : Theme.muted;
+        animate x { duration: UiMotion.state; easing: ease-out; }
+    }
     TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
 }
 export component Panel inherits Rectangle {
     background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
-    Rectangle { x: 0px; y: 0px; height: 1px; background: #73603d; }
+    Rectangle { x: 0px; y: 0px; height: 1px; background: #45535a; }
     @children
 }
 export component SectionTitle inherits Label { color: #e5d2a6; font-size: 15px; }
@@ -64,6 +81,7 @@ export component Navigation inherits Rectangle {
     height: 55px;
     background: root.selected ? @linear-gradient(90deg, #263234, #0f1c29) : touch.has-hover ? #132635 : transparent;
     border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.selected ? #75613c : transparent;
+    animate background, border-color { duration: UiMotion.quick; easing: ease-out; }
     accessible-role: button; accessible-label: root.label; forward-focus: focus;
     if root.selected: Rectangle { x: 0px; width: 3px; y: 13px; height: parent.height - 26px; background: Theme.gold; }
     Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7; }
@@ -81,10 +99,10 @@ export component Module inherits Rectangle {
     background: #0c1b28; border-width: 1px; border-color: Theme.stroke;
     Rectangle { x: 0px; y: 0px; height: 2px; background: root.tone; }
     Image { x: 15px; y: 19px; width: 27px; height: 27px; source: root.icon; image-fit: contain; }
-    Label { x: root.compact ? 51px : 15px; y: root.compact ? 13px : 57px; width: parent.width - self.x - 12px; height: 18px; text: root.label; color: #aab9c1; font-size: 11px; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 10px : 55px; width: parent.width - self.x - 12px; height: 20px; text: root.label; color: #aab9c1; font-size: 12px; }
     Rectangle { x: root.compact ? 51px : 15px; y: root.compact ? 43px : 87px; width: 6px; height: 6px; border-radius: 3px; background: root.tone; }
-    Label { x: root.compact ? 64px : 28px; y: root.compact ? 33px : 77px; width: parent.width - self.x - 10px; height: 24px; text: root.value; color: root.tone; font-weight: 600; }
-    Label { x: root.compact ? 51px : 15px; y: root.compact ? 60px : 105px; width: parent.width - self.x - 12px; height: 27px; text: root.detail; color: #8da3b0; font-size: 10px; wrap: word-wrap; }
+    Label { x: root.compact ? 64px : 28px; y: root.compact ? 33px : 77px; width: parent.width - self.x - 10px; height: 24px; text: root.value; color: root.tone; font-size: 13px; font-weight: 600; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 60px : 105px; width: parent.width - self.x - 12px; height: 34px; text: root.detail; color: #a1b3bf; font-size: 12px; wrap: word-wrap; }
 }
 export component Disclosure inherits Panel {
     in property <string> label;
@@ -112,4 +130,20 @@ export component Scrollbar inherits Rectangle {
         moved => { if self.pressed { root.offset = clamp(self.start-offset - (self.mouse-y - self.pressed-y) * root.maximum / max(1px, root.height - root.thumb-height), -root.maximum, 0px); } }
         scroll-event(event) => { root.offset = clamp(root.offset + event.delta-y, -root.maximum, 0px); return accept; }
     }
+}
+
+// A reserved footer avoids moving content when feedback arrives. Long errors stay scrollable.
+export component NoticeBar inherits Rectangle {
+    in property <string> message;
+    in property <bool> enabled: true;
+    callback dismissed;
+    height: 52px; background: #102431; border-width: 1px; border-color: #385361;
+    Image { x: 12px; y: 22px; width: 7px; height: 7px; source: @image-url("assets/diamond.svg"); colorize: Theme.blue; }
+    changed message => { notice-scroll.viewport-y = 0px; }
+    notice-scroll := Flickable { x: 28px; y: 7px; width: parent.width - 80px; height: 38px;
+        viewport-width: self.width; viewport-height: max(self.height, message-text.preferred-height);
+        message-text := Text { width: notice-scroll.width; height: self.preferred-height; text: root.message; color: #d4e2e9; font-size: 12px; wrap: word-wrap; }
+    }
+    Scrollbar { x: parent.width - 52px; y: 7px; height: 38px; content-height: notice-scroll.viewport-height; offset <=> notice-scroll.viewport-y; }
+    Action { x: parent.width - 40px; y: 9px; width: 32px; min-width: 0px; height: 32px; quiet: true; label: "×"; description: "关闭操作反馈"; enabled: root.enabled; clicked => { root.dismissed(); } }
 }

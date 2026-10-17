@@ -4,9 +4,10 @@ import { Palette } from "std-widgets.slint";
 export { HostState, ShellState, MaintenanceState, RecordState, ClaimState, DiagnosticState } from "host-state.slint";
 import { HostState, ShellState, MaintenanceState, RecordState } from "host-state.slint";
 export { ChampionWindow } from "champion.slint";
+export { UiMotion } from "components.slint";
 import { SettingsPage, HistoryPage } from "pages.slint";
 import { LineEdit, AboutSlint } from "std-widgets.slint";
-import { Theme, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar } from "components.slint";
+import { Theme, UiMotion, Label, Action, Panel, SectionTitle, Navigation, Module, Disclosure, Scrollbar, NoticeBar } from "components.slint";
 
 export component Workbench inherits Window {
     title: HostState.offline ? "符择 · 离线界面预览" : "符择 · 对局助手";
@@ -78,16 +79,16 @@ export component Workbench inherits Window {
     content-focus := FocusScope { focus-on-click: false;
     enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
     content := Rectangle {
-        x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px - (root.feedback != "" ? 78px : 0px);
+        x: root.rail-width; y: 42px; width: root.width - self.x; height: root.height - 42px - 64px;
         scroll := Flickable { x: 0px; y: 0px;
             width: parent.width; height: parent.height;
             viewport-width: self.width; viewport-height: body.height + 48px;
             body := VerticalLayout {
                 height: self.preferred-height;
                 x: root.inset; y: 24px; width: scroll.width - 2 * root.inset - 10px;
-                spacing: 18px;
+                spacing: 16px;
                 Rectangle {
-                    height: 95px;
+                    height: 90px;
                     Label { x: 0px; y: 0px; height: 15px; text: "海克斯大乱斗助手"; color: Theme.gold; font-size: 10px; font-weight: 600; letter-spacing: 2px; }
                     Label { x: 0px; y: 21px; height: 41px; text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询" : "按你的习惯设置"; font-size: 27px; font-weight: 700; letter-spacing: 1px; }
                     Label { x: 0px; y: 66px; height: 23px; text: "连接、识别与推荐，进度一目了然。"; color: Theme.muted; }
@@ -96,10 +97,11 @@ export component Workbench inherits Window {
                     }
                 }
                 if root.page == 0: VerticalLayout {
-                    spacing: 18px;
+                    spacing: 16px;
                     Rectangle {
-                        height: 164px; border-width: 1px; border-color: root.tone;
+                        height: 156px; border-width: 1px; border-color: root.tone;
                         background: @linear-gradient(110deg, root.tone-background, #0d1b28);
+                        animate background, border-color { duration: UiMotion.state; easing: ease-out; }
                         Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 1px; border-color: #091724; background: transparent; }
                         Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
                         Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }
@@ -113,7 +115,7 @@ export component Workbench inherits Window {
                         spacing: 3px;
                         Label { height: 14px; text: "整体胜率 · 正式领取轮次未确认"; color: #98a9b3; font-size: 10px; }
                         module-grid := Rectangle {
-                            height: root.narrow ? 202px : 137px;
+                            height: root.narrow ? 220px : 145px;
                             for item[index] in [
                                 {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "通信已验证", hint: HostState.connected ? HostState.connection-hint : root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
                                 {label: "游戏画面", value: HostState.connected ? HostState.capture-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: HostState.connected ? HostState.capture-hint : "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: HostState.connected ? (HostState.capture-tone == 3 ? Theme.red : HostState.capture-tone == 2 ? Theme.yellow : HostState.capture-tone == 1 ? Theme.green : Theme.blue) : root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
@@ -121,9 +123,9 @@ export component Workbench inherits Window {
                                 {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20.1 · 示例", hint: "保留数据版本 · 使用整体胜率", icon: @image-url("assets/data.svg"), tone: HostState.connected && HostState.data-version == "—" ? Theme.yellow : Theme.green}
                             ]: Module {
                                 x: mod(index, root.narrow ? 2 : 4) * (self.width + 12px);
-                                y: root.narrow && index >= 2 ? 107px : 0px;
+                                y: root.narrow && index >= 2 ? 116px : 0px;
                                 width: (parent.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2 : 4);
-                                height: root.narrow ? 95px : 137px;
+                                height: root.narrow ? 104px : 145px;
                                 label: item.label; value: item.value; detail: item.hint; icon: item.icon; tone: item.tone; compact: root.narrow;
                             }
                         }
@@ -131,7 +133,7 @@ export component Workbench inherits Window {
                     Panel {
                         height: 273px;
                         SectionTitle { x: 21px; y: 18px; height: 25px; text: "本局最近识别"; }
-                        Label { x: 21px; y: 46px; height: 21px; text: "只有实际识别出的强化符文才会出现在这里。"; color: Theme.muted; font-size: 11px; }
+                        Label { x: 21px; y: 46px; height: 21px; text: "只有实际识别出的强化符文才会出现在这里。"; color: Theme.muted; font-size: 12px; }
                         HorizontalLayout {
                             x: 21px; y: 85px; width: parent.width - 42px; height: 166px; spacing: 13px;
                             for name[index] in ["裁决使", "超凡邪恶", "神射法师"]: Rectangle {
@@ -139,7 +141,7 @@ export component Workbench inherits Window {
                                 Label { x: 15px; y: 13px; height: 20px; text: "选项 " + (index + 1); color: #91a6b2; font-size: 10px; }
                                 Image { x: (parent.width - 43px)/2; y: 47px; width: 43px; height: 43px; source: @image-url("assets/rune.svg"); }
                                 Label { x: 0px; y: 100px; width: parent.width; height: 24px; horizontal-alignment: center; text: HostState.connected ? HostState.slots[index].name : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "此位置暂不可读" : name) : "等待海克斯出现"; color: #b4c0c5; font-size: 13px; }
-                                Label { x: 10px; y: 131px; width: parent.width - 20px; height: 24px; horizontal-alignment: center; wrap: word-wrap; text: HostState.connected ? HostState.slots[index].hint : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #8fa3ae; font-size: 10px; }
+                                Label { x: 10px; y: 130px; width: parent.width - 20px; height: 36px; horizontal-alignment: center; wrap: word-wrap; text: HostState.connected ? HostState.slots[index].hint : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #a1b3bf; font-size: 12px; }
                             }
                         }
                     }
@@ -157,10 +159,6 @@ export component Workbench inherits Window {
                 }
                 if root.page == 1: HistoryPage { sample: root.history-sample; }
                 if root.page == 2: SettingsPage { }
-                Rectangle { height: 30px;
-                    Label { x: 0px; y: 0px; height: 30px; text: HostState.offline ? "状态更新 · 离线预览" : "状态来自本机运行服务"; color: #8698a5; font-size: 10px; }
-                    Label { y: 0px; x: parent.width - 190px; width: 190px; height: 30px; text: "符择 · 中文版结构恢复"; horizontal-alignment: right; color: #8698a5; font-size: 10px; }
-                }
                 if root.backend-note != "": Panel {
                     height: 180px;
                     VerticalLayout { x: 0px; y: 0px; padding: 20px; spacing: 10px;
@@ -175,13 +173,16 @@ export component Workbench inherits Window {
         Scrollbar { x: parent.width - 13px; y: 6px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     }
     }
-    if root.feedback != "": Panel {
-        x: root.rail-width + 16px; y: root.height - 72px; width: root.width - root.rail-width - 32px; height: 64px;
-        Label { x: 14px; y: 7px; width: parent.width - 68px; height: 50px; text: root.feedback; wrap: word-wrap; color: Theme.yellow; }
-        Action { x: parent.width - 48px; y: 13px; width: 36px; min-width: 0px; height: 36px; quiet: true; label: "×"; description: "关闭操作反馈";
-            enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
-            clicked => { HostState.notice = ""; RecordState.notice = ""; ShellState.notice = ""; MaintenanceState.notice = ""; root.feedback = ""; }
-        }
+    if root.feedback == "": Rectangle {
+        x: root.rail-width + root.inset; y: root.height - 58px; width: root.width - self.x - root.inset - 10px; height: 52px;
+        Label { x: 0px; width: parent.width - 190px; height: parent.height; horizontal-alignment: left; text: HostState.offline ? "状态更新 · 离线预览" : "状态来自本机运行服务"; color: Theme.muted; font-size: 11px; }
+        Label { x: parent.width - 190px; width: 190px; height: parent.height; text: "符择 · 中文版"; horizontal-alignment: right; color: Theme.muted; font-size: 11px; }
+    }
+    if root.feedback != "": NoticeBar {
+        x: root.rail-width + root.inset; y: root.height - 58px; width: root.width - self.x - root.inset - 10px;
+        message: root.feedback;
+        enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
+        dismissed => { HostState.notice = ""; RecordState.notice = ""; ShellState.notice = ""; MaintenanceState.notice = ""; root.feedback = ""; }
     }
     changed quit-open => { if root.quit-open { cancel-exit.focus(); } else { content-focus.focus(); } }
     Rectangle { x: 0px; y: 0px; visible: root.quit-open;

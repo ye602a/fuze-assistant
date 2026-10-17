@@ -18,6 +18,7 @@ mod lifecycle;
 mod maintenance_bridge;
 mod maintenance_review;
 mod manual_profile;
+mod motion;
 mod native_shell;
 mod overlay_review;
 mod public_art;
@@ -94,6 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let renderer = args.get(1).map(String::as_str).unwrap_or(if cfg!(feature="gpu") {"skia"} else {"software"});
             if !matches!(renderer, "software" | "skia" | "skia-software") { return Err("unsupported renderer".into()); }
             if renderer != "software" && !cfg!(feature = "gpu") { return Err("build with --features gpu first".into()); }
+            motion::configure(renderer == "skia");
             slint::BackendSelector::new().backend_name("winit".into()).renderer_name(renderer.into()).select()?;
             let ui = Workbench::new()?;
             slint_probe::connect(&ui);

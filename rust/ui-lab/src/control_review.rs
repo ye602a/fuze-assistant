@@ -331,7 +331,15 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         ui.set_paused(value);
         a.click(ui, label, Some("host:toggle-running"));
     }
+    let content_bottom = ui.get_content_bottom();
     s.set_notice("测试提示".into());
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
+    let _ = ui.window().take_snapshot()?;
+    a.check(
+        "反馈不挤动内容区",
+        ui.get_content_bottom() == content_bottom,
+        "reserved footer geometry",
+    );
     a.click(ui, "关闭操作反馈", None);
     a.check("关闭提示结果", s.get_notice().is_empty(), "notice cleared");
     ui.global::<ShellState>().set_notice("测试提示".into());
@@ -819,6 +827,30 @@ pub fn run(output: &Path) -> Result<serde_json::Value> {
         champion_ui
             .window()
             .set_size(slint::LogicalSize::new(cw, ch));
+        // Public fixtures only. Capture the overview, not a scrolled detail tab.
+        use slint::Model;
+        let hero = champion_ui
+            .get_bench()
+            .row_data(1)
+            .ok_or("missing-public-fixture")?;
+        champion_ui.set_inspected_id(hero.id);
+        champion_ui.set_inspected_name(hero.name);
+        champion_ui.set_inspected_icon(hero.icon);
+        champion_ui.set_inspected_win(hero.win);
+        champion_ui.set_inspected_pick(hero.pick);
+        for (name, window) in [
+            (format!("home-{w:.0}.png"), ui.window()),
+            (format!("champion-{cw:.0}.png"), champion_ui.window()),
+        ] {
+            let p = window.take_snapshot()?;
+            image::save_buffer(
+                output.join(name),
+                p.as_bytes(),
+                p.width(),
+                p.height(),
+                image::ColorType::Rgba8,
+            )?;
+        }
         workbench(&mut audit, &ui)?;
         champion(&mut audit, &champion_ui)?;
         use slint::winit_030::WinitWindowAccessor;

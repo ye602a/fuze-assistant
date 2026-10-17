@@ -98,7 +98,7 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [10., 14., 20., 24.] {
+            for size in [11., 14., 20., 24.] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,

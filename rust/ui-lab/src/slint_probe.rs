@@ -264,6 +264,7 @@ pub fn connect(ui: &Workbench) {
     let weak = ui.as_weak();
     ui.on_minimize(move || {
         if let Some(ui) = weak.upgrade() {
+            crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
             ui.window()
                 .with_winit_window(|window| window.set_minimized(true));
         }
@@ -294,6 +295,16 @@ pub fn connect(ui: &Workbench) {
     });
     // Text remains in the widget model only; no files, telemetry or network.
     ui.on_query_edited(|_| {});
+    let weak = ui.as_weak();
+    ui.window().on_winit_window_event(move |_, event| {
+        use slint::winit_030::{winit::event::WindowEvent, EventResult};
+        if let WindowEvent::Focused(focused) = event {
+            if let Some(ui) = weak.upgrade() {
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), *focused);
+            }
+        }
+        EventResult::Propagate
+    });
 }
 pub fn review(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let start = Instant::now();
@@ -365,12 +376,41 @@ pub fn review(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Er
             return Err("unexpected continuous Slint redraw".into());
         }
     }
+    // Exercise actual property transitions without an OS window or frame-rate loop in production.
+    let motion = ui.global::<crate::UiMotion>();
+    motion.set_enabled(true);
+    ui.set_health(1);
+    let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
+    let mut motion_frames = 0;
+    for _ in 0..15 {
+        slint::platform::update_timers_and_animations();
+        if window.draw_if_needed(|r| {
+            r.render(&mut pixels, 920);
+        }) {
+            motion_frames += 1;
+        }
+        // A duplicate host update must not restart the finite transition.
+        ui.set_health(1);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if ui.window().has_active_animations() {
+        return Err("motion-did-not-settle".into());
+    }
+    motion.set_enabled(false);
+    ui.set_health(0);
+    slint::platform::update_timers_and_animations();
+    window.draw_if_needed(|r| {
+        r.render(&mut pixels, 920);
+    });
+    if ui.window().has_active_animations() {
+        return Err("reduced-motion-not-immediate".into());
+    }
     ui.invoke_cycle_health();
     if ui.get_health() != 1 {
         return Err("state callback failed".into());
     }
     ui.hide()?;
     Ok(
-        serde_json::json!({"renderer":"software_offscreen","startup_ms":startup_ms,"cases":cases,"chinese_model_roundtrip":true,"real_ime_verified":false,"native_window_verified":false,"hardware_dpi_verified":false}),
+        serde_json::json!({"renderer":"software_offscreen","startup_ms":startup_ms,"cases":cases,"motion_frames":motion_frames,"duplicate_updates_settle":true,"reduced_motion_immediate":true,"chinese_model_roundtrip":true,"real_ime_verified":false,"native_window_verified":false,"hardware_dpi_verified":false}),
     )
 }

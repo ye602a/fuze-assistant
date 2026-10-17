@@ -186,6 +186,16 @@ pub fn attach(
     let redraw_observed = Rc::new(Cell::new(false));
     let redraw = redraw_observed.clone();
     ui.window().on_winit_window_event(move |_, event| {
+        if let WindowEvent::Focused(focused) = event {
+            if let Some(ui) = weak.upgrade() {
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), interactive && *focused);
+            }
+        }
+        if matches!(event, WindowEvent::Occluded(true)) {
+            if let Some(ui) = weak.upgrade() {
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
+            }
+        }
         if matches!(event, WindowEvent::RedrawRequested) {
             redraw.set(true);
         }
