@@ -3,27 +3,44 @@ use fuze_contract::{
     wire::{Request, TitleKind},
     Slot,
 };
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct TitleReuse {
-    previous: Option<(Request, [Slot; 3], TitleKind)>,
+    previous: Option<(Request, [Slot; 3], TitleKind, Instant)>,
 }
 impl TitleReuse {
     pub fn get(&self, request: &Request) -> Option<([Slot; 3], TitleKind)> {
-        let (old, slots, kind) = self.previous.as_ref()?;
-        (old.id.generation == request.id.generation
+        self.get_at(request, Instant::now())
+    }
+    fn get_at(&self, request: &Request, now: Instant) -> Option<([Slot; 3], TitleKind)> {
+        let (old, slots, kind, until) = self.previous.as_ref()?;
+        (now < *until
+            && old.id.generation == request.id.generation
             && old.width == request.width
             && old.height == request.height
             && old.pixels == request.pixels)
             .then(|| (slots.clone(), *kind))
     }
     pub fn remember(&mut self, request: Request, slots: [Slot; 3], kind: TitleKind) {
+        self.remember_at(request, slots, kind, Instant::now());
+    }
+    fn remember_at(&mut self, request: Request, slots: [Slot; 3], kind: TitleKind, now: Instant) {
+        // Match the legacy bounded reuse policy: a static failed/partial read must retry.
+        // Hits do not extend the deadline. Keep exact bytes rather than another hash pass.
+        let seconds = if kind == TitleKind::StatShard {
+            10
+        } else if slots.iter().all(|s| matches!(s, Slot::Known { .. })) {
+            3
+        } else {
+            1
+        };
         // The wire decoder already bounds size; keep this boundary valid for internal callers too.
         self.previous = request
             .atlas()
             .ok()
             .map(|_| ())
-            .map(|_| (request, slots, kind));
+            .map(|_| (request, slots, kind, now + Duration::from_secs(seconds)));
     }
 }
 
@@ -83,5 +100,34 @@ mod tests {
             TitleKind::Unknown,
         );
         assert!(cache.get(&request(1, 7, 2, 1, 8)).is_none());
+    }
+    #[test]
+    fn identical_failed_partial_full_and_shard_reads_have_bounded_reuse() {
+        let now = Instant::now();
+        for (count, kind, seconds) in [
+            (0, TitleKind::Unknown, 1),
+            (1, TitleKind::Candidate, 1),
+            (3, TitleKind::Candidate, 3),
+            (0, TitleKind::StatShard, 10),
+        ] {
+            let mut cache = TitleReuse::default();
+            let slots = std::array::from_fn(|i| {
+                if i < count {
+                    Slot::Known {
+                        id: i as u32 + 1,
+                        name: "fixture".into(),
+                        confidence: 1.0,
+                    }
+                } else {
+                    Slot::Unreadable
+                }
+            });
+            cache.remember_at(request(1, 1, 2, 1, 9), slots, kind, now);
+            let end = now + Duration::from_secs(seconds);
+            assert!(cache
+                .get_at(&request(1, 2, 2, 1, 9), end - Duration::from_millis(1))
+                .is_some());
+            assert!(cache.get_at(&request(1, 3, 2, 1, 9), end).is_none());
+        }
     }
 }

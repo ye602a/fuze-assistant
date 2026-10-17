@@ -37,9 +37,11 @@ pub struct FrameResult {
     pub selection_confirmed: bool,
 }
 
-// Trim horizontal background inside an already fixed title ROI. This is not a popup detector.
-// Ignore card-edge bands; retain generous padding and the original vertical geometry.
+// Locate one title line inside the legacy title envelope, without another inference or
+// full-screen text fallback. The larger glyph band wins over the small category label.
+// Only the three title crops are scanned; preserve card order and glyph aspect ratio.
 fn trim_title_padding(crop: RgbImage) -> RgbImage {
+    let crop = trim_title_rows(crop);
     let (w, h) = crop.dimensions();
     let edge = w * 8 / 100;
     let mut first = w;
@@ -60,6 +62,48 @@ fn trim_title_padding(crop: RgbImage) -> RgbImage {
         let left = first.saturating_sub(h / 2);
         let right = (last + 1 + h / 2).min(w);
         image::imageops::crop_imm(&crop, left, 0, right - left, h).to_image()
+    } else {
+        crop
+    }
+}
+
+fn trim_title_rows(crop: RgbImage) -> RgbImage {
+    let (w, h) = crop.dimensions();
+    let edge = w * 8 / 100;
+    let inner = w - edge * 2;
+    let gap = (h / 50).max(1);
+    let mut bands = Vec::new();
+    let mut start = None;
+    let mut last = 0;
+    for y in 0..h {
+        let count = (edge..w - edge)
+            .filter(|&x| {
+                let p = crop.get_pixel(x, y);
+                p[0] >= 160 && p[1] >= 160 && p[2] >= 130
+            })
+            .count() as u32;
+        let active = count >= (w / 100).max(3) && count < inner * 70 / 100;
+        if active {
+            start.get_or_insert(y);
+            last = y;
+        } else if start.is_some() && y > last + gap {
+            bands.push((start.take().unwrap(), last + 1));
+        }
+    }
+    if let Some(start) = start {
+        bands.push((start, last + 1));
+    }
+    let band = bands
+        .into_iter()
+        .filter(|(top, bottom)| bottom - top >= (h / 30).max(3) && bottom - top <= h * 3 / 4)
+        .max_by_key(|(top, bottom)| {
+            (bottom - top) as i64 * 100 - ((top + bottom) as i64 - h as i64).abs()
+        });
+    if let Some((top, bottom)) = band {
+        let padding = ((bottom - top) / 3).max(2);
+        let top = top.saturating_sub(padding);
+        let bottom = (bottom + padding).min(h);
+        image::imageops::crop_imm(&crop, 0, top, w, bottom - top).to_image()
     } else {
         crop
     }
@@ -346,7 +390,7 @@ impl Recognizer {
         let mut slots = [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable];
         let mut shards = [false; 3];
         let mut title_reads = [fuze_contract::wire::TitleRead::Unknown; 3];
-        // Prototype fixed single-line title geometry, not a generic text detector.
+        // One recognition pass per card; locate its title inside the bounded envelope.
         for (i, slot) in slots.iter_mut().enumerate() {
             let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
             let shard_name = selection::shard_title(&name, 1.0);

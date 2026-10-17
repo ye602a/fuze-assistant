@@ -13,10 +13,12 @@ pub fn regions(width: u32, height: u32) -> Result<[Region; 3], &'static str> {
         return Err("invalid-title-frame");
     }
     let regions = std::array::from_fn(|i| Region {
-        x: ((0.2305 + i as f64 * 0.1855 + 0.01344) * width as f64).round() as u32,
-        y: (0.385 * height as f64).round() as u32,
-        width: (0.14112 * width as f64).round() as u32,
-        height: (0.03 * height as f64).round().max(1.) as u32,
+        // v0.6.3 Paddle title envelope. The recognizer locates the title line inside it;
+        // clipping to a fixed 3%-high strip loses glyphs during card motion/scaling.
+        x: ((0.2305 + i as f64 * 0.1855 + 0.00336) * width as f64).round() as u32,
+        y: (0.35 * height as f64).round() as u32,
+        width: (0.16128 * width as f64).round() as u32,
+        height: (0.095 * height as f64).round().max(1.) as u32,
     });
     if regions
         .iter()

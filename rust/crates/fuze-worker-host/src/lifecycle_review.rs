@@ -122,6 +122,26 @@ fn fixtures(root: &str) -> Result<Vec<Pixels>> {
         width: 300,
         height: 40,
     });
+    // Shift only the title atlas from the committed fixture. The former narrow crop
+    // could not contain these offsets; this exercises the real line locator and worker.
+    for offset in [-20_i32, 20] {
+        let p = &result[0];
+        let stride = p.width as usize * 12;
+        let mut bytes = vec![0; p.bytes.len()];
+        for y in 0..p.height as i32 {
+            let source = y - offset;
+            if source >= 0 && source < p.height as i32 {
+                bytes[y as usize * stride..(y as usize + 1) * stride].copy_from_slice(
+                    &p.bytes[source as usize * stride..(source as usize + 1) * stride],
+                );
+            }
+        }
+        result.push(Pixels {
+            bytes,
+            width: p.width,
+            height: p.height,
+        });
+    }
     Ok(result)
 }
 fn context(phase: Phase, champion: u32, game: u64) -> Result<Context> {
@@ -311,11 +331,36 @@ pub fn run(
         "capture-review-unknown-hero-stats",
     )?;
     let first_context = frame.context;
+    for image in [5, 6] {
+        require(
+            ids(&r.next(playing, Some(3), image)?) == ids(&full),
+            "capture-review-title-offset",
+        )?;
+    }
     let partial = r.next(playing, Some(3), 3)?;
     require(
         ids(&partial) == ids(&full) && partial.pipeline.overlay.as_ref().unwrap().retained,
         "capture-review-retention",
     )?;
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = r.next(playing, Some(3), 3)?;
+        let frame = status
+            .pipeline
+            .overlay
+            .as_ref()
+            .ok_or("capture-review-partial-flicker")?;
+        if !frame.retained {
+            require(
+                ids(&status) == [Some(1032), None, None],
+                "capture-review-partial-positions",
+            )?;
+            break;
+        }
+        require(Instant::now() < until, "capture-review-partial-grace")?;
+    }
+    r.next(playing, Some(3), 0)?;
+    r.next(playing, Some(3), 3)?;
     r.input.lock().unwrap().stalled = true;
     let until = Instant::now() + Duration::from_secs(4);
     while r.tick(playing, None)?.pipeline.overlay.is_some() {
@@ -407,6 +452,7 @@ pub fn run(
         "first_threshold_to_delivery_ms":first_ms,"ui_updates":r.updates,"worker_reaped":true,
         "loading_capture_started":false,"unknown_hero_recognized":true,"statistics_available":!minimal,
         "occlusion_expired_without_frames":true,"reroll_preserved_positions":true,"shards_hidden":true,
+        "title_offsets_recognized":true,"continuous_partial_remained_visible":true,
         "formal_after_shards_recognized":true,"new_match_isolated":true,"statistics_scope":"overall",
         "selection_confirmed":false,"actual_stage":null,"game_access":false,"system_input":false,
         "native_screen_tested":false,"real_game_verified":false}),

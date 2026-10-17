@@ -4,6 +4,9 @@ const GRACE_MS: u64 = 2500;
 #[derive(Default)]
 pub struct Retention {
     previous: Option<[Slot; 3]>,
+    grace_until: Option<u64>,
+    // Separate loss-of-capture deadline from the missing-slot grace period. Fresh
+    // matching cards keep the window alive while missing slots downgrade in place.
     until: Option<u64>,
 }
 pub struct Display {
@@ -53,14 +56,22 @@ impl Retention {
                 .filter(|s| matches!(s, Slot::Known { .. }))
                 .count();
         if subset {
-            self.until.get_or_insert(now.saturating_add(GRACE_MS));
-            return Display {
-                slots: self.previous.as_ref().unwrap().clone(),
-                retained: true,
-                visible: true,
-            };
+            let grace = *self.grace_until.get_or_insert(now.saturating_add(GRACE_MS));
+            if known {
+                self.until = Some(now.saturating_add(GRACE_MS));
+            } else {
+                self.until.get_or_insert(now.saturating_add(GRACE_MS));
+            }
+            if now < grace {
+                return Display {
+                    slots: self.previous.as_ref().unwrap().clone(),
+                    retained: true,
+                    visible: true,
+                };
+            }
         }
         self.until = None;
+        self.grace_until = None;
         self.previous = known.then(|| slots.clone());
         Display {
             slots: slots.clone(),
@@ -112,5 +123,26 @@ mod tests {
         r.apply(&cards([0, 0, 0]), TitleKind::Unknown, 4100);
         assert!(r.expire(6600)); // No new capture is required to expire the display.
         assert!(r.previous.is_none());
+    }
+    #[test]
+    fn continuing_partial_reads_downgrade_missing_slots_without_hiding_the_window() {
+        let mut r = Retention::default();
+        r.apply(&cards([1, 2, 3]), TitleKind::Candidate, 0);
+        for at in [100, 600, 1100, 1600, 2100] {
+            assert!(!r.expire(at));
+            let d = r.apply(&cards([1, 0, 3]), TitleKind::Candidate, at);
+            assert!(d.visible && d.retained);
+        }
+        assert!(!r.expire(2600));
+        let partial = r.apply(&cards([1, 0, 3]), TitleKind::Candidate, 2600);
+        assert!(partial.visible && !partial.retained);
+        assert_eq!(partial.slots, cards([1, 0, 3]));
+        assert_eq!(r.deadline(), None);
+        assert!(
+            r.apply(&cards([1, 0, 3]), TitleKind::Candidate, 3100)
+                .visible
+        );
+        r.apply(&cards([0, 0, 0]), TitleKind::Unknown, 3200);
+        assert!(!r.apply(&cards([0, 0, 0]), TitleKind::Unknown, 5700).visible);
     }
 }

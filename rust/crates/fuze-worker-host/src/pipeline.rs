@@ -393,16 +393,12 @@ impl Pipeline {
         if self.cancel_if_requested()? {
             return Ok(None);
         }
-        if self.retention.expire(self.now()) {
-            self.frames.clear();
-            self.overlay.visible(false)?;
-            self.capture_state = "waiting-frame";
-        }
         let saving = self.scheduling().0 == fuze_runtime::gate::Mode::Saving;
         if let Some(capture) = self.capture.as_mut() {
             capture.saving(saving);
         }
         if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
+            self.expire_retained()?;
             self.skipped_frames = self.skipped_frames.saturating_add(1);
             return Ok(None);
         }
@@ -483,7 +479,18 @@ impl Pipeline {
         if !discard {
             self.capture = Some(capture);
         }
+        // Let a fresh frame replace the previous display before expiring stale retention.
+        // A timeout still expires normally, without waiting for another captured frame.
+        self.expire_retained()?;
         result
+    }
+    fn expire_retained(&mut self) -> Result<()> {
+        if self.retention.expire(self.now()) {
+            self.frames.clear();
+            self.overlay.visible(false)?;
+            self.capture_state = "waiting-frame";
+        }
+        Ok(())
     }
 }
 
