@@ -164,6 +164,10 @@ jobs:
           restore-keys: ui-lab-win-1.90-
       - name: Level scheduling and public stage cache boundaries
         run: |
+          cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-capture -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-capture --lib target::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib stage_reference
