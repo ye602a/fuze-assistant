@@ -42,11 +42,14 @@ jobs:
         run: node scripts/check-secrets.mjs
       - name: Rust toolchain
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: rust-cache
         with:
           path: rust/ui-lab/target
-          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
-          restore-keys: ui-lab-win-1.90-
+          key: ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-
+            ui-lab-win-1.90-
       - name: Format and build software and Skia entry points
         working-directory: rust/ui-lab
         run: |
@@ -81,6 +84,7 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-motion artifacts/motion
           exit $LASTEXITCODE
       - name: Build normal frontend and OCR worker from the same checkout
+        id: production-build
         run: |
           cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --release --locked --features gpu -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -111,3 +115,9 @@ jobs:
           FUZE_RUST_BIN_DIR: rust/ui-lab/target/release
         run: node scripts/check-rust-screen.mjs
       # Owned capture fixtures on disposable CI only; no player game, installer or release.
+      - name: Preserve compiled dependencies after runtime failures
+        if: always() && steps.production-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: rust/ui-lab/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

@@ -229,6 +229,19 @@ pub fn run(
                     break None;
                 }
                 if Instant::now() >= deadline {
+                    // Fixed/numeric fixture diagnostics only, never desktop pixels or paths.
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "passed":false,"error":"capture-review-timeout",
+                            "sample":index,"repeat":repeat,"fixture_width":image.width(),
+                            "fixture_height":image.height(),"capture_state":pipeline.capture_state,
+                            "source":pipeline.capture_source(),"fallback":pipeline.capture_fallback(),
+                            "recent_frame_ms":pipeline.last_capture.map(|at|at.elapsed().as_millis()),
+                            "skipped_frames":pipeline.skipped_frames,"busy_frames":pipeline.busy_frames,
+                            "interval_ms":pipeline.scheduling().1
+                        })
+                    );
                     return Err("capture-review-timeout".into());
                 }
                 std::thread::sleep(Duration::from_millis(20));

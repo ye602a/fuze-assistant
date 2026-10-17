@@ -1143,7 +1143,16 @@ impl Drop for Surface {
 
 /// Numeric test metadata only; never reads desktop pixels.
 pub fn fixture_screen_size() -> (i32, i32) {
-    unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
+    unsafe {
+        // The fixture window and capture feed use physical pixels. The caller may
+        // be a fresh Slint worker thread with a different inherited DPI context.
+        let previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let size = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        if !previous.is_null() {
+            SetThreadDpiAwarenessContext(previous);
+        }
+        size
+    }
 }
 
 #[cfg(test)]
