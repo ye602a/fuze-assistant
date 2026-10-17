@@ -15,6 +15,7 @@ const augments=Object.entries(catalog).map(([name,id])=>({name,id}))
 await writeFile(path.join(fixtureData,'current.json'),JSON.stringify({schemaVersion:3,locale:'zh-CN',dataVersion:version}))
 await writeFile(path.join(versionDir,'manifest.json'),JSON.stringify({locale:'zh-CN',dataVersion:version,files:[{path:'augments.json'}]}))
 await writeFile(path.join(versionDir,'augments.json'),JSON.stringify({data:augments}))
+await writeFile(path.join(versionDir,'items.json'),JSON.stringify({data:[]}))
 await writeFile(path.join(versionDir,'champion-shards/index.json'),JSON.stringify({dataVersion:version,shards:[{path:'champion-shards/1.json',championIds:[8]}]}))
 await writeFile(path.join(versionDir,'champion-shards/1.json'),JSON.stringify({champions:{8:{augments:augments.map(a=>({...a,stats:{winRate:0.6,pickRate:0.12,games:900,source:'fixture',region:'TEST',gamePatch:'fixture'}}))}}}))
 const ci=process.env.GITHUB_ACTIONS==='true' && process.env.FUZE_RUST_CI_VISIBLE==='1'
@@ -30,8 +31,9 @@ for(const {mode,data,label} of cases) {
     data,mode,'cpu',path.join(output,label)],120000)
   results.push(report)
   console.log(JSON.stringify({case:label,...report}))
+  const completeStatistics = label==='bundled-current' || report.frames?.filter(f=>f.sample===0).every(f=>f.statistics_slots?.every(Boolean))
   if(!report.exit_ok || !report.passed || report.production_ui_publisher!==true ||
-     !report.foreground_unchanged || report.hidden_native_popup_renders<2 || !report.worker_reaped) {
+     !report.foreground_unchanged || report.hidden_native_popup_renders<2 || !report.worker_reaped || !completeStatistics) {
     process.exitCode=1
     break
   }

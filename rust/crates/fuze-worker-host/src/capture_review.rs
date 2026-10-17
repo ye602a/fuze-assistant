@@ -121,6 +121,7 @@ pub fn run(
         level_gate: true,
     };
     let data = config.prepare_data(8, fuze_data::Locale::ZhCn)?;
+    let details = data.champion_detail(8)?;
     // Exact production preparation, including the independent recognition catalog.
     let mut pipeline = config.prepare(8, fuze_data::Locale::ZhCn)?;
     if pipeline.has_capture() || pipeline.wake_at().is_some() {
@@ -231,10 +232,9 @@ pub fn run(
                     .current()
                     .ok_or("capture-review-frame-missing")?;
                 for i in 0..3 {
-                    if published.cards[i]
-                        .as_ref()
-                        .is_some_and(|c| Some(c.id) != expected[i])
-                    {
+                    let expected_card =
+                        expected[i].and_then(|id| details.augments.iter().find(|a| a.id == id));
+                    if published.cards[i].as_deref() != expected_card {
                         return Err("capture-review-card-data".into());
                     }
                 }
@@ -249,6 +249,7 @@ pub fn run(
             present(&pipeline, Some(&delivery), frames.len())?;
             frames.push(serde_json::json!({"sample":index,"repeat":repeat,"source":pipeline.capture_source(),
                 "fallback":pipeline.capture_fallback(),"matched":true,"slots":actual.map(|s|s.is_some()),
+                "statistics_slots":pipeline.frames.current().map(|f|f.cards.each_ref().map(|c|c.as_ref().is_some_and(|c|c.win.is_some() && c.pick.is_some()))),
                 "ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"roi_bytes":delivery.roi_bytes}));
             last_snapshot = Some(delivery.snapshot);
         }

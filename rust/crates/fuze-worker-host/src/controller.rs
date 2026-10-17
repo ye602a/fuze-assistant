@@ -368,8 +368,9 @@ impl Config {
         champion: u32,
         locale: fuze_data::Locale,
     ) -> Result<fuze_data::Prepared> {
-        let mut data =
-            fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Champion(champion))?;
+        // The production popup needs the same complete detail scope as the champion page.
+        // Load one shard and the small item catalogue once during preparation, never per frame.
+        let mut data = fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Detail(champion))?;
         let (supplement, _) = crate::recognition_sources::load(&self.roots)?;
         data.supplement_recognition(&supplement);
         Ok(data)

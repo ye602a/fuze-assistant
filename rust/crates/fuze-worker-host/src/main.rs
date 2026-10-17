@@ -195,7 +195,7 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
             source: fuze_data::Source::Bundled,
         }],
         fuze_data::Locale::ZhCn,
-        fuze_data::Scope::Champion(8),
+        fuze_data::Scope::Detail(8),
     )?;
     let stats = prepared.recommendations(8)?;
     if stats

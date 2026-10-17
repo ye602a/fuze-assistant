@@ -64,7 +64,7 @@ impl Pipeline {
         headless: bool,
     ) -> Result<Self> {
         let dataset = data.identity();
-        let detail = data.champion_detail(champion).unwrap_or_default();
+        let detail = data.champion_detail(champion)?;
         let tiers = detail
             .augments
             .iter()
