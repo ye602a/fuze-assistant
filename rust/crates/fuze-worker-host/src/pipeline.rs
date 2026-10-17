@@ -102,8 +102,9 @@ impl Pipeline {
         } else {
             data.recommendations(champion)?
         };
-        let frames = crate::overlay_frame::Publisher::new(
+        let frames = crate::overlay_frame::Publisher::with_catalog(
             detail.augments,
+            data.recognition_cards(),
             stats
                 .iter()
                 .filter_map(|(id, r)| r.score.map(|s| (*id, s)))

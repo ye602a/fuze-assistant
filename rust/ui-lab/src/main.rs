@@ -27,6 +27,7 @@ mod motion_review;
 mod native_shell;
 mod overlay_review;
 mod public_art;
+mod public_augment_art;
 mod record_bridge;
 #[cfg(feature = "gpu")]
 mod skia_surface_probe;
@@ -43,6 +44,7 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-icons") if args.len()==3 => println!("{}",direct::review_icons(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-close") if args.len()==3 => println!("{}",host_review::close_only(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-feedback") if args.len()==2 => println!("{}",feedback_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-capture") => println!("{}",capture_review::run(&args[1..])?),

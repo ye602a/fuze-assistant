@@ -12,6 +12,7 @@ import { Theme, UiMotion, StatusSurface, PageEntrance, Label, Action, Panel, Sec
 
 export component Workbench inherits Window {
     title: HostState.offline ? "符择 · 离线界面预览" : "符择 · 对局助手";
+    icon: @image-url("../../../public/fuze.png");
     preferred-width: 1120px; preferred-height: 860px; min-width: 920px; min-height: 760px;
     init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;

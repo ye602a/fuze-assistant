@@ -8,6 +8,7 @@ export struct StageRow { name: string, win: string, pick: string, samples: strin
 
 export component ChampionWindow inherits Window {
     title: root.side-mode ? "符择 · 局内符文资料" : "符择 · 英雄详情";
+    icon: @image-url("../../../public/fuze.png");
     init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
     preferred-width: 420px; preferred-height: 640px; min-width: 380px; min-height: 600px;

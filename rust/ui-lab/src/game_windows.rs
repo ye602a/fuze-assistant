@@ -396,6 +396,7 @@ impl Manager {
             self.cards = Some(HostOverlay::new(self.offline).map_err(|_| "overlay-window")?);
         }
         if let Some(cards) = self.cards.as_mut() {
+            cards.options(status.preferences.icon_downloads);
             cards
                 .update(frame, self.visible)
                 .map_err(|_| "overlay-window")?;

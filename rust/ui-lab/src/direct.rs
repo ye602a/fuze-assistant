@@ -1,5 +1,8 @@
 //! Isolated Direct2D/DirectWrite probe; never attaches to another application's window.
 use fuze_contract::Slot;
+use fuze_worker_host::champion_assets::{
+    Reply as ArtReply, Request as ArtRequest, Service as ArtService,
+};
 use fuze_worker_host::overlay_frame::Frame;
 use std::{path::Path, time::Instant};
 #[derive(Clone, PartialEq, Default)]
@@ -310,13 +313,47 @@ impl Surface {
                 continue;
             }
             self.fill(target, rect(x + 10., 49., 64., 64.), 0x07131e);
-            target.DrawBitmap(
-                &self.icons[i],
-                Some(&rect(x + 12., 51., 60., 60.)),
-                1.,
-                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                None,
-            );
+            if scene.icons[i].width() > 1 {
+                target.DrawBitmap(
+                    &self.icons[i],
+                    Some(&rect(x + 12., 51., 60., 60.)),
+                    1.,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
+            } else {
+                self.brush.SetColor(&color(GOLD));
+                let points = [
+                    (x + 42., 58.),
+                    (x + 56., 72.),
+                    (x + 42., 86.),
+                    (x + 28., 72.),
+                    (x + 42., 58.),
+                ];
+                for p in points.windows(2) {
+                    target.DrawLine(
+                        windows_numerics::Vector2 {
+                            X: p[0].0,
+                            Y: p[0].1,
+                        },
+                        windows_numerics::Vector2 {
+                            X: p[1].0,
+                            Y: p[1].1,
+                        },
+                        &self.brush,
+                        1.,
+                        None,
+                    );
+                }
+                self.text(
+                    scene,
+                    target,
+                    "图标待补",
+                    0,
+                    rect(x + 19., 91., 54., 18.),
+                    MUTED,
+                );
+            }
             self.text(
                 scene,
                 target,
@@ -858,6 +895,11 @@ pub struct HostOverlay {
     ids: [Option<u32>; 3],
     revisions: u64,
     preview_mode: bool,
+    download: bool,
+    art: Option<ArtService>,
+    art_request: Option<ArtRequest>,
+    art_reply: ArtReply,
+    art_retry: Instant,
 }
 impl HostOverlay {
     pub fn reference(
@@ -893,10 +935,20 @@ impl HostOverlay {
             ids: [None; 3],
             revisions: 0,
             preview_mode: false,
+            download: false,
+            art: None,
+            art_request: None,
+            art_reply: ArtReply::default(),
+            art_retry: Instant::now(),
         })
     }
     /// Called by the existing UI tick even if host data is unchanged. No per-tick file IO.
     pub fn placement(&mut self) -> bool {
+        // Existing UI tick also consumes artwork completions when OCR/model data is unchanged.
+        // No file/network/decode work here, and no extra timer or window activation.
+        if self.poll_art().is_err() {
+            return false;
+        }
         unsafe {
             if self.window.state.recover {
                 self.window.state.recover = false;
@@ -922,6 +974,9 @@ impl HostOverlay {
                 return Ok(true);
             }
             self.frame = None;
+            self.art = None;
+            self.art_request = None;
+            self.art_reply = ArtReply::default();
             self.ids = [None; 3];
             self.window.state.dismissed = false;
             self.window.state.scene.select(None)?;
@@ -963,6 +1018,9 @@ impl HostOverlay {
                 self.gate = Some(gate);
                 self.context = frame.context;
                 self.generation = frame.snapshot.generation;
+                if self.dataset != frame.snapshot.dataset_version {
+                    self.window.state.scene.image_cache.clear();
+                }
                 self.dataset = frame.snapshot.dataset_version.clone();
                 self.window.state.dismissed = false;
                 self.window.state.scene.select(None)?;
@@ -1028,7 +1086,11 @@ impl HostOverlay {
                         if scene.image_cache.len() >= 128 {
                             scene.image_cache.clear();
                         }
-                        scene.image_cache.insert(card.icon.clone(), image.clone());
+                        // A missing icon is not a successful cached image. A late download
+                        // must replace the placeholder even when the recognized card stays the same.
+                        if image.width() > 1 {
+                            scene.image_cache.insert(card.icon.clone(), image.clone());
+                        }
                         image
                     })
                     .collect();
@@ -1076,7 +1138,111 @@ impl HostOverlay {
         }
         self.last_accepted = Some(frame.clone());
         self.frame = Some(frame);
+        self.request_art();
         Ok(true)
+    }
+    pub fn options(&mut self, download: bool) {
+        if self.download != download {
+            self.download = download;
+            self.request_art();
+        }
+    }
+    fn request_art(&mut self) {
+        let scene = &self.window.state.scene;
+        let urls: Vec<_> = scene
+            .cards
+            .iter()
+            .filter(|c| {
+                c.id.is_some() && !c.icon.is_empty() && !scene.image_cache.contains_key(&c.icon)
+            })
+            .map(|c| c.icon.clone())
+            .collect();
+        if self.frame.is_none() || urls.is_empty() {
+            self.art = None;
+            self.art_request = None;
+            self.art_reply = ArtReply::default();
+            return;
+        }
+        let request = ArtRequest {
+            presentation: Some(std::sync::Arc::new(Default::default())),
+            version: self.dataset.clone(),
+            id: 0,
+            icons: urls,
+            download: self.download && !self.offline,
+        };
+        if self.art_request.as_ref() == Some(&request) {
+            return;
+        }
+        if self.art.is_none() {
+            self.art = ArtService::new(vec![], self.offline).ok();
+        }
+        if let Some(service) = &self.art {
+            service.request(Some(request.clone()));
+            self.art_request = Some(request);
+            self.art_reply = ArtReply::default();
+            self.art_retry = Instant::now() + std::time::Duration::from_secs(60);
+        }
+    }
+    fn poll_art(&mut self) -> Result<()> {
+        let Some(service) = &self.art else {
+            return Ok(());
+        };
+        let reply = service
+            .changed(&self.art_reply)
+            .filter(|r| r.key == self.art_request);
+        let mut changed = false;
+        if let Some(reply) = reply {
+            let scene = &mut self.window.state.scene;
+            for (i, card) in scene.cards.iter().enumerate() {
+                let Some(pic) = reply.icons.get(&card.icon) else {
+                    continue;
+                };
+                if let Some(image) = scene.image_cache.get(&card.icon) {
+                    // Several augments can share one asset. Fill every card position,
+                    // even when an earlier position decoded this URL in the same reply.
+                    if scene.icons[i].width() <= 1 {
+                        scene.icons[i] = image.clone();
+                        changed = true;
+                    }
+                    continue;
+                }
+                let mut rgba = pic.bgra.clone();
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                if let Some(image) = image::RgbaImage::from_raw(48, 48, rgba) {
+                    if scene.image_cache.len() >= 128 {
+                        scene.image_cache.clear();
+                    }
+                    scene.image_cache.insert(card.icon.clone(), image.clone());
+                    scene.icons[i] = image;
+                    changed = true;
+                }
+            }
+            self.art_reply = reply;
+        }
+        if changed {
+            self.window.state.surface = None;
+            if let Some(target) = &self.window.state.target {
+                self.window.state.surface =
+                    Some(unsafe { Surface::new(&self.window.state.scene, target)? });
+            }
+            self.revisions += 1;
+            unsafe {
+                let _ = InvalidateRect(Some(self.window.hwnd), None, false);
+            }
+        }
+        if Instant::now() >= self.art_retry {
+            // Bounded retry after a transient CDN failure. No per-frame request loop.
+            service.request(None);
+            service.request(self.art_request.clone());
+            self.art_reply = ArtReply::default();
+            self.art_retry = Instant::now() + std::time::Duration::from_secs(60);
+        }
+        if changed {
+            self.request_art();
+        }
+        Ok(())
     }
     pub fn dismiss(&mut self) {
         self.window.state.dismissed = true;
@@ -1313,6 +1479,151 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
         fetched: fuze_worker_host::stage_reference::now(),
         rows,
     }
+}
+/// Narrow artwork review: public bundle, synthetic missing URL and an isolated disk cache.
+/// Real worker completion updates the same frame. No download, discovery or system input.
+pub fn review_icons(
+    data: &Path,
+    output: &Path,
+) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use fuze_contract::{ActualStage, Snapshot};
+    use fuze_worker_host::{overlay_frame::Publisher, update_io};
+    std::fs::create_dir_all(output)?;
+    let roots = [fuze_data::Root {
+        path: data.into(),
+        source: fuze_data::Source::Bundled,
+    }];
+    let prepared = fuze_data::prepare(&roots, fuze_data::Locale::ZhCn, fuze_data::Scope::Ocr)?;
+    let catalog = prepared.recognition_cards();
+    let mut unique = std::collections::HashSet::new();
+    for card in &catalog {
+        if card.icon.is_empty() || !unique.insert(card.icon.clone()) {
+            continue;
+        }
+        image::load_from_memory(
+            crate::public_art::bytes(&card.icon).ok_or("bundled-icon-missing")?,
+        )?;
+    }
+    let cards: Vec<_> = catalog
+        .into_iter()
+        .filter(|c| crate::public_augment_art::bytes(&c.icon).is_some())
+        .take(3)
+        .collect();
+    if cards.len() != 3 {
+        return Err("icon-review-data".into());
+    }
+    let mut snapshot = Snapshot {
+        schema_version: 1,
+        generation: 1,
+        sequence: 1,
+        dataset_version: prepared.identity(),
+        selection_confirmed: false,
+        actual_stage: ActualStage::Unknown,
+        slots: std::array::from_fn(|i| Slot::Known {
+            id: cards[i].id,
+            name: cards[i].name.clone(),
+            confidence: 1.,
+        }),
+    };
+    let mut publisher = Publisher::with_catalog(vec![], cards.clone(), Default::default());
+    publisher.publish(snapshot.clone(), true, false, None);
+    let frame = publisher.current().unwrap();
+    if frame.cards.iter().any(|c| {
+        c.as_ref()
+            .is_none_or(|c| c.icon.is_empty() || c.win.is_some() || c.pick.is_some())
+    }) {
+        return Err("icon-metadata-fallback".into());
+    }
+    let before = unsafe { GetForegroundWindow() };
+    let mut overlay = HostOverlay::new(true)?;
+    overlay.update(Some(frame), false)?;
+    if overlay
+        .window
+        .state
+        .scene
+        .icons
+        .iter()
+        .any(|i| i.width() <= 1)
+    {
+        return Err("bundled-icon-not-rendered".into());
+    }
+    overlay.render(&output.join("bundled-three-icons.png"))?;
+    let mut late = cards.clone();
+    late[0].icon = "https://cdn.dtodo.cn/hextech/augment-icons/fuze_icon_review.png".into();
+    let url = late[0].icon.clone();
+    late[1].icon = url.clone();
+    let mut publisher = Publisher::with_catalog(vec![], late, Default::default());
+    snapshot.sequence += 1;
+    publisher.publish(snapshot, true, false, None);
+    overlay.update(publisher.current(), false)?;
+    overlay.render(&output.join("missing-icon-placeholder.png"))?;
+    let ids = overlay.ids();
+    let revision = overlay.revisions();
+    overlay.window.state.scene.select(Some(1))?;
+    overlay.dismiss();
+    // The cache root is private to this explicit child review, never the installed app's data.
+    let previous = std::env::var_os("LOCALAPPDATA");
+    struct Restore(Option<std::ffi::OsString>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if let Some(v) = &self.0 {
+                std::env::set_var("LOCALAPPDATA", v);
+            } else {
+                std::env::remove_var("LOCALAPPDATA");
+            }
+        }
+    }
+    let _restore = Restore(previous);
+    let profile = output.join("isolated-profile");
+    let cache = profile.join("FuzeRustPreview/icon-cache");
+    std::fs::create_dir_all(&cache)?;
+    let key = format!("{}|{url}", prepared.identity());
+    let hash = update_io::hex(&update_io::digest(key.as_bytes(), false)?);
+    std::fs::write(
+        cache.join(format!("{hash}.png")),
+        crate::public_art::bytes(&cards[0].icon).unwrap(),
+    )?;
+    std::env::set_var("LOCALAPPDATA", profile);
+    let service = ArtService::new(vec![], false)?;
+    let request = overlay.art_request.clone().ok_or("icon-request-missing")?;
+    if request.download {
+        return Err("icon-review-download-enabled".into());
+    }
+    service.request(Some(request));
+    overlay.art = Some(service);
+    let until = Instant::now() + std::time::Duration::from_secs(3);
+    while !overlay.window.state.scene.image_cache.contains_key(&url) {
+        if Instant::now() >= until || !overlay.placement() {
+            return Err("icon-worker-not-published".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if overlay.ids() != ids
+        || overlay.revisions() != revision + 1
+        || overlay
+            .window
+            .state
+            .scene
+            .icons
+            .iter()
+            .any(|i| i.width() <= 1)
+        || !overlay.dismissed()
+        || !overlay.hidden()
+        || overlay.window.state.scene.selected != Some(1)
+    {
+        return Err("icon-refresh-state-changed".into());
+    }
+    overlay.window.state.scene.select(None)?;
+    overlay.render(&output.join("late-cache-icon.png"))?;
+    if before != unsafe { GetForegroundWindow() } {
+        return Err("icon-review-foreground-changed".into());
+    }
+    let report = serde_json::json!({"passed":true,"bundled_unique_icons":unique.len(),"missing_statistics_keep_icons":true,"late_cache_without_new_ocr":true,"shared_icon_fills_all_positions":true,"single_icon_repaint":true,"description_and_dismissal_preserved":true,"placeholder_rendered":true,"foreground_unchanged":true,"game_access":false,"network":false,"system_input":false});
+    std::fs::write(
+        output.join("icon-review.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    Ok(report)
 }
 pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {
     let _com = Com::new()?;

@@ -19,6 +19,22 @@ pub struct Publisher {
     current: Option<Arc<Frame>>,
 }
 impl Publisher {
+    /// A valid OCR match may have no statistics for this champion. Keep its global
+    /// artwork/description while leaving rates and scores absent, rather than losing the card.
+    pub fn with_catalog(
+        augments: Vec<Augment>,
+        mut catalog: Vec<Augment>,
+        scores: HashMap<u32, f64>,
+    ) -> Self {
+        for card in &mut catalog {
+            card.win = None;
+            card.pick = None;
+            card.tier = None;
+            card.provenance.clear();
+        }
+        catalog.extend(augments);
+        Self::new(catalog, scores)
+    }
     pub fn new(augments: Vec<Augment>, scores: HashMap<u32, f64>) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {

@@ -1,5 +1,8 @@
 // Public artwork reused from the existing v0.6.3 reference cache. No user data.
 pub fn bytes(url: &str) -> Option<&'static [u8]> {
+    if let Some(bytes) = crate::public_augment_art::bytes(url) {
+        return Some(bytes);
+    }
     match url.strip_prefix("https://cdn.dtodo.cn/")? {
         "hextech/augment-icons/adapt_large.png" => Some(include_bytes!("../ui/assets/public-cache/hextech/augment-icons/adapt_large.png")),
         "hextech/augment-icons/apexinventor_large.png" => Some(include_bytes!("../ui/assets/apexinventor_large.png")),
