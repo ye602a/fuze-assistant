@@ -94,35 +94,100 @@ fn present(row: &fuze_lcu::history::Match, data: &fuze_data::Prepared) -> Detail
         ..Default::default()
     }
 }
-/// UTC explicitly labelled; does not imply the time zone from the old machine.
+/// Convert only for presentation. Stored/exported timestamps remain UTC milliseconds.
 pub fn date(ms: u64) -> String {
+    date_with(ms, |utc| {
+        let mut local = unsafe { std::mem::zeroed() };
+        // A null zone uses Windows' current zone and its historical daylight rules.
+        let ok = unsafe {
+            windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTimeEx(
+                std::ptr::null(),
+                utc,
+                &mut local,
+            )
+        };
+        (ok != 0).then_some(local)
+    })
+}
+fn date_with(
+    ms: u64,
+    localize: impl FnOnce(
+        &windows_sys::Win32::Foundation::SYSTEMTIME,
+    ) -> Option<windows_sys::Win32::Foundation::SYSTEMTIME>,
+) -> String {
     if ms > 253402300799999 {
         return "--".into();
     }
-    let seconds = ms / 1000;
-    let z = (seconds / 86400) as i64 + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let mut y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    y += i64::from(m <= 2);
+    let ticks = (ms + 11644473600000) * 10000;
+    let file_time = windows_sys::Win32::Foundation::FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let mut utc = unsafe { std::mem::zeroed() };
+    if unsafe { windows_sys::Win32::System::Time::FileTimeToSystemTime(&file_time, &mut utc) } == 0
+    {
+        return "--".into();
+    }
+    let (time, zone) = match localize(&utc) {
+        Some(time) if (1..=9999).contains(&time.wYear) => (time, "本地"),
+        _ => (utc, "UTC"),
+    };
     format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02} UTC",
-        seconds % 86400 / 3600,
-        seconds % 3600 / 60
+        "{:04}-{:02}-{:02} {:02}:{:02} {zone}",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute
     )
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn date_and_unknown_ids_are_explicit() {
-        assert_eq!(date(0), "1970-01-01 00:00 UTC");
-        assert_eq!(date(1709164800000), "2024-02-29 00:00 UTC");
+    fn invalid_dates_and_conversion_failure_are_explicit() {
+        assert_eq!(date(u64::MAX), "--");
+        assert_eq!(date(253402300800000), "--");
+        assert_eq!(date_with(0, |_| None), "1970-01-01 00:00 UTC");
+        assert_eq!(date_with(1709164800000, |_| None), "2024-02-29 00:00 UTC");
+        assert_eq!(date_with(253402300799999, |_| None), "9999-12-31 23:59 UTC");
+    }
+    fn in_zone(ms: u64, zone: windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION) -> String {
+        date_with(ms, |utc| {
+            let mut local = unsafe { std::mem::zeroed() };
+            let ok = unsafe {
+                windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTime(
+                    &zone, utc, &mut local,
+                )
+            };
+            (ok != 0).then_some(local)
+        })
+    }
+    #[test]
+    fn local_dates_cover_offsets_midnight_and_leap_day() {
+        let mut zone: windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION =
+            unsafe { std::mem::zeroed() };
+        zone.Bias = -480;
+        assert_eq!(in_zone(1709164800000, zone), "2024-02-29 08:00 本地");
+        assert_eq!(in_zone(1709226000000, zone), "2024-03-01 01:00 本地");
+        zone.Bias = 300;
+        assert_eq!(in_zone(0, zone), "1969-12-31 19:00 本地");
+    }
+    #[test]
+    fn local_dates_follow_daylight_rules_at_both_transitions() {
+        let mut zone: windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION =
+            unsafe { std::mem::zeroed() };
+        zone.Bias = 300;
+        zone.DaylightBias = -60;
+        zone.DaylightDate.wMonth = 3;
+        zone.DaylightDate.wDay = 2;
+        zone.DaylightDate.wHour = 2;
+        zone.StandardDate.wMonth = 11;
+        zone.StandardDate.wDay = 1;
+        zone.StandardDate.wHour = 2;
+        assert_eq!(in_zone(1710053940000, zone), "2024-03-10 01:59 本地");
+        assert_eq!(in_zone(1710054000000, zone), "2024-03-10 03:00 本地");
+        assert_eq!(in_zone(1730613540000, zone), "2024-11-03 01:59 本地");
+        assert_eq!(in_zone(1730613600000, zone), "2024-11-03 01:00 本地");
+    }
+    #[test]
+    fn unknown_ids_are_explicit() {
         assert_eq!(name(asset(&serde_json::json!({"data":[]}), 99), 99), "#99");
         assert_eq!(
             name(

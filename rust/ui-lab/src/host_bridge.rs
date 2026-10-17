@@ -182,6 +182,8 @@ fn change(p: &mut Preferences, key: &str, value: bool) -> Result<(), &'static st
     *target = value;
     Ok(())
 }
+const HISTORY_PAGE_SIZE: usize = 10;
+
 fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page: usize) {
     let state = ui.global::<HostState>();
     let query = state.get_history_query().to_lowercase();
@@ -202,7 +204,7 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
                         == Some(&r.result.as_str()))
         })
         .collect::<Vec<_>>();
-    let pages = filtered.len().div_ceil(6).max(1);
+    let pages = filtered.len().div_ceil(HISTORY_PAGE_SIZE).max(1);
     let page = page.min(pages - 1);
     state.set_history_page(page as i32);
     state.set_history_pages(pages as i32);
@@ -239,8 +241,8 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
         Rc::new(VecModel::from(
             filtered
                 .into_iter()
-                .skip(page * 6)
-                .take(6)
+                .skip(page * HISTORY_PAGE_SIZE)
+                .take(HISTORY_PAGE_SIZE)
                 .map(|(i, r)| {
                     let d = view.details.get(i);
                     MatchRow {
@@ -525,12 +527,6 @@ pub fn attach_recovered(
                     ["auto", "cpu", "dml"]
                         .iter()
                         .position(|s| *s == prefs.backend)
-                        .unwrap_or(0) as i32,
-                );
-                state.set_locale(
-                    ["auto", "zh-CN", "zh-TW", "en-US"]
-                        .iter()
-                        .position(|s| *s == prefs.locale)
                         .unwrap_or(0) as i32,
                 );
                 if old

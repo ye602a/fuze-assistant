@@ -20,6 +20,8 @@ Current explicit differences: [preview vs complete migration](../../RUST_PREVIEW
 
 ## Latest changes
 
+- History display parity and redundant-entry cleanup: Windows local-time conversion, ten rows per page, removed unused UI-language binding, and consistent Slint packaging default. Retained active legacy compatibility and CI probes; no new package or live-game acceptance. See the current difference report for the remaining release boundaries.
+
 - Exact 0.6.3 comparison: full augment lists and authoritative ranking, rarity/description/guide controls, shared side-panel rendering and automatic side-panel preference, viewport-prioritized artwork and idle data refresh. See the parity audit for mandatory remaining features.
 
 - [Chinese workbench restoration](../../../rust/docs/WORKBENCH_RESTORATION.md) and [champion / in-game popup restoration](../../../rust/docs/POPUP_RESTORATION.md): actual hidden Win32 renders compared with retained Vue components, existing public artwork, bounded nonblocking three-card image delivery. PR #46's CI-only WGC failure is not declared resolved by local visual checks.

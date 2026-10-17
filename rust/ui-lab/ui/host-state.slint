@@ -90,7 +90,6 @@ export global HostState {
     in-out property <string> data-version: "—";
     in-out property <[PreferenceRow]> preferences;
     in-out property <int> backend: 0;
-    in-out property <int> locale: 0;
     in-out property <string> directory;
     in-out property <[MatchRow]> history;
     in-out property <string> history-query;
@@ -116,7 +115,6 @@ export global HostState {
     in-out property <string> verified;
     callback preference(string, bool);
     callback backend-changed(int);
-    callback locale-changed(int);
     callback directory-save(string);
     callback command(string);
     callback history-turn(int);

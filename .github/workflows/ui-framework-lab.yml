@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs, fix/rust-preview-history-parity]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'

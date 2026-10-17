@@ -8,7 +8,7 @@ import {inspectUpload} from './check-secrets.mjs'
 import {prepare,root,ort} from './rust-prototype-tools.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 if(!/^[a-f0-9]{12}$/.test(revision))throw new Error('Invalid revision')
-const frontend=process.env.FUZE_UI_FRONTEND || 'win32'
+const frontend=process.env.FUZE_UI_FRONTEND || 'slint'
 if(!['win32','slint'].includes(frontend))throw new Error('Invalid UI frontend')
 const previewRoot=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview'))
 const dir=path.join(previewRoot,`fuze-rust-preview-${revision}`)
@@ -73,7 +73,33 @@ await text('Update.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe 
 await text('Private-channel.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update-private\r\n')
 await text('Forget-private-token.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --forget-credentials\r\n')
 await text('Rollback.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --rollback\r\n')
-await text('README.txt',`Start menu: Fuze Rust Preview / Uninstall Fuze Rust Preview. Uninstall-local.cmd removes managed program files and shortcuts only; settings, records, caches, tokens, unknown files and lock remain. The temporary uninstaller is left for system temp cleanup.\r\nIn-game reference: tray menu, supported active match only; independent of OCR. Match export supports JSON / PNG (local file, no upload).\r\nFUZE Rust 开发测试包 ${revision}\r\n\r\n这是独立开发预览，不替换稳定版。请不要与稳定版同时识别。\r\n可运行 Install-local.cmd 安装到独立用户目录，之后使用 LOCALAPPDATA/FuzeRustPreview/releases/Start-Fuze-Rust.cmd，不再依赖解压目录；登记到当前用户的 Windows 已安装应用，可从系统设置卸载，不自动启动。也可保持便携方式：解压后运行 Start-preview.cmd 。普通启动跟随上次自动识别开关，默认开启；暂停和继续会保存。离线检查不会连接游戏。\r\n暂停立即取消旧推荐，后台清理截图/OCR后显示已暂停；关闭窗口收起到托盘，退出按钮或托盘菜单结束程序。托盘不可用时关闭窗口显示退出确认，可取消。\r\n暂停状态可手动更新推荐数据。只下载公开数据，校验完整后启用；独立缓存为 LOCALAPPDATA/FuzeRustPreview/client-data，不修改稳定版。\r\n实际 OCR 后端由 worker 回报；连接、截图、语言错误分别显示。实际领取轮次未确认，推荐继续使用整体胜率。\r\n需要系统具备 x64 Visual C++ 运行库，当前包仍依赖 VCRUNTIME140.dll；不自动安装运行库。\r\n使用 Update.cmd 或暂停后的“退出并检查更新”检查 Rust 开发频道；公开仓库无需令牌。私有测试使用 Private-channel.cmd，令牌仅保存在 Windows 凭据管理器，Forget-private-token.cmd 可删除。下载与安装需分别确认，差分失败一次全量回退；版本在独立目录切换，下次通过 Start-preview.cmd 启动，失败自动回滚。发布端需要 rust-preview 预发布及 rust-update.json/.fuz/.blockmap 配套资产，不会读取 Electron latest.yml。\r\n原生偏好设置、战绩详情、个人记录与选人参考已有实现；写入类功能和实战验收仍未全部迁移。真实国服、独占全屏、多屏及长期运行仍待验证。\r\n不要提交账号、令牌、游戏截图或原始日志。来源说明见 THANKS.md。\r\n`)
+await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
+
+这是独立预览，保留已安装的稳定版。不要让两套助手同时识别。
+启动、两局测试要点与脱敏反馈步骤统一见 TESTING-zh-CN.txt。
+首次验证本包请运行 Start-this-build.cmd，直接启动当前解压版本。
+Start-preview.cmd 和开始菜单可能启动此前安装的受管版本。
+
+安装与卸载
+Install-local.cmd 安装到独立用户目录，登记到 Windows 已安装应用，不自动启动。
+安装后可使用开始菜单 Fuze Rust Preview；目录为 %LOCALAPPDATA%/FuzeRustPreview/releases。
+Uninstall-local.cmd 只删除受管程序与快捷方式，保留设置、记录、缓存、凭据及未知文件。
+删除私有频道授权请单独运行 Forget-private-token.cmd。
+当前载荷需要 Windows x64 和 Visual C++ x64 运行库，不会自动安装系统依赖。
+
+数据与程序更新
+暂停后可在设置中更新推荐数据，校验完成才启用；数据保存在独立缓存，不修改稳定版。
+程序更新使用设置页的检查入口，或 Update.cmd；私有频道使用 Private-channel.cmd。
+令牌仅保存在 Windows 凭据管理器。下载与安装分别确认，差分失败回退全量，失败安装支持回滚。
+Rust 频道使用 rust-update.json、.fuz 和配套 .blockmap，不读取 Electron 的 latest.yml。
+
+功能边界
+界面为简体中文；自动推荐继续整体胜率，分阶段数据为手动参考，实际领取轮次仍未确认。
+连接、截图和 OCR 状态会自动脱敏保存；退出后可运行 Export-feedback.cmd 导出反馈。
+记录和分享均在本地处理，不自动上传。不要发送整个数据目录、原始日志或账号信息。
+真实游戏、跨屏、独占全屏及最终安装更新仍需验收，本包不代表完整迁移或正式稳定发布。
+来源与致谢见 THANKS.md。
+`.replace(/\n/g,'\r\n'))
 await text('build.json',JSON.stringify({revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:JSON.parse(await readFile(path.join(root,'node_modules/onnxruntime-node/package.json'),'utf8')).version,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})

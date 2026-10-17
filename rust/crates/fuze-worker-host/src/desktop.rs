@@ -246,7 +246,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             account: "demo0001".into(),
             platform: "HN1".into(),
             cached: true,
-            rows: (1..=8)
+            rows: (1..=12)
                 .map(|id| fuze_lcu::history::Match {
                     game_id: id,
                     created: 1709164800000,

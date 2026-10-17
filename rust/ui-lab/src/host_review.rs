@@ -246,7 +246,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         step.set(4);
                     }
                     4 => {
-                        if state.get_history().row_count() != 6 {
+                        if state.get_history().row_count() != 10 {
                             return Err("history-first-page".into());
                         }
                         state.set_history_selected(0);
@@ -269,7 +269,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                             return Err("history-filter".into());
                         }
                         state.invoke_history_filter("".into(), 0);
-                        if state.get_history().row_count() != 6 {
+                        if state.get_history().row_count() != 10 {
                             return Err("history-filter-restore".into());
                         }
                         state.invoke_command("history-refresh".into());
