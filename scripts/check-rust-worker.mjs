@@ -12,6 +12,8 @@ const catalog=JSON.parse(await readFile(args[3],'utf8'))
 await writeFile(path.join(dataset,'current.json'),JSON.stringify({schemaVersion:3,locale:'zh-CN',dataVersion:version}))
 await writeFile(path.join(versionDir,'manifest.json'),JSON.stringify({locale:'zh-CN',dataVersion:version,files:[{path:'augments.json'}]}))
 await writeFile(path.join(versionDir,'augments.json'),JSON.stringify({data:Object.entries(catalog).map(([name,id])=>({name,id}))}))
+// Detail scope requires the item document even when this OCR fixture has no item builds.
+await writeFile(path.join(versionDir,'items.json'),JSON.stringify({data:[]}))
 await mkdir(path.join(versionDir,'champion-shards'),{recursive:true})
 await writeFile(path.join(versionDir,'champion-shards/index.json'),JSON.stringify({dataVersion:version,shards:[{path:'champion-shards/1.json',championIds:[8]}]}))
 await writeFile(path.join(versionDir,'champion-shards/1.json'),JSON.stringify({champions:{8:{augments:Object.values(catalog).map(id=>({id,stats:{winRate:0.6,pickRate:0.12,games:900,source:'fixture',region:'TEST',gamePatch:'fixture'}}))}}}))

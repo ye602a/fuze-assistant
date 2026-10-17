@@ -415,14 +415,17 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     for (label, command) in [
         ("检查新版", "check"),
         ("退出并打开更新程序", "install"),
-        ("设置私有授权", "credentials"),
-        ("移除授权", "forget"),
+        ("移除旧更新令牌", "forget"),
         ("扫描本地占用", "scan"),
         ("清理可回收文件", "clean"),
     ] {
         a.click(ui, label, Some(&format!("maintenance:{command}")));
     }
-    a.click(ui, "使用私有更新频道", Some("pref:private_updates:false"));
+    a.check(
+        "公开更新不要求私有授权",
+        target(ui, "设置私有授权").is_err() && target(ui, "使用私有更新频道").is_err(),
+        "public channel has no credential entry or private toggle",
+    );
     a.click(ui, "选择旧设置并预览", Some("record:import-settings:0"));
     for (key, title) in prefs {
         a.click(ui, title, Some(&format!("pref:{key}:false")));
@@ -509,7 +512,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     }
     s.set_running(true);
     a.disabled(ui, "导出脱敏反馈");
-    a.disabled(ui, "检查新版");
+    a.click(ui, "检查新版", Some("maintenance:check"));
     a.disabled(ui, "扫描本地占用");
     a.disabled(ui, "更新推荐数据与字典");
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
