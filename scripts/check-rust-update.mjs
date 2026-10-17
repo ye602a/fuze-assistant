@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {root} from './rust-prototype-tools.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
-const directory=path.join(root,'rust/artifacts/preview'),manifest=path.join(directory,'rust-update.json')
+const directory=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview')),manifest=path.join(directory,'rust-update.json')
 const m=JSON.parse(await readFile(manifest,'utf8'))
 if(m.revision!==revision)throw new Error('Stale native update artifact')
 const temp=await mkdtemp(path.join(os.tmpdir(),'fuze-native-update-'))

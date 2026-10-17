@@ -166,32 +166,9 @@ pub(crate) fn allowed(path: &str) -> bool {
     {
         return false;
     }
-    [
-        "fuze-rust-host.exe",
-        "fuze-ui-lab.exe",
-        "fuze-ocr-worker.exe",
-        "fuze-update.exe",
-        "onnxruntime.dll",
-        "DirectML.dll",
-        "dxcompiler.dll",
-        "dxil.dll",
-        "preview.json",
-        "build.json",
-        "THANKS.md",
-        "README.txt",
-        "TESTING-zh-CN.txt",
-        "Export-feedback.cmd",
-        "Export-feedback.ps1",
-        "Start-preview.cmd",
-        "Check-preview.cmd",
-        "Update.cmd",
-        "Private-channel.cmd",
-        "Forget-private-token.cmd",
-        "Rollback.cmd",
-        "Install-local.cmd",
-        "Uninstall-local.cmd",
-    ]
-    .contains(&path)
+    include_str!("../../../bundle-files.txt")
+        .lines()
+        .any(|file| file == path)
         || path == "resources/inference.onnx"
         || path == "resources/dictionary.json"
         || path.starts_with("resources/client-data/") && path.ends_with(".json")
@@ -672,6 +649,10 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+#[path = "managed_install_contract_tests.rs"]
+mod contract_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

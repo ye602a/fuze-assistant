@@ -8,6 +8,8 @@ on:
       - '.gitignore'
       - 'scripts/package-rust-preview.mjs'
       - 'scripts/package-rust-update.mjs'
+      - 'scripts/rust-bundle-policy.mjs'
+      - 'tests/unit/rust-bundle-policy.test.mjs'
       - 'scripts/check-rust-update.mjs'
       - 'scripts/check-rust-desktop.mjs'
       - 'scripts/prepare-rust-data.mjs'
@@ -111,6 +113,8 @@ jobs:
           node --test tests/unit/rust-data-preparation.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-feedback-export.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/unit/rust-bundle-policy.test.mjs
           exit $LASTEXITCODE
       - name: Build the selected milestone frontend from the same checkout
         id: frontend

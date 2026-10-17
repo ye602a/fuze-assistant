@@ -6,16 +6,24 @@ import {execFileSync} from 'node:child_process'
 import path from 'node:path'
 import AdmZip from 'adm-zip'
 import {root} from './rust-prototype-tools.mjs'
+import {updateEntries} from './rust-bundle-policy.mjs'
 const git=(args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 const revision=git(['rev-parse','--short=12','HEAD'])
 const sequence=Number(git(['show','-s','--format=%ct','HEAD']))
 if(!/^[a-f0-9]{12}$/.test(revision)||!Number.isSafeInteger(sequence)||sequence<=0)throw new Error('Invalid release identity')
 const directory=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview'))
 const zip=new AdmZip(path.join(directory,`fuze-rust-preview-${revision}.zip`))
-const entries=zip.getEntries().filter(e=>!e.isDirectory).sort((a,b)=>a.entryName.localeCompare(b.entryName,'en'))
+const entries=updateEntries(zip.getEntries())
 const files=[]
-for(const e of entries){const data=e.getData();const packed=deflateRawSync(data,{level:6});files.push({path:e.entryName,size:data.length,compressed:packed.length,packed})}
+for(const e of entries){
+ const data=e.getData()
+ if(data.length!==e.header.size)throw new Error('Invalid update file size')
+ const packed=deflateRawSync(data,{level:6})
+ if(packed.length>128*1024*1024)throw new Error('Invalid compressed update size')
+ files.push({path:e.entryName,size:data.length,compressed:packed.length,packed})
+}
 const index=Buffer.from(JSON.stringify({schema:1,revision,files:files.map(({packed,...f})=>f)}))
+if(index.length>512*1024)throw new Error('Invalid update index size')
 const header=Buffer.alloc(12);header.write('FUZEUP01');header.writeUInt32LE(index.length,8)
 const archive=`Fuze-Rust-${revision}.fuz`
 const handle=await open(path.join(directory,archive),'w')

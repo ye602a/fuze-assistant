@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto'
 import AdmZip from 'adm-zip'
 import {inspectUpload} from './check-secrets.mjs'
 import {prepare,root,ort} from './rust-prototype-tools.mjs'
+import {previewPath} from './rust-bundle-policy.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 if(!/^[a-f0-9]{12}$/.test(revision))throw new Error('Invalid revision')
 const frontend=process.env.FUZE_UI_FRONTEND || 'slint'
@@ -18,11 +19,11 @@ await mkdir(dir)
 const bin=process.env.FUZE_RUST_BIN_DIR || path.join(root,'rust/target/release')
 const files=[]
 async function copy(source,destination){
- if(!destination || destination.split(/[\\/]/).some(x=>x==='..') || path.isAbsolute(destination))throw new Error('Invalid package path')
+ if(!previewPath(destination))throw new Error('Invalid package path')
  if((await stat(source)).size>128*1024*1024)throw new Error('Oversize package input')
  const target=path.join(dir,destination);await mkdir(path.dirname(target),{recursive:true});await copyFile(source,target);files.push(destination)
 }
-async function text(name,body){await writeFile(path.join(dir,name),body);files.push(name)}
+async function text(name,body){if(!previewPath(name))throw new Error('Invalid package path');await writeFile(path.join(dir,name),body);files.push(name)}
 for(const file of ['fuze-rust-host.exe','fuze-ocr-worker.exe','fuze-update.exe'])await copy(path.join(bin,file),file)
 if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'fuze-ui-lab.exe')
 for(const file of ['onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll'])await copy(path.join(path.dirname(ort),file),file)
@@ -77,7 +78,7 @@ await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
 
 这是独立预览，保留已安装的稳定版。不要让两套助手同时识别。
 启动、两局测试要点与脱敏反馈步骤统一见 TESTING-zh-CN.txt。
-首次验证本包请运行 Start-this-build.cmd，直接启动当前解压版本。
+便携 ZIP 验证请运行 Start-this-build.cmd，直接启动当前解压版本；受管安装不包含此专用入口。
 Start-preview.cmd 和开始菜单可能启动此前安装的受管版本。
 
 安装与卸载
