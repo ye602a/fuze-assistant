@@ -9,6 +9,71 @@ use std::{
 };
 // Exercise Slint hit testing, not direct page/callback assignment. Events stay in
 // this hidden component; no Windows messages, cursor movement or system input.
+pub fn close_only(
+    data: &Path,
+    output: &Path,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    std::fs::create_dir_all(output)?;
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .renderer_name("software".into())
+        .with_winit_window_attributes_hook(|a| a.with_visible(false).with_active(false))
+        .select()?;
+    let ui = Workbench::new()?;
+    ui.window().set_size(slint::LogicalSize::new(1120., 860.));
+    crate::slint_probe::connect(&ui);
+    let binding = crate::host_bridge::attach(&ui, crate::host_bridge::offline_config(data), true)?;
+    let _lifecycle = crate::lifecycle::attach(&ui, binding.session.clone(), true, false)?;
+    let click = |x, y| -> Result<(), Box<dyn std::error::Error>> {
+        let _ = ui.window().take_snapshot()?;
+        let position = slint::LogicalPosition::new(x, y);
+        ui.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        ui.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        ui.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        Ok(())
+    };
+    for (action, x) in [("cancel", 495.), ("minimize", 605.), ("exit", 713.)] {
+        click(1097., 20.)?;
+        if !ui.get_quit_open() {
+            return Err("close-choice-not-open".into());
+        }
+        if action == "cancel" {
+            let pixels = ui.window().take_snapshot()?;
+            image::save_buffer(
+                output.join("close-choice.png"),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )?;
+        }
+        click(x, 479.)?;
+        if action != "exit" && (ui.get_quit_open() || binding.session.snapshot().done) {
+            return Err("close-choice-action".into());
+        }
+    }
+    let started = Instant::now();
+    while !binding.session.snapshot().done {
+        if started.elapsed() > Duration::from_secs(3) {
+            return Err("close-choice-exit-timeout".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if ui.window().is_visible() {
+        return Err("close-review-visible".into());
+    }
+    Ok(
+        serde_json::json!({"close_choice":true,"cancel_keeps_running":true,"minimize_keeps_running":true,"exit_stops_session":true,"system_input":false,"game_access":false,"native_tray_interaction_tested":false}),
+    )
+}
 fn control(
     ui: &Workbench,
     label: &str,
@@ -69,7 +134,7 @@ fn navigation_input(ui: &Workbench) -> Result<(), Box<dyn std::error::Error>> {
     }
     ui.set_quit_open(true); // outside click may dismiss, reopen for the button check
     let _ = ui.window().take_snapshot()?;
-    click(585., 471.);
+    click(495., 479.);
     if ui.get_quit_open() {
         return Err("modal-cancel-hit-test-failed".into());
     }

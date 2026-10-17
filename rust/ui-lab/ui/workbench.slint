@@ -194,15 +194,17 @@ export component Workbench inherits Window {
         enabled: root.quit-open;
         key-pressed(event) => {
             if event.text == Key.Escape { root.quit-open = false; return accept; }
-            if event.text == Key.Tab || event.text == Key.Backtab { if cancel-exit.focused { confirm-exit.focus(); } else { cancel-exit.focus(); } return accept; }
+            if event.text == Key.Tab { if cancel-exit.focused { minimize-exit.focus(); } else if minimize-exit.focused { confirm-exit.focus(); } else { cancel-exit.focus(); } return accept; }
+            if event.text == Key.Backtab { if cancel-exit.focused { confirm-exit.focus(); } else if confirm-exit.focused { minimize-exit.focus(); } else { cancel-exit.focus(); } return accept; }
             return reject;
         }
-        Panel { x: (root.width - 360px) / 2; y: (root.height - 174px) / 2; width: 360px; height: 174px;
+        Panel { x: (root.width - 480px) / 2; y: (root.height - 190px) / 2; width: 480px; height: 190px;
             TouchArea { x: 0px; y: 0px; }
-            SectionTitle { x: 26px; y: 22px; height: 25px; text: "退出软件"; }
-            Label { x: 26px; y: 58px; width: 308px; height: 42px; wrap: word-wrap; text: ShellState.notice != "" ? ShellState.notice : "退出后将停止自动识别和浮窗更新。"; color: Theme.muted; }
-            HorizontalLayout { x: 166px; y: 109px; width: 168px; height: 38px; spacing: 10px;
+            SectionTitle { x: 26px; y: 22px; height: 25px; text: "关闭符择"; }
+            Label { x: 26px; y: 58px; width: 428px; height: 44px; wrap: word-wrap; text: "退出软件会停止识别与推荐。\n最小化后继续在后台运行，可从托盘或任务栏恢复。"; color: Theme.muted; }
+            HorizontalLayout { x: 126px; y: 125px; width: 328px; height: 38px; spacing: 10px;
                 cancel-exit := Action { enabled: root.quit-open; min-width: 0px; label: "取消"; clicked => { root.quit-open = false; } }
+                minimize-exit := Action { enabled: root.quit-open; min-width: 0px; label: "最小化"; clicked => { ShellState.action("minimize-close"); } }
                 confirm-exit := Action { enabled: root.quit-open; min-width: 0px; primary: true; label: "退出软件"; clicked => { root.close-requested(); } }
             }
         }

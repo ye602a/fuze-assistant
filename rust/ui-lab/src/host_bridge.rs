@@ -129,8 +129,8 @@ fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
         ),
         (
             "close_to_tray",
-            "关闭后保留托盘",
-            "从托盘可再次打开主窗口。",
+            "最小化时收入托盘",
+            "点击 X 始终询问；关闭此项后最小化到任务栏。",
             p.close_to_tray,
         ),
         (

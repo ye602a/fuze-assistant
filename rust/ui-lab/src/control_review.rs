@@ -303,7 +303,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         ("augment_side_panel", "局内海克斯侧栏"),
         ("champ_select", "选人英雄详情"),
         ("champ_topmost", "选人阶段窗口置顶"),
-        ("close_to_tray", "关闭后保留托盘"),
+        ("close_to_tray", "最小化时收入托盘"),
         ("icon_downloads", "补充缺失图标"),
         ("pause_hotkey", "暂停快捷键"),
         ("local_records", "保存本地观察记录"),

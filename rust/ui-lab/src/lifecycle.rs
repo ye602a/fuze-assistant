@@ -53,24 +53,13 @@ fn reveal(ui: &Workbench, interactive: bool) {
         w.focus_window();
     });
 }
-fn close(ui: &Workbench, shell: &Shell, session: &Session, interactive: bool) {
+fn close(ui: &Workbench) {
     ui.global::<crate::RecordState>()
         .invoke_action("cancel-confirm".into(), 0);
     ui.global::<crate::MaintenanceState>()
         .set_confirmation("".into());
-    if session.snapshot().preferences.close_to_tray && shell.tray_available() {
-        ui.set_quit_open(false);
-        crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
-        if interactive {
-            let _ = ui.hide();
-        }
-    } else {
-        if session.snapshot().preferences.close_to_tray && !shell.tray_available() {
-            ui.global::<ShellState>()
-                .set_notice("系统托盘不可用，窗口会保持可见；可取消或确认退出。".into());
-        }
-        ui.set_quit_open(true);
-    }
+    // X and the operating-system close command always offer an explicit choice.
+    ui.set_quit_open(true);
 }
 pub fn attach(
     ui: &Workbench,
@@ -97,11 +86,9 @@ pub fn attach(
     })?;
     ui.global::<ShellState>().set_attached(true);
     let weak = ui.as_weak();
-    let native = shell.clone();
-    let engine = session.clone();
     ui.on_request_close(move || {
         if let Some(ui) = weak.upgrade() {
-            close(&ui, &native, &engine, interactive);
+            close(&ui);
         }
     });
     let weak = ui.as_weak();
@@ -124,6 +111,18 @@ pub fn attach(
             return;
         };
         match action.as_str() {
+            "minimize-close" => {
+                ui.set_quit_open(false);
+                crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
+                if interactive {
+                    if engine.snapshot().preferences.close_to_tray && native.tray_available() {
+                        let _ = ui.hide();
+                    } else {
+                        // Keep a taskbar recovery path when the tray is disabled or unavailable.
+                        ui.window().with_winit_window(|w| w.set_minimized(true));
+                    }
+                }
+            }
             "reference" => {
                 ui.global::<crate::HostState>()
                     .invoke_command("show-reference".into());
@@ -315,7 +314,7 @@ fn availability(ui: &Workbench, native: &Shell, interactive: bool) {
         } else if native.tray_available() {
             "系统托盘已就绪"
         } else {
-            "系统托盘不可用，关闭时保留退出确认"
+            "系统托盘不可用，最小化后保留在任务栏"
         }
         .into(),
     );
