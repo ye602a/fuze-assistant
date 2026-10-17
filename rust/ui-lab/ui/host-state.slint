@@ -1,0 +1,131 @@
+export struct PreferenceRow { key: string, title: string, hint: string, checked: bool }
+export global ClaimState {
+    in-out property <[string]> details;
+    in-out property <bool> details-open: false;
+    in-out property <int> scenario: 0;
+    in-out property <bool> busy: false;
+    in-out property <bool> can-mark: false;
+    in-out property <int> cooldown: 0;
+    in-out property <string> summary: "尚未检查；这项检查不会确认领取轮次。";
+    in-out property <string> notice;
+    in-out property <string> comparison;
+    callback action(string);
+}
+export global DiagnosticState {
+    in-out property <bool> upload-ready: false;
+    in-out property <bool> upload-enabled: false;
+    in-out property <bool> upload-busy: false;
+    in-out property <bool> upload-has-report: false;
+    in-out property <string> upload-status: "默认关闭；开启后才收集并上传每局脱敏摘要。";
+    in-out property <string> upload-notice;
+    in-out property <string> upload-authorization: "反馈上传需要单独授权；下载更新无需令牌。";
+    in-out property <string> upload-tracking: "自动反馈关闭；已有记录可手动补传。";
+    in-out property <bool> upload-confirm: false;
+    callback upload-action(string);
+    in-out property <string> log-status: "日志：等待宿主初始化。";
+    in-out property <bool> log-retry: false;
+    in-out property <bool> open: false;
+    in-out property <bool> busy: false;
+    in-out property <[string]> rows;
+    in-out property <string> summary: "本次启动尚未收到状态；仅存内存，退出后清空。";
+    callback action(string);
+}
+export global MaintenanceState {
+    in-out property <bool> attached: false;
+    in-out property <bool> offline: true;
+    in-out property <bool> busy: false;
+    in-out property <bool> private-channel: false;
+    in-out property <bool> installable: false;
+    in-out property <bool> can-clean: false;
+    in-out property <string> confirmation;
+    in-out property <string> notice;
+    in-out property <string> current-version: "未打包开发构建";
+    in-out property <string> update-status: "尚未检查更新";
+    in-out property <string> storage-summary: "尚未扫描。暂停识别后可查看本地占用。";
+    in-out property <[string]> storage-rows;
+    callback action(string);
+}
+export struct MatchRow { title: string, result: string, kda: string, duration: string, detail: string, won: bool, source-index: int, date: string, icon: image, items: [image], augments: [image], chosen: bool }
+export struct ObservationRow { title: string, cards: string, hint: string }
+export global RecordState {
+    in-out property <bool> unbound-open: false;
+    in-out property <[ObservationRow]> unbound;
+    in-out property <string> unbound-note: "等待本机记录服务";
+    in-out property <string> unbound-names;
+    in-out property <int> unbound-selected: -1;
+    in-out property <int> unbound-page: 0;
+    in-out property <int> unbound-pages: 1;
+    in-out property <[ObservationRow]> unbound-events;
+    callback unbound-action(string, int);
+    in-out property <bool> busy: false;
+    in-out property <string> notice;
+    in-out property <[ObservationRow]> observations;
+    in-out property <int> observation-page: 0;
+    in-out property <int> observation-pages: 1;
+    in-out property <string> observation-note: "观察记录不等于实际领取。";
+    in-out property <bool> share-ready: false;
+    in-out property <image> share-image;
+    in-out property <int> import-count: 0;
+    in-out property <int> chosen-count: 0;
+    in-out property <bool> journal-preview: false;
+    in-out property <string> confirmation;
+    in-out property <string> confirm-text;
+    callback refresh;
+    callback action(string, int);
+}
+export struct DetailRow { icon-url: string, title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
+export struct BuildRow { text: string, icons: [image], skills: [string] }
+export struct SlotRow { name: string, hint: string }
+export global ShellState {
+    in-out property <bool> attached: false;
+    in-out property <bool> tray-available: false;
+    in-out property <string> tray-hint;
+    in-out property <string> hotkey-hint;
+    in-out property <string> notice;
+    callback action(string);
+    callback sync(bool, bool);
+}
+export global HostState {
+    in-out property <[SlotRow]> slots;
+    in-out property <[string]> resources: ["—", "—", "—", "—"];
+    in-out property <string> sampled: "等待首次采样";
+    in-out property <string> schedule: "无法确认等级时恢复基础检测；等级不是实际领取轮次。";
+    in-out property <bool> connected: false;
+    in-out property <bool> busy: false;
+    in-out property <bool> offline: true;
+    in-out property <bool> running: false;
+    // Explicit host transaction; separate from background notices and maintenance.
+    in-out property <string> pending-action;
+    in-out property <string> notice;
+    in-out property <string> data-version: "—";
+    in-out property <[PreferenceRow]> preferences;
+    in-out property <int> backend: 0;
+    in-out property <string> directory;
+    in-out property <[MatchRow]> history;
+    in-out property <string> history-query;
+    in-out property <int> history-result: 0;
+    callback history-filter(string, int);
+    in-out property <int> history-selected: -1;
+    in-out property <int> history-page: 0;
+    in-out property <int> history-pages: 1;
+    in-out property <string> history-note: "未读取账号与缓存";
+    in-out property <bool> history-busy: false;
+    in-out property <bool> history-can-more: false;
+    in-out property <string> status-title;
+    in-out property <string> status-hint;
+    in-out property <string> connection-value;
+    in-out property <string> capture-value;
+    in-out property <string> ocr-value;
+    in-out property <string> connection-hint;
+    in-out property <string> capture-hint;
+    in-out property <string> ocr-hint;
+    in-out property <int> connection-tone;
+    in-out property <int> capture-tone;
+    in-out property <int> ocr-tone;
+    in-out property <string> verified;
+    callback preference(string, bool);
+    callback backend-changed(int);
+    callback directory-save(string);
+    callback command(string);
+    callback history-turn(int);
+}

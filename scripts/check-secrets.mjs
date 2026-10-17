@@ -7,9 +7,10 @@ import { lstat, readFile, readdir } from 'node:fs/promises'
 export function inspectUpload(name, buffer) {
   const file = name.replaceAll('\\', '/').replace(/^\//, '')
   const findings = []
-  if (/(^|\/)(?:\.env(?:\..*)?|\.netrc|id_rsa|id_ed25519|personal-history-v1\.json|augment-journal-v1\.json)$/.test(file)
+  if (/(^|\/)github-feedback-v[0-9]+\.(?:json|lock)$/.test(file)) findings.push({ file, line: 0, rule: 'private-file' })
+  if (/(^|\/)(?:\.env(?:\..*)?|\.netrc|id_rsa|id_ed25519|personal-history-v1\.json|augment-journal-v1\.json|observations(?:-v[0-9]+)?\.json|preferences-v[0-9]+\.json|account-history(?:-v[0-9]+)?\.json|window-(?:main|champions|augments|direct-cards|slint-[a-z-]+)\.json)$/.test(file)
     && !file.endsWith('.example')) findings.push({ file, line: 0, rule: 'private-file' })
-  if (/(?:^|\/)(?:aramgg_client-data|user-profile|\.runtime|release-smoke)\//.test(file)
+  if (/(?:^|\/)(?:aramgg_client-data|FuzeRustPreview|user-profile|\.runtime|release-smoke)\//.test(file)
     || /\.(?:pfx|p12|key|keystore|log)$/i.test(file)) findings.push({ file, line: 0, rule: 'runtime-or-key-file' })
   if (buffer.includes(0)) return findings
   const source = buffer.toString('utf8')

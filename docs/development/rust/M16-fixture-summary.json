@@ -1,0 +1,54 @@
+{
+  "scope": "offline committed fixtures; not live gameplay or end-to-end popup latency",
+  "game_access": false,
+  "actual_claim_round": null,
+  "results": [
+    {
+      "mode": "cpu",
+      "backend": "cpu",
+      "passed": true,
+      "worker_reaped": true,
+      "startup_ms": 262,
+      "frames": 9,
+      "reused": 6,
+      "new_result_total_ms": [
+        52.23,
+        74.22,
+        59.32
+      ],
+      "reused_total_ms": [
+        1.72,
+        1.74,
+        1.65,
+        1.62,
+        1.4,
+        2.46
+      ],
+      "title_bytes": 104064
+    },
+    {
+      "mode": "auto",
+      "backend": "direct_ml",
+      "passed": true,
+      "worker_reaped": true,
+      "startup_ms": 1627,
+      "frames": 9,
+      "reused": 6,
+      "new_result_total_ms": [
+        17.77,
+        21.6,
+        20.13
+      ],
+      "reused_total_ms": [
+        1.75,
+        1.75,
+        1.76,
+        1.78,
+        1.51,
+        1.54
+      ],
+      "title_bytes": 104064
+    }
+  ],
+  "lifecycle_passed": true
+}

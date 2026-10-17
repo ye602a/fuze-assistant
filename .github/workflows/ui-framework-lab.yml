@@ -1,0 +1,123 @@
+name: Rust UI integration
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'resources/paddleocr/**'
+      - 'tests/fixtures/augment-ocr/**'
+      - 'scripts/check-rust-screen.mjs'
+      - 'tests/unit/actions-validation-summary.test.mjs'
+      - 'rust/bundle-files.txt'
+      - 'scripts/rust-bundle-policy.mjs'
+      - 'tests/unit/rust-bundle-policy.test.mjs'
+      - 'scripts/check-rust-update.mjs'
+      - 'scripts/create-ui-host-fixture.mjs'
+      - 'scripts/package-rust-preview.mjs'
+      - 'scripts/package-rust-update.mjs'
+      - 'scripts/check-rust-desktop.mjs'
+      - 'scripts/check-rust-private-transfer.mjs'
+      - 'public/fuze.png'
+      - '.github/workflows/ui-framework-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ui-framework-lab-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-prototype:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Existing ONNX runtime for isolated fixtures
+        run: npm ci --ignore-scripts
+      - name: Check tracked privacy boundary
+        run: node scripts/check-secrets.mjs
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - uses: actions/cache/restore@v4
+        id: rust-cache
+        with:
+          path: rust/ui-lab/target
+          key: ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-
+            ui-lab-win-1.90-
+      - name: Format and build software and Skia entry points
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --release --locked --features gpu,ui-audit -j 2 --bin fuze-ui-lab
+          exit $LASTEXITCODE
+      - name: Offscreen images and hidden own-window invariants
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-native software artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-native skia-software artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-skia-surface software artifacts
+          exit $LASTEXITCODE
+      - name: Individual control hit tests and keyboard actions at two window sizes
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review-controls artifacts/control-review
+          exit $LASTEXITCODE
+      # No installers, upload-artifact, release publication or game/LCU access.
+      - name: Direct cards and bounded motion
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review-direct artifacts/direct
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-motion artifacts/motion
+          exit $LASTEXITCODE
+      - name: Build normal frontend and OCR worker from the same checkout
+        id: production-build
+        run: |
+          cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target --release -p fuze-ocr --bin fuze-ocr-worker -j 2
+          exit $LASTEXITCODE
+      - name: Existing Rust services through hidden Slint callbacks
+        working-directory: rust/ui-lab
+        run: |
+          node ../../scripts/create-ui-host-fixture.mjs artifacts/host-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-host artifacts/host-data artifacts/host-review
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --desktop-smoke artifacts/host-data/preview.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-recovery artifacts/host-data/preview.json artifacts/renderer-recovery
+          exit $LASTEXITCODE
+      - name: Hero details and feedback through production callbacks
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review-details artifacts/host-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-feedback artifacts/feedback
+          exit $LASTEXITCODE
+      - name: Screen capture and fallback through OCR to production popup
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
+          FUZE_SCREEN_LIFECYCLE: '1'
+          FUZE_RUST_BIN_DIR: rust/ui-lab/target/release
+        run: node scripts/check-rust-screen.mjs
+      # Owned capture fixtures on disposable CI only; no player game, installer or release.
+      - name: Preserve compiled dependencies after runtime failures
+        if: always() && steps.production-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: rust/ui-lab/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

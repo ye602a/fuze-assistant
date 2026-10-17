@@ -1,0 +1,16 @@
+{
+  "elapsed_including_400ms_timer": 2950.3404,
+  "first_raster_snapshot_ms": 160.8956,
+  "foreground_unchanged_observed": true,
+  "gpu_performance_verified": false,
+  "native_window_created": true,
+  "real_ime_verified": false,
+  "requested_backend": "software",
+  "visible": false,
+  "warm_process_cpu_ms": 1765.625,
+  "warm_raster_snapshot": {
+    "count": 12,
+    "median_ms": 153.1456,
+    "p95_ms": 221.02859999999998
+  }
+}

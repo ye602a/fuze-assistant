@@ -1,0 +1,32 @@
+# Rust 边界契约 v1
+
+本轮 Rust 类型在 rust/crates/fuze-contract/src/lib.rs。不是新的生产 Electron IPC，也不提供 HTTP 服务。
+
+本文以下为 M0 基线契约，后续增量以 M1–M4 文档为准。M2b/M2c 实现的私有管道在 wire.rs：父进程设置 Windows Job 后写入 FZH1 启动门；子进程加载模型并返回带长度的 Ready JSON；每帧输入 FZA1 + little-endian u64 generation/sequence + u32 单卡宽高 + 横排三卡 BGRA。输入布局有固定上限，输出 JSON 最多 8192 字节。读写共同限时；模型初始化和恢复另有限时。正式领取确认字段不通过此管道开启。
+
+## OCR 输入与结果
+
+- 引擎初始化一次：显式模型路径、字符表、本地名称目录、后端 CPU。路径只在工具本地配置，不进入推荐消息。
+- 图像：PNG fixture 或内存 RGB；文件大小、宽高、总像素、推理宽度必须有上限。生产 BGRA/stride/共享缓冲区接口待 M1 单独评审。
+- 结果始终三个 slot，按左/中/右固定索引；每格为 known 或 unreadable，不压缩数组、不借其他区域补位。
+- known 含增幅 ID、显示名与置信度。unreadable 不猜测是遮挡还是无选择画面。
+- 整体 result 不代表当前存在可展示的强化选择；selectionConfirmed=false 是原型默认，只有显式测试快照可展示。
+- 实际正式轮次固定未知，不提供任何“等级换算领取次数”的接口。
+- 生产推荐还必须携带 sessionGeneration、sequence、datasetVersion。新局增加世代、清空旧状态；同世代重复/倒序序号丢弃，数据版本不符丢弃。UI 只消费已被当前上下文接受的快照。
+
+## 生命周期和性能
+
+生产目标：一个 worker 同时最多一次推理；只保留一个最新待处理帧；超时/退出由宿主回收 worker，不能通过丢弃 Future 假装已停止原生推理。停止会话后结果失效。GPU 故障最多一次受控 CPU 回退，禁止循环重建模型。
+
+本轮 OCR CLI 是一次有限离线任务：加载一次、预热一次、按固定次数运行、退出释放。无循环轮询、全屏哈希、网络查询或自动发现。报告仅样本代号、数值、固定错误类及已匹配本地测试目录的快照；不打印输入路径和未匹配的任意识别文本。测试目录只包含仓库 fixture 的公开强化名称。
+
+## 原生窗口
+
+- 默认不启动可见窗口。`--smoke 输出PNG 快照JSON` 创建隐藏窗口、绘制自己的离屏位图并销毁，禁止读取屏幕像素。
+- `--show 快照JSON` 是用户显式运行的独立演示：WS_EX_NOACTIVATE / TOOLWINDOW，显示时 SW_SHOWNOACTIVATE，置顶时 SWP_NOACTIVATE；不调用 SetForegroundWindow、不移动鼠标、不自动点击。右上关闭按钮只响应真实用户点击。
+- WM_PAINT 按系统失效绘制，无持续重绘定时器；WM_DPICHANGED 调整窗口尺寸。窗口销毁释放字体、笔刷、位图、DC。
+- 原型接收至多 16 KiB 的 v1 快照，要求 generation=1、dataset_version=fixture-v1、selection_confirmed=false，并通过 ContextGate 校验。展示匹配名称、识别置信度、版本及缺失位置；缺失不意味着检测到遮挡。不伪造胜率，推荐统计待后续接入。离线快照被显式标注，不读取真实对局。
+
+## 后续模块边界
+
+LCU 返回已验证状态/固定错误类型，不返回认证凭据或玩家身份；网络证书例外限于已验证本地服务。更新服务保存凭据并下载，UI 只收进度/错误类型。配置采用 allowlist + schemaVersion；缓存事务先校验、后激活。旧凭据不得明文迁移。以上是后续契约约束，不表示本轮实现了这些服务。

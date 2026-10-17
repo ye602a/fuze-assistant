@@ -60,3 +60,20 @@ augment-journal-v1.json
 *.njsproj
 *.sln
 *.sw?
+
+# Native preview runtime state is private, even when copied into the checkout.
+FuzeRustPreview/
+account-history.json
+account-history-v*.json
+observations.json
+observations-v*.json
+window-main.json
+window-champions.json
+window-augments.json
+window-direct-cards.json
+window-slint-*.json
+
+preferences-v*.json
+# Per-user automatic feedback outbox, never source or a release asset.
+github-feedback-v*.json
+github-feedback-v*.lock

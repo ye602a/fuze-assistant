@@ -1,0 +1,15 @@
+{
+  "automatic_stage": "unknown_overall_only",
+  "dismissal_retained": true,
+  "duplicate_model_rebuilds": 0,
+  "game_access": false,
+  "hidden_owned_windows": true,
+  "live_game_verified": false,
+  "partial_slots_preserved": true,
+  "phase_exit_clears": true,
+  "preference_restore": true,
+  "public_data_rates": true,
+  "stale_sequence_rejected": true,
+  "synthetic_host_transitions": true,
+  "system_input": false
+}

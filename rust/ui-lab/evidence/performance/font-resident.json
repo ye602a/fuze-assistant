@@ -1,0 +1,42 @@
+{
+  "elapsed_including_400ms_timer": 774.8317999999999,
+  "first_raster_snapshot_ms": 10.6698,
+  "font_probe": {
+    "after_face_access_ms": 0.0155,
+    "after_face_accesses": 192,
+    "before_face_access_ms": 55.3351,
+    "faces": 8,
+    "files": 6,
+    "mode": "resident_copy",
+    "preparation_ms": 13.7371,
+    "retained_bytes": 40558240
+  },
+  "foreground_unchanged_observed": true,
+  "gpu_performance_verified": false,
+  "hidden_native_resize": [
+    {
+      "logical_height": 760,
+      "logical_width": 920,
+      "physical_height": 760,
+      "physical_width": 920,
+      "still_hidden": true
+    },
+    {
+      "logical_height": 860,
+      "logical_width": 1120,
+      "physical_height": 860,
+      "physical_width": 1120,
+      "still_hidden": true
+    }
+  ],
+  "native_window_created": true,
+  "real_ime_verified": false,
+  "requested_backend": "software",
+  "visible": false,
+  "warm_process_cpu_ms": 93.75,
+  "warm_raster_snapshot": {
+    "count": 12,
+    "median_ms": 7.964199999999999,
+    "p95_ms": 8.9015
+  }
+}

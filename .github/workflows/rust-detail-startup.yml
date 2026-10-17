@@ -1,0 +1,81 @@
+# Manual focused diagnostic; automatic coverage is consolidated in Rust core/UI workflows.
+name: Rust detail cache and first capture
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rust-detail-startup-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-detail-startup:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Existing ONNX runtime for the integrated capture chain
+        run: npm ci --ignore-scripts
+      - name: Privacy and isolated toolchain
+        run: |
+          node scripts/check-secrets.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+          exit $LASTEXITCODE
+      - uses: actions/cache@v4
+        with:
+          path: rust/ui-lab/target
+          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+          restore-keys: ui-lab-win-1.90-
+      - name: Local data and loading handoff regressions
+        run: |
+          cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-data -p fuze-lcu -p fuze-capture -p fuze-contract -p fuze-ocr -p fuze-worker-host -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib pipeline::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib controller::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-capture --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib runtime_log::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/unit/rust-feedback-export.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib github_feedback
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-ocr --lib title_matcher
+          exit $LASTEXITCODE
+      - name: Build normal frontend and exercise real detail callbacks
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../../scripts/create-ui-host-fixture.mjs artifacts/detail-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-details artifacts/detail-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-host artifacts/detail-data artifacts/detail-host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-feedback artifacts/feedback-ui
+          exit $LASTEXITCODE
+      - name: Screen stream and native bitmap fallback through OCR to production popup
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
+          FUZE_SCREEN_LIFECYCLE: '1'
+          FUZE_RUST_BIN_DIR: ${{ github.workspace }}/rust/ui-lab/target/release
+        run: |
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target --release -p fuze-ocr --bin fuze-ocr-worker -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-rust-screen.mjs
+          exit $LASTEXITCODE
+      # Actual monitor capture only on disposable CI, covered by an owned full-screen fixture.
+      # Local runs use offline pixels and hidden popup windows; no game or system input.

@@ -1,0 +1,241 @@
+// Palette and glyphs from the v0.6.3 Chinese workbench.
+export global Theme {
+    out property <color> background: #07131e;
+    out property <color> surface: #101e2a;
+    out property <color> stroke: #30424d;
+    out property <color> muted: #a1adb4;
+    out property <color> gold: #c8aa6e;
+    out property <color> ivory: #f0e6d2;
+    out property <color> blue: #69bce6;
+    out property <color> green: #79d6ae;
+    out property <color> yellow: #e5c06d;
+    out property <color> red: #f19b9b;
+}
+// Disabled by default for previews, software rendering and background windows.
+export global UiMotion {
+    in-out property <bool> enabled: false;
+    out property <duration> quick: self.enabled ? 100ms : 0ms;
+    out property <duration> state: self.enabled ? 160ms : 0ms;
+    out property <duration> selection: self.enabled ? 180ms : 0ms;
+    public pure function reveal(progress: float, group: int) -> float {
+        // Three readable groups, 30ms apart, settled within 240ms. No layout movement.
+        let t = clamp((progress * 240 - group * 30) / 180, 0, 1);
+        return 0.84 + 0.16 * (1 - (1 - t) * (1 - t) * (1 - t));
+    }
+}
+
+// A finite repaint of the status surface only. Text/buttons above it update immediately.
+export component StatusSurface inherits Rectangle {
+    in property <color> fill;
+    in property <color> accent;
+    private property <color> previous: root.fill;
+    private property <color> target: root.fill;
+    private property <bool> reset: true;
+    private property <bool> pending: false;
+    private property <bool> motion: UiMotion.enabled;
+    in-out property <float> progress: 1;
+    public function settle() {
+        root.pending = false;
+        root.reset = true;
+        root.previous = root.fill;
+        root.target = root.fill;
+        root.progress = 1;
+    }
+    init => { root.settle(); }
+    changed motion => { if !root.motion { root.settle(); } }
+    changed fill => {
+        if !root.motion || root.pending || root.progress < 1 {
+            // Rapid changes supersede the in-flight transition; never queue stale colours.
+            root.settle();
+        } else {
+            root.previous = root.target;
+            root.target = root.fill;
+            root.reset = true;
+            root.progress = 0;
+            root.pending = true;
+        }
+    }
+    Timer { interval: 16ms; running: root.pending;
+        triggered => { root.pending = false; root.reset = false; root.progress = 1; }
+    }
+    animate progress { duration: root.reset || !root.motion ? 0ms : 280ms; easing: cubic-bezier(0.22, 0.8, 0.25, 1); }
+    background: @linear-gradient(110deg, root.progress >= 1 ? root.target : root.previous, #0d1b28);
+    if root.progress < 1: Rectangle { x: 0px; y: 0px; width: root.width * root.progress; height: root.height; clip: true;
+        // Keep the gradient at full size while revealing it, rather than stretching it.
+        Rectangle { x: 0px; y: 0px; width: root.width; height: root.height; background: @linear-gradient(110deg, root.target, #0d1b28); }
+    }
+    Rectangle { background: transparent; border-width: 1px; border-color: root.accent; }
+    @children
+}
+
+// One sequence per page per window lifetime. Background visits and returning pages stay still.
+export component PageEntrance inherits Rectangle {
+    in property <int> page: 0;
+    private property <bool> motion: UiMotion.enabled;
+    private property <bool> home-seen: false;
+    private property <bool> history-seen: false;
+    private property <bool> settings-seen: false;
+    private property <bool> reset: true;
+    private property <bool> pending: false;
+    in-out property <float> progress: 1;
+    width: 0px; height: 0px;
+    public function visit() {
+        let seen = root.page == 0 ? root.home-seen : root.page == 1 ? root.history-seen : root.settings-seen;
+        root.pending = false;
+        root.reset = true;
+        root.progress = 1;
+        if root.page == 0 { root.home-seen = true; }
+        else if root.page == 1 { root.history-seen = true; }
+        else { root.settings-seen = true; }
+        if root.motion && !seen { root.progress = 0; root.pending = true; }
+    }
+    changed page => { root.visit(); }
+    changed motion => {
+        if root.motion { root.visit(); }
+        else { root.pending = false; root.reset = true; root.progress = 1; }
+    }
+    Timer { interval: 16ms; running: root.pending;
+        triggered => { root.pending = false; root.reset = false; root.progress = 1; }
+    }
+    animate progress { duration: root.reset || !root.motion ? 0ms : 240ms; easing: linear; }
+}
+export component Label inherits Text {
+    color: Theme.ivory; font-size: 13px; vertical-alignment: center; overflow: elide;
+}
+export component Action inherits Rectangle {
+    out property <bool> focused: focus.has-focus;
+    in property <string> label;
+    in property <string> description: root.label;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <bool> quiet: false;
+    in property <bool> busy: false;
+    callback clicked;
+    height: 38px; min-width: 100px;
+    private property <bool> down: root.enabled && (touch.pressed || root.key-down);
+    private property <bool> key-down: false;
+    changed enabled => { if !root.enabled { root.key-down = false; } }
+    background: root.quiet ? (root.down ? #324654 : touch.has-hover && root.enabled ? #263340 : transparent) : root.primary ? (root.down ? #ad915b : touch.has-hover && root.enabled ? #e5cc99 : Theme.gold) : (root.down ? #304952 : touch.has-hover && root.enabled ? #243742 : #122432);
+    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : touch.has-hover && root.enabled ? #89703f : #46535a;
+    animate background, border-color { duration: root.down ? 0ms : UiMotion.quick; easing: ease-out; }
+    border-radius: 2px; opacity: root.enabled || root.busy ? 1 : 0.55;
+    accessible-role: button; accessible-label: root.description; forward-focus: focus;
+    Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 12px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
+    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled && !root.busy; clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled && !root.busy; key-pressed(event) => {
+        if event.text == " " || event.text == "\n" { root.key-down = true; root.clicked(); return accept; } return reject;
+    }
+        key-released(event) => { if event.text == " " || event.text == "\n" { root.key-down = false; return accept; } return reject; }
+        changed has-focus => { if !self.has-focus { root.key-down = false; } }
+    }
+}
+export component Toggle inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback toggled;
+    width: 44px; height: 26px;
+    background: root.checked ? #557260 : #253340;
+    animate background { duration: UiMotion.state; easing: ease-out; }
+    border-radius: 13px; border-width: 1px;
+    border-color: focus.has-focus ? Theme.blue : root.checked ? Theme.gold : Theme.stroke;
+    opacity: root.enabled ? 1 : 0.45;
+    accessible-role: checkbox; accessible-label: root.label; accessible-checked: root.checked;
+    forward-focus: focus;
+    Rectangle { x: root.checked ? 22px : 4px; y: 4px; width: 18px; height: 18px; border-radius: 9px; background: root.checked ? Theme.ivory : Theme.muted;
+        animate x { duration: UiMotion.state; easing: ease-out; }
+    }
+    TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
+}
+export component Panel inherits Rectangle {
+    in property <float> entrance: 1;
+    in property <int> entrance-group: 0;
+    opacity: UiMotion.reveal(root.entrance, root.entrance-group);
+    background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
+    Rectangle { x: 0px; y: 0px; height: 1px; background: #45535a; }
+    @children
+}
+export component SectionTitle inherits Label { color: #e5d2a6; font-size: 15px; }
+export component Navigation inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: 55px;
+    background: root.selected ? @linear-gradient(90deg, #263234, #0f1c29) : touch.has-hover ? #132635 : transparent;
+    border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.selected ? #75613c : transparent;
+    animate background { duration: UiMotion.selection; easing: ease-out; }
+    animate border-color { duration: focus.has-focus ? 0ms : UiMotion.selection; easing: ease-out; }
+    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    Rectangle { x: 0px; width: 3px; y: 13px; height: parent.height - 26px; background: Theme.gold; opacity: root.selected ? 1 : 0;
+        animate opacity { duration: UiMotion.selection; easing: ease-out; }
+    }
+    Image { x: 13px; y: 15px; width: 25px; height: 25px; source: root.icon; image-fit: contain; opacity: root.selected ? 1 : 0.7;
+        animate opacity { duration: UiMotion.selection; easing: ease-out; }
+    }
+    Label { y: 0px; x: 51px; width: parent.width - 56px; height: parent.height; text: root.label; color: root.selected ? #e8ce96 : Theme.muted; font-size: 13px;
+        animate color { duration: UiMotion.selection; easing: ease-out; }
+    }
+    touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+    focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.clicked(); return accept; } return reject; } }
+}
+export component Module inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> value;
+    in property <string> detail;
+    in property <color> tone: Theme.blue;
+    in property <bool> compact: false;
+    background: #0c1b28; border-width: 1px; border-color: Theme.stroke;
+    Rectangle { x: 0px; y: 0px; height: 2px; background: root.tone; }
+    Image { x: 15px; y: 19px; width: 27px; height: 27px; source: root.icon; image-fit: contain; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 10px : 55px; width: parent.width - self.x - 12px; height: 20px; text: root.label; color: #aab9c1; font-size: 12px; }
+    Rectangle { x: root.compact ? 51px : 15px; y: root.compact ? 43px : 87px; width: 6px; height: 6px; border-radius: 3px; background: root.tone; }
+    Label { x: root.compact ? 64px : 28px; y: root.compact ? 33px : 77px; width: parent.width - self.x - 10px; height: 24px; text: root.value; color: root.tone; font-size: 13px; font-weight: 600; }
+    Label { x: root.compact ? 51px : 15px; y: root.compact ? 60px : 105px; width: parent.width - self.x - 12px; height: 34px; text: root.detail; color: #a1b3bf; font-size: 12px; wrap: word-wrap; }
+}
+export component Disclosure inherits Panel {
+    in property <string> label;
+    in property <string> detail;
+    in-out property <bool> expanded: false;
+    height: root.expanded ? 114px : 46px;
+    accessible-role: button; accessible-label: root.label; forward-focus: focus;
+    Label { y: 0px; x: 20px; height: 46px; width: parent.width - 40px; text: (root.expanded ? "−  " : "+  ") + root.label; color: #bdad88; }
+    if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+    TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
+    focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
+    if focus.has-focus: Rectangle { x: 0px; y: 0px; background: transparent; border-width: 1px; border-color: Theme.blue; height: 46px; }
+}
+export component Scrollbar inherits Rectangle {
+    in property <length> content-height;
+    in-out property <length> offset;
+    private property <length> maximum: max(0px, root.content-height - root.height);
+    private property <length> thumb-height: max(28px, root.height * root.height / max(1px, root.content-height));
+    width: 12px;
+    visible: root.maximum > 0px;
+    Rectangle { x: 4px; y: clamp(-root.offset / max(1px, root.maximum), 0, 1) * (root.height - root.thumb-height); width: 5px; height: root.thumb-height; border-radius: 2px; background: touch.has-hover ? Theme.gold : #635638; }
+    touch := TouchArea {
+        private property <length> start-offset;
+        pointer-event(event) => { if event.kind == PointerEventKind.down { self.start-offset = root.offset; } }
+        moved => { if self.pressed { root.offset = clamp(self.start-offset - (self.mouse-y - self.pressed-y) * root.maximum / max(1px, root.height - root.thumb-height), -root.maximum, 0px); } }
+        scroll-event(event) => { root.offset = clamp(root.offset + event.delta-y, -root.maximum, 0px); return accept; }
+    }
+}
+
+// A reserved footer avoids moving content when feedback arrives. Long errors stay scrollable.
+export component NoticeBar inherits Rectangle {
+    in property <string> message;
+    in property <bool> enabled: true;
+    callback dismissed;
+    height: 52px; background: #102431; border-width: 1px; border-color: #385361;
+    Image { x: 12px; y: 22px; width: 7px; height: 7px; source: @image-url("assets/diamond.svg"); colorize: Theme.blue; }
+    changed message => { notice-scroll.viewport-y = 0px; }
+    notice-scroll := Flickable { x: 28px; y: 7px; width: parent.width - 80px; height: 38px;
+        viewport-width: self.width; viewport-height: max(self.height, message-text.preferred-height);
+        message-text := Text { width: notice-scroll.width; height: self.preferred-height; text: root.message; color: #d4e2e9; font-size: 12px; wrap: word-wrap; }
+    }
+    Scrollbar { x: parent.width - 52px; y: 7px; height: 38px; content-height: notice-scroll.viewport-height; offset <=> notice-scroll.viewport-y; }
+    Action { x: parent.width - 40px; y: 9px; width: 32px; min-width: 0px; height: 32px; quiet: true; label: "×"; description: "关闭操作反馈"; enabled: root.enabled; clicked => { root.dismissed(); } }
+}

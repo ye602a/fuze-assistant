@@ -1,0 +1,16 @@
+{
+  "elapsed_including_400ms_timer": 685.9977,
+  "first_raster_snapshot_ms": 4.663600000000001,
+  "foreground_unchanged_observed": true,
+  "gpu_performance_verified": false,
+  "native_window_created": true,
+  "real_ime_verified": false,
+  "requested_backend": "skia",
+  "visible": false,
+  "warm_process_cpu_ms": 46.875,
+  "warm_raster_snapshot": {
+    "count": 12,
+    "median_ms": 2.94,
+    "p95_ms": 5.43
+  }
+}

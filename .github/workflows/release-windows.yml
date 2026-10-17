@@ -7,7 +7,16 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      stage_acceptance:
+        description: '阶段版本验收：生成安装包并执行安装包窗口验证'
+        type: boolean
+        default: false
+      upload_artifacts:
+        description: '保留安装包和窗口诊断供下载（正式标签直接发布到 Releases）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -57,41 +66,62 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Check upload secrets
+        id: secrets
         # Scan before building/uploading; findings never contain credential values.
         run: npm run security:check
 
       - name: Code lint
+        id: lint
         run: npm run lint
 
       - name: Type check
+        id: types
         run: npm run type-check
 
       - name: Unit tests
+        id: tests
         run: npm run test:unit
 
+      - name: Compile application without packaging
+        id: build
+        run: npm run build
+
+      - name: Validate workflow policy
+        id: contracts
+        run: node --test tests/unit/actions-validation-summary.test.mjs
+
       - name: OCR fixture regression
+        id: ocr
         run: npm run test:augment-ocr
 
       - name: Stage statistics cache regression
+        id: stages
         run: node --experimental-transform-types tests/electron/test-stage-statistics.js
 
       - name: Stage signal privacy and transport regression
+        id: signals
         run: node --experimental-transform-types tests/electron/test-stage-signal.js
 
       - name: Private differential update regression
+        id: differential
         run: node scripts/test-private-update.mjs
 
       - name: Verify private release differential download
+        id: download
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         env:
           FUZE_UPDATE_TEST_ACCESS: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/test-private-update-live.mjs
 
       - name: Package Windows installer
+        id: package
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         shell: pwsh
         run: |
           $env:ELECTRON_CACHE = Join-Path $env:RUNNER_TEMP 'electron-cache'
           $env:ELECTRON_BUILDER_CACHE = Join-Path $env:RUNNER_TEMP 'electron-builder-cache'
           npm run pack
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $localeBundles = @(
             @{ Locale = 'zh-CN'; Pointer = 'current.json'; VersionPrefix = 'versions' },
@@ -133,24 +163,33 @@ jobs:
           }
 
       - name: Check packaged upload secrets
+        id: upload_scan
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         run: npm run security:check -- --packaged
 
       - name: Smoke test packaged Windows application
+        id: desktop
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
         timeout-minutes: 4
         run: npm run test:packaged-windows
 
       - name: Upload packaged smoke diagnostics
-        if: always()
+        id: upload_evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fuze-window-smoke
+          retention-days: 7
           if-no-files-found: warn
           path: build/release-smoke/
 
       - name: Upload workflow artifact
+        id: upload_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fuze-windows
+          retention-days: 3
           if-no-files-found: error
           path: |
             build/*.exe
@@ -158,6 +197,7 @@ jobs:
             build/latest.yml
 
       - name: Publish GitHub Release
+        id: publish
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
@@ -210,3 +250,10 @@ jobs:
 
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep validation results in the job summary
+        if: always()
+        env:
+          FUZE_CI_KIND: electron
+          FUZE_CI_STATUS: ${{ job.status }}
+          FUZE_CI_STEPS: ${{ toJSON(steps) }}
+        run: node scripts/actions-validation-summary.mjs

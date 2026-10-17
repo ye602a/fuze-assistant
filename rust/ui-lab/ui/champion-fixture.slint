@@ -1,0 +1,19 @@
+// Offline public-data fixture, never represents the current player.
+export struct ChampionChoice { id: int, name: string, win: string, pick: string, games: string, icon: image }
+export global ChampionFixture {
+ out property <[ChampionChoice]> team: [{ id: 1, name: "安妮", win: "48.5%", pick: "2.3%", icon: @image-url("assets/champion-1.png") },
+{ id: 4, name: "崔斯特", win: "56.0%", pick: "11.6%", icon: @image-url("assets/champion-4.png") },
+{ id: 17, name: "提莫", win: "53.6%", pick: "13.8%", icon: @image-url("assets/champion-17.png") },
+{ id: 51, name: "凯特琳", win: "52.8%", pick: "13.0%", icon: @image-url("assets/champion-51.png") },
+{ id: 157, name: "亚索", win: "57.4%", pick: "10.8%", icon: @image-url("assets/champion-157.png") }];
+ out property <[ChampionChoice]> bench: [{ id: 10, name: "凯尔", win: "55.0%", pick: "6.9%", icon: @image-url("assets/champion-10.png") },
+{ id: 11, name: "易", win: "54.4%", pick: "10.7%", icon: @image-url("assets/champion-11.png") },
+{ id: 5, name: "赵信", win: "53.1%", pick: "8.4%", icon: @image-url("assets/champion-5.png") },
+{ id: 12, name: "阿利斯塔", win: "51.7%", pick: "6.0%", icon: @image-url("assets/champion-12.png") },
+{ id: 3, name: "加里奥", win: "50.2%", pick: "7.0%", icon: @image-url("assets/champion-3.png") },
+{ id: 9, name: "费德提克", win: "48.6%", pick: "4.2%", icon: @image-url("assets/champion-9.png") },
+{ id: 8, name: "弗拉基米尔", win: "47.7%", pick: "6.5%", icon: @image-url("assets/champion-8.png") },
+{ id: 2, name: "奥拉夫", win: "46.2%", pick: "1.6%", icon: @image-url("assets/champion-2.png") },
+{ id: 6, name: "厄加特", win: "45.9%", pick: "4.3%", icon: @image-url("assets/champion-6.png") },
+{ id: 7, name: "乐芙兰", win: "43.7%", pick: "3.1%", icon: @image-url("assets/champion-7.png") }];
+}
