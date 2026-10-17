@@ -11,7 +11,7 @@ use fuze_data::Prepared;
 use fuze_native_overlay::native::HiddenOverlay;
 use fuze_runtime::{
     gate::Selection,
-    session::{FrameKey, Phase, Session},
+    session::{FrameKey, Phase, Session, Ticket},
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
@@ -42,6 +42,22 @@ pub struct Delivery {
     pub ocr_ms: f64,
     pub total_ms: f64,
 }
+fn finish_session(
+    session: &mut Session,
+    ticket: Ticket,
+    slots: [fuze_contract::Slot; 3],
+    selection: Selection,
+    now: u64,
+) -> Result<Option<Snapshot>> {
+    let snapshot = session.finish(ticket, slots, selection, now);
+    // A completed but expired reply has no transport error. Signal exhaustion to Controller
+    // so its bounded backoff replaces the worker instead of leaving a timerless session.
+    if snapshot.is_none() && session.faulted() {
+        Err("worker-result-expired")
+    } else {
+        Ok(snapshot)
+    }
+}
 impl Pipeline {
     pub fn scheduling(&self) -> (fuze_runtime::gate::Mode, u64, Option<u8>) {
         let (d, next) = self.session.level_schedule(self.now());
@@ -64,7 +80,15 @@ impl Pipeline {
         headless: bool,
     ) -> Result<Self> {
         let dataset = data.identity();
-        let detail = data.champion_detail(champion)?;
+        let recognition_only = data.scope() == fuze_data::Scope::Ocr;
+        let detail = if recognition_only {
+            fuze_data::champion_detail::Detail {
+                augments: data.recognition_cards(),
+                ..Default::default()
+            }
+        } else {
+            data.champion_detail(champion)?
+        };
         let tiers = detail
             .augments
             .iter()
@@ -72,7 +96,11 @@ impl Pipeline {
             .collect();
         let mut session = Session::new(dataset.clone())?;
         session.update_phase(Phase::Loading)?;
-        let stats = data.recommendations(champion)?;
+        let stats = if recognition_only {
+            Default::default()
+        } else {
+            data.recommendations(champion)?
+        };
         let frames = crate::overlay_frame::Publisher::new(
             detail.augments,
             stats
@@ -309,7 +337,9 @@ impl Pipeline {
             TitleKind::Candidate => Selection::Candidate,
             TitleKind::Unknown => Selection::Unknown,
         };
-        let Some(snapshot) = self.session.finish(ticket, slots, selection, self.now()) else {
+        let now = self.now();
+        let Some(snapshot) = finish_session(&mut self.session, ticket, slots, selection, now)?
+        else {
             return Ok(None);
         };
         let display = self
@@ -363,6 +393,10 @@ impl Pipeline {
             self.frames.clear();
             self.overlay.visible(false)?;
             self.capture_state = "waiting-frame";
+        }
+        let saving = self.scheduling().0 == fuze_runtime::gate::Mode::Saving;
+        if let Some(capture) = self.capture.as_mut() {
+            capture.saving(saving);
         }
         if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
             self.skipped_frames = self.skipped_frames.saturating_add(1);
@@ -453,5 +487,41 @@ impl Drop for Pipeline {
     fn drop(&mut self) {
         self.capture.take();
         let _ = self.worker.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn expired_completed_jobs_report_exhaustion_instead_of_silently_stopping() {
+        let mut session = Session::new("zh-CN@fixture".into()).unwrap();
+        session.update_phase(Phase::InProgress).unwrap();
+        for i in 0..3 {
+            let at = i * 10_000;
+            let ticket = session
+                .begin(
+                    FrameKey {
+                        epoch: 1,
+                        sequence: i + 1,
+                    },
+                    at,
+                )
+                .unwrap();
+            let result = finish_session(
+                &mut session,
+                ticket,
+                std::array::from_fn(|_| fuze_contract::Slot::Unreadable),
+                Selection::Unknown,
+                at + 3000,
+            );
+            if i < 2 {
+                assert!(result.unwrap().is_none());
+            } else {
+                assert_eq!(result.unwrap_err(), "worker-result-expired");
+            }
+        }
+        assert!(session.faulted());
+        assert!(session.wake_at(100_000).is_none());
     }
 }

@@ -189,6 +189,26 @@ fn stats(v: &Value, locale: Locale) -> String {
     )
 }
 impl Prepared {
+    /// Display metadata when hero statistics are unavailable. Never relabel global rates as hero rates.
+    pub fn recognition_cards(&self) -> Vec<Augment> {
+        self.document("augments.json")
+            .into_iter()
+            .flat_map(|v| rows(&v["data"]))
+            .filter_map(|a| {
+                Some(Augment {
+                    id: u32::try_from(a["id"].as_u64()?).ok().filter(|id| *id > 0)?,
+                    name: clean(&a["name"]),
+                    icon: clean(&a["iconUrl"]),
+                    rarity: a["rarity"].as_u64().filter(|v| *v <= 2).map(|v| v as u8),
+                    description: description(a["description"].as_str().unwrap_or("")),
+                    tier: None,
+                    win: None,
+                    pick: None,
+                    provenance: String::new(),
+                })
+            })
+            .collect()
+    }
     pub fn champion_detail(&self, id: u32) -> Result<Detail> {
         let key = id.to_string();
         let mut matches = self

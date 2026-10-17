@@ -18,11 +18,6 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, Box<dyn std::error::Err
         source: fuze_data::Source::Bundled,
     }];
     let mut manager = crate::game_windows::Manager::new(roots, true, false);
-    let mut status = Status::default();
-    status.mode = 1;
-    status.preferences.augment_overlay = true;
-    status.preferences.icon_downloads = false;
-    status.connection = Some(fuze_lcu::reconnect::State::Connected(Phase::InProgress));
     let foreground = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     let started = Instant::now();
     let mut renders = 0;
@@ -31,23 +26,38 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, Box<dyn std::error::Err
     let (send, receive) = std::sync::mpsc::sync_channel(1);
     let (ack, acknowledged) = std::sync::mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
-        fuze_worker_host::capture_review::run(&inputs, |pipeline, delivery, index| {
-            send.send((pipeline.frames.current(), delivery.is_some(), index))
+        let present = |status: Status, index| {
+            send.send((status, index))
                 .map_err(|_| "capture-review-ui-closed")?;
             acknowledged
                 .recv_timeout(std::time::Duration::from_secs(10))
                 .map_err(|_| "capture-review-ui-timeout")?;
             Ok(())
-        })
+        };
+        if inputs[6].starts_with("lifecycle") {
+            fuze_worker_host::lifecycle_review::run(&inputs, present)
+        } else {
+            fuze_worker_host::capture_review::run(&inputs, |pipeline, delivery, index| {
+                let mut status = Status::default();
+                status.mode = 1;
+                status.preferences.augment_overlay = true;
+                status.preferences.icon_downloads = false;
+                status.connection = Some(fuze_lcu::reconnect::State::Connected(
+                    if delivery.is_some() {
+                        Phase::InProgress
+                    } else {
+                        Phase::PostGame
+                    },
+                ));
+                status.pipeline.overlay = pipeline.frames.current();
+                present(status, index)
+            })
+        }
         .map_err(|e| e.to_string())
     });
-    for (frame, active, index) in receive {
-        status.pipeline.overlay = frame.clone();
-        if !active {
-            status.connection = Some(fuze_lcu::reconnect::State::Connected(Phase::PostGame));
-        }
+    for (status, index) in receive {
         manager.update(&status)?;
-        if let Some(frame) = frame {
+        if let Some(frame) = status.pipeline.overlay {
             let cards = manager
                 .cards
                 .as_mut()

@@ -32,6 +32,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// One production capture contract. Frames never leave memory or enter diagnostics.
 pub trait CaptureFeed {
+    /// Release continuous capture during the level-one saving gate; probes still work.
+    fn saving(&mut self, _saving: bool) {}
     fn next(&mut self, timeout: Duration) -> Result<FrameStatus>;
     fn titles(&self) -> Result<fuze_contract::titles::Atlas<'_>>;
     fn key(&self) -> (u64, u64);

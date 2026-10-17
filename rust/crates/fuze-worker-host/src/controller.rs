@@ -17,7 +17,6 @@ fn loading_handoff(old: Context, new: Context) -> bool {
         && new.phase == Phase::InProgress
         && old.supported
         && new.supported
-        && old.champion.is_some()
         && old.champion == new.champion
         && old.finishes_loading(&new)
 }
@@ -124,6 +123,35 @@ pub struct Monitor {
     thread: Option<JoinHandle<()>>,
 }
 impl Monitor {
+    /// Isolated replay only: no auth discovery, network thread, or player records.
+    pub(crate) fn review() -> Self {
+        let latest = Arc::new(Mutex::new(Observation {
+            journal: None,
+            locale: Some(fuze_lcu::locale::Locale::ZhCn),
+            state: fuze_lcu::reconnect::State::Waiting,
+            context: None,
+            root: None,
+            revision: 0,
+            updated: Instant::now(),
+            cancellation: None,
+        }));
+        Self {
+            control: MonitorControl {
+                wake: None,
+                enabled: Arc::new(AtomicBool::new(true)),
+                latest: latest.clone(),
+            },
+            latest,
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        }
+    }
+    pub(crate) fn review_publish(&self, context: Context) {
+        assert!(self.thread.is_none());
+        let mut s = self.latest.lock().unwrap();
+        s.state = fuze_lcu::reconnect::State::Connected(context.phase);
+        s.publish(Some(context), Some(PathBuf::from("isolated-review-root")));
+    }
     pub fn playing_champion(&self) -> Option<u32> {
         let latest = self.latest.lock().ok()?;
         if latest.updated.elapsed() >= Duration::from_secs(8)
@@ -368,9 +396,15 @@ impl Config {
         champion: u32,
         locale: fuze_data::Locale,
     ) -> Result<fuze_data::Prepared> {
-        // The production popup needs the same complete detail scope as the champion page.
-        // Load one shard and the small item catalogue once during preparation, never per frame.
-        let mut data = fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Detail(champion))?;
+        // Stats enrich recognition; they must never prevent the first card names appearing.
+        // Zero means the authenticated context has no champion yet, never a guessed hero.
+        let details = (champion != 0)
+            .then(|| fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Detail(champion)))
+            .and_then(std::result::Result::ok);
+        let mut data = match details {
+            Some(data) => data,
+            None => fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Ocr)?,
+        };
         let (supplement, _) = crate::recognition_sources::load(&self.roots)?;
         data.supplement_recognition(&supplement);
         Ok(data)
@@ -456,7 +490,15 @@ pub struct Controller {
     retry: Retry,
     epoch: Instant,
 }
+/// Only explicit offline review entry points supply these; production always uses live inputs.
+pub(crate) struct ReviewInputs {
+    pub capture: Option<Box<dyn fuze_capture::native::CaptureFeed>>,
+    pub level: Option<(u8, Instant)>,
+}
 impl Controller {
+    pub(crate) fn review_pipeline(&self) -> Option<&Pipeline> {
+        self.pipeline.as_ref()
+    }
     pub(crate) fn usage(&self) -> Option<(u32, u64, u64)> {
         self.pipeline.as_ref().and_then(|p| p.worker.usage())
     }
@@ -560,6 +602,13 @@ impl Controller {
     }
     /// One bounded unit of work; caller yields between ticks and never runs this on UI.
     pub fn tick(&mut self, monitor: &Monitor) -> Result<()> {
+        self.tick_inputs(monitor, None)
+    }
+    pub(crate) fn tick_inputs(
+        &mut self,
+        monitor: &Monitor,
+        mut review: Option<&mut ReviewInputs>,
+    ) -> Result<()> {
         let (context, root, revision, fresh, detected_locale, journal) = {
             let latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
             (
@@ -582,10 +631,7 @@ impl Controller {
         }
         self.records.bind(if fresh { journal } else { None });
         let active = context.filter(|c| {
-            fresh
-                && matches!(c.phase, Phase::Loading | Phase::InProgress)
-                && c.supported
-                && c.champion.is_some()
+            fresh && matches!(c.phase, Phase::Loading | Phase::InProgress) && c.supported
         });
         let (Some(context), Some(_root)) = (active, root) else {
             self.clear();
@@ -605,7 +651,7 @@ impl Controller {
         let result: Result<()> = (|| {
             if self.pipeline.is_none() {
                 let pipeline = self.config.prepare(
-                    context.champion.ok_or("champion-missing")?,
+                    context.champion.unwrap_or(0),
                     locale.ok_or("locale-unavailable")?,
                 )?;
                 let mut latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
@@ -644,18 +690,27 @@ impl Controller {
             if phase != Phase::InProgress {
                 return Ok(());
             }
-            if self.config.level_gate && self.level_reader.is_none() {
+            if review.is_none() && self.config.level_gate && self.level_reader.is_none() {
                 self.level_reader = crate::live_level::Reader::start().ok();
             }
-            let sample = self.level_reader.as_ref().and_then(|r| {
-                r.enable(self.config.level_gate);
-                r.sample()
-            });
+            let sample = if let Some(inputs) = review.as_ref() {
+                inputs.level
+            } else {
+                self.level_reader.as_ref().and_then(|r| {
+                    r.enable(self.config.level_gate);
+                    r.sample()
+                })
+            };
             let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
             if !pipeline.has_capture() {
                 // Stable v0.6.3 default: screen first, independent of game process handles/layout.
                 // Only this authenticated, supported InProgress branch starts capture.
-                pipeline.capture_screen()?;
+                if let Some(inputs) = review.as_mut() {
+                    pipeline
+                        .capture_feed(inputs.capture.take().ok_or("review-capture-missing")?)?;
+                } else {
+                    pipeline.capture_screen()?;
+                }
             }
             if let Some((level, at)) = sample {
                 pipeline.level_sample(level, at.elapsed().as_millis() as u64);

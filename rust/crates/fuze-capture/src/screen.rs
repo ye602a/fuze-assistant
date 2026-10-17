@@ -48,6 +48,7 @@ pub struct ScreenCapture<D: ScreenDriver = NativeScreen> {
     retry_at: u64,
     waiting_since: u64,
     running: bool,
+    saving: bool,
     bitmap: bool,
     ready: bool,
     seen: bool,
@@ -70,6 +71,7 @@ impl<D: ScreenDriver> ScreenCapture<D> {
             retry_at: 0,
             waiting_since: 0,
             running: false,
+            saving: false,
             bitmap: false,
             ready: false,
             seen: false,
@@ -97,6 +99,11 @@ impl<D: ScreenDriver> ScreenCapture<D> {
     }
     fn next_at(&mut self, now: u64, timeout: Duration) -> Result<FrameStatus> {
         self.ready = false;
+        if self.saving {
+            self.driver.bitmap().map_err(|_| "capture-bitmap")?;
+            self.bitmap = true;
+            return self.accept();
+        }
         if !self.running && now >= self.retry_at {
             match self.driver.start() {
                 Ok(()) => {
@@ -172,6 +179,20 @@ impl<D: ScreenDriver> ScreenCapture<D> {
     }
 }
 impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
+    fn saving(&mut self, saving: bool) {
+        if self.saving == saving {
+            return;
+        }
+        self.saving = saving;
+        if saving {
+            self.driver.stop();
+            self.running = false;
+            self.ready = false;
+            self.bitmap = true;
+        }
+        // Resume immediately unless an actual capture failure already imposed a cooldown.
+        // Saving itself is not a failure and must not delay the first selection.
+    }
     fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
         // Physical monitor coordinates, including a DPI-unaware embedding caller.
         let _dpi = bitmap::PhysicalPixels::new();
@@ -243,6 +264,27 @@ mod tests {
             bitmaps: 0,
             black: false,
         })
+    }
+    #[test]
+    fn level_one_saving_releases_stream_and_resume_has_no_artificial_cooldown() {
+        let mut c = capture();
+        c.saving(true);
+        c.next_at(0, Duration::ZERO).unwrap();
+        c.next_at(8000, Duration::ZERO).unwrap();
+        assert_eq!(c.driver.starts, 0);
+        assert_eq!(c.driver.bitmaps, 2);
+        c.saving(false);
+        c.next_at(8250, Duration::ZERO).unwrap();
+        assert_eq!(c.source(), "screen-stream");
+        c.saving(true);
+        assert!(!c.running);
+        c.next_at(9000, Duration::ZERO).unwrap();
+        assert_eq!(c.driver.starts, 1);
+        c.saving(false);
+        c.next_at(9250, Duration::ZERO).unwrap();
+        assert_eq!(c.source(), "screen-stream");
+        assert_eq!(c.driver.starts, 2);
+        assert_eq!(c.fallback(), None);
     }
     #[test]
     fn startup_failure_falls_back_immediately_and_recovers_after_cooldown() {

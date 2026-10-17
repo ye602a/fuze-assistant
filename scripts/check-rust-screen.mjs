@@ -11,7 +11,7 @@ const fixtureData=path.join(output,'fixture-data'), version='1.0.0'
 const versionDir=path.join(fixtureData,'versions',version)
 await mkdir(path.join(versionDir,'champion-shards'),{recursive:true})
 const catalog=JSON.parse(await readFile(args[3],'utf8'))
-const augments=Object.entries(catalog).map(([name,id])=>({name,id}))
+const augments=Object.entries(catalog).map(([name,id])=>({name,id,stats:{winRate:0.99,pickRate:0.99}}))
 await writeFile(path.join(fixtureData,'current.json'),JSON.stringify({schemaVersion:3,locale:'zh-CN',dataVersion:version}))
 await writeFile(path.join(versionDir,'manifest.json'),JSON.stringify({locale:'zh-CN',dataVersion:version,files:[{path:'augments.json'}]}))
 await writeFile(path.join(versionDir,'augments.json'),JSON.stringify({data:augments}))
@@ -24,6 +24,14 @@ if(modes.some(m=>!['screen','bitmap','offline-stream','offline-bitmap','offline-
    (!ci && modes.some(m=>m==='screen'||m==='bitmap')))throw new Error('Screen capture is CI-only in this review')
 const results=[]
 const cases=modes.map(mode=>({mode,data:fixtureData,label:mode}))
+if(process.env.FUZE_SCREEN_LIFECYCLE==='1') {
+  const minimalData=path.join(output,'minimal-data')
+  const prefix=path.join(minimalData,'versions',version)
+  await mkdir(prefix,{recursive:true})
+  for(const name of ['manifest.json','augments.json']) await writeFile(path.join(prefix,name),await readFile(path.join(versionDir,name)))
+  await writeFile(path.join(minimalData,'current.json'),await readFile(path.join(fixtureData,'current.json')))
+  cases.push({mode:'lifecycle',data:fixtureData,label:'lifecycle'}, {mode:'lifecycle-minimal',data:minimalData,label:'lifecycle-minimal'})
+}
 if(process.env.FUZE_SCREEN_VERIFY_BUNDLED==='1')cases.push({mode:'offline-stream',data:path.join(root,'resources/client-data'),label:'bundled-current'})
 for(const {mode,data,label} of cases) {
   const report=childReport(path.join(bin,'fuze-ui-lab.exe'),['--review-capture',
@@ -31,7 +39,7 @@ for(const {mode,data,label} of cases) {
     data,mode,'cpu',path.join(output,label)],120000)
   results.push(report)
   console.log(JSON.stringify({case:label,...report}))
-  const completeStatistics = label==='bundled-current' || report.frames?.filter(f=>f.sample===0).every(f=>f.statistics_slots?.every(Boolean))
+  const completeStatistics = label==='bundled-current' || report.controller_lifecycle===true || report.frames?.filter(f=>f.sample===0).every(f=>f.statistics_slots?.every(Boolean))
   if(!report.exit_ok || !report.passed || report.production_ui_publisher!==true ||
      !report.foreground_unchanged || report.hidden_native_popup_renders<2 || !report.worker_reaped || !completeStatistics) {
     process.exitCode=1

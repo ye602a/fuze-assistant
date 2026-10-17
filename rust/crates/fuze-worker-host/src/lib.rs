@@ -49,6 +49,8 @@ pub mod capture_review;
 #[cfg(windows)]
 pub mod legacy_preferences;
 #[cfg(windows)]
+pub mod lifecycle_review;
+#[cfg(windows)]
 pub mod live_level;
 #[cfg(windows)]
 pub mod local_records;
