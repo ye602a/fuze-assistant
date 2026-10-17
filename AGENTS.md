@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Current development scope
+
+The repository is public. The active native preview is Rust (`rust/crates/`) with
+Slint and Direct2D/DirectWrite UI (`rust/ui-lab/`). Electron/Vue under `src/`
+remains the v0.6.3 stable implementation and migration reference. The Electron
+commands and architecture rules below apply to that implementation, not to Rust UI.
+Use `docs/development/README.md` and current CI for native build/check entry points.
+Public Rust update downloads need no token; optional GitHub issue uploads require
+separate local authorization. Never embed a shared credential.
+
 ## Project Structure & Module Organization
 
 This is an Electron + Vue app built with `electron-vite`. Source code lives under `src/`:

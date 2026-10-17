@@ -1,16 +1,14 @@
-> 最新进度见 [图形恢复与受管启动](evidence/RENDERER_RECOVERY.md)、[运行收口与集中验收](evidence/RUNTIME_CLOSURE.md) 和 [阶段清单](../../docs/RUST_TEST_STAGE_HANDOFF.md)。当前继续原会话，完成整个移植且功能稳定后才换会话。此前记录见 [完整观察与三卡交互](evidence/OBSERVATION_OVERLAY.md)、[选人操作与按需图片](evidence/CHAMPION_ACTIONS.md)、[战绩与迁移](evidence/RECORD_ACTIONS.md)、[启动与维护](evidence/STARTUP_MAINTENANCE.md)。隔离开发验收不等于实战成功，本轮不发布安装包。
+# FUZE 原生界面
 
-# FUZE UI 技术验证
+当前本目录用于 Rust 测试版的 Slint 主界面和 Direct2D / DirectWrite 三卡浮窗，代码已随 [#95](https://github.com/ye602a/fuze-assistant/pull/95) 合入 master。`ui-lab` 是沿用的目录名，不表示当前下载包仍只是界面原型。玩家下载见 [Rust 测试频道](https://github.com/ye602a/fuze-assistant/releases/tag/rust-preview)。
 
-当前进行 [v0.6.3 中文界面恢复](evidence/RESTORATION_PROGRESS.md)。首页结构、资源与三卡尺寸先恢复；设置、战绩和选人是分阶段迁入，未接回的操作明确禁用。此前性能图片是历史原型，不能当作当前界面完成证明。开发侧对照完成前不要求玩家验收，也不打包。
+- Slint 主界面保留中文版侧栏、大状态区、四个模块和三卡结构，沿用深蓝、金色与品牌资源。
+- 三卡浮窗使用 Direct2D / DirectWrite，固定左右顺序，提供缺失卡位提示、说明、拖动和位置记忆。
+- `gpu` 构建使用 Skia，可用 `skia-software` 进行软件渲染对照。工具链与依赖版本以锁文件及 CI 为准。
+- `--review*` 和 `--desktop-smoke` 使用隔离数据，不连接玩家游戏；生产启动会按偏好运行真实宿主，不能当成无副作用的开发检查。
+- 中文输入法、跨屏、远程桌面和实战窗口行为的验证，与隐藏窗口和 CI 结果分开记录。
 
-这是独立开发入口，不是新版本或安装包。现已复用 Rust 宿主的 LCU、截图、OCR、偏好与资料服务，并增加显式生产启动及维护入口。`--review*`、`--desktop-smoke` 使用隔离合成数据，不连接游戏；`--desktop 配置文件` 会按照已保存偏好运行真实宿主，仅供空闲时主动验证，开发检查不会启动该模式。界面结构以中文版 FUZE 为基准，英雄候选网格继续属于选人窗口，不混入主界面。
-
-首轮 [本机证据](evidence/README.md) 保留作基线。后续 [Skia 性能与窗口验证](evidence/PERFORMANCE_FOLLOWUP.md) 已定位软件字体访问开销，并验证隐藏 Skia 实际图形表面与上下文重建。整体仍为“原型部分验收通过，全面迁移未放行”；下一步按 [人工验收清单](MANUAL_ACCEPTANCE.md) 验证中文输入和真实跨屏。
-
-- Slint 主窗口：原侧栏、大状态区、四模块、三卡；保留深蓝、金色和品牌资源。首页、偏好与维护、战绩和英雄资料页面已逐步接线；未完成操作仍明确禁用，剩余范围见最新进度文档。
-- Direct2D / DirectWrite 浮窗：三卡顺序固定、左侧图片、右侧选取率和胜率、粗进度条、缺失卡位占位；不依赖 Slint 创建浮窗。品牌图片仅为清楚标记的渲染占位，不冒充符文图标。
-- `gpu` 构建的交互入口默认选择 Skia；可显式选择 `skia-software` 对照。未启用该特性时仍使用 Slint software。固定 Slint 1.13.1 与现有 Rust 1.90 工具链配合，不以版本号代替兼容性验收。
+[evidence/](evidence/README.md) 保留早期原型、性能调查与阶段检查结果。其中“下一步”“未打包”等是当时状态，不代表当前缺口。当前维护流程见[开发索引](../../docs/development/README.md)，下载包功能以对应发行说明为准。
 
 ## 开发运行
 

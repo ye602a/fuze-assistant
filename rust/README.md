@@ -1,6 +1,8 @@
-# FUZE Rust 原型（不接入稳定版）
+# FUZE Rust 原生测试版
 
-完整状态见 [替换进度](../docs/development/rust/PROGRESS.md)。正式入口仍为 Electron/Vue；Rust 模块及测试工具不被稳定安装包引用。
+当前开发代码已通过 [集成 PR #95](https://github.com/ye602a/fuze-assistant/pull/95) 合入 master。玩家入口为 [Rust 测试频道](https://github.com/ye602a/fuze-assistant/releases/tag/rust-preview)；原生主界面位于 [ui-lab](ui-lab/README.md)。v0.6.3 Electron 稳定包继续保留，源码合并不自动更新已发布包。
+
+下文及所链接的阶段文档包含原型时期记录。当前结构、验证与发布边界以[开发索引](../docs/development/README.md)和当前工作流为准；历史“下一步”不表示功能仍未实现。
 
 最新界面进度：[中文工作台复原](docs/WORKBENCH_RESTORATION.md)、[中文选人与局内浮窗复原](docs/POPUP_RESTORATION.md)。识别链路见 [M17 分类、刷新保留和加载预热](../docs/development/rust/M17_SELECTION_PREWARM.md)。WGC 可见自有窗口测试仅在 CI 显式运行，不能当作游戏验收；退出问题及防护见 [WGC shutdown](../docs/development/rust/WGC_SHUTDOWN.md)。
 
