@@ -48,10 +48,14 @@ pub fn classify(titles: &Atlas<'_>, buttons: &Atlas<'_>) -> Evidence {
         let n = sample(buttons, slot, |r, g, b| {
             let max = r.max(g).max(b);
             let min = r.min(g).min(b);
-            let gray = max >= 75 && min >= 55 && max - min <= 32;
+            // Preserve v0.6.3's muted/disabled button and bright-border evidence.
+            // Stricter replacement thresholds lost valid partially occluded cards
+            // after downscaling, even though their title was readable by OCR.
+            let gray = (65..=190).contains(&max) && max - min <= 60;
             let gold = r >= 100 && (70..=190).contains(&g) && b <= 135;
             let cyan = g >= 105 && b >= 105 && r <= 120;
-            button += usize::from(gray || gold || cyan);
+            let border = max >= 145 && min >= 105 && max - min <= 85;
+            button += usize::from(gray || gold || cyan || border);
         }) as f64;
         button_slots += usize::from(button as f64 / n >= 0.08);
     }

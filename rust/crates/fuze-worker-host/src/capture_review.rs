@@ -11,6 +11,54 @@ use fuze_contract::{titles::Atlas, Slot};
 use fuze_runtime::session::Phase;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod tests {
+    use fuze_contract::{
+        selection_pixels,
+        titles::{self, Atlas, Region},
+    };
+    fn packed(image: &image::RgbImage, regions: [Region; 3]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for y in 0..regions[0].height {
+            for r in regions {
+                for x in 0..r.width {
+                    let p = image.get_pixel(r.x + x, r.y + y);
+                    bytes.extend_from_slice(&[p[2], p[1], p[0], 255]);
+                }
+            }
+        }
+        bytes
+    }
+    #[test]
+    fn screen_gate_accepts_full_and_occluded_cards_at_multiple_sizes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/fixtures/augment-ocr");
+        for (file, visible) in [
+            ("full-three-cards.png", true),
+            ("partial-one-card.png", true),
+        ] {
+            let source = image::open(root.join(file)).unwrap().to_rgb8();
+            for (w, h) in [(1920, 1080), (1280, 720), (1024, 768)] {
+                let image =
+                    image::imageops::resize(&source, w, h, image::imageops::FilterType::Lanczos3);
+                let t = titles::regions(w, h).unwrap();
+                let b = selection_pixels::buttons(w, h).unwrap();
+                let tb = packed(&image, t);
+                let bb = packed(&image, b);
+                let evidence = selection_pixels::classify(
+                    &Atlas::new(&tb, t[0].width, t[0].height).unwrap(),
+                    &Atlas::new(&bb, b[0].width, b[0].height).unwrap(),
+                );
+                assert_eq!(
+                    evidence == selection_pixels::Evidence::Visible,
+                    visible,
+                    "{file} at {w}x{h}: {evidence:?}"
+                );
+            }
+        }
+    }
+}
+
 struct Offline {
     reader: GpuFixtureReader,
     texture: GpuFixture,
