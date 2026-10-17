@@ -61,6 +61,7 @@ fn run() -> fuze_ocr::Result<()> {
     )?;
     let mut last = None;
     let mut reuse = fuze_ocr::reuse::TitleReuse::default();
+    let mut last_reads = [wire::TitleRead::Unknown; 3];
     while let Some(request) = Request::read(&mut input)? {
         let id = request.id;
         if last.is_some_and(|old: wire::Identity| {
@@ -76,6 +77,7 @@ fn run() -> fuze_ocr::Result<()> {
                     id,
                     slots,
                     title_kind,
+                    title_reads: last_reads,
                     ocr_ms: 0.0,
                     backend: backend(&engine),
                     fallback_count: engine.status().fallback_count,
@@ -87,6 +89,7 @@ fn run() -> fuze_ocr::Result<()> {
         let result = engine.run("gpu_inference_failed", |e| e.recognize_atlas(&atlas));
         match result {
             Ok(result) => {
+                last_reads = result.title_reads;
                 reuse.remember(request, result.slots.clone(), result.title_kind);
                 wire::write_reply(
                     &mut out,
@@ -94,6 +97,7 @@ fn run() -> fuze_ocr::Result<()> {
                         id,
                         slots: result.slots,
                         title_kind: result.title_kind,
+                        title_reads: result.title_reads,
                         ocr_ms: result.elapsed_ms,
                         backend: backend(&engine),
                         fallback_count: engine.status().fallback_count,

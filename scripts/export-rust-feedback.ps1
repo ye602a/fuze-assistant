@@ -72,6 +72,14 @@ function ReadRuntimeLogs([string]$Directory) {
                             $safe[$key] = if ($value -is [string] -and $value -cin $allowed) { $value } else { $null }
                         }
                         $safe.analysis_ms = SafeNumber $row.state.analysis_ms 3600000
+                        $safe.process_cpu_percent = SafeNumber $row.state.process_cpu_percent 100
+                        $safe.process_memory_mb = SafeNumber $row.state.process_memory_mb 1048576
+                        $safe.title_reads = @('unknown', 'unknown', 'unknown')
+                        if ($null -ne $row.state.title_reads) {
+                            $reads = @($row.state.title_reads)
+                            $allowedReads = @('unknown','empty','low-confidence','no-catalog','ambiguous','exact','alias','fuzzy','stat-shard')
+                            if ($reads.Count -eq 3 -and @($reads | Where-Object { $_ -isnot [string] -or $_ -cnotin $allowedReads }).Count -eq 0) { $safe.title_reads = $reads }
+                        }
                         $safe.level = SafeNumber $row.state.level 30 $true
                         if ($safe.level -eq 0) { $safe.level = $null }
                         $safe.interval_ms = SafeNumber $row.state.interval_ms 3600000 $true

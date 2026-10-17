@@ -13,6 +13,7 @@ pub mod backend;
 mod metrics;
 pub mod reuse;
 pub mod selection;
+mod title_matcher;
 use backend::Backend;
 pub struct PreparedTitle {
     pub width: usize,
@@ -21,7 +22,7 @@ pub struct PreparedTitle {
 pub struct Recognizer {
     session: Session,
     dictionary: Vec<String>,
-    catalog: HashMap<String, u32>,
+    catalog: title_matcher::Matcher,
     fixed_width: Option<usize>,
     warmed: bool,
     #[cfg(windows)]
@@ -31,6 +32,7 @@ pub struct Recognizer {
 pub struct FrameResult {
     pub slots: [Slot; 3],
     pub title_kind: fuze_contract::wire::TitleKind,
+    pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub elapsed_ms: f64,
     pub selection_confirmed: bool,
 }
@@ -171,7 +173,7 @@ impl Recognizer {
         Ok(Self {
             session,
             dictionary,
-            catalog,
+            catalog: title_matcher::Matcher::new(catalog),
             fixed_width,
             warmed: false,
             #[cfg(windows)]
@@ -262,12 +264,10 @@ impl Recognizer {
             return Err("invalid-output-shape".into());
         }
         let (name, confidence) = decode_ctc(values, shape[2] as usize, &self.dictionary)?;
-        let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
         Ok((
-            if confidence >= 0.75 {
-                self.catalog.get(&normalized).copied()
-            } else {
-                None
+            match self.catalog.read(&name, confidence).0 {
+                Slot::Known { id, .. } => Some(id),
+                Slot::Unreadable => None,
             },
             elapsed,
             cpu_elapsed,
@@ -345,24 +345,21 @@ impl Recognizer {
         let started = Instant::now();
         let mut slots = [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable];
         let mut shards = [false; 3];
+        let mut title_reads = [fuze_contract::wire::TitleRead::Unknown; 3];
         // Prototype fixed single-line title geometry, not a generic text detector.
         for (i, slot) in slots.iter_mut().enumerate() {
             let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
             let shard_name = selection::shard_title(&name, 1.0);
             shards[i] = shard_name && confidence.is_finite() && confidence >= 0.9;
-            let normalized: String = name.chars().filter(|c| !c.is_whitespace()).collect();
-            if confidence >= 0.75 && !shard_name {
-                if let Some(&id) = self.catalog.get(&normalized) {
-                    *slot = Slot::Known {
-                        id,
-                        name: normalized,
-                        confidence,
-                    };
-                }
+            if shard_name {
+                title_reads[i] = fuze_contract::wire::TitleRead::StatShard;
+            } else {
+                (*slot, title_reads[i]) = self.catalog.read(&name, confidence);
             }
         }
         Ok(FrameResult {
             title_kind: selection::classify(&slots, shards),
+            title_reads,
             slots,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
             selection_confirmed: false,

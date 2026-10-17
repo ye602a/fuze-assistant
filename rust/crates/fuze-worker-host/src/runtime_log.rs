@@ -144,6 +144,12 @@ codes!(Gate {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub process_cpu_percent: Option<f64>,
+    #[serde(default)]
+    pub process_memory_mb: Option<f64>,
+    #[serde(default)]
+    pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub connection: Connection,
     pub phase: Phase,
     pub capture: Capture,
@@ -281,6 +287,15 @@ impl Snapshot {
             })
             .unwrap_or(Gate::Unknown);
         Self {
+            process_cpu_percent: s
+                .resources
+                .cpu
+                .filter(|n| n.is_finite() && (0. ..=100.).contains(n)),
+            process_memory_mb: s
+                .resources
+                .memory_mb
+                .filter(|n| n.is_finite() && (0. ..=1_048_576.).contains(n)),
+            title_reads: s.pipeline.title_reads,
             connection,
             phase,
             capture,
@@ -322,7 +337,7 @@ impl Snapshot {
             level: s.pipeline.level.filter(|n| (1..=30).contains(n)),
         }
     }
-    fn same_state(&self, other: &Self) -> bool {
+    pub(crate) fn same_state(&self, other: &Self) -> bool {
         (
             self.connection,
             self.phase,
@@ -346,11 +361,13 @@ impl Snapshot {
             self.gate,
             self.readable_slots,
             self.overlay_prepared,
+            self.title_reads,
         ) == (
             other.stream,
             other.gate,
             other.readable_slots,
             other.overlay_prepared,
+            other.title_reads,
         )
     }
 }
@@ -364,8 +381,16 @@ pub struct Record {
     pub dropped: u64,
 }
 impl Record {
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.schema == 1
+            && self
+                .state
+                .process_cpu_percent
+                .is_none_or(|n| n.is_finite() && (0. ..=100.).contains(&n))
+            && self
+                .state
+                .process_memory_mb
+                .is_none_or(|n| n.is_finite() && (0. ..=1_048_576.).contains(&n))
             && self.elapsed_ms <= 1_000_000_000_000
             && self.dropped <= 1_000_000_000_000
             && self.state.analyses <= 1_000_000_000_000

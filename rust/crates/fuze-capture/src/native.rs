@@ -58,6 +58,9 @@ pub use fixture::{GpuFixture, GpuFixtureReader};
 #[path = "stream.rs"]
 mod stream;
 pub use stream::{failure_details, FrameStatus, OwnedWindowStream};
+#[path = "duplication.rs"]
+mod duplication;
+pub use duplication::DesktopStream;
 
 struct Apartment(std::marker::PhantomData<std::rc::Rc<()>>);
 impl Apartment {
@@ -114,9 +117,14 @@ impl Device {
         unsafe {
             let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
             let adapter = factory.EnumAdapters(0)?;
+            Self::on_adapter(&adapter)
+        }
+    }
+    fn on_adapter(adapter: &IDXGIAdapter) -> Result<Self> {
+        unsafe {
             let (mut device, mut context) = (None, None);
             D3D11CreateDevice(
-                &adapter,
+                adapter,
                 D3D_DRIVER_TYPE_UNKNOWN,
                 HMODULE::default(),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,

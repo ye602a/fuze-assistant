@@ -13,6 +13,7 @@ use std::{
 };
 
 pub struct Binding {
+    upload: Rc<RefCell<crate::feedback_upload_bridge::Binding>>,
     recorder: crate::feedback::Recorder,
     pending: Option<(Receiver<Result<(), &'static str>>, JoinHandle<()>)>,
     session: Rc<Session>,
@@ -21,6 +22,7 @@ pub struct Binding {
 }
 impl Binding {
     pub fn poll(&mut self, ui: &Workbench, status: &Status, offline: bool) {
+        self.upload.borrow_mut().poll(ui, status);
         let state = ui.global::<DiagnosticState>();
         if let Some(journal) = &mut self.journal {
             journal.observe(status);
@@ -74,6 +76,7 @@ impl Binding {
         }
     }
     pub fn finish(&mut self) {
+        self.upload.borrow_mut().finish();
         if let Some(journal) = &mut self.journal {
             journal.stop();
         }
@@ -118,6 +121,7 @@ pub fn attach(
     offline: bool,
 ) -> Rc<RefCell<Binding>> {
     let binding = Rc::new(RefCell::new(Binding {
+        upload: crate::feedback_upload_bridge::attach(ui, offline),
         recorder: Default::default(),
         pending: None,
         session: session.clone(),

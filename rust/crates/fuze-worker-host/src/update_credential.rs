@@ -38,9 +38,12 @@ impl Drop for Secret {
     }
 }
 pub fn read() -> Result<Secret> {
+    read_target(TARGET)
+}
+pub(crate) fn read_target(target: &str) -> Result<Secret> {
     unsafe {
         let mut raw = null_mut();
-        if CredReadW(wide(TARGET).as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) == 0 {
+        if CredReadW(wide(target).as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) == 0 {
             return Err("credential-unavailable");
         }
         let result = if (*raw).CredentialBlobSize > 512 || (*raw).CredentialBlob.is_null() {
@@ -64,8 +67,11 @@ pub fn read() -> Result<Secret> {
     }
 }
 pub fn remove() -> Result<()> {
+    remove_target(TARGET)
+}
+pub(crate) fn remove_target(target: &str) -> Result<()> {
     unsafe {
-        if CredDeleteW(wide(TARGET).as_ptr(), CRED_TYPE_GENERIC, 0) == 0
+        if CredDeleteW(wide(target).as_ptr(), CRED_TYPE_GENERIC, 0) == 0
             && GetLastError() != ERROR_NOT_FOUND
         {
             return Err("credential-delete");
@@ -74,9 +80,12 @@ pub fn remove() -> Result<()> {
     Ok(())
 }
 pub fn prompt() -> Result<()> {
+    prompt_target(TARGET, "符择 · 私有更新凭据", "仅私有频道需要：用户名可填 GitHub，密码栏填写仅此仓库 Contents 只读令牌。公开频道无需填写。")
+}
+pub(crate) fn prompt_target(target_name: &str, title: &str, hint: &str) -> Result<()> {
     unsafe {
-        let message = wide("仅私有频道需要：用户名可填 GitHub，密码栏填写仅此仓库 Contents 只读令牌。公开频道无需填写。");
-        let caption = wide("符择 · 私有更新凭据");
+        let message = wide(hint);
+        let caption = wide(title);
         let info = CREDUI_INFOW {
             cbSize: size_of::<CREDUI_INFOW>() as u32,
             hwndParent: null_mut(),
@@ -89,7 +98,7 @@ pub fn prompt() -> Result<()> {
         let mut save = 0;
         let code = CredUIPromptForCredentialsW(
             &info,
-            wide(TARGET).as_ptr(),
+            wide(target_name).as_ptr(),
             null(),
             0,
             user.as_mut_ptr(),
@@ -123,7 +132,7 @@ pub fn prompt() -> Result<()> {
             return Err("credential-dialog");
         }
         let secret = secret?;
-        let mut target = wide(TARGET);
+        let mut target = wide(target_name);
         let mut name = wide("GitHub");
         let mut credential: CREDENTIALW = zeroed();
         credential.Type = CRED_TYPE_GENERIC;

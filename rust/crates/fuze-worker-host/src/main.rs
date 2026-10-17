@@ -49,6 +49,7 @@ fn probe(mode: &str, backend: &str) -> Result<()> {
         &mut io::stdout().lock(),
         &Reply::Result {
             title_kind: fuze_contract::wire::TitleKind::Unknown,
+            title_reads: Default::default(),
             id,
             slots: std::array::from_fn(|_| Slot::Unreadable),
             ocr_ms: 0.,

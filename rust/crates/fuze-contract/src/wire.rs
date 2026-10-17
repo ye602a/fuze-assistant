@@ -103,6 +103,8 @@ pub enum Reply {
         slots: [Slot; 3],
         #[serde(default)]
         title_kind: TitleKind,
+        #[serde(default)]
+        title_reads: [TitleRead; 3],
         ocr_ms: f64,
         backend: ActiveBackend,
         fallback_count: u8,
@@ -118,6 +120,21 @@ pub enum TitleKind {
     #[default]
     Unknown,
     Candidate,
+    StatShard,
+}
+/// Fixed diagnostic categories; never contains OCR text or pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TitleRead {
+    #[default]
+    Unknown,
+    Empty,
+    LowConfidence,
+    NoCatalog,
+    Ambiguous,
+    Exact,
+    Alias,
+    Fuzzy,
     StatShard,
 }
 pub fn write_reply(out: &mut impl Write, reply: &Reply) -> io::Result<()> {

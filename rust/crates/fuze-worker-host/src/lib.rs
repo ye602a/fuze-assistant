@@ -47,6 +47,8 @@ pub use job::Job as ChildJob;
 #[cfg(windows)]
 pub mod capture_review;
 #[cfg(windows)]
+pub mod github_feedback;
+#[cfg(windows)]
 pub mod legacy_preferences;
 #[cfg(windows)]
 pub mod lifecycle_review;

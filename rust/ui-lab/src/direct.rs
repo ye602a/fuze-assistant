@@ -812,6 +812,11 @@ impl OwnWindow {
             };
             // This is our own non-activating overlay HWND, never a game window.
             let mut window = window;
+            if !offline {
+                // Our recommendation must not be read back as game title text when dragged
+                // over a card. Never applies display affinity to the game or another process.
+                let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            }
             window.state.corners = Some(crate::window_style::Corners::new(hwnd.0, true));
             let scale = GetDpiForWindow(hwnd) as f32 / 96.;
             SetWindowPos(
@@ -1062,10 +1067,12 @@ impl HostOverlay {
                 }
             }
             // SW_SHOWNOACTIVATE is mandatory, including repeat shows and preference changes.
-            let _ = ShowWindow(
-                self.window.hwnd,
-                if show { SW_SHOWNOACTIVATE } else { SW_HIDE },
-            );
+            if IsWindowVisible(self.window.hwnd).as_bool() != show {
+                let _ = ShowWindow(
+                    self.window.hwnd,
+                    if show { SW_SHOWNOACTIVATE } else { SW_HIDE },
+                );
+            }
         }
         self.last_accepted = Some(frame.clone());
         self.frame = Some(frame);

@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub frames: crate::overlay_frame::Publisher,
     tiers: std::collections::HashMap<u32, u64>,
     pub(crate) art: Option<crate::overlay_art::Art>,
@@ -121,6 +122,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            title_reads: Default::default(),
             frames,
             tiers,
             art: None,
@@ -325,6 +327,7 @@ impl Pipeline {
         let Reply::Result {
             slots,
             title_kind,
+            title_reads,
             ocr_ms,
             ..
         } = reply
@@ -342,6 +345,7 @@ impl Pipeline {
         else {
             return Ok(None);
         };
+        self.title_reads = title_reads;
         let display = self
             .retention
             .apply(&snapshot.slots, title_kind, self.now());

@@ -459,6 +459,7 @@ impl Retry {
 }
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PipelineStatus {
+    pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub overlay: Option<std::sync::Arc<crate::overlay_frame::Frame>>,
     pub schedule: Option<(fuze_runtime::gate::Mode, u64, Option<u8>)>,
     pub recent_tiers: [Option<u64>; 3],
@@ -517,6 +518,10 @@ impl Controller {
     }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
+            title_reads: self
+                .pipeline
+                .as_ref()
+                .map_or(Default::default(), |p| p.title_reads),
             overlay: self.pipeline.as_ref().and_then(|p| p.frames.current()),
             skipped_frames: self
                 .pipeline

@@ -66,6 +66,14 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     assert.equal(screenReport.records[1].state.capture_fallback,'timeout')
     assert.equal(screenReport.records[2].state.capture_source,null)
     assert.equal(screenReport.records[2].state.capture_fallback,null)
+    writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,state:{...row.state,title_reads:['exact','no-catalog','low-confidence'],process_cpu_percent:12.5,process_memory_mb:180}})+'\n'+JSON.stringify({...row,state:{...row.state,title_reads:[secret,secret,secret],process_cpu_percent:secret,process_memory_mb:secret}})+'\n')
+    assert.equal(run(path.join(dir,'title-reads.json')).status,0)
+    const typed=JSON.parse(readFileSync(path.join(dir,'title-reads.json'))).persistentLog.records
+    assert.deepEqual(typed[1].state.title_reads,['exact','no-catalog','low-confidence'])
+    assert.equal(typed[1].state.process_cpu_percent,12.5)
+    assert.deepEqual(typed[2].state.title_reads,['unknown','unknown','unknown'])
+    assert.equal(typed[2].state.process_cpu_percent,null)
+    assert.ok(!JSON.stringify(typed).includes(secret))
   }finally{
     assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
     assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))

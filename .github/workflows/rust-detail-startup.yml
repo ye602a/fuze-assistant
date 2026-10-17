@@ -1,7 +1,7 @@
 name: Rust detail cache and first capture
 on:
   pull_request:
-    branches: [feat/rust-stage-card-reference, fix/rust-local-details-startup]
+    branches: [feat/rust-stage-card-reference, fix/rust-local-details-startup, fix/rust-selection-lifecycle]
     paths: ['rust/**', 'scripts/create-ui-host-fixture.mjs', 'scripts/export-rust-feedback.ps1', 'scripts/check-rust-screen.mjs', 'tests/fixtures/augment-ocr/**', 'tests/unit/rust-feedback-export.test.mjs', '.github/workflows/rust-detail-startup.yml']
   workflow_dispatch:
 permissions:
@@ -34,7 +34,7 @@ jobs:
           restore-keys: ui-lab-win-1.90-
       - name: Local data and loading handoff regressions
         run: |
-          cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-data -p fuze-lcu -p fuze-capture -p fuze-worker-host -- --check
+          cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-data -p fuze-lcu -p fuze-capture -p fuze-contract -p fuze-ocr -p fuze-worker-host -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-data
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -49,6 +49,10 @@ jobs:
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib runtime_log::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-feedback-export.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib github_feedback
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-ocr --lib title_matcher
           exit $LASTEXITCODE
       - name: Build normal frontend and exercise real detail callbacks
         working-directory: rust/ui-lab
@@ -62,6 +66,8 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-details artifacts/detail-data
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-host artifacts/detail-data artifacts/detail-host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-feedback artifacts/feedback-ui
           exit $LASTEXITCODE
       - name: Screen stream and native bitmap fallback through OCR to production popup
         env:

@@ -12,6 +12,8 @@ mod diagnostic_bridge;
 mod direct;
 mod feedback;
 mod feedback_bridge;
+mod feedback_review;
+mod feedback_upload_bridge;
 mod font_probe;
 mod game_windows;
 mod host_bridge;
@@ -41,6 +43,7 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-feedback") if args.len()==2 => println!("{}",feedback_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-capture") => println!("{}",capture_review::run(&args[1..])?),
         Some("--review-details") if args.len()==2 => println!("{}",detail_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-motion") if args.len()==2 => println!("{}",motion_review::run(std::path::Path::new(&args[1]))?),

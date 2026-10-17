@@ -1,6 +1,6 @@
 //! v0.6.3 screen-first policy: persistent stream, bitmap fallback, 60s recovery cooldown.
 //! Lazy start: constructing this object never captures. The host gates it to an active match.
-use crate::native::{CaptureFeed, FrameStatus, OwnedWindowStream, Result};
+use crate::native::{CaptureFeed, DesktopStream, FrameStatus, Result};
 use fuze_contract::titles::Atlas;
 use std::time::{Duration, Instant};
 #[path = "screen_bitmap.rs"]
@@ -16,12 +16,12 @@ pub trait ScreenDriver {
 
 #[derive(Default)]
 pub struct NativeScreen {
-    stream: Option<OwnedWindowStream>,
+    stream: Option<DesktopStream>,
     bitmap: bitmap::Reader,
 }
 impl ScreenDriver for NativeScreen {
     fn start(&mut self) -> Result<()> {
-        self.stream = Some(OwnedWindowStream::start_primary_screen()?);
+        self.stream = Some(DesktopStream::start_primary_screen()?);
         Ok(())
     }
     fn stop(&mut self) {
@@ -162,7 +162,7 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                     // through bitmap too, so a silently dead stream cannot block the whole match.
                     let deadline = if self.seen { 8_000 } else { 2_000 };
                     if now.saturating_sub(self.waiting_since) < deadline {
-                        // During recovery keep using the functioning bitmap until WGC yields a frame.
+                        // During recovery keep using the functioning bitmap until the stream yields a frame.
                         if !self.bitmap {
                             return Ok(FrameStatus::Timeout);
                         }

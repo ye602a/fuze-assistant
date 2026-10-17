@@ -74,3 +74,6 @@ window-direct-cards.json
 window-slint-*.json
 
 preferences-v*.json
+# Per-user automatic feedback outbox, never source or a release asset.
+github-feedback-v*.json
+github-feedback-v*.lock
