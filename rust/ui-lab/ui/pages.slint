@@ -82,19 +82,33 @@ export component SettingsPage inherits VerticalLayout {
             for row in DiagnosticState.rows: Label { height: 60px; text: row; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
         }
     }
-    Panel { height: 348px;
-        SectionTitle { x: 21px; y: 18px; height: 28px; text: "GitHub 自动反馈"; }
-        Label { x: 21px; y: 58px; width: parent.width - 110px; height: 38px; text: "每局自动上传 · 首次故障提前反馈"; wrap: word-wrap; }
-        Toggle { x: parent.width - 65px; y: 62px; label: "每局自动上传脱敏摘要"; checked: DiagnosticState.upload-enabled; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; toggled => { DiagnosticState.upload-action("toggle"); } }
-        Label { x: 21px; y: 104px; width: parent.width - 42px; height: 62px; text: DiagnosticState.upload-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
-        HorizontalLayout { x: 21px; y: 177px; width: parent.width - 42px; height: 36px; spacing: 10px;
-            Action { label: DiagnosticState.upload-busy ? "等待凭据窗口…" : "配置上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("configure"); } }
-            Action { label: "删除上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("remove"); } }
-            Action { label: "重试上传"; enabled: DiagnosticState.upload-ready && DiagnosticState.upload-enabled && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("retry"); } }
+    Panel { height: 540px + (DiagnosticState.upload-confirm ? 100px : 0px);
+        SectionTitle { x: 21px; y: 18px; height: 28px; text: "GitHub 公开诊断反馈"; }
+        Label { x: 21px; y: 58px; width: parent.width - 110px; height: 38px; text: "每局赛后上传 · 首次故障提前反馈"; wrap: word-wrap; }
+        Toggle { x: parent.width - 65px; y: 62px; label: "每局自动上传到公开 Issues"; checked: DiagnosticState.upload-enabled; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; toggled => { DiagnosticState.upload-action("toggle"); } }
+        Label { x: 21px; y: 103px; width: parent.width - 42px; height: 40px; text: DiagnosticState.upload-tracking; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+        Label { x: 21px; y: 149px; width: parent.width - 42px; height: 54px; text: DiagnosticState.upload-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
+        Label { x: 21px; y: 209px; width: parent.width - 42px; height: 40px; text: DiagnosticState.upload-authorization; wrap: word-wrap; color: Theme.gold; font-size: 12px; }
+        HorizontalLayout { x: 21px; y: 263px; width: parent.width - 42px; height: 36px; spacing: 10px;
+            Action { label: "获取上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("help"); } }
+            Action { label: "配置上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("configure"); } }
+            Action { label: DiagnosticState.upload-busy ? "正在验证…" : "验证授权"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("verify"); } }
+        }
+        HorizontalLayout { x: 21px; y: 311px; width: parent.width - 42px; height: 36px; spacing: 10px;
+            Action { label: "补传最近对局"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy && !HostState.running; clicked => { DiagnosticState.upload-confirm = true; } }
+            Action { label: "重试待传报告"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("retry"); } }
             Action { label: "查看报告"; enabled: DiagnosticState.upload-has-report; clicked => { DiagnosticState.upload-action("open"); } }
         }
-        Label { x: 21px; y: 224px; width: parent.width - 42px; height: 44px; text: DiagnosticState.upload-notice; wrap: word-wrap; font-size: 12px; color: Theme.gold; }
-        Label { x: 21px; y: 275px; width: parent.width - 42px; height: 62px; text: "上传到 ye602a/fuze-assistant 的 Issues，按仓库可见范围公开。只含状态、耗时、计数和卡位分类，不含截图、账号、路径、OCR 原文或密钥。令牌独立保存在 Windows 凭据管理器。"; wrap: word-wrap; font-size: 12px; color: Theme.muted; }
+        Action { x: 21px; y: 359px; width: 170px; label: "删除上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("remove"); } }
+        Label { x: 21px; y: 404px; width: parent.width - 42px; height: 48px; text: DiagnosticState.upload-notice; wrap: word-wrap; font-size: 12px; color: Theme.gold; }
+        Label { x: 21px; y: 461px; width: parent.width - 42px; height: 66px; text: "报告公开在 ye602a/fuze-assistant 的 Issues。仅上传状态、耗时、计数和卡位分类，不含截图、账号、路径、OCR 原文或密钥。\n更新下载免令牌；反馈写入仍需 Issues 读写授权。暂停后可补传有限日志中的最近对局。"; wrap: word-wrap; font-size: 12px; color: Theme.muted; }
+        if DiagnosticState.upload-confirm: Rectangle { x: 21px; y: 535px; width: parent.width - 42px; height: 88px; background: transparent;
+            Label { width: parent.width; height: 38px; text: "将从本地有限日志生成最近对局摘要并公开上传；可能不完整，不会上传原始日志。"; wrap: word-wrap; font-size: 12px; }
+            HorizontalLayout { y: 46px; width: parent.width; height: 34px; spacing: 10px;
+                Action { label: "取消"; clicked => { DiagnosticState.upload-confirm = false; } }
+                Action { primary: true; label: "确认公开补传"; enabled: !HostState.running && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-confirm = false; DiagnosticState.upload-action("recover"); } }
+            }
+        }
     }
     Panel { height: 580px + (ClaimState.details-open ? max(1, ClaimState.details.length) * 38px : 0px);
         SectionTitle { x: 21px; y: 18px; height: 28px; text: "领取轮次验证"; }

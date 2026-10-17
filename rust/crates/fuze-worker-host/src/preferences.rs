@@ -19,11 +19,19 @@ pub struct Preferences {
     pub champ_select: bool,
     pub champ_topmost: bool,
     pub close_to_tray: bool,
+    // Retain the field for old bundles, but the public distribution never restores private mode.
+    #[serde(deserialize_with = "public_update_setting")]
     pub private_updates: bool,
     pub icon_downloads: bool,
     pub pause_hotkey: bool,
     pub manual_directory: String,
     pub local_records: bool,
+}
+fn public_update_setting<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> std::result::Result<bool, D::Error> {
+    // Consume and type-check the legacy boolean even with deny_unknown_fields enabled.
+    bool::deserialize(input).map(|_| false)
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -38,7 +46,7 @@ impl Default for Preferences {
             champ_select: true,
             champ_topmost: true,
             close_to_tray: true,
-            private_updates: true,
+            private_updates: false,
             icon_downloads: true,
             pause_hotkey: false,
             manual_directory: String::new(),
@@ -264,7 +272,9 @@ mod tests {
         assert!(!p.recognition_changed(&ui_only));
         ui_only.backend = "dml".into();
         assert!(p.recognition_changed(&ui_only));
-        assert!(p.private_updates);
+        assert!(!p.private_updates);
+        let old: Preferences = serde_json::from_str(r#"{"private_updates":true}"#).unwrap();
+        assert!(!old.private_updates);
         assert!(!p.pause_hotkey);
         p.manual_directory = r"\\server\share".into();
         assert!(p.validate().is_err());

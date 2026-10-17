@@ -1,5 +1,55 @@
 use super::*;
 use crate::desktop::Status;
+#[test]
+fn recovery_is_bounded_deterministic_and_preserves_incomplete_status() {
+    use crate::runtime_log::{Event as LogEvent, Record};
+    let row = |phase, elapsed_ms, event| Record {
+        schema: 1,
+        event,
+        elapsed_ms,
+        state: state(phase),
+        dropped: 0,
+    };
+    let value = serde_json::json!({"records":[row(Phase::Loading, 10, LogEvent::Start), row(Phase::Playing, 20, LogEvent::State), row(Phase::PostGame, 30, LogEvent::State)]});
+    let report = recover_recent(value.clone()).unwrap();
+    assert!(report.recovered);
+    assert_eq!(report.end, End::PostGame);
+    assert_eq!(report.id, recover_recent(value).unwrap().id);
+    assert_eq!(report.duration_ms, 20);
+    let mut store = Store::default();
+    store.enqueue(report.clone()).unwrap();
+    upload(&mut store, 0, |_| Ok(()), &mut FakeApi::default()).unwrap();
+    let restored: Store = serde_json::from_slice(&serde_json::to_vec(&store).unwrap()).unwrap();
+    assert_eq!(restored.recovered_receipt, Some((report.id, 42)));
+    let partial =
+        recover_recent(serde_json::json!({"records":[row(Phase::Playing, 100, LogEvent::State)]}))
+            .unwrap();
+    assert_eq!(partial.end, End::RecoveredPartial);
+    assert!(partial.started_in_progress);
+    assert!(recover_recent(
+        serde_json::json!({"records":[row(Phase::Lobby, 100, LogEvent::State)]})
+    )
+    .is_err());
+    let mut corrupt = serde_json::to_value(row(Phase::Playing, 100, LogEvent::State)).unwrap();
+    corrupt["account"] = "must-not-upload".into();
+    assert!(recover_recent(serde_json::json!({"records":[corrupt]})).is_err());
+}
+#[test]
+fn recovery_does_not_join_two_application_sessions() {
+    use crate::runtime_log::{Event as LogEvent, Record};
+    let row = |phase, elapsed_ms, event| Record {
+        schema: 1,
+        event,
+        elapsed_ms,
+        state: state(phase),
+        dropped: 0,
+    };
+    let value = serde_json::json!({"records":[row(Phase::Playing, 800, LogEvent::State),row(Phase::Lobby,0,LogEvent::Start),row(Phase::Loading,10,LogEvent::State),row(Phase::Playing,20,LogEvent::State),row(Phase::PostGame,40,LogEvent::State)]});
+    let r = recover_recent(value).unwrap();
+    assert_eq!(r.end, End::PostGame);
+    assert!(!r.started_in_progress);
+    assert_eq!(r.duration_ms, 30);
+}
 fn state(phase: Phase) -> Snapshot {
     let mut s = Snapshot::from_status(&Status::default());
     s.phase = phase;

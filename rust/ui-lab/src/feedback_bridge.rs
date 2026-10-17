@@ -138,6 +138,25 @@ pub fn attach(
         let Some(ui) = weak.upgrade() else {
             return;
         };
+        if action == "recover" {
+            let result = if offline || ui.global::<HostState>().get_running() {
+                Err("feedback-pause-first")
+            } else {
+                let b = model.borrow();
+                let flushed = b.journal.as_ref().and_then(|j| j.export().ok());
+                let request = b.upload.borrow().recover(flushed);
+                request
+            };
+            ui.global::<DiagnosticState>().set_upload_notice(
+                match result {
+                    Ok(()) => "正在保存日志并恢复最近对局摘要；确认后公开上传，缺失片段会标记。",
+                    Err("feedback-pause-first") => "请先暂停识别，再补传最近对局。",
+                    _ => "补传请求未能进入队列；本地日志保留，请稍后重试。",
+                }
+                .into(),
+            );
+            return;
+        }
         if offline {
             notice(&ui, Err("frontend-offline-operation"));
             return;

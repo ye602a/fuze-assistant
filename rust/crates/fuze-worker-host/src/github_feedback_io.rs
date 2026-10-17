@@ -194,6 +194,16 @@ pub(super) fn send(
     }
     Ok(found)
 }
+/// Read-only credential preflight. Repository access is not proof of Issues write permission.
+pub(super) fn verify(token: &Secret, cancel: &AtomicBool) -> Result<()> {
+    let value = request("GET", "/repos/ye602a/fuze-assistant", &[], token, cancel)?;
+    if value["full_name"].as_str() != Some(super::REPOSITORY)
+        || value["has_issues"].as_bool() != Some(true)
+    {
+        return Err("feedback-permission");
+    }
+    Ok(())
+}
 pub(super) fn lookup(
     id: &str,
     title: &str,

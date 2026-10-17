@@ -18,6 +18,9 @@ export global DiagnosticState {
     in-out property <bool> upload-has-report: false;
     in-out property <string> upload-status: "默认关闭；开启后才收集并上传每局脱敏摘要。";
     in-out property <string> upload-notice;
+    in-out property <string> upload-authorization: "反馈上传需要单独授权；下载更新无需令牌。";
+    in-out property <string> upload-tracking: "自动反馈关闭；已有记录可手动补传。";
+    in-out property <bool> upload-confirm: false;
     callback upload-action(string);
     in-out property <string> log-status: "日志：等待宿主初始化。";
     in-out property <bool> log-retry: false;
@@ -31,7 +34,7 @@ export global MaintenanceState {
     in-out property <bool> attached: false;
     in-out property <bool> offline: true;
     in-out property <bool> busy: false;
-    in-out property <bool> private-channel: true;
+    in-out property <bool> private-channel: false;
     in-out property <bool> installable: false;
     in-out property <bool> can-clean: false;
     in-out property <string> confirmation;

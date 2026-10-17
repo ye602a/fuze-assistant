@@ -17,6 +17,15 @@ pub struct Binding {
     finished: bool,
 }
 impl Binding {
+    pub fn recover(
+        &self,
+        flushed: Option<mpsc::Receiver<Result<serde_json::Value, &'static str>>>,
+    ) -> Result<(), &'static str> {
+        self.client
+            .as_ref()
+            .ok_or("feedback-worker")?
+            .recover(flushed)
+    }
     pub fn poll(&mut self, ui: &Workbench, status: &Status) {
         let state = ui.global::<DiagnosticState>();
         if let Some(rx) = &self.credential {
@@ -30,14 +39,16 @@ impl Binding {
                 state.set_upload_busy(false);
                 state.set_upload_notice(
                     match result {
-                        Ok(()) => "上传凭据已保存；请开启每局自动反馈。",
+                        Ok(()) => "上传凭据已保存，正在检查仓库访问；写入权限以实际报告上传为准。",
                         Err("credential-cancelled") => "已取消，现有上传凭据保持不变。",
                         _ => "上传凭据未能保存，请重试。",
                     }
                     .into(),
                 );
-                if let Some(c) = &self.client {
-                    let _ = c.retry();
+                if result.is_ok() {
+                    if let Some(c) = &self.client {
+                        let _ = c.retry();
+                    }
                 }
             }
         }
@@ -45,6 +56,22 @@ impl Binding {
             return;
         };
         let view = client.view();
+        state.set_upload_busy(self.credential.is_some() || view.authorization == "checking");
+        let auth = match view.authorization {
+            "checking" => "正在验证反馈授权…",
+            "readable" => "令牌可访问仓库；Issues 写入权限待首次上传验证。",
+            "write-confirmed" => "本次运行已成功写入报告，上传授权有效。",
+            "credential-unavailable" | "credential-format" => {
+                "未配置有效上传令牌；本地摘要可排队，下载更新不受影响。"
+            }
+            "feedback-auth" => "上传令牌失效或被拒绝，请重新配置。",
+            "feedback-permission" => "上传令牌无法访问仓库或缺少 Issues 权限。",
+            "unchecked" | "" => "反馈授权尚未验证；配置令牌后可检查，更新下载无需令牌。",
+            _ => "授权检查未完成，请检查网络后重试；摘要仍保留在本机。",
+        };
+        if state.get_upload_authorization() != auth {
+            state.set_upload_authorization(auth.into());
+        }
         if view != self.last.clone().unwrap_or_default() {
             state.set_upload_ready(view.ready);
             state.set_upload_enabled(view.enabled);
@@ -70,6 +97,10 @@ impl Binding {
                     "GitHub 暂时不可达，摘要保留，稍后重试。"
                 }
                 "feedback-rejected" => "GitHub 拒绝了报告，请检查仓库 Issues 设置。",
+                "feedback-no-local-match" => "本地保留日志中没有对局记录；不会创建空报告。",
+                "feedback-log-busy" => "本地日志尚未完成保存，请稍后补传。",
+                "feedback-already-sent" => "这份本地摘要已上传，可查看最近报告，无需重复提交。",
+                "feedback-recovery-cooldown" => "补传请求间隔至少 10 秒，请稍候。",
                 "" => "正在读取自动反馈设置…",
                 _ => "自动反馈未完成，可重试；识别不受此操作阻塞。",
             };
@@ -121,6 +152,16 @@ impl Binding {
             self.tracker = None;
             self.pending.clear();
         }
+        let tracking = if !view.enabled {
+            "自动记录关闭；手动补传不改变自动开关。"
+        } else if self.tracker.as_ref().is_some_and(Tracker::recording) {
+            "正在记录本局；正常对局结束后才进入待传队列，0 份不代表未记录。"
+        } else {
+            "等待进入对局；开启前的记录请用“补传最近对局”。"
+        };
+        if state.get_upload_tracking() != tracking {
+            state.set_upload_tracking(tracking.into());
+        }
     }
     pub fn finish(&mut self) {
         if self.finished {
@@ -168,6 +209,10 @@ pub fn attach(ui: &Workbench, offline: bool) -> Rc<RefCell<Binding>> {
                     .set_upload_notice("隔离验证禁止网络和凭据操作。".into());
                 return;
             }
+            if action == "recover" {
+                ui.global::<DiagnosticState>().invoke_action("recover".into());
+                return;
+            }
             let mut b = model.borrow_mut();
             if b.credential.is_some() {
                 return;
@@ -178,6 +223,13 @@ pub fn attach(ui: &Workbench, offline: bool) -> Rc<RefCell<Binding>> {
             let result = match action.as_str() {
                 "toggle" => client.enable(!client.view().enabled),
                 "retry" => client.retry(),
+                "verify" => client.verify(),
+                "help" => {
+                    let url: Vec<u16> = "https://github.com/settings/personal-access-tokens/new?name=FUZE-feedback&target_name=ye602a&expires_in=30&issues=write\0".encode_utf16().collect();
+                    let verb: Vec<u16> = "open\0".encode_utf16().collect();
+                    let code = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), url.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
+                    if code as isize > 32 { Ok(()) } else { Err("feedback-open") }
+                }
                 "configure" => {
                     let (tx, rx) = mpsc::channel();
                     match std::thread::Builder::new()
@@ -233,6 +285,9 @@ pub fn attach(ui: &Workbench, offline: bool) -> Rc<RefCell<Binding>> {
                             "已请求关闭自动上传并删除独立上传令牌；待传摘要保留。"
                         }
                         ("open", Ok(())) => "已请求在浏览器打开最近报告。",
+                        ("help", Ok(())) => "在 GitHub 仅选择 fuze-assistant 仓库，Issues 设为 Read and write；生成后填入上传令牌窗口的密码栏。",
+                        ("recover", Ok(())) => "正在从本地有限日志恢复最近对局并补传；缺失片段会明确标记，不上传原始日志。",
+                        (_, Err("feedback-pause-first")) => "请先暂停识别，再补传最近对局。",
                         (_, Ok(())) => "请求已提交，结果以上方状态为准。",
                         (_, Err(_)) => "操作未完成，请稍后重试；本地日志保留。",
                     }

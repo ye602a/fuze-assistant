@@ -71,7 +71,6 @@ await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuz
 await text('Uninstall-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --uninstall-local\r\n')
 await text('Install-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --install-local\r\n')
 await text('Update.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update\r\n')
-await text('Private-channel.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update-private\r\n')
 await text('Forget-private-token.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --forget-credentials\r\n')
 await text('Rollback.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --rollback\r\n')
 await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
@@ -90,8 +89,11 @@ Uninstall-local.cmd 只删除受管程序与快捷方式，保留设置、记录
 
 数据与程序更新
 暂停后可在设置中更新推荐数据，校验完成才启用；数据保存在独立缓存，不修改稳定版。
-程序更新使用设置页的检查入口，或 Update.cmd；私有频道使用 Private-channel.cmd。
-令牌仅保存在 Windows 凭据管理器。下载与安装分别确认，差分失败回退全量，失败安装支持回滚。
+程序更新使用设置页的检查入口，或 Update.cmd；公开频道无需令牌，旧私有设置自动停用。
+下载与安装分别确认，差分失败回退全量，失败安装支持回滚。
+反馈报告公开在 GitHub Issues，写入仍需独立 Issues 读写令牌，仅保存在 Windows 凭据管理器。
+设置页可获取、配置、验证反馈授权；仓库访问验证不等于写入验证，报告编号代表实际上传成功。
+开启后每局自动反馈；开启前的记录可在暂停后选择“补传最近对局”，确认公开后补传有限日志摘要。
 Rust 频道使用 rust-update.json、.fuz 和配套 .blockmap，不读取 Electron 的 latest.yml。
 
 功能边界

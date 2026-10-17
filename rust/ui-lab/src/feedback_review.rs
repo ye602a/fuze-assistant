@@ -15,7 +15,16 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
     let _binding = crate::feedback_upload_bridge::attach(&ui, true);
     ui.set_page(2);
     let state = ui.global::<DiagnosticState>();
-    for action in ["toggle", "configure", "remove", "retry", "open"] {
+    for action in [
+        "toggle",
+        "configure",
+        "remove",
+        "retry",
+        "open",
+        "verify",
+        "help",
+        "recover",
+    ] {
         state.invoke_upload_action(action.into());
         if !state.get_upload_notice().contains("隔离验证") {
             return Err("feedback-offline-action".into());
@@ -38,10 +47,27 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
         ),
     ] {
         ui.window().set_size(slint::LogicalSize::new(width, 860.));
-        ui.set_scroll_y(-1680.);
+        ui.set_scroll_y(-2000.);
         state.set_upload_enabled(enabled);
         state.set_upload_has_report(enabled);
         state.set_upload_status(status.into());
+        state.set_upload_tracking(
+            if enabled {
+                "正在记录本局；正常对局结束后才进入待传队列，0 份不代表未记录。"
+            } else {
+                "自动记录关闭；手动补传不改变自动开关。"
+            }
+            .into(),
+        );
+        state.set_upload_authorization(
+            if enabled {
+                "令牌可访问仓库；Issues 写入权限待首次上传验证。"
+            } else {
+                "未配置有效上传令牌；本地摘要可排队，下载更新不受影响。"
+            }
+            .into(),
+        );
+        state.set_upload_confirm(enabled);
         let pixels = ui.window().take_snapshot()?;
         image::save_buffer(
             output.join(format!("feedback-{name}.png")),
@@ -51,12 +77,21 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
             image::ColorType::Rgba8,
         )?;
     }
+    ui.set_scroll_y(0.);
+    let pixels = ui.window().take_snapshot()?;
+    image::save_buffer(
+        output.join("public-update.png"),
+        pixels.as_bytes(),
+        pixels.width(),
+        pixels.height(),
+        image::ColorType::Rgba8,
+    )?;
     let unchanged =
         before == unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     if !unchanged {
         return Err("feedback-review-focus".into());
     }
-    let report = serde_json::json!({"settings_rendered":2,"offline_actions":5,"network_requests":0,"credential_access":false,"desktop_capture":false,"foreground_unchanged":unchanged});
+    let report = serde_json::json!({"settings_rendered":3,"offline_actions":8,"network_requests":0,"credential_access":false,"desktop_capture":false,"foreground_unchanged":unchanged});
     std::fs::write(
         output.join("feedback-review.json"),
         serde_json::to_vec_pretty(&report)?,

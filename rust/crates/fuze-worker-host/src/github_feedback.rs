@@ -32,6 +32,7 @@ pub enum End {
     PostGame,
     LeftMatch,
     AppStopped,
+    RecoveredPartial,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +43,10 @@ pub struct Event {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Report {
+    #[serde(default)]
+    recovered: bool,
+    #[serde(default)]
+    incomplete_log: bool,
     id: String,
     end: End,
     started_in_progress: bool,
@@ -97,8 +102,14 @@ impl Report {
             End::PostGame => "已观察到赛后阶段",
             End::LeftMatch => "已离开对局，未观察到结算阶段",
             End::AppStopped => "助手退出，记录不完整",
+            End::RecoveredPartial => "本地记录未包含明确结束阶段，摘要不完整",
         };
-        let body = format!("符择自动诊断 · {status}\n\n构建链路：rust-capture-feedback-1；屏幕流：DXGI（失败回退位图）。\n仅固定状态、相对耗时、计数及三个卡位的识别分类。没有账号、对局 ID、截图、路径、OCR 原文或凭据。\n整体胜率推荐；实际领取轮次未知。分析耗时不代表弹窗出现后的等待时间。\n\n```json\n{safe}\n```\n");
+        let source = if self.recovered {
+            "手动补传：从有限本地日志恢复，可能缺失早期记录；不是实时上传或实际领取证明。"
+        } else {
+            "自动跟踪：开启后的对局记录。"
+        };
+        let body = format!("符择诊断 · {status}\n{source}\n\n反馈格式：rust-public-feedback-2；截图来源和回退状态以记录字段为准。\n仅固定状态、相对耗时、计数及三个卡位的识别分类。没有账号、对局 ID、截图、路径、OCR 原文或凭据。\n整体胜率推荐；实际领取轮次未知。分析耗时不代表弹窗出现后的等待时间。\n\n```json\n{safe}\n```\n");
         let bytes = serde_json::to_vec(&serde_json::json!({"title": self.title(), "body": body}))
             .map_err(|_| "feedback-invalid")?;
         if bytes.len() > 60 * 1024 {
@@ -151,6 +162,8 @@ impl Tracker {
             self.previous_analyses = snapshot.analyses;
             self.fault_sent = false;
             self.active = Some(Report {
+                recovered: false,
+                incomplete_log: false,
                 id: format!("{:016x}{:016x}", self.nonce, self.serial),
                 end: End::Fault,
                 started_in_progress: snapshot.phase == Phase::Playing,
@@ -240,9 +253,57 @@ impl Tracker {
         r.end = End::AppStopped;
         Some(r)
     }
+    pub fn recording(&self) -> bool {
+        self.active.is_some()
+    }
+}
+/// Explicit recovery only, on the feedback worker. Typed allowlist is applied again.
+fn recover_recent(value: serde_json::Value) -> Result<Report> {
+    let rows: Vec<crate::runtime_log::Record> =
+        serde_json::from_value(value["records"].clone()).map_err(|_| "feedback-no-local-match")?;
+    let mut tracker = Tracker::with_nonce(0);
+    let mut latest = None;
+    let mut previous = 0;
+    for row in rows {
+        if !row.valid() {
+            return Err("feedback-invalid");
+        }
+        if row.event == crate::runtime_log::Event::Start || row.elapsed_ms < previous {
+            if let Some(r) = tracker.finish() {
+                latest = Some(r);
+            }
+            tracker = Tracker::with_nonce(0);
+        }
+        previous = row.elapsed_ms;
+        if let Some(report) = tracker.observe(row.state, row.elapsed_ms) {
+            if report.end != End::Fault {
+                latest = Some(report);
+            }
+        }
+    }
+    let mut report = tracker
+        .finish()
+        .or(latest)
+        .ok_or("feedback-no-local-match")?;
+    report.recovered = true;
+    report.incomplete_log = value["status"].as_str() != Some("ok")
+        || report.started_in_progress
+        || report.end == End::AppStopped;
+    if report.end == End::AppStopped {
+        report.end = End::RecoveredPartial;
+    }
+    // Once per explicit recovery, never per frame. Stable identity prevents repeated manual POSTs.
+    report.id.clear();
+    let bytes = serde_json::to_vec(&report).map_err(|_| "feedback-invalid")?;
+    report.id = crate::update_io::hex(&crate::update_io::digest(&bytes, false)?)[..32].into();
+    if !report.valid() {
+        return Err("feedback-invalid");
+    }
+    Ok(report)
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
+    pub authorization: &'static str,
     pub enabled: bool,
     pub ready: bool,
     pub pending: usize,
@@ -260,6 +321,8 @@ struct Entry {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Store {
+    #[serde(default)]
+    recovered_receipt: Option<(String, u64)>,
     enabled: bool,
     entries: VecDeque<Entry>,
     latest_issue: Option<u64>,
@@ -274,6 +337,9 @@ impl Store {
             serde_json::from_slice(&crate::update_channel::bounded(path, 2 * 1024 * 1024)?)
                 .map_err(|_| "feedback-store")?;
         if value.entries.len() > MAX_QUEUE
+            || value.recovered_receipt.as_ref().is_some_and(|(id, issue)| {
+                id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) || *issue == 0
+            })
             || value
                 .entries
                 .iter()
@@ -312,6 +378,8 @@ enum Command {
     Enable(bool),
     Report(Report),
     Retry,
+    Verify,
+    Recover(Option<mpsc::Receiver<Result<serde_json::Value>>>),
     Stop,
 }
 trait Api {
@@ -357,6 +425,9 @@ fn upload(
             e.issue = Some(number);
             e.uncertain = false;
             e.sent = true;
+            if e.report.recovered {
+                store.recovered_receipt = Some((e.report.id.clone(), number));
+            }
             store.latest_issue = Some(number);
             if e.report.end != End::Fault {
                 store.entries.remove(index);
@@ -428,6 +499,19 @@ impl Client {
             .try_send(Command::Retry)
             .map_err(|_| "feedback-busy")
     }
+    pub fn verify(&self) -> Result<()> {
+        self.tx
+            .try_send(Command::Verify)
+            .map_err(|_| "feedback-busy")
+    }
+    pub fn recover(
+        &self,
+        flushed: Option<mpsc::Receiver<Result<serde_json::Value>>>,
+    ) -> Result<()> {
+        self.tx
+            .try_send(Command::Recover(flushed))
+            .map_err(|_| "feedback-busy")
+    }
     pub fn stop(&mut self) {
         self.cancel
             .store(true, std::sync::atomic::Ordering::Release);
@@ -480,10 +564,15 @@ fn worker(
     let mut next = Instant::now();
     let mut snoozed = std::collections::HashMap::<String, Instant>::new();
     let mut error = None;
+    let mut authorization = "unchecked";
+    let mut verify = store.enabled;
+    let mut manual = false;
+    let mut last_recovery: Option<Instant> = None;
     loop {
         {
             let mut v = view.lock().unwrap();
             v.ready = true;
+            v.authorization = authorization;
             v.enabled = store.enabled;
             v.pending = store.entries.iter().filter(|e| !e.sent).count();
             v.issue = store.latest_issue;
@@ -501,6 +590,10 @@ fn worker(
                 return;
             }
             Ok(Command::Enable(enabled)) => {
+                if !enabled {
+                    manual = false;
+                    authorization = "unchecked";
+                }
                 let old = store.enabled;
                 store.enabled = enabled;
                 if let Err(e) = store.save(&path) {
@@ -510,6 +603,7 @@ fn worker(
                     cancel.store(!enabled, Ordering::Release);
                     error = None;
                     next = Instant::now();
+                    verify = enabled;
                 }
             }
             Ok(Command::Report(report)) if store.enabled => {
@@ -523,14 +617,67 @@ fn worker(
                 error = None;
                 snoozed.clear();
                 next = Instant::now();
+                verify = true;
+                manual = true;
+                cancel.store(false, Ordering::Release);
+            }
+            Ok(Command::Verify) => {
+                verify = true;
+            }
+            Ok(Command::Recover(flushed)) => {
+                if last_recovery.is_some_and(|t| t.elapsed() < Duration::from_secs(10)) {
+                    error = Some("feedback-recovery-cooldown");
+                } else {
+                    last_recovery = Some(Instant::now());
+                    let result = match flushed {
+                        Some(rx) => rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .map_err(|_| "feedback-log-busy")
+                            .and_then(|r| r),
+                        None => {
+                            crate::runtime_log::root().and_then(|p| crate::runtime_log::read(&p))
+                        }
+                    }
+                    .and_then(recover_recent);
+                    match result {
+                        Ok(report) => {
+                            if let Some((id, issue)) = &store.recovered_receipt {
+                                if id == &report.id {
+                                    store.latest_issue = Some(*issue);
+                                    error = Some("feedback-already-sent");
+                                    continue;
+                                }
+                            }
+                            error = store.enqueue(report).and_then(|_| store.save(&path)).err();
+                            manual = error.is_none();
+                            if manual {
+                                cancel.store(false, Ordering::Release);
+                                verify = true;
+                                next = Instant::now();
+                            }
+                        }
+                        Err(e) => error = Some(e),
+                    }
+                }
             }
             _ => (),
         }
-        if !store.enabled || cancel.load(Ordering::Acquire) || Instant::now() < next {
+        if verify {
+            verify = false;
+            view.lock().unwrap().authorization = "checking";
+            let result = crate::update_credential::read_target(TARGET)
+                .and_then(|s| io::verify(&s, &std::sync::atomic::AtomicBool::new(false)));
+            authorization = match result {
+                Ok(()) => "readable",
+                Err(e) => e,
+            };
+        }
+        if (!store.enabled && !manual) || cancel.load(Ordering::Acquire) || Instant::now() < next {
             continue;
         }
         let Some(index) = store.entries.iter().position(|e| {
             !e.sent
+                && (store.enabled || e.report.recovered)
                 && snoozed
                     .get(&e.report.id)
                     .is_none_or(|at| Instant::now() >= *at)
@@ -553,6 +700,19 @@ fn worker(
             )
         })();
         error = result.err();
+        if error.is_none() {
+            authorization = "write-confirmed";
+        } else if matches!(
+            error,
+            Some(
+                "credential-unavailable"
+                    | "credential-format"
+                    | "feedback-auth"
+                    | "feedback-permission"
+            )
+        ) {
+            authorization = error.unwrap();
+        }
         if error.is_some() {
             snoozed.insert(id, Instant::now() + Duration::from_secs(300));
         } else {

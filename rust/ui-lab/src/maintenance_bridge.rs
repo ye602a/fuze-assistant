@@ -345,7 +345,7 @@ pub fn attach(
                 state.set_notice(message("maintenance-offline").into());
                 return;
             }
-            match Handoff::prepare(state.get_private_channel()) {
+            match Handoff::prepare(false) {
                 Ok(next) => {
                     *pending.borrow_mut() = Some(next);
                     engine.stop();
@@ -361,7 +361,7 @@ pub fn attach(
         let action = match operation.as_str() {
             "scan" => Action::Scan,
             "clean" => Action::Clean,
-            "check" => Action::Check(state.get_private_channel()),
+            "check" => Action::Check(false),
             "credentials" => Action::Credentials,
             "forget" => Action::Forget,
             _ => {
