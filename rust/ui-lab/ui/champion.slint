@@ -172,14 +172,14 @@ export component ChampionWindow inherits Window {
                     HorizontalLayout { x: 12px; y: 98px; height: 35px; width: min(parent.width - 24px, line.icons.length * 42px); spacing: 7px; for icon in line.icons: Image { source: icon; width: 35px; height: 35px; image-fit: contain; } }
                 }
             }
-            Action { label: root.stage-open ? "收起分阶段胜率参考" : "查看分阶段胜率参考"; clicked => { root.stage-open = !root.stage-open; if root.stage-open { root.stage-request(false); } } }
+            Action { label: root.stage-open ? "收起分阶段胜率参考" : "查看分阶段胜率参考"; clicked => { if root.stage-open { root.stage-reset(); } else { root.stage-open = true; root.stage-request(false); } } }
             if root.stage-open: VerticalLayout { spacing: 9px;
                 Label { height: 42px; wrap: word-wrap; text: "手动参考 · 不自动判断领取轮次\n三卡推荐仍使用整体胜率。"; color: Theme.gold; font-size: 11px; }
                 HorizontalLayout { height: 32px; spacing: 4px;
                     for title[index] in ["整体", "第 1 次", "第 2 次", "第 3 次", "第 4 次"]: Action { min-width: 0px; label: title; primary: root.stage-index == index; clicked => { root.stage-select(index); } }
                 }
-                Label { height: 65px; wrap: word-wrap; text: root.stage-status; color: Theme.muted; font-size: 11px; }
-                Action { busy: root.stage-busy; label: root.stage-busy ? "正在读取…" : "刷新公开统计"; enabled: !root.stage-busy; clicked => { root.stage-request(true); } }
+                Label { height: 85px; wrap: word-wrap; text: root.stage-status; color: Theme.muted; font-size: 11px; }
+                Action { busy: root.stage-busy; label: root.stage-busy ? "正在读取…" : root.side-mode ? "对局中仅读取缓存" : "刷新公开统计"; enabled: !root.stage-busy && !root.side-mode; clicked => { root.stage-request(true); } }
                 ListView { height: 280px;
                     for row in root.stage-rows: Panel { height: 66px;
                         Label { x: 10px; y: 6px; width: parent.width - 92px; height: 24px; text: row.name; }

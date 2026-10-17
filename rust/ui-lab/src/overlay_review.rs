@@ -140,6 +140,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     }
     overlay.render(&output.join("host-live-cards-complete.png"))?;
     overlay.review_description(output)?;
+    overlay.review_reference(output)?;
     if overlay.update(Some(first), false)? {
         return Err("stale-result-accepted".into());
     }
@@ -172,6 +173,8 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
             "duplicate_model_rebuilds": 0, "dismissal_retained": true,
             "stale_sequence_rejected": true, "preference_restore": true,
             "description_long_missing_scroll_rendered": true,
+            "stage_reference_four_columns_without_score_or_slot_changes": true,
+            "stage_duplicate_update_does_not_repaint": true,
             "three_card_click_collapse_gap_scroll_close": true,
             "preview_without_lcu_is_separate_and_read_only": true,
             "explicit_side_panel_without_auto_show": true,
@@ -206,17 +209,21 @@ pub fn stage(ui: &crate::ChampionWindow, output: &Path) -> Result<(), Box<dyn st
             patch: "16.20".into(),
             date: "2026-10-15".into(),
             data_path: String::new(),
-            fetched: 0,
+            fetched: fuze_worker_host::stage_reference::now(),
             rows,
         })),
         names: Arc::new([(1, "巨像的勇气".into()), (2, "尖端发明家".into())].into()),
         cached: true,
         issue: Some("stage-network"),
         serial: 1,
+        retry_after: None,
     };
     ui.set_stage_index(1);
     crate::stage_bridge::present(ui, &reply);
-    if ui.get_stage_rows().row_count() != 1 || !ui.get_stage_status().contains("保留缓存") {
+    if ui.get_stage_rows().row_count() != 1
+        || !ui.get_stage_status().contains("保留缓存")
+        || !ui.get_stage_status().contains("地区未确认")
+    {
         return Err("stage-samples-or-cache-status".into());
     }
     ui.set_stage_index(2);
@@ -237,6 +244,24 @@ pub fn stage(ui: &crate::ChampionWindow, output: &Path) -> Result<(), Box<dyn st
         pixels.height(),
         image::ColorType::Rgba8,
     )?;
+    let size = ui.window().size();
+    ui.window().set_size(slint::LogicalSize::new(380., 600.));
+    ui.set_detail_version("zh-CN@16.19.3".into());
+    crate::stage_bridge::present(ui, &reply);
+    if !ui.get_stage_status().contains("与本地数据补丁不同") {
+        return Err("stage-patch-context-missing".into());
+    }
+    let _ = ui.window().take_snapshot()?;
+    ui.set_scroll_y(-ui.get_scroll_limit());
+    let pixels = ui.window().take_snapshot()?;
+    image::save_buffer(
+        output.join("host-stage-reference-narrow.png"),
+        pixels.as_bytes(),
+        pixels.width(),
+        pixels.height(),
+        image::ColorType::Rgba8,
+    )?;
+    ui.window().set_size(size);
     ui.invoke_stage_reset();
     if ui.get_stage_rows().row_count() != 0 || ui.get_stage_open() || ui.get_stage_busy() {
         return Err("stage-reset".into());

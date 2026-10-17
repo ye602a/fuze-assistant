@@ -24,18 +24,24 @@ pub struct Panel {
     _debounce: Rc<slint::Timer>,
 }
 impl Panel {
-    fn new(roots: &[fuze_data::Root], side: bool, offline: bool) -> Result<Self, &'static str> {
+    fn new(
+        roots: &[fuze_data::Root],
+        side: bool,
+        offline: bool,
+        store: std::sync::Arc<fuze_worker_host::stage_reference::Store>,
+    ) -> Result<Self, &'static str> {
         let ui = ChampionWindow::new().map_err(|_| "champion-window")?;
         ui.set_side_mode(side);
         ui.set_offline(offline);
         ui.set_inspected_id(0);
-        let details = champion_bridge::attach_roots(&ui, roots.to_vec())?;
+        let details = champion_bridge::attach_shared(&ui, roots.to_vec(), store)?;
         let dismissed = Rc::new(Cell::new(false));
         let weak = ui.as_weak();
         let closed = dismissed.clone();
         ui.on_close_requested(move || {
             closed.set(true);
             if let Some(ui) = weak.upgrade() {
+                ui.invoke_stage_reset();
                 ui.invoke_player_action("cancel".into(), 0);
                 crate::motion::refresh(ui.global::<crate::UiMotion>(), false);
                 if let Some(h) = hwnd(ui.window()) {
@@ -205,6 +211,7 @@ impl Drop for Panel {
     }
 }
 pub struct Manager {
+    stages: crate::stage_cards::Reference,
     roots: Vec<fuze_data::Root>,
     offline: bool,
     visible: bool,
@@ -224,6 +231,7 @@ impl Manager {
     }
     pub fn new(roots: Vec<fuze_data::Root>, offline: bool, visible: bool) -> Self {
         Self {
+            stages: crate::stage_cards::Reference::new(offline),
             roots,
             offline,
             visible,
@@ -242,7 +250,12 @@ impl Manager {
             &mut self.champion
         };
         if target.is_none() {
-            *target = Some(Panel::new(&self.roots, side, self.offline)?);
+            *target = Some(Panel::new(
+                &self.roots,
+                side,
+                self.offline,
+                self.stages.store.clone(),
+            )?);
         }
         Ok(target.as_mut().unwrap())
     }
@@ -261,7 +274,12 @@ impl Manager {
         // Separate read-only public-data window; never reuse or replace the actual
         // selection context, save its placement, or enable client writes in a preview.
         if self.sample_champion.is_none() {
-            self.sample_champion = Some(Panel::new(&self.roots, false, true)?);
+            self.sample_champion = Some(Panel::new(
+                &self.roots,
+                false,
+                true,
+                std::sync::Arc::new(Default::default()),
+            )?);
         }
         let p = self.sample_champion.as_mut().unwrap();
         p.dismissed.set(false);
@@ -329,6 +347,7 @@ impl Manager {
         panel.update(Some(view), true, visible)
     }
     pub fn update(&mut self, status: &Status) -> Result<(), &'static str> {
+        self.stages.update(status);
         let active = status.mode == 1;
         let phase = match status.connection {
             Some(State::Connected(p)) => p,
@@ -376,6 +395,13 @@ impl Manager {
             cards
                 .update(frame, self.visible)
                 .map_err(|_| "overlay-window")?;
+            let dataset = status
+                .pipeline
+                .overlay
+                .as_ref()
+                .map_or("", |f| f.snapshot.dataset_version.as_str());
+            let reference = self.stages.cards(cards.ids(), dataset);
+            cards.reference(reference).map_err(|_| "overlay-window")?;
         }
         Ok(())
     }

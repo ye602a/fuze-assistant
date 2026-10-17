@@ -449,6 +449,13 @@ pub fn attach_roots(
     ui: &ChampionWindow,
     roots: Vec<fuze_data::Root>,
 ) -> Result<Binding, &'static str> {
+    attach_shared(ui, roots, std::sync::Arc::new(Default::default()))
+}
+pub fn attach_shared(
+    ui: &ChampionWindow,
+    roots: Vec<fuze_data::Root>,
+    store: std::sync::Arc<fuze_worker_host::stage_reference::Store>,
+) -> Result<Binding, &'static str> {
     let worker = Rc::new(Worker::new(roots.clone())?);
     let actions = Rc::new(crate::champion_actions::attach(ui));
     let state = Rc::new(RefCell::new(Presentation {
@@ -647,7 +654,7 @@ pub fn attach_roots(
         timer.stop();
     }
     Ok(Binding {
-        _stage: crate::stage_bridge::attach(ui, roots, ui.get_offline()),
+        _stage: crate::stage_bridge::attach(ui, roots, ui.get_offline(), store),
         actions,
         art,
         _worker: worker,

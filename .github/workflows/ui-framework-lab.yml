@@ -1,7 +1,7 @@
 name: UI framework prototype
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs, fix/rust-preview-history-parity, fix/rust-history-local-time-cleanup, fix/rust-package-install-contract]
+    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs, fix/rust-preview-history-parity, fix/rust-history-local-time-cleanup, fix/rust-package-install-contract, style/rust-ui-feedback-motion]
     paths:
       - 'rust/ui-lab/**'
       - 'rust/crates/**'
@@ -46,7 +46,7 @@ jobs:
           cargo +1.90.0 check --locked --features gpu -j 2
           exit $LASTEXITCODE
   windows-prototype:
-    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation' && github.base_ref != 'fix/rust-locale-context' && github.base_ref != 'test/rust-private-transfer' && github.base_ref != 'perf/rust-update-range-routing' && github.base_ref != 'feat/rust-update-resume' && github.base_ref != 'fix/rust-history-local-time-cleanup' && github.base_ref != 'fix/rust-package-install-contract')
+    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation' && github.base_ref != 'fix/rust-locale-context' && github.base_ref != 'test/rust-private-transfer' && github.base_ref != 'perf/rust-update-range-routing' && github.base_ref != 'feat/rust-update-resume' && github.base_ref != 'fix/rust-history-local-time-cleanup' && github.base_ref != 'fix/rust-package-install-contract' && github.base_ref != 'style/rust-ui-feedback-motion')
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -146,6 +146,49 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-motion artifacts/ui-motion
           exit $LASTEXITCODE
+
+  windows-stage-reference:
+    if: github.event_name == 'pull_request' && github.base_ref == 'style/rust-ui-feedback-motion'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tracked privacy boundary
+        run: node scripts/check-secrets.mjs
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: rust/ui-lab/target
+          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
+          restore-keys: ui-lab-win-1.90-
+      - name: Level scheduling and public stage cache boundaries
+        run: |
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib stage_reference
+          exit $LASTEXITCODE
+      - name: Build and check stage projection
+        working-directory: rust/ui-lab
+        run: |
+          cargo +1.90.0 fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --release --locked --features gpu,ui-audit -j 2 --bin fuze-ui-lab stage_cards
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
+          exit $LASTEXITCODE
+      - name: Hidden native stage displays and reference controls
+        working-directory: rust/ui-lab
+        run: |
+          ./target/release/fuze-ui-lab.exe --review-direct artifacts/stage-direct
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-controls artifacts/stage-controls
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../../scripts/create-ui-host-fixture.mjs artifacts/stage-data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/release/fuze-ui-lab.exe --review-host artifacts/stage-data artifacts/stage-host
+          exit $LASTEXITCODE
+      # Synthetic local artifacts only; no release, upload, installed app or game access.
 
   windows-update:
     if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/slint-renderer-recovery' || github.base_ref == 'fix/rust-locale-context' || github.base_ref == 'test/rust-private-transfer' || github.base_ref == 'perf/rust-update-range-routing' || github.base_ref == 'feat/rust-update-resume' || github.base_ref == 'fix/rust-history-local-time-cleanup'

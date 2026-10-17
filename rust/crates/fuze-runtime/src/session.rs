@@ -163,9 +163,6 @@ impl Session {
             self.gate.update_level(level, now);
         }
     }
-    pub fn unchanged_frame(&mut self, now: u64) {
-        self.gate.unchanged_frame(now);
-    }
     pub fn poll_cancel(&mut self, now: u64) -> Option<Ticket> {
         if let Worker::Running(ticket, started) = self.worker {
             if ticket.generation != self.generation || now.saturating_sub(started) >= 3000 {
@@ -318,7 +315,7 @@ mod tests {
         s.update_phase(Phase::InProgress).unwrap();
         let t = s.begin(key(1), 0).unwrap();
         s.dataset_changed("en-US@v1".into()).unwrap();
-        assert!(s.finish(t, blank(), Selection::Augment, 1).is_none());
+        assert!(s.finish(t, blank(), Selection::Candidate, 1).is_none());
         let t = s.begin(key(2), 2).unwrap();
         assert_eq!(
             s.finish(t, blank(), Selection::Unknown, 3)
@@ -334,7 +331,7 @@ mod tests {
         s.update_phase(Phase::InProgress).unwrap();
         let t = s.begin(key(1), 0).unwrap();
         assert_eq!(s.wake_at(0), Some(3000));
-        assert!(s.finish(t, blank(), Selection::Augment, 3001).is_none());
+        assert!(s.finish(t, blank(), Selection::Candidate, 3001).is_none());
         assert_eq!(s.wake_at(3001), Some(3501));
         s.pause(true).unwrap();
         assert_eq!(s.wake_at(4000), None);
@@ -356,8 +353,8 @@ mod tests {
         assert!(s.worker_stopped(old, 4000));
         assert!(s.begin(key(2), 4499).is_none());
         let new = s.begin(key(2), 4500).unwrap();
-        assert!(s.finish(old, blank(), Selection::Absent, 4501).is_none());
-        assert!(s.finish(new, blank(), Selection::Absent, 4502).is_some());
+        assert!(s.finish(old, blank(), Selection::Unknown, 4501).is_none());
+        assert!(s.finish(new, blank(), Selection::Unknown, 4502).is_some());
         assert!(s.begin(key(2), 9000).is_none());
     }
     #[test]
@@ -369,7 +366,7 @@ mod tests {
         s.update_phase(Phase::InProgress).unwrap();
         let old = s.begin(key(1), 0).unwrap();
         assert!(s.pause(true).unwrap().unwrap().stop_capture);
-        assert!(s.finish(old, blank(), Selection::Augment, 1).is_none());
+        assert!(s.finish(old, blank(), Selection::Candidate, 1).is_none());
         s.pause(false).unwrap();
         let old = s.begin(key(2), 2).unwrap();
         s.dataset_changed("zh-CN@v2".into()).unwrap();
@@ -382,10 +379,10 @@ mod tests {
         assert!(!snapshot.selection_confirmed);
         let t = s.begin(key(4), 2000).unwrap();
         s.capture_replaced().unwrap();
-        assert!(s.finish(t, blank(), Selection::Augment, 2001).is_none());
+        assert!(s.finish(t, blank(), Selection::Candidate, 2001).is_none());
         let t = s.begin(key(5), 2002).unwrap();
         s.update_phase(Phase::Disconnected).unwrap();
-        assert!(s.finish(t, blank(), Selection::Augment, 2003).is_none());
+        assert!(s.finish(t, blank(), Selection::Candidate, 2003).is_none());
     }
     #[test]
     fn repeated_failures_stop_until_context_is_explicitly_reset() {

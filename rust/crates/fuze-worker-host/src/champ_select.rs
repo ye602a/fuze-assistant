@@ -1112,7 +1112,11 @@ impl State {
             .request(Some(crate::stage_reference::Request {
                 id: self.selected,
                 locale,
-                refresh,
+                access: if refresh {
+                    crate::stage_reference::Access::Refresh
+                } else {
+                    crate::stage_reference::Access::Cached
+                },
             }));
     }
 

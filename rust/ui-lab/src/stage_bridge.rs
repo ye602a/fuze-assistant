@@ -1,6 +1,6 @@
 //! Explicit manual reference. Never sends stage statistics into the recommendation pipeline.
 use crate::{ChampionWindow, StageRow};
-use fuze_worker_host::stage_reference::{self, Reply, Request, Service};
+use fuze_worker_host::stage_reference::{self, Access, Reply, Request, Service, Store};
 use slint::{ComponentHandle, VecModel};
 use std::{
     cell::{Cell, RefCell},
@@ -16,7 +16,7 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
     let rows = reply
         .snapshot
         .as_ref()
-        .filter(|s| s.champion == ui.get_inspected_id() as u32);
+        .filter(|s| s.usable(ui.get_inspected_id() as u32, stage_reference::now()));
     let values = rows
         .map(|s| {
             s.visible(ui.get_stage_index().clamp(0, 4) as usize)
@@ -39,7 +39,7 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
     ui.set_stage_rows(Rc::new(VecModel::from(values)).into());
     let message = if let Some(s) = rows {
         format!(
-            "ARAMKIT · {} · {}{}{}\n{}",
+            "ARAMKit · {} · {}{}{}\n地区未确认{}\n{}",
             s.patch,
             s.date,
             if reply.cached { " · 缓存" } else { "" },
@@ -47,6 +47,11 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
                 " · 待刷新"
             } else {
                 ""
+            },
+            if s.patch_matches(&ui.get_detail_version()) {
+                ""
+            } else {
+                " · 与本地数据补丁不同"
             },
             if reply.issue.is_some() && reply.issue != Some("stage-loading") {
                 "刷新失败，保留缓存；仅显示样本不少于 200 的统计。"
@@ -56,6 +61,10 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
                 "仅显示样本不少于 200 的统计；来源与三卡整体数据独立。"
             }
         )
+    } else if reply.snapshot.is_some() {
+        "阶段缓存已超过保留期限，请在选人阶段重新准备。".into()
+    } else if reply.issue == Some("stage-cache-missing") {
+        "暂无此英雄的阶段缓存；对局中不下载，请在选人阶段准备。".into()
     } else if reply.issue == Some("stage-offline") {
         "离线验证不查询网络，也不读取个人缓存。".into()
     } else if reply.issue.is_some() {
@@ -65,7 +74,12 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
     };
     ui.set_stage_status(message.into());
 }
-pub fn attach(ui: &ChampionWindow, roots: Vec<fuze_data::Root>, offline: bool) -> Binding {
+pub fn attach(
+    ui: &ChampionWindow,
+    roots: Vec<fuze_data::Root>,
+    offline: bool,
+    store: std::sync::Arc<Store>,
+) -> Binding {
     let service = Rc::new(RefCell::new(None::<Service>));
     let timer = Rc::new(slint::Timer::default());
     let reply = Rc::new(RefCell::new(Reply::default()));
@@ -83,12 +97,19 @@ pub fn attach(ui: &ChampionWindow, roots: Vec<fuze_data::Root>, offline: bool) -
         if id == 0 || ui.get_stage_busy() {
             return;
         }
-        if !refresh && hero.get() == id && current.borrow().snapshot.is_some() {
+        if !refresh
+            && hero.get() == id
+            && current
+                .borrow()
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.usable(id, stage_reference::now()))
+        {
             present(&ui, &current.borrow());
             return;
         }
         if s.borrow().is_none() {
-            match Service::new(roots.clone(), offline) {
+            match Service::with_store(roots.clone(), offline, store.clone()) {
                 Ok(worker) => *s.borrow_mut() = Some(worker),
                 Err(_) => {
                     ui.set_stage_status("阶段统计服务暂不可用。".into());
@@ -111,7 +132,13 @@ pub fn attach(ui: &ChampionWindow, roots: Vec<fuze_data::Root>, offline: bool) -
         service.request(Some(Request {
             id,
             locale,
-            refresh,
+            access: if ui.get_side_mode() {
+                Access::CacheOnly
+            } else if refresh {
+                Access::Refresh
+            } else {
+                Access::Cached
+            },
         }));
         if let Some(next) = service.changed(seen.get()) {
             seen.set(next.serial);

@@ -28,7 +28,8 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 170;
+const HEIGHT: u32 = 270;
+const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
 const DETAIL_HEIGHT: u32 = 210;
 const BG: u32 = 0x07131e;
 const PANEL: u32 = 0x101e2a;
@@ -80,6 +81,7 @@ impl Drop for Com {
     }
 }
 struct Scene {
+    reference: std::sync::Arc<crate::stage_cards::Comparison>,
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
     icons: Vec<image::RgbaImage>,
@@ -120,6 +122,7 @@ impl Scene {
             .map(|bytes| image::load_from_memory(bytes).map(|i| i.into_rgba8()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(Self {
+                reference: std::sync::Arc::new(Default::default()),
                 factory,
                 formats,
                 icons,
@@ -156,6 +159,7 @@ impl Scene {
         } else {
             &self.cards[index].description
         };
+        let text = format!("{}{}", text, self.reference.details[index]);
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
             let layout =
@@ -282,10 +286,10 @@ impl Surface {
                     .cards
                     .iter()
                     .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
-            self.fill(target, rect(x, 34., 242., 127.), PANEL);
+            self.fill(target, rect(x, 34., 242., 190.), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
-            target.DrawRectangle(&rect(x, 34., 242., 127.), &self.brush, 1., None);
+            target.DrawRectangle(&rect(x, 34., 242., 190.), &self.brush, 1., None);
             if (partial && i == 1) || card.id.is_none() {
                 self.text(
                     scene,
@@ -321,7 +325,7 @@ impl Surface {
                 rect(x + 85., 47., 147., 23.),
                 TEXT,
             );
-            for (j, label) in ["选取率", "胜率"].iter().enumerate() {
+            for (j, label) in ["选取率", "整体胜率"].iter().enumerate() {
                 let sx = x + 85. + j as f32 * 75.;
                 self.text(scene, target, label, 0, rect(sx, 74., 72., 17.), MUTED);
                 self.text(
@@ -367,15 +371,51 @@ impl Surface {
                 ),
                 if best { GOLD } else { 0x42c6cc },
             );
+            self.fill(target, rect(x + 10., 158., 222., 1.), 0x34434c);
+            for j in 0..4 {
+                let sx = x + 10. + j as f32 * 56.;
+                self.text(
+                    scene,
+                    target,
+                    &format!("第 {} 次", j + 1),
+                    0,
+                    rect(sx, 166., 54., 18.),
+                    MUTED,
+                );
+                self.text(
+                    scene,
+                    target,
+                    &scene.reference.values[i][j],
+                    1,
+                    rect(sx, 187., 54., 25.),
+                    TEXT,
+                );
+            }
         }
+        self.text(
+            scene,
+            target,
+            &scene.reference.source,
+            0,
+            rect(12., 231., 736., 17.),
+            MUTED,
+        );
+        self.text(
+            scene,
+            target,
+            "四阶段仅供比较，不改变整体推荐 · 少于 200 场不显示胜率 · 点卡片查看样本",
+            0,
+            rect(12., 250., 736., 17.),
+            MUTED,
+        );
         if let Some(index) = scene.selected {
-            self.fill(target, rect(9., 173., 742., 198.), PANEL);
+            self.fill(target, rect(9., 173. + DETAIL_OFFSET, 742., 198.), PANEL);
             self.text(
                 scene,
                 target,
                 &scene.cards[index].title,
                 1,
-                rect(20., 183., 500., 24.),
+                rect(20., 183. + DETAIL_OFFSET, 500., 24.),
                 GOLD,
             );
             self.text(
@@ -387,16 +427,19 @@ impl Surface {
                     "再点卡片收起"
                 },
                 0,
-                rect(530., 185., 210., 20.),
+                rect(530., 185. + DETAIL_OFFSET, 210., 20.),
                 MUTED,
             );
-            target.PushAxisAlignedClip(&rect(20., 214., 720., 136.), D2D1_ANTIALIAS_MODE_ALIASED);
+            target.PushAxisAlignedClip(
+                &rect(20., 214. + DETAIL_OFFSET, 720., 136.),
+                D2D1_ANTIALIAS_MODE_ALIASED,
+            );
             if let Some(layout) = &scene.detail {
                 self.brush.SetColor(&color(TEXT));
                 target.DrawTextLayout(
                     windows_numerics::Vector2 {
                         X: 20.,
-                        Y: 214. - scene.scroll,
+                        Y: 214. + DETAIL_OFFSET - scene.scroll,
                     },
                     layout,
                     &self.brush,
@@ -410,7 +453,7 @@ impl Surface {
                     target,
                     "上移",
                     0,
-                    rect(619., 352., 50., 20.),
+                    rect(619., 352. + DETAIL_OFFSET, 50., 20.),
                     if scene.scroll > 0. { GOLD } else { MUTED },
                 );
                 self.text(
@@ -418,17 +461,22 @@ impl Surface {
                     target,
                     "下移",
                     0,
-                    rect(689., 352., 50., 20.),
+                    rect(689., 352. + DETAIL_OFFSET, 50., 20.),
                     if scene.scroll < scene.max_scroll {
                         GOLD
                     } else {
                         MUTED
                     },
                 );
-                self.fill(target, rect(741., 214., 3., 136.), 0x24343e);
+                self.fill(target, rect(741., 214. + DETAIL_OFFSET, 3., 136.), 0x24343e);
                 self.fill(
                     target,
-                    rect(741., 214. + scene.scroll / scene.max_scroll * 108., 3., 28.),
+                    rect(
+                        741.,
+                        214. + DETAIL_OFFSET + scene.scroll / scene.max_scroll * 108.,
+                        3.,
+                        28.,
+                    ),
                     GOLD,
                 );
             }
@@ -571,13 +619,13 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
             let _ = DestroyWindow(hwnd);
         }
     } else if state.scene.selected.is_some()
-        && (350. ..373.).contains(&y)
+        && (350. + DETAIL_OFFSET..373. + DETAIL_OFFSET).contains(&y)
         && (609. ..749.).contains(&x)
     {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..161.).contains(&y) {
+    } else if (34. ..224.).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -807,6 +855,22 @@ pub struct HostOverlay {
     preview_mode: bool,
 }
 impl HostOverlay {
+    pub fn reference(
+        &mut self,
+        view: std::sync::Arc<crate::stage_cards::Comparison>,
+    ) -> Result<()> {
+        let scene = &mut self.window.state.scene;
+        if std::sync::Arc::ptr_eq(&scene.reference, &view) || *scene.reference == *view {
+            return Ok(());
+        }
+        scene.reference = view;
+        scene.select(scene.selected)?;
+        self.revisions += 1;
+        unsafe {
+            let _ = InvalidateRect(Some(self.window.hwnd), None, false);
+        }
+        Ok(())
+    }
     pub fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let com = Com::new()?;
         let mut window = OwnWindow::new(offline)?;
@@ -1073,6 +1137,49 @@ impl HostOverlay {
         }
     }
     /// Synthetic hidden-window review; no input messages or production position storage.
+    pub fn review_reference(
+        &mut self,
+        output: &Path,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        if !self.offline || !self.hidden() {
+            return Err("stage-review-isolation".into());
+        }
+        let cards = self.window.state.scene.cards.clone();
+        let ids = self.ids;
+        let sample = reference_fixture(ids);
+        let view = std::sync::Arc::new(crate::stage_cards::compare(
+            Some(&sample),
+            4,
+            ids,
+            "zh-CN@16.19.3",
+            fuze_worker_host::stage_reference::now(),
+        ));
+        self.reference(view.clone())?;
+        let revisions = self.revisions;
+        self.reference(view)?;
+        if cards != self.window.state.scene.cards
+            || ids != self.ids
+            || revisions != self.revisions
+            || !self.hidden()
+        {
+            return Err("stage-reference-changed-recommendation-or-repainted".into());
+        }
+        self.render(&output.join("host-cards-four-stage-reference.png"))?;
+        // Click the stage row in our own hidden window; no input is sent to the OS.
+        unsafe {
+            handle_click(self.window.hwnd, &mut self.window.state, 100., 196.);
+        }
+        if self.window.state.scene.selected != Some(0) {
+            return Err("stage-reference-detail-route".into());
+        }
+        self.render(&output.join("host-cards-stage-samples.png"))?;
+        self.window.state.scene.select(None)?;
+        unsafe {
+            size_to_content(self.window.hwnd, false);
+        }
+        Ok(())
+    }
+    /// Synthetic hidden-window review; no input messages or production position storage.
     pub fn review_description(
         &mut self,
         output: &Path,
@@ -1122,13 +1229,23 @@ impl HostOverlay {
         }
         self.render(&output.join("host-cards-description-top.png"))?;
         unsafe {
-            handle_click(self.window.hwnd, &mut self.window.state, 710., 360.);
+            handle_click(
+                self.window.hwnd,
+                &mut self.window.state,
+                710.,
+                360. + DETAIL_OFFSET,
+            );
         }
         if self.window.state.scene.scroll <= 0. {
             return Err("description-down-click".into());
         }
         unsafe {
-            handle_click(self.window.hwnd, &mut self.window.state, 640., 360.);
+            handle_click(
+                self.window.hwnd,
+                &mut self.window.state,
+                640.,
+                360. + DETAIL_OFFSET,
+            );
         }
         if self.window.state.scene.scroll != 0. {
             return Err("description-up-click".into());
@@ -1159,9 +1276,48 @@ impl HostOverlay {
         Ok(())
     }
 }
+fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference::Snapshot {
+    use fuze_worker_host::stage_reference::{Row, Snapshot};
+    let mut rows: [Vec<Row>; 5] = Default::default();
+    for stage in 1..=4 {
+        for (index, id) in ids.into_iter().enumerate() {
+            let Some(id) = id else { continue };
+            if index == 2 && stage == 4 {
+                continue;
+            }
+            rows[stage].push(Row {
+                id,
+                win: 0.49 + (stage + index) as f64 * 0.025,
+                pick: 0.12,
+                samples: if index == 1 && stage == 2 {
+                    199
+                } else {
+                    531 + stage as u64
+                },
+            });
+        }
+    }
+    Snapshot {
+        schema: 1,
+        champion: 4,
+        patch: "16.20".into(),
+        date: "2026-10-16".into(),
+        data_path: String::new(),
+        fetched: fuze_worker_host::stage_reference::now(),
+        rows,
+    }
+}
 pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {
     let _com = Com::new()?;
-    let scene = Scene::new()?;
+    let mut scene = Scene::new()?;
+    let sample = reference_fixture([Some(1), Some(2), Some(3)]);
+    scene.reference = std::sync::Arc::new(crate::stage_cards::compare(
+        Some(&sample),
+        4,
+        [Some(1), Some(2), Some(3)],
+        "zh-CN@16.19.3",
+        fuze_worker_host::stage_reference::now(),
+    ));
     let mut cases = Vec::new();
     unsafe {
         let imaging: IWICImagingFactory =

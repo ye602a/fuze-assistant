@@ -28,6 +28,7 @@ mod record_bridge;
 mod skia_surface_probe;
 mod slint_probe;
 mod stage_bridge;
+mod stage_cards;
 mod startup;
 mod status_view;
 mod telemetry;

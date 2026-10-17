@@ -1,11 +1,14 @@
-//! Explicit public reference only. Not a source of actual claims or automatic ranking.
+//! Public statistics reference only. Not a source of actual claims or automatic ranking.
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Condvar, Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 const LIMIT: usize = 2 * 1024 * 1024;
@@ -116,6 +119,13 @@ fn valid_rows(rows: &[Row]) -> bool {
         })
 }
 impl Snapshot {
+    pub fn usable(&self, champion: u32, at: u64) -> bool {
+        self.champion == champion && self.fetched <= at && at - self.fetched <= RETAIN
+    }
+    pub fn patch_matches(&self, dataset: &str) -> bool {
+        let version = dataset.rsplit('@').next().unwrap_or(dataset);
+        self.patch == version.split('.').take(2).collect::<Vec<_>>().join(".")
+    }
     fn valid(&self, now: u64) -> bool {
         self.schema==1 && self.champion>0 && self.champion<=10000 && self.fetched<=now && now-self.fetched<=RETAIN && !self.rows[0].is_empty() && self.rows.iter().all(|r|valid_rows(r)) && version(&serde_json::json!({"version":self.patch,"dataDate":self.date,"dataPath":self.data_path})).is_ok()
     }
@@ -231,12 +241,20 @@ pub struct Reply {
     pub cached: bool,
     pub issue: Option<&'static str>,
     pub serial: u64,
+    pub retry_after: Option<u64>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Access {
+    CacheOnly,
+    Cached,
+    Prepare,
+    Refresh,
 }
 #[derive(Clone)]
 pub struct Request {
     pub id: u32,
     pub locale: fuze_data::Locale,
-    pub refresh: bool,
+    pub access: Access,
 }
 #[derive(Default)]
 struct State {
@@ -247,6 +265,39 @@ struct State {
 }
 pub struct Service {
     shared: Arc<(Mutex<State>, Condvar)>,
+}
+/// All native reference consumers share one cache/IO lock and one download cooldown.
+/// UI peeks never block on IO; entering gameplay revokes pending network work.
+pub struct Store {
+    cache: Mutex<Option<Cache>>,
+    network: AtomicBool,
+    network_epoch: AtomicU64,
+}
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            cache: Mutex::new(None),
+            network: AtomicBool::new(true),
+            network_epoch: AtomicU64::new(0),
+        }
+    }
+}
+impl Store {
+    pub fn allow_network(&self, enabled: bool) {
+        if self.network.swap(enabled, Ordering::AcqRel) != enabled {
+            self.network_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    pub fn peek(&self, id: u32, at: u64) -> Option<Arc<Snapshot>> {
+        self.cache
+            .try_lock()
+            .ok()?
+            .as_ref()?
+            .entries
+            .iter()
+            .find(|s| s.usable(id, at))
+            .cloned()
+    }
 }
 struct Cache {
     entries: VecDeque<Arc<Snapshot>>,
@@ -277,10 +328,31 @@ impl Cache {
             retry: 0,
         }
     }
+    #[cfg(test)]
     fn get(
         &mut self,
         id: u32,
         refresh: bool,
+        at: u64,
+        fetch: &dyn Fn(&str) -> Result<Vec<u8>>,
+        cancel: &dyn Fn() -> bool,
+    ) -> Reply {
+        self.get_policy(
+            id,
+            if refresh {
+                Access::Refresh
+            } else {
+                Access::Cached
+            },
+            at,
+            fetch,
+            cancel,
+        )
+    }
+    fn get_policy(
+        &mut self,
+        id: u32,
+        access: Access,
         at: u64,
         fetch: &dyn Fn(&str) -> Result<Vec<u8>>,
         cancel: &dyn Fn() -> bool,
@@ -299,11 +371,19 @@ impl Cache {
             reply.issue = Some("stage-cancelled");
             return reply;
         }
-        if previous.is_some() && !refresh {
+        if access == Access::CacheOnly {
+            reply.issue = previous.is_none().then_some("stage-cache-missing");
+            return reply;
+        }
+        if previous
+            .as_ref()
+            .is_some_and(|s| access == Access::Cached || access == Access::Prepare && !s.stale(at))
+        {
             return reply;
         }
         if at < self.retry {
             reply.issue = Some("stage-busy");
+            reply.retry_after = Some(self.retry);
             return reply;
         }
         self.retry = at.saturating_add(30);
@@ -337,6 +417,9 @@ impl Cache {
                     }
                 }
             }
+            _ if cancel() => {
+                reply.issue = Some("stage-cancelled");
+            }
             _ => {
                 self.retry = at.saturating_add(300);
                 reply.issue = Some("stage-unavailable");
@@ -347,12 +430,18 @@ impl Cache {
 }
 impl Service {
     pub fn new(roots: Vec<fuze_data::Root>, offline: bool) -> Result<Self> {
+        Self::with_store(roots, offline, Arc::new(Store::default()))
+    }
+    pub fn with_store(
+        roots: Vec<fuze_data::Root>,
+        offline: bool,
+        store: Arc<Store>,
+    ) -> Result<Self> {
         let shared = Arc::new((Mutex::new(State::default()), Condvar::new()));
         let worker = shared.clone();
         std::thread::Builder::new()
             .name("fuze-stage-reference".into())
             .spawn(move || {
-                let mut cache = None;
                 let mut seen = 0;
                 loop {
                     let (lock, wake) = &*worker;
@@ -385,14 +474,29 @@ impl Service {
                             ..Default::default()
                         }
                     } else {
-                        let cache = cache.get_or_insert_with(|| {
+                        let Ok(mut holder) = store.cache.lock() else {
+                            return;
+                        };
+                        let epoch = store.network_epoch.load(Ordering::Acquire);
+                        let access = if store.network.load(Ordering::Acquire) {
+                            req.access
+                        } else {
+                            Access::CacheOnly
+                        };
+                        let cancelled = || {
+                            cancel()
+                                || access != Access::CacheOnly
+                                    && (!store.network.load(Ordering::Acquire)
+                                        || store.network_epoch.load(Ordering::Acquire) != epoch)
+                        };
+                        let cache = holder.get_or_insert_with(|| {
                             Cache::new(std::env::var_os("LOCALAPPDATA").map(|p| {
                                 PathBuf::from(p).join("FuzeRustPreview/stage-reference-v1.json")
                             }))
                         });
-                        cache.get(
+                        cache.get_policy(
                             req.id,
-                            req.refresh,
+                            access,
                             now(),
                             &|p| {
                                 crate::update_io::get(
@@ -401,10 +505,10 @@ impl Service {
                                     LIMIT,
                                     None,
                                     None,
-                                    &cancel,
+                                    &cancelled,
                                 )
                             },
-                            &cancel,
+                            &cancelled,
                         )
                     };
                     if cancel() {
@@ -432,7 +536,7 @@ impl Service {
     pub fn request(&self, request: Option<Request>) {
         if let Ok(mut s) = self.shared.0.lock() {
             let preserve = request.as_ref().is_some_and(|r| {
-                r.refresh
+                r.access == Access::Refresh
                     && s.desired
                         .as_ref()
                         .is_some_and(|old| old.id == r.id && old.locale == r.locale)
@@ -479,6 +583,83 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prepare_reuses_fresh_cache_and_gameplay_never_fetches_or_promotes_missing_rows() {
+        let at = now();
+        let mut cache = Cache::new(None);
+        assert_eq!(
+            cache
+                .get_policy(
+                    21,
+                    Access::CacheOnly,
+                    at,
+                    &|_| panic!("gameplay network"),
+                    &|| false
+                )
+                .issue,
+            Some("stage-cache-missing")
+        );
+        assert!(cache
+            .get_policy(21, Access::Prepare, at, &fixture, &|| false)
+            .snapshot
+            .is_some());
+        assert!(
+            cache
+                .get_policy(
+                    21,
+                    Access::Prepare,
+                    at + 31,
+                    &|_| panic!("fresh cache redownload"),
+                    &|| false
+                )
+                .cached
+        );
+        assert!(
+            cache
+                .get_policy(
+                    21,
+                    Access::CacheOnly,
+                    at + FRESH + 1,
+                    &|_| panic!("gameplay refresh"),
+                    &|| false
+                )
+                .cached
+        );
+        assert!(cache
+            .get_policy(
+                21,
+                Access::CacheOnly,
+                at + RETAIN + 1,
+                &|_| panic!("expired gameplay fetch"),
+                &|| false
+            )
+            .snapshot
+            .is_none());
+        assert!(
+            !cache
+                .get_policy(21, Access::Prepare, at + FRESH + 1, &fixture, &|| false)
+                .cached
+        );
+    }
+    #[test]
+    fn shared_cache_peek_never_waits_for_io_and_epoch_changes_invalidate_network() {
+        let store = Store::default();
+        let initial = store.network_epoch.load(Ordering::Acquire);
+        store.allow_network(true);
+        assert_eq!(store.network_epoch.load(Ordering::Acquire), initial);
+        store.allow_network(false);
+        store.allow_network(true);
+        assert_ne!(store.network_epoch.load(Ordering::Acquire), initial);
+        let mut held = store.cache.lock().unwrap();
+        let mut cache = Cache::new(None);
+        let at = now();
+        cache.get_policy(21, Access::Prepare, at, &fixture, &|| false);
+        *held = Some(cache);
+        assert!(store.peek(21, at).is_none());
+        drop(held);
+        assert_eq!(store.peek(21, at).unwrap().champion, 21);
+        assert!(store.peek(22, at).is_none());
+    }
     fn fixture(path: &str) -> Result<Vec<u8>> {
         Ok(if path.ends_with("versions.json"){serde_json::json!({"latest":"16.20","versions":[{"version":"16.20","dataDate":"2026-10-15","dataPath":"data/16.20-20261015-abcdef012345"}]})}else{serde_json::json!({"champion":{"id":21},"augments":{"all":[{"id":1,"winRate":0.6,"pickRate":0.1,"sampleCount":1000}],"stages":{"1":[{"id":2,"winRate":0.8,"pickRate":0.2,"sampleCount":199},{"id":3,"winRate":0.55,"pickRate":0.3,"sampleCount":500}]}}})}.to_string().into_bytes())
     }
@@ -490,13 +671,13 @@ mod tests {
         let req = Request {
             id: 21,
             locale: fuze_data::Locale::ZhCn,
-            refresh: false,
+            access: Access::Cached,
         };
         service.request(Some(req.clone()));
         let snapshot = Arc::new(fetch_snapshot(21, now(), &fixture, &|| false).unwrap());
         service.shared.0.lock().unwrap().reply.snapshot = Some(snapshot.clone());
         service.request(Some(Request {
-            refresh: true,
+            access: Access::Refresh,
             ..req
         }));
         let state = service.shared.0.lock().unwrap();

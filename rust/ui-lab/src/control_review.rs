@@ -214,7 +214,9 @@ impl Audit {
                     }
                 }
                 if ok
-                    && expected.is_some_and(|e| e != "__must_not_dispatch__" && e != "stage:false")
+                    && expected.is_some_and(|e| {
+                        e != "__must_not_dispatch__" && e != "stage:false" && e != "stage-reset"
+                    })
                 {
                     self.events.borrow_mut().clear();
                     key(ui, " ".into());
@@ -688,6 +690,17 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     let e = a.events.clone();
     ui.on_stage_select(move |v| e.borrow_mut().push(format!("stage-select:{v}")));
     let e = a.events.clone();
+    let weak = ui.as_weak();
+    ui.on_stage_reset(move || {
+        e.borrow_mut().push("stage-reset".into());
+        if let Some(ui) = weak.upgrade() {
+            ui.set_stage_open(false);
+            ui.set_stage_busy(false);
+            ui.set_stage_rows(Default::default());
+            ui.set_stage_index(0);
+        }
+    });
+    let e = a.events.clone();
     ui.on_route_changed(move |v| e.borrow_mut().push(format!("route:{v}")));
     let e = a.events.clone();
     ui.on_close_requested(move || e.borrow_mut().push("champion:close".into()));
@@ -778,7 +791,24 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         a.click(ui, label, Some(&format!("stage-select:{i}")));
     }
     a.click(ui, "刷新公开统计", Some("stage:true"));
-    a.click(ui, "收起分阶段胜率参考", None);
+    a.click(ui, "收起分阶段胜率参考", Some("stage-reset"));
+    a.check(
+        "阶段参考收起",
+        !ui.get_stage_open(),
+        "cancel and clear route",
+    );
+    // This toggle changes its next action after closing; test keyboard close from
+    // an open fixture instead of expecting a second activation to close it again.
+    ui.set_stage_open(true);
+    let _ = ui.window().take_snapshot()?;
+    a.events.borrow_mut().clear();
+    key(ui, " ".into());
+    let closed = a.events.borrow().as_slice() == ["stage-reset"] && !ui.get_stage_open();
+    a.check(
+        "阶段参考键盘收起",
+        closed,
+        "keyboard cancel and clear route",
+    );
     a.click(ui, "配置 4 套装备方案", Some("player:prepare-items:0"));
     ui.set_item_confirm(true);
     a.click(ui, "取消", Some("player:cancel:0"));
