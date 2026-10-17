@@ -133,6 +133,14 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     snapshot.sequence += 1;
     snapshot.slots[1] = known(1);
     publisher.publish(snapshot.clone(), true, false, None);
+    overlay.update(publisher.current(), false)?;
+    if !overlay.dismissed() {
+        return Err("partial-read-reopened-dismissed-choice".into());
+    }
+    // Only a confirmed selection close followed by a new cycle may reopen the panel.
+    publisher.end_selection();
+    snapshot.sequence += 1;
+    publisher.publish(snapshot.clone(), true, false, None);
     let complete = publisher.current().unwrap();
     overlay.update(Some(complete.clone()), false)?;
     if overlay.dismissed() || overlay.ids()[1] != Some(cards[1].id) {

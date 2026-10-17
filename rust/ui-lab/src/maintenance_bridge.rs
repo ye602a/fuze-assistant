@@ -22,6 +22,7 @@ enum Action {
 }
 #[derive(Default)]
 struct Reply {
+    read_only: bool,
     notice: String,
     storage: Option<storage::Preview>,
     update: Option<String>,
@@ -87,7 +88,12 @@ fn perform(
             let installed = fuze_worker_host::managed_install::read(
                 &fuze_worker_host::managed_install::root()?,
             )?;
-            let current = installed.current.as_ref().unwrap_or(&bundled);
+            // A portable test build may be newer than a previously managed installation.
+            let current = installed
+                .current
+                .as_ref()
+                .filter(|v| v.sequence > bundled.sequence)
+                .unwrap_or(&bundled);
             let rejected = installed.rejected.as_ref() == Some(&release.manifest.revision);
             reply.installable = !installed.pending
                 && !rejected
@@ -103,8 +109,13 @@ fn perform(
                     release.manifest.revision,
                     release.manifest.size.div_ceil(1024 * 1024)
                 )
+            } else if release.manifest.sequence < current.sequence {
+                format!(
+                    "本机版本较新；线上测试频道仍为 {}，不会降级。",
+                    release.manifest.revision
+                )
             } else {
-                "当前没有可安装的新版本。".into()
+                format!("已是当前测试频道版本 {}。", release.manifest.revision)
             });
             reply.notice = reply.update.clone().unwrap_or_default();
         }
@@ -154,17 +165,17 @@ impl Worker {
                     drop(s);
                     let result = perform(action, offline, &fixture_root, &mut preview, &cancel);
                     if let Ok(mut s) = task.0.lock() {
-                        s.reply = Some(result.unwrap_or_else(|e| {
-                            Reply {
-                                error: Some(e),
-                                update: matches!(
-                                    action,
-                                    Action::Check(_) | Action::Credentials | Action::Forget
-                                )
-                                .then(|| message(e).to_owned()),
-                                ..Default::default()
-                            }
-                        }));
+                        let mut reply = result.unwrap_or_else(|e| Reply {
+                            error: Some(e),
+                            update: matches!(
+                                action,
+                                Action::Check(_) | Action::Credentials | Action::Forget
+                            )
+                            .then(|| message(e).to_owned()),
+                            ..Default::default()
+                        });
+                        reply.read_only = matches!(action, Action::Check(_));
+                        s.reply = Some(reply);
                     }
                 }
             })
@@ -255,9 +266,7 @@ fn message(error: &str) -> &'static str {
         "credential-cancelled" => "已取消授权输入，原授权保持不变。",
         "credential-format" => "授权格式无效，未保存。请使用 GitHub 访问令牌。",
         "credential-save" | "credential-delete" => "Windows 安全存储操作未完成，请稍后重试。",
-        "update-access-or-release" => {
-            "无法读取频道版本：请检查授权是否有仓库读取权限，以及频道是否已发布 Rust 测试版。"
-        }
+        "update-access-or-release" => "无法读取公开测试频道，请稍后重试；下载更新不需要上传令牌。",
         "update-cancelled-or-timeout" | "update-http-status" => {
             "更新检查未完成，请检查网络后重试；当前版本仍可使用。"
         }
@@ -335,9 +344,12 @@ pub fn attach(
         if operation.is_empty() {
             return;
         }
-        if let Err(e) = engine.begin_maintenance() {
-            state.set_notice(message(e).into());
-            return;
+        let read_only = operation == "check";
+        if !read_only {
+            if let Err(e) = engine.begin_maintenance() {
+                state.set_notice(message(e).into());
+                return;
+            }
         }
         if operation == "install" {
             if offline {
@@ -370,7 +382,12 @@ pub fn attach(
             }
         };
         state.set_busy(true);
-        ui.global::<HostState>().set_busy(true);
+        if !read_only {
+            ui.global::<HostState>().set_busy(true);
+        }
+        if read_only {
+            state.set_update_status("正在检查公开测试频道，识别继续运行…".into());
+        }
         state.set_notice(
             match action {
                 Action::Scan => "正在扫描本地占用，不会删除文件…",
@@ -403,7 +420,9 @@ pub fn attach(
         move || {
             let reply = service.work.0.lock().ok().and_then(|mut s| s.reply.take());
             let Some(reply) = reply else { return };
-            engine.end_maintenance();
+            if !reply.read_only {
+                engine.end_maintenance();
+            }
             if let Some(timer) = tick.upgrade() {
                 timer.stop();
             }

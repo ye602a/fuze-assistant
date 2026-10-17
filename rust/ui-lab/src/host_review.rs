@@ -502,17 +502,28 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         if !crate::maintenance_review::preserved(&maintenance_root) {
                             return Err("storage-preservation".into());
                         }
+                        session.set_running(true)?;
                         ui.global::<crate::MaintenanceState>()
                             .invoke_action("check".into());
+                        if session.busy()
+                            || !ui
+                                .global::<crate::MaintenanceState>()
+                                .get_update_status()
+                                .contains("正在检查")
+                        {
+                            return Err("update-check-blocked-recognition".into());
+                        }
                         step.set(13);
                     }
                     13 if !ui.global::<crate::MaintenanceState>().get_busy() => {
                         let maintenance = ui.global::<crate::MaintenanceState>();
                         if maintenance.get_installable()
                             || !maintenance.get_notice().contains("离线验证")
+                            || !maintenance.get_update_status().contains("离线验证")
                         {
                             return Err("maintenance-offline-check".into());
                         }
+                        session.set_running(false)?;
                         save("maintenance-complete")?;
                         ui.window().set_size(slint::LogicalSize::new(920., 760.));
                         ui.set_scroll_y(0.);

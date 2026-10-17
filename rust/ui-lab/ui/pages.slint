@@ -9,7 +9,7 @@ export component SettingsPage inherits VerticalLayout {
     in-out property <bool> manual-open: false;
     spacing: 18px;
     if HostState.running: Panel { height: 90px;
-        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行。更新、清理和导入需要先暂停；其余偏好可直接调整。"; wrap: word-wrap; color: Theme.muted; }
+        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行，可以检查新版。安装更新、清理和导入需要先暂停。"; wrap: word-wrap; color: Theme.muted; }
         Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
     }
     MaintenancePage { entrance: root.entrance; }
