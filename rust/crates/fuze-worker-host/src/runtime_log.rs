@@ -89,6 +89,15 @@ codes!(Failure {
     LcuObservation,
     PipelineMissing,
     WindowWaiting,
+    WindowRoot,
+    WindowLayout,
+    WindowPathEscape,
+    WindowAccess,
+    WindowImageUnavailable,
+    WindowPathMismatch,
+    WindowFiltered,
+    WindowAmbiguous,
+    WindowDiscovery,
     CapturePhase,
     CaptureStart,
     CaptureMissing,
@@ -185,6 +194,15 @@ impl Snapshot {
             Some("lcu-observation") => Failure::LcuObservation,
             Some("pipeline-missing") => Failure::PipelineMissing,
             Some("game-window-waiting") => Failure::WindowWaiting,
+            Some("game-window-root") => Failure::WindowRoot,
+            Some("game-window-layout") => Failure::WindowLayout,
+            Some("game-window-path-escape") => Failure::WindowPathEscape,
+            Some("game-window-access") => Failure::WindowAccess,
+            Some("game-window-image-unavailable") => Failure::WindowImageUnavailable,
+            Some("game-window-path-mismatch") => Failure::WindowPathMismatch,
+            Some("game-window-filtered") => Failure::WindowFiltered,
+            Some("game-window-ambiguous") => Failure::WindowAmbiguous,
+            Some("game-window-discovery") => Failure::WindowDiscovery,
             Some("capture-phase") => Failure::CapturePhase,
             Some("capture-start") => Failure::CaptureStart,
             Some("capture-missing") => Failure::CaptureMissing,
@@ -711,6 +729,32 @@ mod tests {
             elapsed_ms: 1,
             state: Snapshot::from_status(&status),
             dropped: 0,
+        }
+    }
+    #[test]
+    fn discovery_failures_export_distinct_fixed_codes_without_mislabeling_ocr() {
+        let mut status = Status::default();
+        status.mode = 1;
+        status.pipeline.backend = Some(fuze_contract::wire::ActiveBackend::DirectMl);
+        for (error, code) in [
+            ("game-window-root", "window-root"),
+            ("game-window-layout", "window-layout"),
+            ("game-window-path-escape", "window-path-escape"),
+            ("game-window-access", "window-access"),
+            ("game-window-image-unavailable", "window-image-unavailable"),
+            ("game-window-path-mismatch", "window-path-mismatch"),
+            ("game-window-filtered", "window-filtered"),
+            ("game-window-ambiguous", "window-ambiguous"),
+            ("game-window-discovery", "window-discovery"),
+        ] {
+            status.pipeline.error = Some(error);
+            let snapshot = Snapshot::from_status(&status);
+            assert_eq!(snapshot.capture, Capture::Failed);
+            assert_eq!(snapshot.issue, Issue::Window);
+            assert_eq!(snapshot.ocr, Ocr::Directml);
+            let value = serde_json::to_value(&snapshot).unwrap();
+            assert_eq!(value["failure"], code);
+            assert_eq!(serde_json::from_value::<Snapshot>(value).unwrap(), snapshot);
         }
     }
     #[test]

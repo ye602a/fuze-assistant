@@ -22,6 +22,18 @@ fn loading_handoff(old: Context, new: Context) -> bool {
         && old.finishes_loading(&new)
 }
 
+fn pending_game_window(error: &str) -> bool {
+    matches!(error, "game-window-waiting" | "game-window-filtered")
+}
+
+fn keep_capture_worker(error: &str) -> bool {
+    error.starts_with("game-window-")
+        || matches!(
+            error,
+            "capture-frame" | "capture-atlas" | "capture-start" | "worker-recovered-use-next-frame"
+        )
+}
+
 struct Observation {
     journal: Option<crate::local_records::Binding>,
     locale: Option<fuze_lcu::locale::Locale>,
@@ -676,21 +688,12 @@ impl Controller {
             Err(error) => {
                 self.last_error = Some(error);
                 let now = self.epoch.elapsed().as_millis() as u64;
-                if error == "game-window-waiting" {
+                if pending_game_window(error) {
                     self.retry.window_wait(now);
                 } else {
                     self.retry.fail(now);
                 }
-                if !matches!(
-                    error,
-                    "capture-frame"
-                        | "capture-atlas"
-                        | "capture-start"
-                        | "game-window-waiting"
-                        | "game-window-ambiguous"
-                        | "game-window-discovery"
-                        | "worker-recovered-use-next-frame"
-                ) {
+                if !keep_capture_worker(error) {
                     self.clear();
                 }
                 Err(error)
@@ -707,6 +710,35 @@ impl Drop for Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn window_diagnostics_preserve_worker_without_masking_real_ocr_failures() {
+        for error in [
+            "game-window-waiting",
+            "game-window-filtered",
+            "game-window-layout",
+            "game-window-root",
+            "game-window-path-escape",
+            "game-window-access",
+            "game-window-image-unavailable",
+            "game-window-path-mismatch",
+            "game-window-ambiguous",
+            "game-window-discovery",
+        ] {
+            assert!(keep_capture_worker(error));
+        }
+        assert!(pending_game_window("game-window-filtered"));
+        assert!(pending_game_window("game-window-waiting"));
+        for error in [
+            "game-window-access",
+            "game-window-layout",
+            "capture-start",
+            "worker-result",
+        ] {
+            assert!(!pending_game_window(error));
+        }
+        assert!(!keep_capture_worker("worker-result"));
+        assert!(!keep_capture_worker("locale-unavailable"));
+    }
     #[test]
     fn locale_context_requires_fresh_connected_detection() {
         let latest = Arc::new(Mutex::new(Observation {

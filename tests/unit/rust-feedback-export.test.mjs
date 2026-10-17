@@ -52,6 +52,12 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     writeFileSync(path.join(logs,'runtime-v1.2.jsonl'),'x'.repeat(262145))
     assert.equal(run(path.join(dir,'bounded.json')).status,0)
     assert.equal(JSON.parse(readFileSync(path.join(dir,'bounded.json'))).persistentLog.unavailableFiles,1)
+    const failures=['window-root','window-layout','window-path-escape','window-access','window-image-unavailable','window-path-mismatch','window-filtered','window-ambiguous','window-discovery']
+    writeFileSync(path.join(logs,'runtime-v1.jsonl'),failures.map(failure=>JSON.stringify({...row,state:{...row.state,capture:'failed',issue:'window',failure}})).join('\n')+'\n')
+    assert.equal(run(path.join(dir,'window-codes.json')).status,0)
+    const windowReport=JSON.parse(readFileSync(path.join(dir,'window-codes.json'))).persistentLog
+    assert.equal(windowReport.skippedLines,0)
+    assert.deepEqual(windowReport.records.slice(1).map(record=>record.state.failure),failures)
   }finally{
     assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
     assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))
