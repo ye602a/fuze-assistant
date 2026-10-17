@@ -1,9 +1,12 @@
 name: Rust isolated prototypes
 on:
   pull_request:
-    branches: [master, feat/rust-foundation-prototypes, feat/rust-ocr-backends, feat/rust-native-capture, feat/rust-capture-pipeline, feat/rust-session-scheduler, feat/rust-worker-host, feat/rust-local-data, feat/rust-worker-recovery, feat/rust-lcu-readonly, feat/rust-integrated-overlay, feat/rust-live-pipeline, feat/rust-session-controller, feat/rust-lcu-events, feat/rust-desktop-control, feat/rust-managed-updates, feat/rust-install-validation-ui, feat/rust-champion-detail, feat/rust-desktop-continuity, feat/rust-account-history, feat/rust-history-detail, feat/rust-runtime-continuity, feat/rust-live-level-gate, feat/rust-local-setup, feat/rust-stage-reference, feat/rust-install-lifecycle, feat/rust-app-registration-sharing, fix/rust-flow-audit, feat/rust-selection-prewarm, style/rust-native-ui-polish, style/rust-popup-restoration]
     paths:
       - 'rust/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'resources/paddleocr/**'
+      - 'tests/fixtures/augment-ocr/**'
       - 'scripts/check-secrets.mjs'
       - '.gitignore'
       - 'scripts/package-rust-preview.mjs'
@@ -74,13 +77,13 @@ jobs:
         id: build
         working-directory: rust
         run: |
-          cargo fmt --all -- --check
+          cargo +1.90.0 fmt --all -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           $env:FUZE_SHARE_FIXTURE = Join-Path (Get-Location) 'artifacts/share.png'
-          cargo test --workspace --locked -j 2
+          cargo +1.90.0 test --workspace --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo build --workspace --release --locked -j 2
+          cargo +1.90.0 build --workspace --release --locked -j 2
           exit $LASTEXITCODE
       - name: Offline ONNX and hidden native window
         id: ocr

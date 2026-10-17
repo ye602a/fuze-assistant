@@ -1,10 +1,7 @@
+# Manual focused diagnostic; automatic coverage is consolidated in Rust core/UI workflows.
 name: Rust LCU regression
 on:
-  pull_request:
-    paths:
-      - 'rust/crates/fuze-lcu/**'
-      - 'rust/crates/fuze-worker-host/src/preferences.rs'
-      - '.github/workflows/rust-lcu-regression.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:

@@ -83,11 +83,35 @@ test('ordinary PRs never package; milestone acceptance preserves package validat
     assert.equal(steps.at(-1).if, 'always()')
     if (name === 'rust-prototypes') {
       assert.equal(workflow.on.workflow_dispatch.inputs.artifacts.default, 'none')
-      assert.ok(steps.some((step) => step.id === 'build' && step.run.includes('cargo test --workspace')))
+      assert.ok(steps.some((step) => step.id === 'build' && step.run.includes('cargo +1.90.0 test --workspace')))
       assert.ok(!steps.find((step) => step.id === 'upload_preview').with.path.includes('*.fuz'))
     } else {
       assert.equal(steps.find((step) => step.id === 'publish').if, "startsWith(github.ref, 'refs/tags/v')")
       assert.ok(steps.findIndex((step) => step.id === 'desktop') < steps.findIndex((step) => step.id === 'publish'))
     }
+  }
+})
+
+test('Rust integration covers new PR bases without silently skipping jobs or packaging', () => {
+  for (const name of ['rust-prototypes', 'ui-framework-lab']) {
+    const workflow = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
+    assert.ok(workflow.on.pull_request)
+    assert.equal(workflow.on.pull_request.branches, undefined)
+    assert.equal(workflow.on.pull_request['branches-ignore'], undefined)
+    assert.ok(workflow.on.pull_request.paths.includes('rust/**'))
+    assert.ok(workflow.on.pull_request.paths.includes('package-lock.json'))
+    for (const job of Object.values(workflow.jobs)) assert.equal(job.if, undefined)
+  }
+  const ui = yaml.load(readFileSync(new URL('../../.github/workflows/ui-framework-lab.yml', import.meta.url), 'utf8'))
+  const steps = ui.jobs['windows-prototype'].steps
+  assert.ok(steps.some(step => step.run?.includes('check-rust-screen.mjs') && !step.if))
+  assert.ok(steps.some(step => step.run?.includes('--review-host') && !step.if))
+  assert.ok(steps.some(step => step.run?.includes('--review-controls') && !step.if))
+  assert.ok(steps.some(step => step.run?.includes('--features gpu -j 2') && !step.if))
+  assert.ok(!steps.some(step => /package-rust-|gh release/.test(step.run || '') || step.uses?.startsWith('actions/upload-artifact')))
+  for (const name of ['rust-lcu-regression', 'rust-detail-startup']) {
+    const focused = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
+    assert.equal(focused.on.pull_request, undefined)
+    assert.ok(Object.hasOwn(focused.on, 'workflow_dispatch'))
   }
 })

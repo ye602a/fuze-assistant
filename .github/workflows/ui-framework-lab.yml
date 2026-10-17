@@ -1,10 +1,14 @@
-name: UI framework prototype
+name: Rust UI integration
 on:
   pull_request:
-    branches: [master, feat/rust-v063-parity, feat/rust-ui-framework-lab, feat/slint-performance-validation, feat/slint-v063-restoration, feat/slint-host-interactions, feat/slint-live-overlays, feat/slint-startup-maintenance, feat/slint-history-actions, feat/slint-champion-records, feat/slint-observation-overlay, feat/slint-runtime-closure, feat/slint-renderer-recovery, feat/rust-update-transfer-status, feat/rust-locale-activation, fix/rust-locale-context, test/rust-private-transfer, perf/rust-update-range-routing, feat/rust-update-resume, feat/rust-first-game-delivery, fix/slint-navigation-input, fix/rust-lcu-log-encoding, fix/rust-preview-action-feedback, feat/rust-safe-diagnostics, feat/rust-persistent-runtime-logs, fix/rust-preview-history-parity, fix/rust-history-local-time-cleanup, fix/rust-package-install-contract, style/rust-ui-feedback-motion]
     paths:
-      - 'rust/ui-lab/**'
-      - 'rust/crates/**'
+      - 'rust/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'resources/paddleocr/**'
+      - 'tests/fixtures/augment-ocr/**'
+      - 'scripts/check-rust-screen.mjs'
+      - 'tests/unit/actions-validation-summary.test.mjs'
       - 'rust/bundle-files.txt'
       - 'scripts/rust-bundle-policy.mjs'
       - 'tests/unit/rust-bundle-policy.test.mjs'
@@ -23,34 +27,17 @@ concurrency:
   group: ui-framework-lab-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  # Development batch requested compile/privacy checks only. Full workflow_dispatch remains available.
-  windows-compile:
-    if: github.event_name == 'pull_request' && (github.base_ref == 'feat/slint-history-actions' || github.base_ref == 'feat/slint-champion-records')
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked privacy boundary
-        run: node scripts/check-secrets.mjs
-      - name: Rust toolchain
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: rust/ui-lab/target
-          key: ui-check-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
-      - name: Format and compile only
-        working-directory: rust/ui-lab
-        run: |
-          cargo +1.90.0 fmt -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 check --locked --features gpu -j 2
-          exit $LASTEXITCODE
   windows-prototype:
-    if: github.event_name != 'pull_request' || (github.base_ref != 'feat/slint-history-actions' && github.base_ref != 'feat/slint-champion-records' && github.base_ref != 'feat/slint-renderer-recovery' && github.base_ref != 'feat/rust-update-transfer-status' && github.base_ref != 'feat/rust-locale-activation' && github.base_ref != 'fix/rust-locale-context' && github.base_ref != 'test/rust-private-transfer' && github.base_ref != 'perf/rust-update-range-routing' && github.base_ref != 'feat/rust-update-resume' && github.base_ref != 'fix/rust-history-local-time-cleanup' && github.base_ref != 'fix/rust-package-install-contract' && github.base_ref != 'style/rust-ui-feedback-motion')
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Existing ONNX runtime for isolated fixtures
+        run: npm ci --ignore-scripts
       - name: Check tracked privacy boundary
         run: node scripts/check-secrets.mjs
       - name: Rust toolchain
@@ -86,23 +73,19 @@ jobs:
           ./target/release/fuze-ui-lab.exe --review-controls artifacts/control-review
           exit $LASTEXITCODE
       # No installers, upload-artifact, release publication or game/LCU access.
-      - name: LCU startup-log fallback (synthetic files only)
+      - name: Direct cards and bounded motion
         working-directory: rust/ui-lab
-        run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-lcu --lib --locked -j 2
-      - name: Managed frontend selection compatibility
-        working-directory: rust/ui-lab
-        run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-worker-host --lib frontend_selection_preserves_legacy_and_rejects_unknown_or_missing --locked -j 2
-      - name: Bounded persistent logs and post-exit privacy export
         run: |
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml --target-dir rust/ui-lab/target -p fuze-worker-host --lib runtime_log::tests --locked -j 2
+          ./target/release/fuze-ui-lab.exe --review-direct artifacts/direct
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-feedback-export.test.mjs
+          ./target/release/fuze-ui-lab.exe --review-motion artifacts/motion
           exit $LASTEXITCODE
-      - name: Nonblocking history reads and account cache boundaries
-        run: cargo +1.90.0 test --manifest-path rust/Cargo.toml --target-dir rust/ui-lab/target -p fuze-worker-host --lib history --locked -j 2
-      - name: Windowless cancellation and context gate
-        working-directory: rust/ui-lab
-        run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-native-overlay --lib headless_gate_cancels_without_window_thread_or_ack --locked -j 2
+      - name: Build normal frontend and OCR worker from the same checkout
+        run: |
+          cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target --release -p fuze-ocr --bin fuze-ocr-worker -j 2
+          exit $LASTEXITCODE
       - name: Existing Rust services through hidden Slint callbacks
         working-directory: rust/ui-lab
         run: |
@@ -114,165 +97,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-recovery artifacts/host-data/preview.json artifacts/renderer-recovery
           exit $LASTEXITCODE
-      - name: Selective history import boundary
-        working-directory: rust/ui-lab
-        run: cargo +1.90.0 test --manifest-path ../Cargo.toml --target-dir target -p fuze-worker-host --lib selective_preview_never_adds_unreviewed_matches_or_claims --locked -j 2
-
-  windows-ui-polish:
-    if: github.event_name == 'pull_request' && github.base_ref == 'fix/rust-package-install-contract'
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked privacy boundary
-        run: node scripts/check-secrets.mjs
-      - name: Rust toolchain
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: rust/ui-lab/target
-          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
-          restore-keys: ui-lab-win-1.90-
-      - name: Build and review affected UI only
+      - name: Hero details and feedback through production callbacks
         working-directory: rust/ui-lab
         run: |
-          cargo +1.90.0 fmt -- --check
+          ./target/release/fuze-ui-lab.exe --review-details artifacts/host-data
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review artifacts/ui-polish
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review-controls artifacts/ui-polish-controls
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review-motion artifacts/ui-motion
+          ./target/release/fuze-ui-lab.exe --review-feedback artifacts/feedback
           exit $LASTEXITCODE
-
-  windows-stage-reference:
-    if: github.event_name == 'pull_request' && github.base_ref == 'style/rust-ui-feedback-motion'
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked privacy boundary
-        run: node scripts/check-secrets.mjs
-      - name: Rust toolchain
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: rust/ui-lab/target
-          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
-          restore-keys: ui-lab-win-1.90-
-      - name: Level scheduling and public stage cache boundaries
-        run: |
-          cargo +1.90.0 fmt --manifest-path rust/Cargo.toml -p fuze-capture -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-capture --lib target::tests
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-runtime
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib stage_reference
-          exit $LASTEXITCODE
-      - name: Build and check stage projection
-        working-directory: rust/ui-lab
-        run: |
-          cargo +1.90.0 fmt -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --release --locked --features gpu,ui-audit -j 2 --bin fuze-ui-lab stage_cards
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
-          exit $LASTEXITCODE
-      - name: Hidden native stage displays and reference controls
-        working-directory: rust/ui-lab
-        run: |
-          ./target/release/fuze-ui-lab.exe --review-direct artifacts/stage-direct
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review-controls artifacts/stage-controls
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node ../../scripts/create-ui-host-fixture.mjs artifacts/stage-data
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review-host artifacts/stage-data artifacts/stage-host
-          exit $LASTEXITCODE
-      # Synthetic local artifacts only; no release, upload, installed app or game access.
-
-  windows-update:
-    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/slint-renderer-recovery' || github.base_ref == 'fix/rust-locale-context' || github.base_ref == 'test/rust-private-transfer' || github.base_ref == 'perf/rust-update-range-routing' || github.base_ref == 'feat/rust-update-resume' || github.base_ref == 'fix/rust-history-local-time-cleanup'
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked privacy boundary
-        run: node scripts/check-secrets.mjs
-      - name: Rust toolchain
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: rust/target
-          key: update-check-win-1.90-${{ hashFiles('rust/Cargo.lock') }}
-      - name: Transfer boundaries, native text and updater build
-        working-directory: rust
-        run: |
-          cargo +1.90.0 fmt -p fuze-worker-host -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test -p fuze-worker-host --lib update_ --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test -p fuze-worker-host --lib i18n::tests --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build -p fuze-worker-host --bin fuze-update --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build -p fuze-worker-host --bin fuze-update-verify --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --check ../scripts/check-rust-private-transfer.mjs
-          exit $LASTEXITCODE
-      - name: Managed bundle extraction and portable delivery contract
-        run: |
-          node --test tests/unit/rust-bundle-policy.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml -p fuze-worker-host --lib managed_install --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml -p fuze-worker-host --lib local_setup --locked -j 2
-          exit $LASTEXITCODE
-
-  windows-locale:
-    if: github.event_name == 'workflow_dispatch' || github.base_ref == 'feat/rust-update-transfer-status' || github.base_ref == 'feat/rust-locale-activation'
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked privacy boundary
-        run: node scripts/check-secrets.mjs
-      - name: Rust toolchain
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: rust/target
-          key: locale-check-win-1.90-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: update-check-win-1.90-
-      - name: Locale activation, rollback and host integration
-        working-directory: rust
-        run: |
-          cargo +1.90.0 fmt -p fuze-worker-host -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test -p fuze-worker-host --lib locale_ --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test -p fuze-worker-host --lib preferences::tests --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 check -p fuze-worker-host --bins --locked -j 2
-          exit $LASTEXITCODE
-      - uses: actions/cache@v4
-        if: github.base_ref == 'feat/rust-locale-activation'
-        with:
-          path: rust/ui-lab/target
-          key: ui-lab-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}
-          restore-keys: ui-lab-win-1.90-
-      - name: Hidden Slint host and observation identity transitions
-        if: github.base_ref == 'feat/rust-locale-activation'
-        working-directory: rust/ui-lab
-        run: |
-          cargo +1.90.0 fmt -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node ../../scripts/create-ui-host-fixture.mjs artifacts/host-data
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./target/release/fuze-ui-lab.exe --review-host artifacts/host-data artifacts/host-review
-          exit $LASTEXITCODE
+      - name: Screen capture and fallback through OCR to production popup
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
+          FUZE_SCREEN_LIFECYCLE: '1'
+          FUZE_RUST_BIN_DIR: rust/ui-lab/target/release
+        run: node scripts/check-rust-screen.mjs
+      # Owned capture fixtures on disposable CI only; no player game, installer or release.

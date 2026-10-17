@@ -1,8 +1,6 @@
+# Manual focused diagnostic; automatic coverage is consolidated in Rust core/UI workflows.
 name: Rust detail cache and first capture
 on:
-  pull_request:
-    branches: [feat/rust-stage-card-reference, fix/rust-local-details-startup, fix/rust-selection-lifecycle]
-    paths: ['rust/**', 'scripts/create-ui-host-fixture.mjs', 'scripts/export-rust-feedback.ps1', 'scripts/check-rust-screen.mjs', 'tests/fixtures/augment-ocr/**', 'tests/unit/rust-feedback-export.test.mjs', '.github/workflows/rust-detail-startup.yml']
   workflow_dispatch:
 permissions:
   contents: read
