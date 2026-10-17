@@ -232,14 +232,14 @@ fn publish(lock: &Mutex<State>, generation: u64, reply: &mut Reply) {
     }
 }
 fn load(roots: &[Root], r: &Request) -> Result<Detail> {
-    let (locale, _) = r.version.split_once('@').ok_or("detail-version")?;
+    let (locale, version) = r.version.split_once('@').ok_or("detail-version")?;
     let locale = match locale {
         "zh-CN" => Locale::ZhCn,
         "zh-TW" => Locale::ZhTw,
         "en-US" => Locale::EnUs,
         _ => return Err("detail-locale"),
     };
-    let data = fuze_data::prepare(roots, locale, Scope::Detail(r.id))?;
+    let data = fuze_data::prepare_version(roots, locale, Scope::Detail(r.id), Some(version))?;
     if data.identity() != r.version {
         return Err("detail-version-changed");
     }

@@ -20,7 +20,9 @@ pub struct Pipeline {
     tiers: std::collections::HashMap<u32, u64>,
     pub(crate) art: Option<crate::overlay_art::Art>,
     retention: crate::retention::Retention,
+    screen_gate: fuze_runtime::screen_gate::ScreenGate,
     pub capture_state: &'static str,
+    pub last_capture: Option<Instant>,
     session: Session,
     pub worker: Supervisor,
     pub overlay: HiddenOverlay,
@@ -128,7 +130,9 @@ impl Pipeline {
             tiers,
             art: None,
             retention: Default::default(),
+            screen_gate: Default::default(),
             capture_state: "waiting",
+            last_capture: None,
             session,
             worker,
             overlay,
@@ -187,9 +191,13 @@ impl Pipeline {
     pub fn level(&mut self, level: u8) {
         self.session.update_level(level, self.now());
     }
+    pub fn life_sample(&mut self, dead: Option<bool>) {
+        self.session.update_dead(dead, self.now());
+    }
     pub fn phase(&mut self, phase: Phase) -> Result<()> {
         if let Some(cleanup) = self.session.update_phase(phase)? {
             self.retention = Default::default();
+            self.screen_gate = Default::default();
             self.frames.clear();
             if cleanup.stop_capture {
                 self.capture = None;
@@ -230,6 +238,7 @@ impl Pipeline {
         }
         self.capture = None;
         self.retention = Default::default();
+        self.screen_gate = Default::default();
         self.frames.clear();
         let cleanup = self.session.capture_replaced()?;
         if !self
@@ -250,6 +259,7 @@ impl Pipeline {
         }
         self.capture = None;
         self.retention = Default::default();
+        self.screen_gate = Default::default();
         self.frames.clear();
         let cleanup = self.session.capture_replaced()?;
         if !self
@@ -277,6 +287,7 @@ impl Pipeline {
         }
         self.capture = None;
         self.retention = Default::default();
+        self.screen_gate = Default::default();
         self.frames.clear();
         let cleanup = self.session.capture_replaced()?;
         if !self
@@ -414,6 +425,7 @@ impl Pipeline {
             }
         })? {
             FrameStatus::Ready => {
+                self.last_capture = Some(Instant::now());
                 self.capture_state = "receiving";
                 self.busy_streak = 0;
                 if capture.source().starts_with("screen-") {
@@ -423,12 +435,32 @@ impl Pipeline {
                     epoch: capture.key().0,
                     sequence: capture.key().1,
                 };
+                if let Some(evidence) = capture.selection() {
+                    let now = self.now();
+                    let decision = self.screen_gate.observe(evidence, now);
+                    if !decision.recognize {
+                        self.session.screen_probe(
+                            evidence == fuze_contract::selection_pixels::Evidence::Visible,
+                            decision.closed,
+                            now,
+                        );
+                        if decision.closed {
+                            self.retention = Default::default();
+                            self.screen_gate = Default::default();
+                            self.frames.end_selection();
+                            self.overlay.visible(false)?;
+                        }
+                        self.capture_state = "waiting-selection";
+                        return Ok(None);
+                    }
+                }
                 let atlas = capture.titles().map_err(|_| "capture-atlas")?;
                 self.recognize(key, &atlas)
             }
             FrameStatus::Resized => {
                 self.capture_state = "resizing";
                 self.retention = Default::default();
+                self.screen_gate = Default::default();
                 self.frames.clear();
                 let cleanup = self.session.capture_replaced()?;
                 if !self
@@ -453,6 +485,7 @@ impl Pipeline {
             FrameStatus::Suspended => {
                 self.capture_state = "suspended";
                 self.retention = Default::default();
+                self.screen_gate = Default::default();
                 self.frames.clear();
                 self.overlay.visible(false)?;
                 self.next_capture_at = self.now().saturating_add(500);
@@ -472,6 +505,7 @@ impl Pipeline {
         if discard || matches!(result, Err("capture-bitmap")) {
             self.capture_state = "recovering";
             self.retention = Default::default();
+            self.screen_gate = Default::default();
             self.frames.clear();
             let cleanup = self.session.capture_replaced()?;
             self.overlay

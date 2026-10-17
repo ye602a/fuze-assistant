@@ -70,7 +70,7 @@ impl Retention {
                 };
             }
         }
-        self.until = None;
+        self.until = known.then_some(now.saturating_add(GRACE_MS));
         self.grace_until = None;
         self.previous = known.then(|| slots.clone());
         Display {
@@ -137,7 +137,7 @@ mod tests {
         let partial = r.apply(&cards([1, 0, 3]), TitleKind::Candidate, 2600);
         assert!(partial.visible && !partial.retained);
         assert_eq!(partial.slots, cards([1, 0, 3]));
-        assert_eq!(r.deadline(), None);
+        assert_eq!(r.deadline(), Some(5100));
         assert!(
             r.apply(&cards([1, 0, 3]), TitleKind::Candidate, 3100)
                 .visible

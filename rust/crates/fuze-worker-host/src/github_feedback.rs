@@ -303,6 +303,7 @@ fn recover_recent(value: serde_json::Value) -> Result<Report> {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
+    pub uploaded_this_run: u64,
     pub authorization: &'static str,
     pub enabled: bool,
     pub ready: bool,
@@ -380,7 +381,7 @@ enum Command {
     Retry,
     Verify,
     Recover(Option<mpsc::Receiver<Result<serde_json::Value>>>),
-    Stop,
+    Stop(Vec<Report>),
 }
 trait Api {
     fn lookup(&mut self, id: &str, title: &str) -> Result<Option<u64>>;
@@ -513,10 +514,15 @@ impl Client {
             .map_err(|_| "feedback-busy")
     }
     pub fn stop(&mut self) {
+        self.finish(Vec::new());
+    }
+    /// Shutdown cancels network first, then durably drains final summaries on the
+    /// worker. A full UI command queue must not silently drop the last match.
+    pub fn finish(&mut self, reports: Vec<Report>) {
         self.cancel
             .store(true, std::sync::atomic::Ordering::Release);
         if let Some(thread) = self.thread.take() {
-            let _ = self.tx.send(Command::Stop);
+            let _ = self.tx.send(Command::Stop(reports));
             let _ = thread.join();
         }
     }
@@ -568,10 +574,12 @@ fn worker(
     let mut verify = store.enabled;
     let mut manual = false;
     let mut last_recovery: Option<Instant> = None;
+    let mut uploaded_this_run = 0u64;
     loop {
         {
             let mut v = view.lock().unwrap();
             v.ready = true;
+            v.uploaded_this_run = uploaded_this_run;
             v.authorization = authorization;
             v.enabled = store.enabled;
             v.pending = store.entries.iter().filter(|e| !e.sent).count();
@@ -585,7 +593,16 @@ fn worker(
             });
         }
         match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(Command::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Ok(Command::Stop(reports)) => {
+                if store.enabled {
+                    for report in reports {
+                        let _ = store.enqueue(report);
+                    }
+                }
+                let _ = store.save(&path);
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = store.save(&path);
                 return;
             }
@@ -702,6 +719,7 @@ fn worker(
         error = result.err();
         if error.is_none() {
             authorization = "write-confirmed";
+            uploaded_this_run = uploaded_this_run.saturating_add(1);
         } else if matches!(
             error,
             Some(

@@ -8,14 +8,14 @@ pub struct GpuFixture {
     height: u32,
 }
 pub struct GpuFixtureReader {
-    reader: RoiReader,
+    reader: SelectionReader,
     device: Device,
 }
 impl GpuFixtureReader {
     pub fn new() -> Result<Self> {
         let device = Device::new()?;
         Ok(Self {
-            reader: RoiReader::new(&device),
+            reader: SelectionReader::new(&device),
             device,
         })
     }
@@ -57,6 +57,9 @@ impl GpuFixtureReader {
             height,
         })
     }
+    pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.reader.evidence
+    }
     pub fn read<'a>(&'a mut self, source: &GpuFixture) -> Result<Atlas<'a>> {
         // Fixtures must belong to this D3D device; never submit a foreign-device texture.
         let source_device = unsafe { source.texture.GetDevice()? };
@@ -64,7 +67,8 @@ impl GpuFixtureReader {
             return Err("fixture-device-mismatch".into());
         }
         let rects = regions(source.width, source.height)?;
-        self.reader.read(&source.texture, &rects)?;
+        self.reader
+            .read(&source.texture, &rects, (source.width, source.height))?;
         Ok(Atlas::new(
             &self.reader.bytes,
             rects[0].width,

@@ -9,7 +9,7 @@ struct State {
     generation: u64,
     active: bool,
     stop: bool,
-    sample: Option<(u8, Instant)>,
+    sample: Option<(fuze_lcu::transport::LiveState, Instant)>,
 }
 pub struct Reader {
     shared: Arc<(Mutex<State>, Condvar)>,
@@ -17,9 +17,11 @@ pub struct Reader {
 }
 impl Reader {
     pub fn start() -> Result<Self, &'static str> {
-        Self::with_source(Box::new(|| fuze_lcu::transport::active_player_level().ok()))
+        Self::with_source(Box::new(|| fuze_lcu::transport::active_player_state().ok()))
     }
-    fn with_source(read: Box<dyn Fn() -> Option<u8> + Send>) -> Result<Self, &'static str> {
+    fn with_source(
+        read: Box<dyn Fn() -> Option<fuze_lcu::transport::LiveState> + Send>,
+    ) -> Result<Self, &'static str> {
         let shared = Arc::new((Mutex::new(State::default()), Condvar::new()));
         let state = shared.clone();
         let worker = thread::Builder::new()
@@ -39,7 +41,7 @@ impl Reader {
                     }
                     let generation = s.generation;
                     drop(s);
-                    let value = read().filter(|v| (1..=30).contains(v));
+                    let value = read().filter(|v| (1..=30).contains(&v.level));
                     let Ok(mut s) = lock.lock() else { return };
                     if s.active && s.generation == generation {
                         s.sample = value.map(|v| (v, Instant::now()));
@@ -70,6 +72,9 @@ impl Reader {
         }
     }
     pub fn sample(&self) -> Option<(u8, Instant)> {
+        self.state().map(|(s, at)| (s.level, at))
+    }
+    pub fn state(&self) -> Option<(fuze_lcu::transport::LiveState, Instant)> {
         self.shared
             .0
             .lock()
@@ -103,9 +108,15 @@ mod tests {
             if index == 0 {
                 entered_tx.send(()).unwrap();
                 release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-                Some(3)
+                Some(fuze_lcu::transport::LiveState {
+                    level: 3,
+                    dead: None,
+                })
             } else {
-                Some(7)
+                Some(fuze_lcu::transport::LiveState {
+                    level: 7,
+                    dead: None,
+                })
             }
         }))
         .unwrap();
@@ -122,8 +133,13 @@ mod tests {
         assert_eq!(reader.sample().map(|s| s.0), Some(7));
         reader.enable(false);
         assert!(reader.sample().is_none());
-        reader.shared.0.lock().unwrap().sample =
-            Some((7, Instant::now() - Duration::from_secs(11)));
+        reader.shared.0.lock().unwrap().sample = Some((
+            fuze_lcu::transport::LiveState {
+                level: 7,
+                dead: None,
+            },
+            Instant::now() - Duration::from_secs(11),
+        ));
         assert!(reader.sample().is_none());
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
     }

@@ -155,12 +155,26 @@ impl Session {
     pub fn clear_level(&mut self) {
         self.gate.clear_level();
     }
+    /// Pixel-only probe consumes scheduling time without creating an OCR ticket.
+    pub fn screen_probe(&mut self, visible: bool, closed: bool, now: u64) {
+        self.gate.record_capture(now);
+        if visible {
+            self.gate.observe(Selection::Candidate, now);
+        } else if closed {
+            self.gate.screen_closed();
+        }
+    }
     pub fn level_schedule(&self, now: u64) -> (crate::gate::Decision, Option<u8>) {
         (self.gate.decision(now), self.gate.next_level())
     }
     pub fn update_level(&mut self, level: u8, now: u64) {
         if self.phase == Phase::InProgress && !self.paused {
             self.gate.update_level(level, now);
+        }
+    }
+    pub fn update_dead(&mut self, dead: Option<bool>, now: u64) {
+        if self.phase == Phase::InProgress && !self.paused {
+            self.gate.update_dead(dead, now);
         }
     }
     pub fn poll_cancel(&mut self, now: u64) -> Option<Ticket> {

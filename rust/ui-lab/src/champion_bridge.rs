@@ -17,6 +17,7 @@ struct Work {
     generation: u64,
     stop: bool,
     invalidate: bool,
+    reload: bool,
     reply: Option<(u64, Result<Arc<Loaded>, &'static str>)>,
 }
 struct Worker {
@@ -58,6 +59,9 @@ impl Worker {
                     }
                     if std::mem::take(&mut s.invalidate) {
                         let expected = s.expected.clone();
+                        if std::mem::take(&mut s.reload) {
+                            cache = None;
+                        }
                         drop(s);
                         if !cache
                             .as_ref()
@@ -80,6 +84,17 @@ impl Worker {
                         continue;
                     };
                     drop(s);
+                    // A previous failed preload is not permanent: a later click/retry may
+                    // arrive after a data update or a temporarily unavailable local file.
+                    if !cache
+                        .as_ref()
+                        .is_some_and(|c| expected.is_empty() || c.identity() == expected)
+                    {
+                        match Cache::prepare(&roots, &expected) {
+                            Ok(next) => cache = Some(next),
+                            Err(error) => failure = error,
+                        }
+                    }
                     let result = match cache.as_mut() {
                         Some(cache) if expected.is_empty() || cache.identity() == expected => {
                             cache.get(id)
@@ -106,11 +121,15 @@ impl Worker {
             thread: Some(thread),
         })
     }
-    fn request(&self, id: u32) {
+    fn request(&self, id: u32, reload: bool) {
         if let Ok(mut s) = self.shared.0.lock() {
             s.generation = s.generation.wrapping_add(1);
             s.wanted = Some((s.generation, id, s.expected.clone()));
             s.reply = None;
+            if reload {
+                s.invalidate = true;
+                s.reload = true;
+            }
             self.shared.1.notify_one();
         }
     }
@@ -262,6 +281,7 @@ impl Binding {
                 ui.invoke_stage_reset();
                 ui.set_inspected_id(0);
                 ui.set_detail_champion(0);
+                ui.set_detail_failed(false);
                 ui.set_inspected_games(Default::default());
                 ui.set_inspected_name("等待选择英雄".into());
                 ui.set_inspected_icon(Default::default());
@@ -531,6 +551,7 @@ pub fn attach_shared(
                 .chain(ui.get_bench().iter())
                 .find(|h| h.id == id);
             if let Some(hero) = found {
+                let retry = ui.get_detail_failed();
                 action_reset.context(&ui, None);
                 ui.invoke_stage_reset();
                 current.borrow_mut().loaded = None;
@@ -547,9 +568,10 @@ pub fn attach_shared(
                 ui.set_inspected_icon(hero.icon);
                 ui.set_augments(Default::default());
                 ui.set_build_lines(Default::default());
+                ui.set_detail_failed(false);
                 ui.set_detail_status("正在读取本地英雄数据…".into());
                 ui.set_scroll_y(-ui.get_detail_offset());
-                service.request(id as u32);
+                service.request(id as u32, retry);
                 reload.restart();
             }
         }
@@ -621,6 +643,7 @@ pub fn attach_shared(
             };
             match reply {
                 Ok(loaded) => {
+                    ui.set_detail_failed(false);
                     ui.set_detail_version(loaded.version.clone().into());
                     ui.set_detail_champion(loaded.id as i32);
                     ui.set_detail_status(
@@ -644,15 +667,24 @@ pub fn attach_shared(
                     apply(&ui, &p);
                     builds(&ui, &p);
                 }
-                Err(_) => {
+                Err(error) => {
                     current.borrow_mut().loaded = None;
-                    ui.set_detail_status("本地详情暂不可用；不会显示上一位英雄的数据。".into());
+                    ui.set_detail_failed(true);
+                    let reason = match error {
+                        "detail-version-mismatch" => "详情版本与当前英雄概览不一致",
+                        "detail-champion-missing" => "本地数据暂未提供这位英雄的详情",
+                        "data-no-complete-local-version" => "当前版本的本地数据不完整或暂不可读",
+                        _ => "本地英雄详情加载失败",
+                    };
+                    ui.set_detail_status(
+                        format!("{reason}。可重试读取；仍失败时请在设置中检查数据更新。").into(),
+                    );
                 }
             }
         },
     );
     if ui.get_inspected_id() > 0 {
-        worker.request(ui.get_inspected_id() as u32);
+        worker.request(ui.get_inspected_id() as u32, false);
     } else {
         timer.stop();
     }

@@ -6,6 +6,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 pub struct Frame {
     /// Process-local pipeline identity prevents a restarted game accepting an old generation.
     pub context: u64,
+    pub selection_cycle: u64,
     pub snapshot: Snapshot,
     pub retained: bool,
     pub deadline: Option<Instant>,
@@ -14,6 +15,7 @@ pub struct Frame {
 }
 pub struct Publisher {
     context: u64,
+    selection_cycle: u64,
     augments: HashMap<u32, Arc<Augment>>,
     scores: HashMap<u32, f64>,
     current: Option<Arc<Frame>>,
@@ -39,6 +41,7 @@ impl Publisher {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
             context: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            selection_cycle: 0,
             augments: augments.into_iter().map(|a| (a.id, Arc::new(a))).collect(),
             scores,
             current: None,
@@ -46,6 +49,10 @@ impl Publisher {
     }
     pub fn clear(&mut self) {
         self.current = None;
+    }
+    pub fn end_selection(&mut self) {
+        self.clear();
+        self.selection_cycle = self.selection_cycle.saturating_add(1);
     }
     pub fn current(&self) -> Option<Arc<Frame>> {
         self.current.clone()
@@ -64,6 +71,7 @@ impl Publisher {
             });
             Arc::new(Frame {
                 context: self.context,
+                selection_cycle: self.selection_cycle,
                 cards: ids.map(|id| id.and_then(|id| self.augments.get(&id).cloned())),
                 scores: ids.map(|id| id.and_then(|id| self.scores.get(&id).copied())),
                 snapshot,

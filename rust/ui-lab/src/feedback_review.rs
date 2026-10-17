@@ -36,13 +36,13 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
         (
             1120.,
             false,
-            "已关闭，不收集新的自动报告；待传摘要保留在本机。\n待传 0 份",
+            "已关闭，不收集新的自动报告；待传摘要保留在本机。\n待传 0 份\n本次运行上传成功 0 次（含赛后更新）",
             "disabled",
         ),
         (
             920.,
             true,
-            "GitHub 暂时不可达，摘要保留，稍后重试。\n待传 2 份 · 最近报告 #42",
+            "GitHub 暂时不可达，摘要保留，稍后重试。\n待传 2 份 · 最近报告 #42\n本次运行上传成功 1 次（含赛后更新）",
             "queued",
         ),
     ] {

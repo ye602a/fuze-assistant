@@ -12,6 +12,9 @@ pub trait ScreenDriver {
     fn stream(&mut self, timeout: Duration) -> Result<FrameStatus>;
     fn bitmap(&mut self) -> Result<()>;
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>>;
+    fn selection(&self, _bitmap: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
+        None
+    }
 }
 
 #[derive(Default)]
@@ -20,6 +23,13 @@ pub struct NativeScreen {
     bitmap: bitmap::Reader,
 }
 impl ScreenDriver for NativeScreen {
+    fn selection(&self, bitmap: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
+        if bitmap {
+            self.bitmap.evidence
+        } else {
+            self.stream.as_ref().and_then(DesktopStream::selection)
+        }
+    }
     fn start(&mut self) -> Result<()> {
         self.stream = Some(DesktopStream::start_primary_screen()?);
         Ok(())
@@ -179,6 +189,9 @@ impl<D: ScreenDriver> ScreenCapture<D> {
     }
 }
 impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
+    fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.driver.selection(self.bitmap)
+    }
     fn saving(&mut self, saving: bool) {
         if self.saving == saving {
             return;

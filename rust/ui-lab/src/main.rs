@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("--review-close") if args.len()==3 => println!("{}",host_review::close_only(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-feedback") if args.len()==2 => println!("{}",feedback_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-capture") => println!("{}",capture_review::run(&args[1..])?),
-        Some("--review-details") if args.len()==2 => println!("{}",detail_review::run(std::path::Path::new(&args[1]))?),
+        Some("--review-details") if (2..=3).contains(&args.len()) => println!("{}",detail_review::run(std::path::Path::new(&args[1]),args.get(2).map(|p| std::path::Path::new(p)))?),
         Some("--review-motion") if args.len()==2 => println!("{}",motion_review::run(std::path::Path::new(&args[1]))?),
         #[cfg(feature = "ui-audit")]
         Some("--review-controls") if args.len()==2 => println!("{}",control_review::run(std::path::Path::new(&args[1]))?),

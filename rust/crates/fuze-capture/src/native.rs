@@ -36,6 +36,10 @@ pub trait CaptureFeed {
     fn saving(&mut self, _saving: bool) {}
     fn next(&mut self, timeout: Duration) -> Result<FrameStatus>;
     fn titles(&self) -> Result<fuze_contract::titles::Atlas<'_>>;
+    /// None is reserved for title-only offline fixtures/legacy feed implementations.
+    fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
+        None
+    }
     fn key(&self) -> (u64, u64);
     fn source(&self) -> &'static str;
     fn fallback(&self) -> Option<&'static str> {
@@ -151,7 +155,7 @@ impl Device {
 }
 
 pub use fuze_contract::titles::Region;
-fn validate_regions(width: u32, height: u32, regions: &[Region; 3]) -> Result<(u32, u32)> {
+fn validate_regions(width: u32, height: u32, regions: &[Region]) -> Result<(u32, u32)> {
     if width == 0 || height == 0 || width > 4096 || height > 2160 {
         return Err("frame-size".into());
     }
@@ -197,7 +201,7 @@ impl RoiReader {
             bytes: Vec::new(),
         }
     }
-    fn read(&mut self, source: &ID3D11Texture2D, regions: &[Region; 3]) -> Result<()> {
+    fn read(&mut self, source: &ID3D11Texture2D, regions: &[Region]) -> Result<()> {
         unsafe {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             source.GetDesc(&mut desc);
@@ -289,6 +293,54 @@ impl RoiReader {
             }
             Ok(())
         }
+    }
+}
+
+/// Titles and reroll controls from ONE GPU texture and ONE map. Only small ROIs
+/// cross to CPU; the OCR wire still receives the original title atlas alone.
+struct SelectionReader {
+    reader: RoiReader,
+    bytes: Vec<u8>,
+    controls: Vec<u8>,
+    evidence: Option<fuze_contract::selection_pixels::Evidence>,
+}
+impl SelectionReader {
+    fn new(device: &Device) -> Self {
+        Self {
+            reader: RoiReader::new(device),
+            bytes: Vec::new(),
+            controls: Vec::new(),
+            evidence: None,
+        }
+    }
+    fn read(
+        &mut self,
+        source: &ID3D11Texture2D,
+        titles: &[Region; 3],
+        size: (u32, u32),
+    ) -> Result<()> {
+        use fuze_contract::{selection_pixels, titles::Atlas};
+        let buttons = selection_pixels::buttons(size.0, size.1)?;
+        let all = [
+            titles[0], titles[1], titles[2], buttons[0], buttons[1], buttons[2],
+        ];
+        self.reader.read(source, &all)?;
+        let tw = titles[0].width as usize * 3 * 4;
+        let bw = buttons[0].width as usize * 3 * 4;
+        let stride = tw + bw;
+        self.bytes.resize(tw * titles[0].height as usize, 0);
+        self.controls.resize(bw * buttons[0].height as usize, 0);
+        for (y, row) in self.bytes.chunks_exact_mut(tw).enumerate() {
+            row.copy_from_slice(&self.reader.bytes[y * stride..y * stride + tw]);
+        }
+        for (y, row) in self.controls.chunks_exact_mut(bw).enumerate() {
+            row.copy_from_slice(&self.reader.bytes[y * stride + tw..y * stride + stride]);
+        }
+        self.evidence = Some(selection_pixels::classify(
+            &Atlas::new(&self.bytes, titles[0].width, titles[0].height)?,
+            &Atlas::new(&self.controls, buttons[0].width, buttons[0].height)?,
+        ));
+        Ok(())
     }
 }
 

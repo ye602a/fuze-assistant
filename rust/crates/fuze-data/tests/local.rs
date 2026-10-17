@@ -131,6 +131,44 @@ fn newer_complete_bundle_beats_cache_without_mixing_partial_versions() {
     );
 }
 #[test]
+fn details_pin_displayed_version_across_pointer_updates_and_incomplete_downloads() {
+    let bundled = Temp::new();
+    let cache = Temp::new();
+    for ver in ["16.20.1", "16.20.2"] {
+        bundled.dataset("zh-CN", ver, true);
+        bundled.write(
+            &format!("versions/{ver}/manifest.json"),
+            json!({"files":{
+            "augments.json":{},"champions.json":{},"items.json":{},
+            "champion-shards/index.json":{},"champion-shards/1.json":{}}}),
+        );
+        bundled.write(
+            &format!("versions/{ver}/champion-shards/index.json"),
+            json!({"shards":[{"path":"champion-shards/1.json","championIds":[25]}]}),
+        );
+        bundled.write(&format!("versions/{ver}/champion-shards/1.json"),
+            json!({"champions":{"25":{"champion":{"name":"fixture"},"augments":[{"id":100,"name":"测试符文"}]}}}));
+    }
+    cache.dataset("zh-CN", "16.20.3", false);
+    cache.write("versions/16.20.3/champions.json", json!({"data":[]}));
+    let roots = [cache.root(Source::Cache), bundled.root(Source::Bundled)];
+    assert_eq!(
+        prepare(&roots, Locale::ZhCn, Scope::Champions)
+            .unwrap()
+            .version(),
+        "16.20.3"
+    );
+    assert_eq!(
+        prepare(&roots, Locale::ZhCn, Scope::Full)
+            .unwrap()
+            .version(),
+        "16.20.2"
+    );
+    let mut old = fuze_data::detail_cache::Cache::prepare(&roots, "zh-CN@16.20.1").unwrap();
+    assert_eq!(old.get(25).unwrap().version, "zh-CN@16.20.1");
+    assert!(fuze_data::detail_cache::Cache::prepare(&roots, "zh-CN@../16.20.1").is_err());
+}
+#[test]
 fn locale_identity_and_failed_prepare_cannot_replace_active_snapshot() {
     let cache = Temp::new();
     cache.dataset("zh-CN", "16.20.1", false);

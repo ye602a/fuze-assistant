@@ -227,7 +227,9 @@ pub fn refresh_current(
             .collect::<std::result::Result<Vec<_>, _>>()
             .ok()
     };
-    if fuze_data::prepare(roots, locale, Scope::Champions)
+    // A current overview alone cannot satisfy the detail/build cache. Re-fetch a
+    // partial same-version download instead of reporting it as already up to date.
+    if fuze_data::prepare(roots, locale, Scope::Full)
         .is_ok_and(|data| order(data.version()) >= order(version))
     {
         return Ok(false);

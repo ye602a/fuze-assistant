@@ -8,20 +8,36 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub fn run(data: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+pub fn run(
+    data: &Path,
+    output: Option<&Path>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let output = output.map(Path::to_path_buf);
+    if let Some(p) = &output {
+        std::fs::create_dir_all(p)?;
+    }
     let roots = [fuze_data::Root {
         path: data.into(),
         source: fuze_data::Source::Bundled,
     }];
     let prepared =
         fuze_data::prepare(&roots, fuze_data::Locale::ZhCn, fuze_data::Scope::Champions)?;
-    let ids: Vec<u32> = prepared.document("champions.json").ok_or("champions")?["data"]
+    let mut ids: Vec<u32> = prepared.document("champions.json").ok_or("champions")?["data"]
         .as_array()
         .ok_or("champions")?
         .iter()
         .filter_map(|v| v["id"].as_u64().map(|n| n as u32))
-        .take(20)
         .collect();
+    let mut all = fuze_data::detail_cache::Cache::prepare(&roots, &prepared.identity())?;
+    let hero_count = ids.len();
+    for id in &ids {
+        let _ = all.get(*id)?;
+    }
+    // The reported empty hero must traverse the real callback, not just a JSON check.
+    if let Some(index) = ids.iter().position(|id| *id == 25) {
+        ids.swap(0, index);
+    }
+    ids.truncate(20);
     if ids.len() < 12 {
         return Err("detail-review-needs-twelve-public-heroes".into());
     }
@@ -46,6 +62,7 @@ pub fn run(data: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>>
         .with_winit_window_attributes_hook(|a| a.with_visible(false).with_active(false))
         .select()?;
     let ui = ChampionWindow::new()?;
+    ui.window().set_size(slint::LogicalSize::new(420., 800.));
     ui.set_offline(true);
     ui.set_inspected_id(0);
     let binding = champion_bridge::attach(&ui, data)?;
@@ -74,11 +91,24 @@ pub fn run(data: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>>
                 if ui.get_build_lines().row_count() == 0 || !binding.idle() {
                     return Err("details-incomplete".into());
                 }
+                if order[index] == 25 && ui.get_augments().row_count()==0 {
+                    return Err("morgana-augments-empty".into());
+                }
                 timings.push(began.elapsed().as_secs_f64() * 1000.);
                 if index == 0 || index == order.len() - 1 {
                     ui.set_detail_tab(1);
                     let paint = Instant::now();
-                    let _ = ui.window().take_snapshot()?;
+                    let _=ui.window().take_snapshot()?; // resolve layout before scrolling
+                    ui.set_scroll_y(-ui.get_detail_offset());
+                    let pixels = ui.window().take_snapshot()?;
+                    if index == 0 {
+                        if let Some(output)=&output {
+                            image::save_buffer(output.join("morgana-build.png"),pixels.as_bytes(),pixels.width(),pixels.height(),image::ColorType::Rgba8)?;
+                            ui.set_detail_tab(0);
+                            let pixels=ui.window().take_snapshot()?;
+                            image::save_buffer(output.join("morgana-augments.png"),pixels.as_bytes(),pixels.width(),pixels.height(),image::ColorType::Rgba8)?;
+                        }
+                    }
                     paint_ms.push(paint.elapsed().as_secs_f64() * 1000.);
                 }
                 index += 1;
@@ -94,7 +124,8 @@ pub fn run(data: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>>
                 Ok(true) => {
                     *result.borrow_mut() = Some(Ok(serde_json::json!({
                         "offline":true,"hidden":true,"network":false,"selections":timings,
-                        "offscreen_raster_ms":paint_ms,"returned_after_twelve":true
+                        "offscreen_raster_ms":paint_ms,"returned_after_twelve":true,"all_hero_details":hero_count,
+                        "first_hero":order[0]
                     })));
                     let _ = slint::quit_event_loop();
                 }

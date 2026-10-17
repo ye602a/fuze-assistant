@@ -891,6 +891,7 @@ pub struct HostOverlay {
     gate: Option<fuze_contract::ContextGate>,
     context: u64,
     generation: u64,
+    selection_cycle: u64,
     dataset: String,
     ids: [Option<u32>; 3],
     revisions: u64,
@@ -931,6 +932,7 @@ impl HostOverlay {
             gate: None,
             context: 0,
             generation: 0,
+            selection_cycle: 0,
             dataset: String::new(),
             ids: [None; 3],
             revisions: 0,
@@ -978,7 +980,6 @@ impl HostOverlay {
             self.art_request = None;
             self.art_reply = ArtReply::default();
             self.ids = [None; 3];
-            self.window.state.dismissed = false;
             self.window.state.scene.select(None)?;
             unsafe {
                 size_to_content(self.window.hwnd, false);
@@ -1031,6 +1032,10 @@ impl HostOverlay {
                 return Ok(false);
             }
         }
+        if self.selection_cycle != frame.selection_cycle {
+            self.selection_cycle = frame.selection_cycle;
+            self.window.state.dismissed = false;
+        }
         if !same || self.frame.is_none() {
             let rate = |v: Option<f64>| {
                 v.map(|n| format!("{:.1}%", n * 100.))
@@ -1056,7 +1061,8 @@ impl HostOverlay {
             });
             let ids = cards.each_ref().map(|c| c.id);
             if ids != self.ids {
-                self.window.state.dismissed = false;
+                // A reroll or partial OCR result is still the same selection window.
+                // Only a confirmed closure/new context can undo the user's dismissal.
                 self.ids = ids;
                 self.window.state.scene.select(None)?;
                 unsafe {
@@ -1615,6 +1621,29 @@ pub fn review_icons(
     }
     overlay.window.state.scene.select(None)?;
     overlay.render(&output.join("late-cache-icon.png"))?;
+    // A partial OCR, refresh, and temporary empty publication must respect X.
+    let mut changed = publisher.current().unwrap().snapshot.clone();
+    changed.sequence += 1;
+    changed.slots[1] = Slot::Unreadable;
+    publisher.publish(changed.clone(), true, false, None);
+    overlay.update(publisher.current(), false)?;
+    if !overlay.dismissed() {
+        return Err("partial-reopened-dismissed-window".into());
+    }
+    overlay.update(None, false)?;
+    changed.sequence += 1;
+    publisher.publish(changed.clone(), true, false, None);
+    overlay.update(publisher.current(), false)?;
+    if !overlay.dismissed() {
+        return Err("temporary-empty-reopened-dismissed-window".into());
+    }
+    publisher.end_selection();
+    changed.sequence += 1;
+    publisher.publish(changed, true, false, None);
+    overlay.update(publisher.current(), false)?;
+    if overlay.dismissed() {
+        return Err("new-selection-stayed-dismissed".into());
+    }
     if before != unsafe { GetForegroundWindow() } {
         return Err("icon-review-foreground-changed".into());
     }

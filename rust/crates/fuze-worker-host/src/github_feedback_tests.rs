@@ -282,6 +282,21 @@ fn persistent_outbox_is_exclusive_and_corrupt_existing_data_is_preserved() {
     let restored = Store::load(&path).unwrap();
     assert!(restored.enabled);
     assert_eq!(restored.entries.len(), 1);
+    drop(guard);
+    // Final UI-held report is passed in the stop command, before any credential
+    // lookup/network work. Shutdown must persist it even with network cancelled.
+    tracker.observe(state(Phase::Playing), 10);
+    let (tx, rx) = mpsc::sync_channel(1);
+    tx.send(Command::Stop(vec![tracker.finish().unwrap()]))
+        .unwrap();
+    worker(
+        path.clone(),
+        rx,
+        Arc::new(Mutex::new(View::default())),
+        Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    );
+    assert_eq!(Store::load(&path).unwrap().entries.len(), 2);
+    let guard = lock(&path).unwrap();
     std::fs::write(&path, b"not-a-report").unwrap();
     assert!(Store::load(&path).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"not-a-report");

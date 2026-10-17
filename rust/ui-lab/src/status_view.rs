@@ -144,6 +144,10 @@ pub fn present(s: &Status, offline: bool) -> View {
             "等级门禁或游戏窗口可能正在等待"
         };
         v.capture_tone = if fresh { 1 } else { 0 };
+        if s.pipeline.capture == "waiting-selection" {
+            v.capture = "轻量画面检查";
+            v.capture_hint = "未确认强化选择界面，跳过 OCR";
+        }
         if s.pipeline.recent.is_some() {
             v.health = if partial { 2 } else { 1 };
             v.title = if partial {
@@ -156,6 +160,11 @@ pub fn present(s: &Status, offline: bool) -> View {
             } else {
                 "保持实际卡位顺序，推荐继续使用整体胜率。"
             };
+        }
+        if s.pipeline.capture == "waiting-selection" && s.pipeline.overlay.is_none() {
+            v.health = 0;
+            v.title = "对局中 · 等待强化选择";
+            v.hint = "轻量检查选择界面；确认出现后才进行中文识别。";
         }
     }
     if active && waiting_window {

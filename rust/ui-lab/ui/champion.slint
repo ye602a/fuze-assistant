@@ -39,6 +39,7 @@ export component ChampionWindow inherits Window {
     in-out property <int> build-route: 0;
     callback route-changed(int);
     in-out property <string> detail-status: "等待加载英雄数据";
+    in-out property <bool> detail-failed: false;
     in-out property <string> augment-query;
     in-out property <int> rarity: -1;
     in-out property <int> expanded-augment: -1;
@@ -137,6 +138,7 @@ export component ChampionWindow inherits Window {
             }
 
             Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 11px; }
+            if root.detail-failed: Action { label: "重新读取本地详情"; clicked => { root.inspect(root.inspected-id); } }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
                 LineEdit { accessible-label: "搜索强化符文"; text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
                 HorizontalLayout { height: 32px; spacing: 5px;

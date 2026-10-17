@@ -366,14 +366,31 @@ fn load(
 }
 /// Roots are explicitly supplied by the host. No disk scan, automatic directory creation or network.
 pub fn prepare(roots: &[Root], locale: Locale, scope: Scope) -> Result<Prepared> {
+    prepare_version(roots, locale, scope, None)
+}
+/// Pin a consumer to its displayed version even if current.json advances in the meantime.
+/// Only numeric versions under the supplied roots are allowed; never mix documents.
+pub fn prepare_version(
+    roots: &[Root],
+    locale: Locale,
+    scope: Scope,
+    expected: Option<&str>,
+) -> Result<Prepared> {
     if roots.len() > 8 {
         return Err("data-root-count");
+    }
+    if let Some(ver) = expected {
+        version(ver)?;
     }
     let mut candidates = Vec::new();
     for root in roots {
         let Ok(path) = fs::canonicalize(&root.path) else {
             continue;
         };
+        if let Some(ver) = expected {
+            candidates.push((version(ver)?, path, root.source, ver.to_string()));
+            continue;
+        }
         let names = if locale == Locale::ZhCn {
             vec!["current.json".into(), "current.zh-CN.json".into()]
         } else {

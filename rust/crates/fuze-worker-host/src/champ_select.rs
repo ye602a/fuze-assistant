@@ -50,7 +50,9 @@ impl Catalog {
         &self.version
     }
     pub fn load(roots: &[fuze_data::Root], locale: fuze_data::Locale) -> Result<Self> {
-        let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Champions)?;
+        // Overview and detail must select the same complete local snapshot. A newer
+        // partial download must not strand the UI on a version without hero shards.
+        let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Full)?;
         Self::parse(
             data.document("champions.json").ok_or("champions-missing")?,
             data.identity(),

@@ -112,6 +112,7 @@ codes!(Failure {
 codes!(Stream {
     Waiting,
     WaitingFrame,
+    WaitingSelection,
     Receiving,
     Resizing,
     GpuBusy,
@@ -266,6 +267,7 @@ impl Snapshot {
         let stream = match s.pipeline.capture {
             "waiting" => Stream::Waiting,
             "waiting-frame" => Stream::WaitingFrame,
+            "waiting-selection" => Stream::WaitingSelection,
             "receiving" => Stream::Receiving,
             "resizing" => Stream::Resizing,
             "gpu-busy" => Stream::GpuBusy,

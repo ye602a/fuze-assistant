@@ -54,7 +54,7 @@ impl Drop for Frame {
 pub struct OwnedWindowStream {
     target: Option<crate::target::GameWindow>,
     capture: Capture,
-    reader: RoiReader,
+    reader: SelectionReader,
     winrt: IDirect3DDevice,
     device: Device,
     receive: Receiver<()>,
@@ -172,7 +172,7 @@ impl OwnedWindowStream {
         Ok(Self {
             target,
             capture,
-            reader: RoiReader::new(&device),
+            reader: SelectionReader::new(&device),
             winrt,
             device,
             receive,
@@ -242,7 +242,7 @@ impl OwnedWindowStream {
                 .checked_add(1)
                 .ok_or("capture-generation-overflow")?;
             self.last_timestamp = None;
-            self.reader = RoiReader::new(&self.device);
+            self.reader = SelectionReader::new(&self.device);
             return Ok(FrameStatus::Resized);
         }
         let stamp = frame.0.SystemRelativeTime()?.Duration;
@@ -251,7 +251,10 @@ impl OwnedWindowStream {
         }
         let access: IDirect3DDxgiInterfaceAccess = frame.0.Surface()?.cast()?;
         let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
-        if let Err(error) = self.reader.read(&texture, &rects) {
+        if let Err(error) =
+            self.reader
+                .read(&texture, &rects, (size.Width as u32, size.Height as u32))
+        {
             if error.is::<ReadbackBusy>() {
                 self.last_timestamp = Some(stamp);
                 return Ok(FrameStatus::Busy);
@@ -280,6 +283,9 @@ impl OwnedWindowStream {
 }
 
 impl CaptureFeed for OwnedWindowStream {
+    fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.reader.evidence
+    }
     fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
         Self::next(self, timeout)
     }

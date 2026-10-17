@@ -19,7 +19,7 @@ function ReadRuntimeLogs([string]$Directory) {
         ocr=@('waiting','paused','warming','cpu','directml','failed')
         issue=@('none','window-waiting','capture','window','ocr','pipeline')
         failure=@('none','other','locale-unavailable','champion-missing','lcu-context-missing','lcu-observation','pipeline-missing','window-waiting','window-root','window-layout','window-path-escape','window-access','window-image-unavailable','window-path-mismatch','window-filtered','window-ambiguous','window-discovery','capture-phase','capture-start','capture-missing','capture-frame','capture-atlas','capture-bitmap','worker-result','worker','overlay-reset','overlay-delivery')
-        stream=@('waiting','waiting-frame','receiving','resizing','gpu-busy','suspended','recovering','stat-shards','retaining','unknown')
+        stream=@('waiting','waiting-frame','waiting-selection','receiving','resizing','gpu-busy','suspended','recovering','stat-shards','retaining','unknown')
         gate=@('unknown','fallback','selection','pending','preparing','saving')
     }
     try {

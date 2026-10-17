@@ -111,7 +111,7 @@ mod tests {
         );
         let b = serde_json::to_string(&p).unwrap();
         assert!(!b.contains("fixture"));
-        assert!(p.private_updates);
+        assert!(!p.private_updates); // Public distribution cannot restore private update mode.
         assert!(convert(
             &serde_json::json!({"app.locale":"en-US","app":{"locale":"zh-CN"}}),
             &current

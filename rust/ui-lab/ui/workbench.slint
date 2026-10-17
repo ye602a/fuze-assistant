@@ -153,7 +153,7 @@ export component Workbench inherits Window {
                         SectionTitle { x: 21px; y: 17px; height: 26px; text: "运行开销"; }
                         Label { x: parent.width - 130px; y: 17px; height: 26px; text: HostState.sampled; color: Theme.muted; font-size: 11px; }
                         HorizontalLayout { x: 21px; y: 60px; width: parent.width - 42px; height: 58px; spacing: 12px;
-                            for metric[index] in ["CPU", "内存", "识别次数", "最近识别耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 10px; } Label { text: HostState.resources[index]; font-size: 24px; } }
+                            for metric[index] in ["CPU", "内存", "累计 OCR 分析", "最近分析耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 10px; } Label { text: HostState.resources[index]; font-size: 24px; } }
                         }
                         Label { x: 21px; y: 130px; height: 22px; text: "仅统计本软件及其识别进程；离线预览不采集运行数据。"; color: #98a9b3; font-size: 10px; }
                     }

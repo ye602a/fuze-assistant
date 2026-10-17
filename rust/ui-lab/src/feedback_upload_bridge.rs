@@ -106,11 +106,12 @@ impl Binding {
             };
             state.set_upload_status(
                 format!(
-                    "{message}\n待传 {} 份{}",
+                    "{message}\n待传 {} 份{}\n本次运行上传成功 {} 次（含赛后更新）",
                     view.pending,
                     view.issue
                         .map(|n| format!(" · 最近报告 #{n}"))
-                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                    view.uploaded_this_run
                 )
                 .into(),
             );
@@ -170,9 +171,9 @@ impl Binding {
         self.finished = true;
         if let Some(client) = &mut self.client {
             if let Some(report) = self.tracker.as_mut().and_then(Tracker::finish) {
-                let _ = client.submit(report);
+                self.pending.push(report);
             }
-            client.stop();
+            client.finish(std::mem::take(&mut self.pending));
         }
     }
 }

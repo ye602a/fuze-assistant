@@ -394,11 +394,62 @@ pub fn active_player_level() -> Result<u8> {
     wipe(&mut body);
     result
 }
+#[derive(Clone, Copy)]
+pub struct LiveState {
+    pub level: u8,
+    pub dead: Option<bool>,
+}
+/// Read-only Live Client Data. Identities are borrowed only to match the active
+/// player in-process; only level/dead leave this function, and response buffers wipe.
+pub fn active_player_state() -> Result<LiveState> {
+    let mut active = live_probe(1)?;
+    let level = parse_active_player_level(&active);
+    let mut players = if level.is_ok() {
+        live_probe(3).ok()
+    } else {
+        None
+    };
+    let dead = players.as_ref().and_then(|p| parse_active_dead(&active, p));
+    wipe(&mut active);
+    if let Some(p) = &mut players {
+        wipe(p);
+    }
+    level.map(|level| LiveState { level, dead })
+}
+fn parse_active_dead(active: &[u8], players: &[u8]) -> Option<bool> {
+    #[derive(serde::Deserialize)]
+    struct Active<'a> {
+        #[serde(rename = "riotId", borrow)]
+        id: &'a str,
+    }
+    #[derive(serde::Deserialize)]
+    struct Player<'a> {
+        #[serde(rename = "riotId", borrow)]
+        id: &'a str,
+        #[serde(rename = "isDead")]
+        dead: bool,
+    }
+    if active.len() > 65536 || players.len() > 256 * 1024 {
+        return None;
+    }
+    let a: Active = serde_json::from_slice(active).ok()?;
+    if a.id.is_empty() {
+        return None;
+    }
+    let p: Vec<Player> = serde_json::from_slice(players).ok()?;
+    if p.len() > 64 {
+        return None;
+    }
+    let mut matches = p.iter().filter(|p| p.id == a.id);
+    let dead = matches.next()?.dead;
+    matches.next().is_none().then_some(dead)
+}
 pub(crate) fn live_probe(index: usize) -> Result<Vec<u8>> {
     let (path, limit) = match index {
         0 => ("/swagger/v3/openapi.json", 2 * 1024 * 1024),
         1 => ("/liveclientdata/activeplayer", 256 * 1024),
         2 => ("/liveclientdata/eventdata", 256 * 1024),
+        3 => ("/liveclientdata/playerlist", 256 * 1024),
         _ => return Err(Error::AuthInput),
     };
     struct Body(Vec<u8>);
@@ -504,6 +555,21 @@ pub fn parse_active_player_level(body: &[u8]) -> Result<u8> {
 #[cfg(test)]
 mod level_tests {
     use super::*;
+    #[test]
+    fn death_signal_requires_one_exact_active_player_and_never_guesses_from_team() {
+        let a = br##"{"riotId":"fixture#one","level":8}"##;
+        assert_eq!(parse_active_dead(a,br##"[{"riotId":"fixture#other","isDead":true},{"riotId":"fixture#one","isDead":false}]"##),Some(false));
+        assert_eq!(
+            parse_active_dead(a, br##"[{"riotId":"fixture#one","isDead":true}]"##),
+            Some(true)
+        );
+        assert_eq!(
+            parse_active_dead(a, br##"[{"riotId":"fixture#other","isDead":true}]"##),
+            None
+        );
+        assert_eq!(parse_active_dead(a,br##"[{"riotId":"fixture#one","isDead":true},{"riotId":"fixture#one","isDead":false}]"##),None);
+        assert_eq!(parse_active_dead(br##"{"level":8}"##, b"[]"), None);
+    }
     #[test]
     fn only_integer_level_survives_untrusted_response() {
         assert_eq!(

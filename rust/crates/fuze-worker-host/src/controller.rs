@@ -717,12 +717,22 @@ impl Controller {
                     pipeline.capture_screen()?;
                 }
             }
+            if review.is_none() {
+                let dead = self
+                    .level_reader
+                    .as_ref()
+                    .and_then(|r| r.state())
+                    .and_then(|(s, _)| s.dead);
+                pipeline.life_sample(dead);
+            }
             if let Some((level, at)) = sample {
                 pipeline.level_sample(level, at.elapsed().as_millis() as u64);
             } else {
                 pipeline.clear_level();
             }
-            if let Some(delivery) = pipeline.tick_wgc()? {
+            let delivery = pipeline.tick_wgc()?;
+            self.last_frame = pipeline.last_capture.or(self.last_frame);
+            if let Some(delivery) = delivery {
                 self.analyses = self.analyses.saturating_add(1);
                 self.records.metrics(
                     delivery.total_ms,

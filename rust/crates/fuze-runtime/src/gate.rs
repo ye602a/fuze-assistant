@@ -31,6 +31,8 @@ pub struct LevelGate {
     last_evidence: Option<u64>,
     unreadable_since: Option<u64>,
     last_probe: Option<u64>,
+    dead: Option<bool>,
+    death_wake: Option<u64>,
 }
 // Only approaching/crossing a threshold starts a burst; ordinary telemetry cannot renew it.
 fn band(level: u8) -> u8 {
@@ -90,6 +92,21 @@ impl LevelGate {
             }
         }
     }
+    pub fn screen_closed(&mut self) {
+        self.last_evidence = None;
+        self.unreadable_since = None;
+        self.burst_started = None;
+    }
+    /// A confirmed transition of the active player's life state only schedules a
+    /// short screen probe burst. It does not imply owning any augment or a reward.
+    pub fn update_dead(&mut self, dead: Option<bool>, now: u64) {
+        if let Some(dead) = dead {
+            if self.dead != Some(dead) && (dead || self.dead == Some(true)) {
+                self.death_wake = Some(now);
+            }
+            self.dead = Some(dead);
+        }
+    }
     pub fn decision(&self, now: u64) -> Decision {
         let level = self
             .level
@@ -101,11 +118,18 @@ impl LevelGate {
         let burst = self
             .burst_started
             .is_some_and(|at| now >= at && now - at < BURST_MS);
+        let death = self
+            .death_wake
+            .is_some_and(|at| now >= at && now - at < BURST_MS);
         let mode = if evidence {
             Mode::Selection
         } else if level.is_none() {
             Mode::Fallback
-        } else if level == Some(1) {
+        } else if death {
+            Mode::Pending
+        } else if level.is_some_and(|v| matches!(v, 1 | 4 | 5 | 8 | 9 | 12 | 13 | 16..=30))
+            && !burst
+        {
             Mode::Saving
         } else if burst && self.last_evidence.is_none() {
             if matches!(self.band, 2 | 6 | 10 | 14) {
@@ -118,13 +142,7 @@ impl LevelGate {
         };
         let interval_ms = match mode {
             Mode::Saving => 8000,
-            Mode::Fallback => {
-                if level.is_some() {
-                    1000
-                } else {
-                    1500
-                }
-            }
+            Mode::Fallback => 1500,
             _ => 250,
         };
         Decision {
@@ -157,6 +175,22 @@ impl LevelGate {
 mod tests {
     use super::*;
     #[test]
+    fn off_threshold_saves_but_death_and_respawn_only_open_bounded_probe_windows() {
+        let mut g = LevelGate::default();
+        g.update_level(8, 0);
+        g.update_dead(Some(false), 0);
+        g.update_level(8, 21000);
+        assert_eq!(g.decision(21000).mode, Mode::Saving);
+        g.update_dead(Some(true), 22000);
+        assert_eq!(g.decision(22000).mode, Mode::Pending);
+        g.update_dead(Some(true), 43000);
+        g.update_level(8, 43000);
+        assert_eq!(g.decision(43000).mode, Mode::Saving);
+        g.update_dead(Some(false), 44000);
+        assert_eq!(g.decision(44000).mode, Mode::Pending);
+        assert_eq!(g.next_level(), Some(11));
+    }
+    #[test]
     fn production_candidate_and_unknown_end_burst_without_claim_counting() {
         let mut g = LevelGate::default();
         g.update_level(3, 0);
@@ -165,7 +199,7 @@ mod tests {
         assert_eq!(g.decision(100).mode, Mode::Selection);
         g.observe(Selection::Unknown, 6100);
         g.update_level(3, 6100);
-        assert_eq!(g.decision(6100).interval_ms, 1000);
+        assert_eq!(g.decision(6100).interval_ms, 1500);
         assert_eq!(g.next_level(), Some(7));
         g.observe(Selection::Candidate, 7100);
         assert_eq!(g.decision(7100).interval_ms, 250);
@@ -180,7 +214,10 @@ mod tests {
                 g.update_level(level, t);
                 g.observe(Selection::Unknown, t);
             }
-            assert_eq!(g.decision(32000).interval_ms, 1000);
+            assert_eq!(
+                g.decision(32000).interval_ms,
+                if level == 18 { 8000 } else { 1500 }
+            );
         }
     }
     #[test]
@@ -197,7 +234,7 @@ mod tests {
         ] {
             g.observe(selection, at);
         }
-        assert_eq!(g.decision(6700).interval_ms, 1000);
+        assert_eq!(g.decision(6700).interval_ms, 1500);
         assert_eq!(g.next_level(), Some(11));
         g.observe(Selection::Candidate, 7700);
         assert_eq!(g.decision(7700).mode, Mode::Selection);
@@ -214,7 +251,7 @@ mod tests {
         g.update_level(3, 10000);
         g.observe(Selection::Candidate, 10000);
         g.update_level(3, 17000);
-        assert_eq!(g.decision(17000).interval_ms, 1000);
+        assert_eq!(g.decision(17000).interval_ms, 1500);
         g.update_level(7, 18000);
         assert_eq!(g.decision(18000).mode, Mode::Pending);
         g.update_level(1, 25000);

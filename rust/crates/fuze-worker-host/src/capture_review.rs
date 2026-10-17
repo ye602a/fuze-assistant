@@ -18,10 +18,18 @@ struct Offline {
     size: (u32, u32),
     mode: String,
     reads: u32,
+    blank: GpuFixture,
+    closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl Offline {
     fn read(&mut self) -> Result<()> {
-        let atlas = self.reader.read(&self.texture)?;
+        let atlas =
+            self.reader
+                .read(if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
+                    &self.blank
+                } else {
+                    &self.texture
+                })?;
         self.size = (atlas.title_width, atlas.title_height);
         self.bytes.clear();
         self.bytes.extend_from_slice(atlas.bytes());
@@ -29,6 +37,9 @@ impl Offline {
     }
 }
 impl ScreenDriver for Offline {
+    fn selection(&self, _: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.reader.selection()
+    }
     fn start(&mut self) -> Result<()> {
         if self.mode == "offline-bitmap" {
             Err("fixture-start".into())
@@ -54,6 +65,9 @@ impl ScreenDriver for Offline {
 }
 struct BitmapOnly(NativeScreen);
 impl ScreenDriver for BitmapOnly {
+    fn selection(&self, _: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.0.selection(true)
+    }
     fn start(&mut self) -> Result<()> {
         Err("fixture-force-native-bitmap".into())
     }
@@ -129,7 +143,9 @@ pub fn run(
     }
     let mut frames = Vec::new();
     let mut last_snapshot = None;
+    let mut closes = Vec::new();
     for (index, sample) in samples.iter().enumerate() {
+        let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let path = root.join(&sample.file).canonicalize()?;
         if !path.starts_with(&root) || std::fs::metadata(&path)?.len() > 32 * 1024 * 1024 {
             return Err("capture-review-limit".into());
@@ -177,6 +193,7 @@ pub fn run(
             } else {
                 let reader = GpuFixtureReader::new()?;
                 let texture = reader.upload(&pixels, image.width(), image.height())?;
+                let blank = reader.upload(&vec![0; pixels.len()], image.width(), image.height())?;
                 Box::new(ScreenCapture::with_driver(Offline {
                     reader,
                     texture,
@@ -184,6 +201,8 @@ pub fn run(
                     size: (0, 0),
                     mode: mode.into(),
                     reads: 0,
+                    blank,
+                    closed: closed.clone(),
                 }))
             };
             pipeline.capture_feed(feed)?;
@@ -201,12 +220,25 @@ pub fn run(
                     ));
                 }
                 if let Some(delivery) = pipeline.tick_wgc()? {
-                    break delivery;
+                    break Some(delivery);
+                }
+                if sample.expected_names.is_empty()
+                    && pipeline.capture_state == "waiting-selection"
+                    && Instant::now() + Duration::from_secs(10) >= deadline
+                {
+                    break None;
                 }
                 if Instant::now() >= deadline {
                     return Err("capture-review-timeout".into());
                 }
                 std::thread::sleep(Duration::from_millis(20));
+            };
+            let Some(delivery) = delivery else {
+                if pipeline.frames.current().is_some() {
+                    return Err("capture-review-unexpected-popup".into());
+                }
+                frames.push(serde_json::json!({"sample":index,"repeat":repeat,"screen_gate_skipped_ocr":true}));
+                continue;
             };
             let actual: [Option<u32>; 3] = delivery.snapshot.slots.each_ref().map(|s| match s {
                 Slot::Known { id, .. } => Some(*id),
@@ -253,6 +285,21 @@ pub fn run(
                 "ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"roi_bytes":delivery.roi_bytes}));
             last_snapshot = Some(delivery.snapshot);
         }
+        if !ci && pipeline.frames.current().is_some() {
+            closed.store(true, std::sync::atomic::Ordering::Relaxed);
+            let start = Instant::now();
+            while pipeline.frames.current().is_some() {
+                if pipeline.tick_wgc()?.is_some() {
+                    return Err("capture-review-ocr-on-absent-ui".into());
+                }
+                if start.elapsed() > Duration::from_millis(1600) {
+                    return Err("capture-review-close-delay".into());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            closes.push(start.elapsed().as_secs_f64() * 1000.);
+            present(&pipeline, None, frames.len())?;
+        }
         pipeline.phase(Phase::Loading)?;
         if pipeline.has_capture() || pipeline.frames.current().is_some() {
             return Err("capture-review-stale-source".into());
@@ -278,6 +325,6 @@ pub fn run(
         "loading_capture_started":false,"worker_launches":pipeline.worker.launches(),"worker_reaped":true,
         "data_version":data.version(),"statistics_scope":"overall","selection_confirmed":false,
         "actual_stage":null,"game_access":false,"system_input":false,
-        "native_screen_tested":ci,"real_game_verified":false}),
+        "absent_ui_close_ms":closes,"native_screen_tested":ci,"real_game_verified":false}),
     )
 }

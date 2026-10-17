@@ -89,8 +89,10 @@ impl Dib {
 #[derive(Default)]
 pub(super) struct Reader {
     dib: Option<Dib>,
-    size: (u32, u32, u32),
+    size: (u32, u32, u32, u32),
     bytes: Vec<u8>,
+    controls: Vec<u8>,
+    pub evidence: Option<fuze_contract::selection_pixels::Evidence>,
 }
 impl Reader {
     pub fn read(&mut self) -> Result<()> {
@@ -106,28 +108,34 @@ impl Reader {
                 (rect.right - rect.left) as u32,
                 (rect.bottom - rect.top) as u32,
             )?;
+            let buttons = fuze_contract::selection_pixels::buttons(
+                (rect.right - rect.left) as u32,
+                (rect.bottom - rect.top) as u32,
+            )?;
             let size = (
                 slots[0].width,
                 slots[0].height,
                 slots[2].x + slots[2].width - slots[0].x,
+                buttons[0].y + buttons[0].height - slots[0].y,
             );
             let dc = DisplayDc(GetDC(null_mut()));
             if dc.0.is_null() {
                 return Err("capture-bitmap-source".into());
             }
             if self.size != size || self.dib.is_none() {
-                self.dib = Some(Dib::new(dc.0, size.2, size.1)?);
+                self.dib = Some(Dib::new(dc.0, size.2, size.3)?);
                 self.size = size;
                 self.bytes.resize((size.0 * size.1 * 12) as usize, 0);
             }
             let dib = self.dib.as_ref().ok_or("capture-bitmap-missing")?;
-            // One coherent title band per sample, not three independently timed captures.
+            // One coherent band contains titles and reroll controls. No second screenshot,
+            // encoder, full-screen CPU buffer or image file is required for the UI gate.
             if BitBlt(
                 dib.dc,
                 0,
                 0,
                 size.2 as i32,
-                size.1 as i32,
+                size.3 as i32,
                 dc.0,
                 rect.left + slots[0].x as i32,
                 rect.top + slots[0].y as i32,
@@ -153,6 +161,26 @@ impl Reader {
                     );
                 }
             }
+            let button_bytes = buttons[0].width as usize * 4;
+            self.controls
+                .resize(button_bytes * 3 * buttons[0].height as usize, 0);
+            for (i, slot) in buttons.iter().enumerate() {
+                let x = (slot.x - slots[0].x) as usize * 4;
+                let top = (slot.y - slots[0].y) as usize;
+                for y in 0..slot.height as usize {
+                    let start = (y * 3 + i) * button_bytes;
+                    self.controls[start..start + button_bytes].copy_from_slice(
+                        std::slice::from_raw_parts(
+                            dib.pixels.add((top + y) * source_stride + x),
+                            button_bytes,
+                        ),
+                    );
+                }
+            }
+            self.evidence = Some(fuze_contract::selection_pixels::classify(
+                &self.titles()?,
+                &Atlas::new(&self.controls, buttons[0].width, buttons[0].height)?,
+            ));
             Ok(())
         }
     }

@@ -5,7 +5,7 @@ use fuze_contract::titles::{regions, Atlas};
 
 pub struct DesktopStream {
     duplication: IDXGIOutputDuplication,
-    reader: RoiReader,
+    reader: SelectionReader,
     size: (u32, u32),
     ready: bool,
 }
@@ -54,7 +54,7 @@ impl DesktopStream {
                         .DuplicateOutput(&device.device)?;
                     return Ok(Self {
                         duplication,
-                        reader: RoiReader::new(&device),
+                        reader: SelectionReader::new(&device),
                         size,
                         ready: false,
                     });
@@ -90,7 +90,7 @@ impl DesktopStream {
         }
         match self
             .reader
-            .read(&texture, &regions(self.size.0, self.size.1)?)
+            .read(&texture, &regions(self.size.0, self.size.1)?, self.size)
         {
             Ok(()) => (),
             Err(e) if e.is::<ReadbackBusy>() => return Ok(FrameStatus::Busy),
@@ -98,6 +98,9 @@ impl DesktopStream {
         }
         self.ready = true;
         Ok(FrameStatus::Ready)
+    }
+    pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.reader.evidence
     }
     pub fn titles(&self) -> Result<Atlas<'_>> {
         if !self.ready {
