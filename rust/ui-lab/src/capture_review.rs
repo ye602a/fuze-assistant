@@ -83,16 +83,30 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, Box<dyn std::error::Err
     let mut report = worker
         .join()
         .map_err(|_| "capture-review-worker-panicked")??;
-    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } != foreground {
-        return Err("capture-review-foreground-changed".into());
+    let after = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    let foreground_unchanged = after == foreground;
+    let mut owner = 0;
+    if !after.is_null() {
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+                after, &mut owner,
+            );
+        }
     }
     report["production_ui_publisher"] = true.into();
     report["hidden_native_popup_renders"] = renders.into();
-    report["foreground_unchanged"] = true.into();
+    report["foreground_unchanged"] = foreground_unchanged.into();
+    // Keep the strict invariant and preserve diagnostic evidence on failure. This
+    // endpoint observation cannot rule out a transient focus change during the run.
+    // Never retain another application's title, process identity or window handle.
+    report["foreground_owned_by_review_at_end"] = (owner == std::process::id()).into();
     report["elapsed_ms"] = (started.elapsed().as_secs_f64() * 1000.).into();
     std::fs::write(
         output.join("capture-review.json"),
         serde_json::to_vec_pretty(&report)?,
     )?;
+    if !foreground_unchanged {
+        return Err("capture-review-foreground-changed".into());
+    }
     Ok(report)
 }
