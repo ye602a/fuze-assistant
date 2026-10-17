@@ -1,6 +1,6 @@
 //! Local catalogue worker and independently scheduled public artwork.
 use crate::{BuildRow, ChampionChoice, ChampionWindow, DetailRow};
-use fuze_data::champion_detail::Detail;
+use fuze_data::detail_cache::{Cache, Loaded};
 use slint::{ComponentHandle, Model, VecModel};
 use std::{
     cell::RefCell,
@@ -10,11 +10,6 @@ use std::{
     sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
-struct Loaded {
-    id: u32,
-    detail: Detail,
-    version: String,
-}
 #[derive(Default)]
 struct Work {
     wanted: Option<(u64, u32, String)>,
@@ -30,18 +25,29 @@ struct Worker {
 }
 impl Worker {
     fn new(roots: Vec<fuze_data::Root>) -> Result<Self, &'static str> {
-        let shared = Arc::new((Mutex::new(Work::default()), Condvar::new()));
+        let shared = Arc::new((
+            Mutex::new(Work {
+                invalidate: true,
+                ..Work::default()
+            }),
+            Condvar::new(),
+        ));
         let task = shared.clone();
         let thread = std::thread::Builder::new()
             .name("fuze-slint-details".into())
             .spawn(move || {
-                let mut cache = HashMap::<u32, Arc<Loaded>>::new();
+                let mut cache: Option<Cache> = None;
+                let mut failure = "detail-data-not-ready";
                 loop {
                     let mut s = match task.0.lock() {
                         Ok(s) => s,
                         Err(_) => return,
                     };
-                    while !s.stop && s.wanted.is_none() {
+                    while !s.stop
+                        && s.wanted.is_none()
+                        && !s.invalidate
+                        && !cache.as_ref().is_some_and(Cache::warming)
+                    {
                         s = match task.1.wait(s) {
                             Ok(s) => s,
                             Err(_) => return,
@@ -50,35 +56,36 @@ impl Worker {
                     if s.stop {
                         return;
                     }
-                    let (generation, id, expected) = s.wanted.take().unwrap();
-                    let invalidate = std::mem::take(&mut s.invalidate);
-                    drop(s);
-                    if invalidate {
-                        cache.clear();
-                    }
-                    let result = if let Some(d) = cache.get(&id) {
-                        Ok(d.clone())
-                    } else {
-                        (|| {
-                            let data = fuze_data::prepare(
-                                &roots,
-                                match expected.split('@').next() {
-                                    Some("zh-TW") => fuze_data::Locale::ZhTw,
-                                    Some("en-US") => fuze_data::Locale::EnUs,
-                                    _ => fuze_data::Locale::ZhCn,
-                                },
-                                fuze_data::Scope::Detail(id),
-                            )?;
-                            if !expected.is_empty() && data.identity() != expected {
-                                return Err("detail-version-mismatch");
+                    if std::mem::take(&mut s.invalidate) {
+                        let expected = s.expected.clone();
+                        drop(s);
+                        if !cache
+                            .as_ref()
+                            .is_some_and(|c| expected.is_empty() || c.identity() == expected)
+                        {
+                            cache = None;
+                            match Cache::prepare(&roots, &expected) {
+                                Ok(next) => cache = Some(next),
+                                Err(error) => failure = error,
                             }
-                            let detail = data.champion_detail(id)?;
-                            Ok(Arc::new(Loaded {
-                                id,
-                                detail,
-                                version: data.identity(),
-                            }))
-                        })()
+                        }
+                        continue; // Check a possible version change before serving queued work.
+                    }
+                    let Some((generation, id, expected)) = s.wanted.take() else {
+                        drop(s);
+                        if let Some(cache) = cache.as_mut() {
+                            cache.warm_next();
+                        }
+                        std::thread::yield_now();
+                        continue;
+                    };
+                    drop(s);
+                    let result = match cache.as_mut() {
+                        Some(cache) if expected.is_empty() || cache.identity() == expected => {
+                            cache.get(id)
+                        }
+                        Some(_) => Err("detail-version-mismatch"),
+                        None => Err(failure),
                     };
                     let mut s = match task.0.lock() {
                         Ok(s) => s,
@@ -89,12 +96,6 @@ impl Worker {
                     }
                     if s.generation != generation {
                         continue;
-                    }
-                    if let Ok(d) = &result {
-                        if cache.len() >= 8 {
-                            cache.clear();
-                        }
-                        cache.insert(id, d.clone());
                     }
                     s.reply = Some((generation, result));
                 }
@@ -212,6 +213,7 @@ impl Binding {
             if let Ok(mut s) = self._worker.shared.0.lock() {
                 s.invalidate = true;
                 s.expected = view.version.clone();
+                self._worker.shared.1.notify_one();
             }
         }
         let local = view
@@ -599,7 +601,8 @@ pub fn attach_shared(
     let tick = Rc::downgrade(&timer);
     timer.start(
         slint::TimerMode::Repeated,
-        Duration::from_millis(100),
+        // Active only until this click's local result arrives; zero idle polling.
+        Duration::from_millis(16),
         move || {
             let reply = service
                 .shared

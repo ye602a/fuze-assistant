@@ -31,6 +31,14 @@ impl Context {
     pub fn same_game(&self, other: &Self) -> bool {
         self.game == other.game
     }
+    /// Loading has not captured or accepted any choices. If its game key was unavailable,
+    /// retaining the warmed model on InProgress does not retain an observed reward.
+    pub fn finishes_loading(&self, next: &Self) -> bool {
+        self.phase == Phase::Loading
+            && next.phase == Phase::InProgress
+            && next.game != 0
+            && (self.game == 0 || self.same_game(next))
+    }
 }
 /// Public champion choices only. Never retain player names, account IDs or raw session bodies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

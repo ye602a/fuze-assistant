@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 pub mod champion_detail;
+pub mod detail_cache;
 pub mod item_sets;
 pub mod recognition;
 pub mod recommendations;

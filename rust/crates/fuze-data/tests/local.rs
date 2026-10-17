@@ -61,6 +61,54 @@ impl Drop for Temp {
     }
 }
 #[test]
+fn all_hero_details_survive_file_removal_and_more_than_eight_selections() {
+    use fuze_data::detail_cache::Cache;
+    use std::sync::Arc;
+    let root = Temp::new();
+    root.dataset("zh-CN", "16.20.1", true);
+    let ids: Vec<_> = (1..=20).collect();
+    root.write(
+        "versions/16.20.1/manifest.json",
+        json!({"files":{
+        "augments.json":{},"champions.json":{},"items.json":{},
+        "champion-shards/index.json":{},"champion-shards/1.json":{}}}),
+    );
+    root.write(
+        "versions/16.20.1/champion-shards/index.json",
+        json!({"shards":[{
+        "path":"champion-shards/1.json","championIds":ids}]}),
+    );
+    let heroes: serde_json::Map<_, _> = (1..=20)
+        .map(|id| {
+            (
+                id.to_string(),
+                json!({
+        "champion":{"name":format!("fixture-{id}")},
+        "augments":[{"id":100,"name":"测试符文"}]}),
+            )
+        })
+        .collect();
+    root.write(
+        "versions/16.20.1/champion-shards/1.json",
+        json!({"champions":heroes}),
+    );
+    let roots = [root.root(Source::Bundled)];
+    assert!(Cache::prepare(&roots, "zh-CN@16.19.1").is_err());
+    let mut cache = Cache::prepare(&roots, "zh-CN@16.20.1").unwrap();
+    // Remove only our synthetic fixture, proving clicks/warm-up cannot read it again.
+    fs::remove_dir_all(root.0.join("versions")).unwrap();
+    let first = cache.get(1).unwrap();
+    assert_eq!(first.id, 1);
+    for id in 2..=20 {
+        assert_eq!(cache.get(id).unwrap().id, id);
+    }
+    assert!(!cache.warming());
+    assert!(Arc::ptr_eq(&first, &cache.get(1).unwrap()));
+    assert!(cache.get(99).is_err());
+    cache.warm_next();
+    assert_eq!(cache.identity(), "zh-CN@16.20.1");
+}
+#[test]
 fn newer_complete_bundle_beats_cache_without_mixing_partial_versions() {
     let cache = Temp::new();
     let bundled = Temp::new();

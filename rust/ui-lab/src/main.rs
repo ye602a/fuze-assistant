@@ -6,6 +6,7 @@ mod closure_review;
 #[cfg(feature = "ui-audit")]
 mod control_review;
 mod desktop_runner;
+mod detail_review;
 mod diagnostic_bridge;
 mod direct;
 mod feedback;
@@ -39,6 +40,7 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-details") if args.len()==2 => println!("{}",detail_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-motion") if args.len()==2 => println!("{}",motion_review::run(std::path::Path::new(&args[1]))?),
         #[cfg(feature = "ui-audit")]
         Some("--review-controls") if args.len()==2 => println!("{}",control_review::run(std::path::Path::new(&args[1]))?),

@@ -19,7 +19,7 @@ fn loading_handoff(old: Context, new: Context) -> bool {
         && new.supported
         && old.champion.is_some()
         && old.champion == new.champion
-        && old.same_game(&new)
+        && old.finishes_loading(&new)
 }
 
 struct Observation {
@@ -385,6 +385,12 @@ struct Retry {
     next: u64,
 }
 impl Retry {
+    fn window_wait(&mut self, now: u64) {
+        // A verified match may precede its visible game window. This is readiness, not
+        // a failed OCR attempt: never turn it into a 30-second blind spot at game start.
+        self.failures = 0;
+        self.next = now.saturating_add(500);
+    }
     fn fail(&mut self, now: u64) {
         self.failures = self.failures.saturating_add(1);
         self.next = now.saturating_add(
@@ -476,7 +482,9 @@ impl Controller {
     }
     pub fn idle_wait(&self) -> Duration {
         let now = self.epoch.elapsed().as_millis() as u64;
-        if self.pipeline.is_none() || now < self.retry.next {
+        if now < self.retry.next {
+            Duration::from_millis((self.retry.next - now).clamp(20, 1000))
+        } else if self.pipeline.is_none() {
             Duration::from_millis(1000)
         } else {
             // Respect the OCR gate, while checking LCU phase/level changes at least once a second.
@@ -667,7 +675,12 @@ impl Controller {
             Ok(()) => Ok(()),
             Err(error) => {
                 self.last_error = Some(error);
-                self.retry.fail(self.epoch.elapsed().as_millis() as u64);
+                let now = self.epoch.elapsed().as_millis() as u64;
+                if error == "game-window-waiting" {
+                    self.retry.window_wait(now);
+                } else {
+                    self.retry.fail(now);
+                }
                 if !matches!(
                     error,
                     "capture-frame"
@@ -750,6 +763,7 @@ mod tests {
         let loading = context(Phase::Loading, 8, 1);
         let playing = context(Phase::InProgress, 8, 1);
         assert!(loading_handoff(loading, playing));
+        assert!(loading_handoff(context(Phase::Loading, 8, 0), playing));
         assert!(!loading_handoff(playing, loading));
         assert!(!loading_handoff(loading, context(Phase::InProgress, 9, 1)));
         assert!(!loading_handoff(loading, context(Phase::InProgress, 8, 2)));
@@ -773,6 +787,19 @@ mod tests {
         observation.publish(Some(playing), Some(PathBuf::from("changed-root")));
         assert_eq!(observation.revision, 2);
         assert!(cancellation.cancelled());
+    }
+    #[test]
+    fn a_slow_game_window_does_not_exhaust_startup_retries() {
+        let mut retry = Retry::default();
+        retry.fail(0);
+        for now in (1000..=60_000).step_by(500) {
+            retry.window_wait(now);
+            assert_eq!(retry.next, now + 500);
+            assert_eq!(retry.failures, 0);
+        }
+        retry.fail(60_500); // Real failures retain bounded backoff.
+        assert_eq!(retry.next, 61_500);
+        assert_eq!(retry.failures, 1);
     }
     #[test]
     fn hero_game_and_disconnect_cancel_old_window_without_live_discovery() {
