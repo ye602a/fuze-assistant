@@ -60,6 +60,7 @@ pub struct OwnedWindowStream {
     receive: Receiver<()>,
     size: SizeInt32,
     handle: isize,
+    monitor: bool,
     pub generation: u64,
     pub sequence: u64,
     last_timestamp: Option<i64>,
@@ -79,15 +80,27 @@ impl OwnedWindowStream {
                 return Err("window-ownership-or-visibility".into());
             }
         }
-        Self::start_validated(handle, None)
+        Self::start_validated(handle, None, false)
     }
     pub fn start_game(target: crate::target::GameWindow) -> Result<Self> {
         if !target.valid() || target.minimized() {
             return Err("game-window-unavailable".into());
         }
-        Self::start_validated(target.handle(), Some(target))
+        Self::start_validated(target.handle(), Some(target), false)
     }
-    fn start_validated(handle: isize, target: Option<crate::target::GameWindow>) -> Result<Self> {
+    pub fn start_primary_screen() -> Result<Self> {
+        use windows::Win32::{Foundation::POINT, Graphics::Gdi::*};
+        let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+        if monitor.is_invalid() {
+            return Err("capture-monitor".into());
+        }
+        Self::start_validated(monitor.0 as isize, None, true)
+    }
+    fn start_validated(
+        handle: isize,
+        target: Option<crate::target::GameWindow>,
+        monitor: bool,
+    ) -> Result<Self> {
         let apartment = Apartment::new()?;
         let hwnd = HWND(handle as *mut _);
         if !step("is_supported", GraphicsCaptureSession::IsSupported())? {
@@ -99,8 +112,18 @@ impl OwnedWindowStream {
             "activation_factory",
             factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>(),
         )?;
-        let item: GraphicsCaptureItem =
-            unsafe { step("create_owned_window_item", interop.CreateForWindow(hwnd))? };
+        let item: GraphicsCaptureItem = unsafe {
+            if monitor {
+                step(
+                    "create_monitor_item",
+                    interop.CreateForMonitor(windows::Win32::Graphics::Gdi::HMONITOR(
+                        handle as *mut _,
+                    )),
+                )?
+            } else {
+                step("create_owned_window_item", interop.CreateForWindow(hwnd))?
+            }
+        };
         let size = step("item_size", item.Size())?;
         regions(size.Width as u32, size.Height as u32)?;
         let pool = step(
@@ -128,6 +151,14 @@ impl OwnedWindowStream {
             "disable_cursor",
             capture.session.SetIsCursorCaptureEnabled(false),
         )?;
+        // Optional on older Windows: host sampling is bounded even if the OS lacks this API.
+        if monitor {
+            let _ = capture
+                .session
+                .SetMinUpdateInterval(windows::Foundation::TimeSpan {
+                    Duration: 5_000_000,
+                });
+        }
         let (send, receive) = sync_channel(1);
         capture.token = Some(
             capture
@@ -147,6 +178,7 @@ impl OwnedWindowStream {
             receive,
             size,
             handle,
+            monitor,
             generation: 1,
             sequence: 0,
             last_timestamp: None,
@@ -165,11 +197,13 @@ impl OwnedWindowStream {
             }
         }
         // Ownership is rechecked before consuming frames if the source HWND was destroyed/reused.
-        unsafe {
-            let mut pid = 0;
-            GetWindowThreadProcessId(HWND(self.handle as *mut _), Some(&mut pid));
-            if self.target.is_none() && pid != GetCurrentProcessId() {
-                return Err("source-window-closed".into());
+        if !self.monitor {
+            unsafe {
+                let mut pid = 0;
+                GetWindowThreadProcessId(HWND(self.handle as *mut _), Some(&mut pid));
+                if self.target.is_none() && pid != GetCurrentProcessId() {
+                    return Err("source-window-closed".into());
+                }
             }
         }
         if self
@@ -242,5 +276,24 @@ impl OwnedWindowStream {
             rects[0].width,
             rects[0].height,
         )?)
+    }
+}
+
+impl CaptureFeed for OwnedWindowStream {
+    fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
+        Self::next(self, timeout)
+    }
+    fn titles(&self) -> Result<Atlas<'_>> {
+        Self::titles(self)
+    }
+    fn key(&self) -> (u64, u64) {
+        (self.generation, self.sequence)
+    }
+    fn source(&self) -> &'static str {
+        if self.monitor {
+            "screen-stream"
+        } else {
+            "window-stream"
+        }
     }
 }

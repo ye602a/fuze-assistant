@@ -30,7 +30,11 @@ fn keep_capture_worker(error: &str) -> bool {
     error.starts_with("game-window-")
         || matches!(
             error,
-            "capture-frame" | "capture-atlas" | "capture-start" | "worker-recovered-use-next-frame"
+            "capture-frame"
+                | "capture-atlas"
+                | "capture-start"
+                | "capture-bitmap"
+                | "worker-recovered-use-next-frame"
         )
 }
 
@@ -359,11 +363,19 @@ impl Config {
         }
         Ok(())
     }
-    fn prepare(&self, champion: u32, locale: fuze_data::Locale) -> Result<Pipeline> {
+    pub(crate) fn prepare_data(
+        &self,
+        champion: u32,
+        locale: fuze_data::Locale,
+    ) -> Result<fuze_data::Prepared> {
         let mut data =
             fuze_data::prepare(&self.roots, locale, fuze_data::Scope::Champion(champion))?;
         let (supplement, _) = crate::recognition_sources::load(&self.roots)?;
         data.supplement_recognition(&supplement);
+        Ok(data)
+    }
+    pub(crate) fn prepare(&self, champion: u32, locale: fuze_data::Locale) -> Result<Pipeline> {
+        let data = self.prepare_data(champion, locale)?;
         let catalog =
             fuze_contract::wire::encode_catalog(data.catalog()).map_err(|_| "catalog-encode")?;
         let args = vec![
@@ -420,6 +432,8 @@ pub struct PipelineStatus {
     pub analyses: u64,
     pub analysis_ms: Option<f64>,
     pub capture: &'static str,
+    pub capture_source: &'static str,
+    pub capture_fallback: Option<&'static str>,
     pub backend: Option<fuze_contract::wire::ActiveBackend>,
     pub dataset: Option<String>,
     pub error: Option<&'static str>,
@@ -477,6 +491,11 @@ impl Controller {
                 .map(|p| p.capture_state)
                 .unwrap_or("waiting"),
             backend: self.pipeline.as_ref().and_then(|p| p.worker.backend()),
+            capture_source: self
+                .pipeline
+                .as_ref()
+                .map_or("waiting", |p| p.capture_source()),
+            capture_fallback: self.pipeline.as_ref().and_then(|p| p.capture_fallback()),
             dataset: self.pipeline.as_ref().map(|p| p.dataset().to_owned()),
             error: self.last_error,
             frame_age: self.last_frame.map(|t| t.elapsed().as_secs()),
@@ -567,7 +586,7 @@ impl Controller {
                 && c.supported
                 && c.champion.is_some()
         });
-        let (Some(context), Some(root)) = (active, root) else {
+        let (Some(context), Some(_root)) = (active, root) else {
             self.clear();
             return Ok(());
         };
@@ -633,8 +652,9 @@ impl Controller {
             });
             let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
             if !pipeline.has_capture() {
-                let target = fuze_capture::target::discover(&root)?.ok_or("game-window-waiting")?;
-                pipeline.capture_game(target)?;
+                // Stable v0.6.3 default: screen first, independent of game process handles/layout.
+                // Only this authenticated, supported InProgress branch starts capture.
+                pipeline.capture_screen()?;
             }
             if let Some((level, at)) = sample {
                 pipeline.level_sample(level, at.elapsed().as_millis() as u64);

@@ -18,7 +18,7 @@ function ReadRuntimeLogs([string]$Directory) {
         capture=@('waiting','paused','fresh','window-waiting','failed')
         ocr=@('waiting','paused','warming','cpu','directml','failed')
         issue=@('none','window-waiting','capture','window','ocr','pipeline')
-        failure=@('none','other','locale-unavailable','champion-missing','lcu-context-missing','lcu-observation','pipeline-missing','window-waiting','window-root','window-layout','window-path-escape','window-access','window-image-unavailable','window-path-mismatch','window-filtered','window-ambiguous','window-discovery','capture-phase','capture-start','capture-missing','capture-frame','capture-atlas','worker-result','worker','overlay-reset','overlay-delivery')
+        failure=@('none','other','locale-unavailable','champion-missing','lcu-context-missing','lcu-observation','pipeline-missing','window-waiting','window-root','window-layout','window-path-escape','window-access','window-image-unavailable','window-path-mismatch','window-filtered','window-ambiguous','window-discovery','capture-phase','capture-start','capture-missing','capture-frame','capture-atlas','capture-bitmap','worker-result','worker','overlay-reset','overlay-delivery')
         stream=@('waiting','waiting-frame','receiving','resizing','gpu-busy','suspended','recovering','stat-shards','retaining','unknown')
         gate=@('unknown','fallback','selection','pending','preparing','saving')
     }
@@ -65,6 +65,11 @@ function ReadRuntimeLogs([string]$Directory) {
                         foreach ($key in @('analyses','skipped')) {
                             $safe[$key] = SafeNumber $row.state.$key 1e12 $true
                             if ($null -eq $safe[$key]) { throw 'invalid-metric' }
+                        }
+                        foreach ($key in @('capture_source','capture_fallback')) {
+                            $allowed = if ($key -eq 'capture_source') { @('screen-stream','screen-bitmap','window-stream') } else { @('start','timeout','black-frame','readback','frame') }
+                            $value = $row.state.$key
+                            $safe[$key] = if ($value -is [string] -and $value -cin $allowed) { $value } else { $null }
                         }
                         $safe.analysis_ms = SafeNumber $row.state.analysis_ms 3600000
                         $safe.level = SafeNumber $row.state.level 30 $true

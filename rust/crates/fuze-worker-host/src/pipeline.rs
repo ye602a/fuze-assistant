@@ -1,7 +1,7 @@
 //! Session-scoped control-thread host shared by offline GPU input and real owned-window WGC.
 //! Game attachment is explicit; no automatic startup. UI has its own message thread.
 use crate::{recovery::Supervisor, Result};
-use fuze_capture::native::{FrameStatus, OwnedWindowStream};
+use fuze_capture::native::{CaptureFeed, FrameStatus, OwnedWindowStream};
 use fuze_contract::{
     titles::Atlas,
     wire::{Identity, Reply, Request, TitleKind},
@@ -23,7 +23,7 @@ pub struct Pipeline {
     session: Session,
     pub worker: Supervisor,
     pub overlay: HiddenOverlay,
-    capture: Option<OwnedWindowStream>,
+    capture: Option<Box<dyn CaptureFeed>>,
     dataset: String,
     epoch: Instant,
     closed: bool,
@@ -183,6 +183,36 @@ impl Pipeline {
     pub fn has_capture(&self) -> bool {
         self.capture.is_some()
     }
+    pub fn capture_source(&self) -> &'static str {
+        self.capture.as_ref().map_or("waiting", |c| c.source())
+    }
+    pub fn capture_fallback(&self) -> Option<&'static str> {
+        self.capture.as_ref().and_then(|c| c.fallback())
+    }
+    pub fn capture_screen(&mut self) -> Result<()> {
+        self.capture_feed(Box::new(fuze_capture::screen::ScreenCapture::default()))
+    }
+    /// Shared installation path for production screen capture and isolated transport fixtures.
+    pub fn capture_feed(&mut self, feed: Box<dyn CaptureFeed>) -> Result<()> {
+        if self.closed || self.overlay.cancellation().cancelled() || self.wake_at().is_none() {
+            return Err("capture-phase");
+        }
+        self.capture = None;
+        self.retention = Default::default();
+        self.frames.clear();
+        let cleanup = self.session.capture_replaced()?;
+        if !self
+            .overlay
+            .reset(cleanup.generation, self.dataset.clone())?
+        {
+            return Err("overlay-reset");
+        }
+        self.capture_failure = None;
+        self.capture = Some(feed);
+        self.capture_state = "waiting-frame";
+        self.next_capture_at = 0;
+        Ok(())
+    }
     pub fn capture_game(&mut self, target: fuze_capture::target::GameWindow) -> Result<()> {
         if self.closed || self.overlay.cancellation().cancelled() || self.wake_at().is_none() {
             return Err("capture-phase");
@@ -200,7 +230,7 @@ impl Pipeline {
         self.capture_failure = None;
         match OwnedWindowStream::start_game(target) {
             Ok(stream) => {
-                self.capture = Some(stream);
+                self.capture = Some(Box::new(stream));
                 self.capture_state = "waiting-frame";
             }
             Err(error) => {
@@ -227,7 +257,7 @@ impl Pipeline {
         self.capture_failure = None;
         match OwnedWindowStream::start(hwnd, visible_ci) {
             Ok(stream) => {
-                self.capture = Some(stream);
+                self.capture = Some(Box::new(stream));
                 self.capture_state = "waiting-frame";
             }
             Err(error) => {
@@ -341,16 +371,22 @@ impl Pipeline {
         let Some(mut capture) = self.capture.take() else {
             return Err("capture-missing");
         };
-        let result = (|| match capture
-            .next(Duration::from_millis(100))
-            .map_err(|_| "capture-frame")?
-        {
+        let result = (|| match capture.next(Duration::from_millis(100)).map_err(|e| {
+            if e.to_string() == "capture-bitmap" {
+                "capture-bitmap"
+            } else {
+                "capture-frame"
+            }
+        })? {
             FrameStatus::Ready => {
                 self.capture_state = "receiving";
                 self.busy_streak = 0;
+                if capture.source().starts_with("screen-") {
+                    self.next_capture_at = self.now().saturating_add(500);
+                }
                 let key = FrameKey {
-                    epoch: capture.generation,
-                    sequence: capture.sequence,
+                    epoch: capture.key().0,
+                    sequence: capture.key().1,
                 };
                 let atlas = capture.titles().map_err(|_| "capture-atlas")?;
                 self.recognize(key, &atlas)
@@ -389,7 +425,7 @@ impl Pipeline {
             }
             FrameStatus::Timeout | FrameStatus::Duplicate => {
                 self.capture_state = "waiting-frame";
-                self.next_capture_at = self.now().saturating_add(100);
+                self.next_capture_at = self.now().saturating_add(500);
                 Ok(None)
             }
         })();
@@ -397,14 +433,16 @@ impl Pipeline {
         if self.closed {
             return result;
         }
-        if matches!(result, Err("capture-frame" | "capture-atlas")) {
+        let discard = matches!(result, Err("capture-frame" | "capture-atlas"));
+        if discard || matches!(result, Err("capture-bitmap")) {
             self.capture_state = "recovering";
             self.retention = Default::default();
             self.frames.clear();
             let cleanup = self.session.capture_replaced()?;
             self.overlay
                 .reset(cleanup.generation, self.dataset.clone())?;
-        } else {
+        }
+        if !discard {
             self.capture = Some(capture);
         }
         result

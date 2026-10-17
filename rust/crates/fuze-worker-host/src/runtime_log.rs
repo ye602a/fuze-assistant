@@ -103,6 +103,7 @@ codes!(Failure {
     CaptureMissing,
     CaptureFrame,
     CaptureAtlas,
+    CaptureBitmap,
     WorkerResult,
     Worker,
     OverlayReset,
@@ -119,6 +120,18 @@ codes!(Stream {
     StatShards,
     Retaining,
     Unknown
+});
+codes!(CaptureSource {
+    ScreenStream,
+    ScreenBitmap,
+    WindowStream
+});
+codes!(CaptureFallback {
+    Start,
+    Timeout,
+    BlackFrame,
+    Readback,
+    Frame
 });
 codes!(Gate {
     Unknown,
@@ -142,6 +155,10 @@ pub struct Snapshot {
     pub analysis_ms: Option<f64>,
     pub level: Option<u8>,
     pub stream: Stream,
+    #[serde(default)]
+    pub capture_source: Option<CaptureSource>,
+    #[serde(default)]
+    pub capture_fallback: Option<CaptureFallback>,
     pub gate: Gate,
     pub interval_ms: Option<u64>,
     pub readable_slots: Option<[bool; 3]>,
@@ -208,6 +225,7 @@ impl Snapshot {
             Some("capture-missing") => Failure::CaptureMissing,
             Some("capture-frame") => Failure::CaptureFrame,
             Some("capture-atlas") => Failure::CaptureAtlas,
+            Some("capture-bitmap") => Failure::CaptureBitmap,
             Some("worker-result") => Failure::WorkerResult,
             Some("overlay-reset") => Failure::OverlayReset,
             Some("overlay-delivery") => Failure::OverlayDelivery,
@@ -270,6 +288,20 @@ impl Snapshot {
             issue,
             failure,
             stream,
+            capture_source: match s.pipeline.capture_source {
+                "screen-stream" => Some(CaptureSource::ScreenStream),
+                "screen-bitmap" => Some(CaptureSource::ScreenBitmap),
+                "window-stream" => Some(CaptureSource::WindowStream),
+                _ => None,
+            },
+            capture_fallback: match s.pipeline.capture_fallback {
+                Some("screen-start") => Some(CaptureFallback::Start),
+                Some("screen-timeout") => Some(CaptureFallback::Timeout),
+                Some("screen-black-frame") => Some(CaptureFallback::BlackFrame),
+                Some("screen-readback") => Some(CaptureFallback::Readback),
+                Some("screen-frame") => Some(CaptureFallback::Frame),
+                _ => None,
+            },
             gate,
             interval_ms: s
                 .pipeline
@@ -298,6 +330,8 @@ impl Snapshot {
             self.ocr,
             self.issue,
             self.failure,
+            self.capture_source,
+            self.capture_fallback,
         ) == (
             other.connection,
             other.phase,
@@ -305,6 +339,8 @@ impl Snapshot {
             other.ocr,
             other.issue,
             other.failure,
+            other.capture_source,
+            other.capture_fallback,
         ) && (
             self.stream,
             self.gate,

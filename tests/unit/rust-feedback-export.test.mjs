@@ -58,6 +58,14 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     const windowReport=JSON.parse(readFileSync(path.join(dir,'window-codes.json'))).persistentLog
     assert.equal(windowReport.skippedLines,0)
     assert.deepEqual(windowReport.records.slice(1).map(record=>record.state.failure),failures)
+    writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,state:{...row.state,failure:'capture-bitmap',capture_source:'screen-bitmap',capture_fallback:'timeout'}})+'\n'+JSON.stringify({...row,state:{...row.state,capture_source:secret,capture_fallback:secret}})+'\n')
+    assert.equal(run(path.join(dir,'screen-source.json')).status,0)
+    const screenReport=JSON.parse(readFileSync(path.join(dir,'screen-source.json'))).persistentLog
+    assert.equal(screenReport.skippedLines,0)
+    assert.equal(screenReport.records[1].state.capture_source,'screen-bitmap')
+    assert.equal(screenReport.records[1].state.capture_fallback,'timeout')
+    assert.equal(screenReport.records[2].state.capture_source,null)
+    assert.equal(screenReport.records[2].state.capture_fallback,null)
   }finally{
     assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
     assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))

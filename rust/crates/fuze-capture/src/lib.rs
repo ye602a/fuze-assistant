@@ -4,4 +4,6 @@ pub mod adapter;
 #[cfg(windows)]
 pub mod native;
 #[cfg(windows)]
+pub mod screen;
+#[cfg(windows)]
 pub mod target;

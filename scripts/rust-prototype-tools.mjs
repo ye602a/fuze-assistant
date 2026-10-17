@@ -38,7 +38,8 @@ export function childReport(command, args, timeout = 120000) {
   const child = spawnSync(command, args, { cwd: root, env: runtimeEnv(), windowsHide: true, timeout, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
   const line = child.stdout?.trim().split(/\r?\n/).findLast(line => line.startsWith('{'))
   const phase = /fuze-ocr: phase=(\d+)/.exec(child.stderr || '')?.[1]
-  let report = { error: child.error?.code === 'ETIMEDOUT' ? 'worker_timeout' : 'worker_failed', phase: phase ? Number(phase) : null }
+  const reviewError = /Error: "(capture-review-[a-z-]{1,80})"/.exec(child.stderr || '')?.[1]
+  let report = { error: child.error?.code === 'ETIMEDOUT' ? 'worker_timeout' : reviewError || 'worker_failed', phase: phase ? Number(phase) : null }
   try { if (line) report = JSON.parse(line) } catch { /* fixed error only */ }
   return { ...report, fallback_started: /fuze-ocr: fallback=1/.test(child.stderr || ''), exit_code: child.status, exit_ok: child.status === 0 && !child.error }
 }

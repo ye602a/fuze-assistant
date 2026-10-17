@@ -2,7 +2,7 @@ name: Rust detail cache and first capture
 on:
   pull_request:
     branches: [feat/rust-stage-card-reference]
-    paths: ['rust/**', 'scripts/create-ui-host-fixture.mjs', 'scripts/export-rust-feedback.ps1', 'tests/unit/rust-feedback-export.test.mjs', '.github/workflows/rust-detail-startup.yml']
+    paths: ['rust/**', 'scripts/create-ui-host-fixture.mjs', 'scripts/export-rust-feedback.ps1', 'scripts/check-rust-screen.mjs', 'tests/unit/rust-feedback-export.test.mjs', '.github/workflows/rust-detail-startup.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,9 +12,15 @@ concurrency:
 jobs:
   windows-detail-startup:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Existing ONNX runtime for the integrated capture chain
+        run: npm ci --ignore-scripts
       - name: Privacy and isolated toolchain
         run: |
           node scripts/check-secrets.mjs
@@ -34,7 +40,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib controller::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-capture --lib target::tests
+          cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-capture --lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 test --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target -p fuze-worker-host --lib runtime_log::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -53,4 +59,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/release/fuze-ui-lab.exe --review-host artifacts/detail-data artifacts/detail-host
           exit $LASTEXITCODE
-      # Synthetic data and hidden own windows only. No game, system input or release assets.
+      - name: Screen stream and native bitmap fallback through OCR to production popup
+        env:
+          FUZE_RUST_CI_VISIBLE: '1'
+          FUZE_RUST_BIN_DIR: ${{ github.workspace }}/rust/ui-lab/target/release
+        run: |
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target --release -p fuze-ocr --bin fuze-ocr-worker -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-rust-screen.mjs
+          exit $LASTEXITCODE
+      # Actual monitor capture only on disposable CI, covered by an owned full-screen fixture.
+      # Local runs use offline pixels and hidden popup windows; no game or system input.

@@ -1,5 +1,5 @@
-//! Bounded WGC for owned test windows or validated game targets, plus GPU ROI readback.
-//! No capture picker, desktop capture, image encoder or input simulation.
+//! Bounded WGC for screens, owned test windows or validated game targets, plus GPU ROI readback.
+//! No capture picker, image encoder or input simulation.
 use std::{
     sync::mpsc::sync_channel,
     time::{Duration, Instant},
@@ -28,7 +28,18 @@ use windows::{
         UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible},
     },
 };
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+/// One production capture contract. Frames never leave memory or enter diagnostics.
+pub trait CaptureFeed {
+    fn next(&mut self, timeout: Duration) -> Result<FrameStatus>;
+    fn titles(&self) -> Result<fuze_contract::titles::Atlas<'_>>;
+    fn key(&self) -> (u64, u64);
+    fn source(&self) -> &'static str;
+    fn fallback(&self) -> Option<&'static str> {
+        None
+    }
+}
 
 #[derive(Debug)]
 pub struct ReadbackBusy;

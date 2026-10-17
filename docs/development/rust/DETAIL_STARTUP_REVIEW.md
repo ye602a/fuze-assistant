@@ -28,7 +28,7 @@
 | 窗口拒绝原因 | 记录截图失败/回退 | 路径不存在、句柄查询失败、路径不匹配等合并为等待窗口 | 现有日志不足以确定测试机具体命中哪种拒绝 |
 | 捕获链路测试 | Electron 截图/OCR 测试 | WGC 测试直接提供程序自有窗口句柄 | 未经过生产 target::discover，未覆盖真实目录筛选 |
 
-旧版 source-of-truth 为 tag v0.6.3 的 src/main/auto-screenshot-service.ts、screenshot.ts、capture-stream.ts、data-loader.ts。Rust 对照为 fuze-lcu/install.rs、discovery.rs，fuze-capture/target.rs，fuze-worker-host/controller.rs、main.rs。复用了数据/模型/美术资源及部分规则，不等于完成了运行行为和回退的等价迁移。本次没有恢复旧版屏幕位图回退，也没有改变游戏进程访问权限；仅查询路径/生命周期，未增加内存访问或提权。
+旧版 source-of-truth 为 tag v0.6.3 的 src/main/auto-screenshot-service.ts、screenshot.ts、capture-stream.ts、data-loader.ts。Rust 对照为 fuze-lcu/install.rs、discovery.rs，fuze-capture/target.rs，fuze-worker-host/controller.rs、main.rs。复用了数据/模型/美术资源及部分规则，不等于完成了运行行为和回退的等价迁移。前一提交仅修复目录契约；后续已恢复生产入口的屏幕采集与位图回退，详见 [屏幕采集与整链路验收](SCREEN_CAPTURE_PARITY.md)。屏幕入口不再查询游戏进程句柄，不增加内存访问或提权。
 
 ## 已收到的脱敏运行证据
 

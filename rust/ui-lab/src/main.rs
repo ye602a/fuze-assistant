@@ -1,4 +1,5 @@
 mod art_cache;
+mod capture_review;
 mod champion_actions;
 mod champion_art;
 mod champion_bridge;
@@ -40,6 +41,7 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--review-capture") => println!("{}",capture_review::run(&args[1..])?),
         Some("--review-details") if args.len()==2 => println!("{}",detail_review::run(std::path::Path::new(&args[1]))?),
         Some("--review-motion") if args.len()==2 => println!("{}",motion_review::run(std::path::Path::new(&args[1]))?),
         #[cfg(feature = "ui-audit")]
