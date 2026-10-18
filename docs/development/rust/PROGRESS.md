@@ -1,6 +1,6 @@
-# Rust migration status - 2026-10-16
+# Historical Rust migration status - 2026-10-16
 
-Current explicit differences: [preview vs complete migration](../../RUST_PREVIEW_DIFFERENCES.md), updated 2026-10-17. Chinese-only scope and persistent logs supersede older open-item lists. The exact [v0.6.3 parity audit](V063_PARITY.md) governs completion; full parity is NOT accepted. This is the current checklist. Earlier milestone documents are historical evidence, not a second list of current blockers. The stable application remains Electron/Vue. Rust is an isolated development preview and the repository remains private.
+Archived on 2026-10-18. Read the [current handoff](../../CODEX_HANDOFF.md) and [preview differences](../../RUST_PREVIEW_DIFFERENCES.md) first. The table below describes the earlier milestone state, not a second current backlog. Since then, Rust history was integrated into master through PR #95, the repository became public and preview 56ca08c45a63 was published. Production capture now uses DXGI plus bitmap fallback. Chinese-only scope, completed logs and the latest release evidence supersede old pending items. The [v0.6.3 parity audit](V063_PARITY.md) remains a historical baseline, not proof of full live acceptance.
 
 | Area | Implemented | Remaining acceptance or development |
 | --- | --- | --- |
@@ -43,4 +43,4 @@ Current explicit differences: [preview vs complete migration](../../RUST_PREVIEW
 - [M8: account history](M8.md)
 - [M7c: desktop continuity](M7C.md)
 
-PRs remain stacked in dependency order. CI/self-owned-window checks establish isolated behavior, not live Tencent success. No production installer or stable-entry replacement is claimed by this checklist.
+The historical stacked PRs have been consolidated through PR #95; do not reopen or reimplement them. CI/self-owned-window checks establish isolated behavior, not live Tencent success. No stable-entry replacement is claimed by this historical checklist.

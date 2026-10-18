@@ -1,8 +1,8 @@
 # FUZE 全 Rust 迁移：范围与实施顺序
 
-最新逐模块状态见 [替换进度](PROGRESS.md)。下方“本轮”列保留最初 M0 规划；后续实现与未验收项以进度表和各阶段报告为准。
+当前状态与剩余工作见 [Codex 交接](../../CODEX_HANDOFF.md)，详细边界见 [功能差异表](../../RUST_PREVIEW_DIFFERENCES.md)。下方“本轮”列及状态保留最初 M0 规划，不是当前未完成项；[替换进度](PROGRESS.md) 也已归档为历史阶段索引。
 
-状态：原型阶段；稳定版 v0.6.3 与现有 Electron 发布流程继续保留。最终应用业务和界面使用 Rust；ONNX Runtime、Windows API 等原生依赖不要求重新实现为 Rust。
+原始 M0 状态：原型阶段。现已集成并发布 Rust 测试版，稳定版 v0.6.3 与现有 Electron 发布流程继续保留。最终应用业务和界面使用 Rust；ONNX Runtime、Windows API 等原生依赖不要求重新实现为 Rust。
 
 ## 功能迁移清单
 
