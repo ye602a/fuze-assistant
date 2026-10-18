@@ -159,10 +159,15 @@ impl Session {
     pub fn screen_probe(&mut self, visible: bool, closed: bool, now: u64) {
         self.gate.record_capture(now);
         if visible {
-            self.gate.observe(Selection::Candidate, now);
+            self.screen_visible(now);
         } else if closed {
             self.gate.screen_closed();
         }
+    }
+    /// Visible selection pixels keep capture fast even when OCR cannot read a title.
+    /// The completed OCR ticket already recorded this capture.
+    pub fn screen_visible(&mut self, now: u64) {
+        self.gate.observe(Selection::Candidate, now);
     }
     pub fn level_schedule(&self, now: u64) -> (crate::gate::Decision, Option<u8>) {
         (self.gate.decision(now), self.gate.next_level())
@@ -300,6 +305,25 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn visible_selection_retries_unreadable_titles_at_fast_interval() {
+        let mut s = Session::new("zh-CN@v1".into()).unwrap();
+        s.update_phase(Phase::InProgress).unwrap();
+        s.update_level(1, 0);
+        s.screen_probe(true, false, 0);
+        for sequence in 1..=30 {
+            let now = sequence * 250;
+            s.update_level(1, now);
+            let ticket = s.begin(key(sequence), now).unwrap();
+            assert!(s
+                .finish(ticket, blank(), Selection::Unknown, now + 1)
+                .is_some());
+            s.screen_visible(now + 1);
+            assert_eq!(s.level_schedule(now + 1).0.interval_ms, 250);
+        }
+        s.update_level(1, 14000);
+        assert_eq!(s.level_schedule(14000).0.interval_ms, 8000);
+    }
     #[test]
     fn a_success_resets_intermittent_failures_but_consecutive_failures_still_stop() {
         let mut s = Session::new("zh-CN@v1".into()).unwrap();

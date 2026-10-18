@@ -40,8 +40,31 @@ pub struct FrameResult {
 // Locate one title line inside the legacy title envelope, without another inference or
 // full-screen text fallback. The larger glyph band wins over the small category label.
 // Only the three title crops are scanned; preserve card order and glyph aspect ratio.
+fn erase_persistent_frame_columns(mut crop: RgbImage) -> RgbImage {
+    let (w, h) = crop.dimensions();
+    if w < 16 || h < 8 {
+        return crop;
+    }
+    let edge = w * 8 / 100;
+    for x in edge..w - edge {
+        let bright = (0..h)
+            .filter(|&y| {
+                let p = crop.get_pixel(x, y);
+                p[0] >= 160 && p[1] >= 160 && p[2] >= 130
+            })
+            .count() as u32;
+        if bright >= h * 4 / 5 {
+            for y in 0..h {
+                crop.put_pixel(x, y, image::Rgb([0, 0, 0]));
+            }
+        }
+    }
+    crop
+}
+
 fn trim_title_padding(crop: RgbImage) -> RgbImage {
-    let crop = trim_title_rows(crop);
+    // Card borders can stay bright for every row and masquerade as a full-height title band.
+    let crop = trim_title_rows(erase_persistent_frame_columns(crop));
     let (w, h) = crop.dimensions();
     let edge = w * 8 / 100;
     let mut first = w;
@@ -436,6 +459,24 @@ fn pad_input(input: &PreparedTitle, fixed: Option<usize>) -> Result<Option<Prepa
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn persistent_card_edge_does_not_hide_a_short_title_row() {
+        let mut crop = RgbImage::from_pixel(165, 55, image::Rgb([0, 0, 0]));
+        for y in 0..55 {
+            for x in 13..=15 {
+                crop.put_pixel(x, y, image::Rgb([230, 230, 210]));
+            }
+        }
+        for y in 30..40 {
+            for x in 58..89 {
+                crop.put_pixel(x, y, image::Rgb([220, 220, 200]));
+            }
+        }
+        let title = trim_title_padding(crop);
+        assert!(title.height() < 25);
+        assert!(title.width() < 100);
+        assert!(title.pixels().any(|p| p[0] >= 200));
+    }
     #[test]
     fn padding_preserves_channels_and_rejects_overflow() {
         let input = PreparedTitle {
