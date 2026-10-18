@@ -1,6 +1,21 @@
 # FUZE 当前开发状态与新会话交接
 
-更新：2026-10-18。此文是本次交接时的**当前状态入口**；历史 M0–M17、原型、阻断报告只证明各自日期的工作，不是第二份待办清单。后续状态有变化时先更新此文。玩家说明继续放在 [README](../README.md) 和 [使用指南](PLAYER_GUIDE.md)，不把开发账本塞进玩家首页。
+## 2026-10-19：识别与 UI 修复
+
+本轮运行代码构建为 **`1c2281940730`**，包含 [OCR PR #103](https://github.com/ye602a/fuze-assistant/pull/103) 和 [原生 UI PR #104](https://github.com/ye602a/fuze-assistant/pull/104)。用户要求完成后上传，继续作为 Rust 测试版；v0.6.3 稳定频道保留。下载与公开更新身份以 [Rust 测试频道](https://github.com/ye602a/fuze-assistant/releases/tag/rust-preview)、包内 `build.json` 和在线 `rust-update.json` 为准。
+
+- OCR：标题裁剪排除纵向卡框干扰；选择界面仍然可见时，即使结果为 Unknown 也继续快速重试。
+- 三卡：依据 24 个公开历史补丁快照的 276 个中文名称，标题改为 22px 半粗体、最多两行；真实最长名称 11 字。推荐度固定在卡片底部，点击展开效果与阶段统计。
+- UI：清理普通页面的研究 / 样例 / 旧更新凭据入口；设置分组，首页与战绩管理按需展开；统一 Lucide 功能图标。页签和展开箭头使用短暂过渡，遵守系统减少动画、后台与软件渲染限制。
+- [原生 UI CI 39148877413](https://github.com/ye602a/fuze-assistant/actions/runs/39148877413) 通过：742 项控件 / 状态 / 尺寸检查，276 个实际字体标题测量，五档 DPI，严格动效中间帧与关闭动效立即落位，20 次空闲采样无重绘；screen / bitmap / offline-drop / lifecycle / lifecycle-minimal 通过。
+- [核心 CI 39148877373](https://github.com/ye602a/fuze-assistant/actions/runs/39148877373) 与 [Windows 检查 39148877455](https://github.com/ye602a/fuze-assistant/actions/runs/39148877455) 通过。[阶段打包记录 39149553932](https://github.com/ye602a/fuze-assistant/actions/runs/39149553932) 单独核对包内启动、更新与回滚。
+- 打包数据已更新到 16.20.2；复核其 211 个名称都在上述语料内，184 张图标全部已随包。未改变推荐统计算法和实际领取判断。
+
+详细设计与来源见 [原生 UI 记录](development/NATIVE_UI_REVIEW.md)。明天实测请运行新包的 `Start-this-build.cmd`，避免启动已安装的旧受管版本。离线与 CI 检查不代替真实游戏、输入法、混合屏幕 DPI 或实际在线安装验收。
+
+---
+
+以下第 1–10 节保留 **2026-10-18 的交接快照**。其中 56ca08c45a63 的下载身份、614 项检查和“本次只整理资料”仅属于当时记录；本轮构建与检查以上节为准。产品边界与尚未解决的实战验收项继续适用。
 
 ## 1. 现在是什么状态
 
