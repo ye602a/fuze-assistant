@@ -1,0 +1,638 @@
+{
+  "scope": "CommunityDragon published patch snapshots 15.21-16.20, KIWI AugmentData, zh_CN; not a complete hotfix archive",
+  "bundle": "16.20.1",
+  "names": [
+    "一板一眼",
+    "万用瞄准镜",
+    "三重射击",
+    "下雪天",
+    "不动如山",
+    "不祥契约",
+    "主玩辅助",
+    "亮出你的剑",
+    "仁慈打击",
+    "仆从大师",
+    "任务：沃格勒特的巫师帽",
+    "任务：海牛阿福的勇士",
+    "任务：艾卡西亚的陷落",
+    "任务：钢化你心",
+    "会心治疗",
+    "会心防御",
+    "位面转移",
+    "作弊：我能回城！",
+    "你摸不到",
+    "你肩上的恶魔",
+    "侵蚀",
+    "保持坚定",
+    "信念者的强化",
+    "俯冲轰炸",
+    "全凭身法",
+    "全心为你",
+    "全能龙魂",
+    "关键暴击",
+    "冰寒",
+    "冰雪爆裂",
+    "冰霜 幽灵",
+    "刃下生风",
+    "利刃华尔兹",
+    "别停止引导",
+    "前进时间到",
+    "加固护盾",
+    "升级：中娅",
+    "升级：弯刀",
+    "升级：收集者",
+    "升级：无尽之刃",
+    "升级：死亡之舞",
+    "升级：焚天",
+    "升级：狂妄",
+    "升级：献祭",
+    "升级：米凯尔的祝福",
+    "升级：耀光",
+    "升级：花晓之剑",
+    "升级：荆棘之甲",
+    "升级：贪欲九头蛇",
+    "升级：雪球",
+    "卡皮巴拉空投",
+    "双刀流",
+    "双发快射",
+    "双生火焰",
+    "双重打击",
+    "叠角龙",
+    "古式佳酿",
+    "可靠武器",
+    "台风",
+    "史上最大雪球",
+    "吃过路兵",
+    "吞噬灵魂",
+    "吵闹鬼",
+    "吸血习性",
+    "和我一起困在这里",
+    "咏叹奏鸣",
+    "咒语裂变",
+    "哎哟，我的硬币！",
+    "唯快不破",
+    "喂呜喂呜",
+    "回力OK镖",
+    "回响施放",
+    "回归基本功",
+    "圣火",
+    "地形专家",
+    "地狱三头犬",
+    "坚若磐石",
+    "坚韧",
+    "坦克引擎",
+    "基石法师",
+    "复位",
+    "多重射击",
+    "夜狩",
+    "大力",
+    "大地苏醒",
+    "大师铸就",
+    "大招工具人",
+    "大法师",
+    "天音爆",
+    "夺金",
+    "威能之追求",
+    "家园卫士",
+    "尊我为王",
+    "小丑学院",
+    "小小的额外帮助",
+    "小猫咪找妈妈",
+    "尖端发明家",
+    "尤里卡",
+    "属性叠属性叠属性！",
+    "属性叠属性！",
+    "属性！",
+    "山脉龙魂",
+    "巨人杀手",
+    "巨像的勇气",
+    "巫师式思考",
+    "帽上加帽",
+    "弹球",
+    "强力护盾",
+    "当心小蛋糕！",
+    "循环往复",
+    "心灵净化",
+    "快中求稳",
+    "快步",
+    "急急小子",
+    "急救用具",
+    "急速之追求",
+    "恶趣味",
+    "惊惧",
+    "感受燃烧",
+    "慢炖",
+    "我们的治疗",
+    "战争交响乐",
+    "扇巴掌",
+    "扳机炼狱",
+    "折磨者",
+    "捐赠",
+    "接二连三",
+    "掷骰狂人",
+    "旋转至胜",
+    "无休回复",
+    "无尽大杀四方",
+    "无限循环往复",
+    "易损",
+    "星界躯体",
+    "暗影疾奔",
+    "暴击律动",
+    "暴击飞弹",
+    "更万用的瞄准镜",
+    "最万用的瞄准镜",
+    "最终形态",
+    "最终都市列车",
+    "有始有终",
+    "术士果汁盒",
+    "杀意翻涌",
+    "杀戮时间到了",
+    "歌利亚巨人",
+    "死亡之环",
+    "残忍",
+    "残暴之力",
+    "沃格勒特的巫师帽",
+    "法术苏醒",
+    "注魔",
+    "泰坦的坚决",
+    "活力再生",
+    "活力焕发",
+    "海克斯科技龙魂",
+    "海洋龙魂",
+    "海牛阿福的勇士",
+    "渴血",
+    "溢流",
+    "潘朵拉的盒子",
+    "激光治疗",
+    "濒死悟道",
+    "火上浇油",
+    "火狐",
+    "灵巧",
+    "灵魂虹吸",
+    "灵魄炸弹",
+    "点亮他们！",
+    "炼狱导管",
+    "炼狱龙魂",
+    "炽烈黎明",
+    "炽燃利息",
+    "牙仙子",
+    "物法皆修",
+    "物理转魔法",
+    "狂徒豪气",
+    "狂热者",
+    "狙神飞星",
+    "王中王，靴中靴",
+    "玻璃大炮",
+    "珠光护手",
+    "生机迸发",
+    "由心及物",
+    "由暴生急",
+    "电涌力场",
+    "男爵之手",
+    "砍伤",
+    "砸开那颗蛋",
+    "祖母的辣椒油",
+    "神圣干预",
+    "神圣雪球",
+    "神射法师",
+    "科学狂人",
+    "秘术冲拳",
+    "空投熊",
+    "穿针引线",
+    "精准奇才",
+    "精怪魔法",
+    "红包",
+    "纯粹主义者 - 术师",
+    "练腿日",
+    "终极不可阻挡",
+    "终极九头蛇",
+    "终极刷新",
+    "终极唤醒",
+    "缩小射线",
+    "缩小引擎",
+    "罪恶快感",
+    "老练狙神",
+    "自我毁灭",
+    "自然即是治愈",
+    "自适应防护",
+    "至高天诺言",
+    "舞会女王",
+    "良性循环",
+    "艾卡西亚的陷落",
+    "藏身草丛",
+    "虚幻武器",
+    "虚空冲刺",
+    "虚空裂隙",
+    "虹吸",
+    "蛋白粉奶昔",
+    "血上加伤",
+    "裁决使",
+    "装填",
+    "豪猪",
+    "负重爆气",
+    "质变：棱彩阶",
+    "质变：混沌",
+    "质变：黄金阶",
+    "贪欲束缚",
+    "超凡邪恶",
+    "超强大脑",
+    "超负荷",
+    "踢踏舞",
+    "轨道镭射",
+    "转得我眩晕了",
+    "软弹啪叽抓",
+    "轻拍背部",
+    "过量延伸者",
+    "连拨击锤",
+    "连锁反应",
+    "退敌力场",
+    "逃跑计划",
+    "速度恶魔",
+    "邦！",
+    "重量级打击手",
+    "量子计算",
+    "针插垫",
+    "钢化你心",
+    "镭射眼",
+    "闪光弹",
+    "闪现向前",
+    "闪电打击",
+    "闪闪现现",
+    "防护面纱",
+    "雪球扭蛋机",
+    "霸符兄弟",
+    "面包和奶酪",
+    "面包和果酱",
+    "面包和黄油",
+    "风语者的祝福",
+    "飞升仪式",
+    "飞身踢",
+    "高压锅",
+    "魄罗之王的弹跳",
+    "魄罗爆破手",
+    "魄罗蛮冲",
+    "魔法转物理",
+    "魔法飞弹",
+    "魔鬼之舞",
+    "鲨鱼暴风",
+    "鲨鱼诱饵",
+    "黎明使者的坚决",
+    "？？？"
+  ],
+  "patch_sources": [
+    {
+      "patch": "15.21",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/15.21/game/maps/modespecificdata/augments.bin.json",
+          "sha256": "df483d561d29a2eb4bb6a6d29fc9670251dda56df636ed55a80aeff5c453483d"
+        },
+        {
+          "url": "https://raw.communitydragon.org/15.21/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "8dd7e98cee10a5eff31645ad4b142a15f5b61487d86bbc8126cb1eaac0934ba6"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "15.22",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/15.22/game/maps/modespecificdata/augments.bin.json",
+          "sha256": "1bf118fe3e18ff23983cbb8600168ef080a67e6e66a580a7fbb05d2ba6eaf95c"
+        },
+        {
+          "url": "https://raw.communitydragon.org/15.22/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "a341cae57930ee621fc46442af78d45666069d81459dd0305c6071b3b92790be"
+        }
+      ],
+      "unresolved": [
+        {
+          "key": "ARAM_ProteinShake",
+          "translation": "kiwi_aram_proteinshake_name"
+        },
+        {
+          "key": "ARAM_MountainSoul",
+          "translation": "kiwi_aram_mountainsoul_name"
+        }
+      ]
+    },
+    {
+      "patch": "15.23",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/15.23/game/maps/modespecificdata/augments.bin.json",
+          "sha256": "6ca6965c812f28ba6821e86c6f8006d1017a3134eab77ad16a43f360cb99ec5a"
+        },
+        {
+          "url": "https://raw.communitydragon.org/15.23/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "91e68f23f7799303add26aa4bbfa67ab0413e4e543f3016be60b89452df9de94"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "15.24",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/15.24/game/maps/modespecificdata/augments.bin.json",
+          "sha256": "3edd2d40655cf8a38d06879477615431b989ecca3f970b684803a45007e57e19"
+        },
+        {
+          "url": "https://raw.communitydragon.org/15.24/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "47a687ee93890fc4cd3f8c74f866c8b6971035cac9d598b976d1ccb1314b30ed"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.1",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.1/game/maps/modespecificdata/augments.bin.json",
+          "sha256": "2e32674b9bacef368c75a798539805d49125722538ff2d742626f7cb584ead3b"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.1/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "79049ac0d5557d91c8ffb6a7d1be527809f64e66fff9cdd46b3ba3404f2bbf87"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.2",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.2/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "9a6464f47ed2856f04f2876e6cb4cd54360713e3e4b63504b355571cfc3d699a"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.2/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "8a70b91e6580e8a7d09ec154aef5a5226e6dba750e33cbadce1a3aab5736c5bc"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.3",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.3/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "2abb964aeb27af4f25a4005fd90d082e008c8d1c1d755afec0de1b4df639ead4"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.3/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "cf1139e0775d6d3a2a9fbdf078ab75c0dc6f0159831449488c32915a223604fc"
+        }
+      ],
+      "unresolved": [
+        {
+          "key": "ARAM_MissingPingAugment",
+          "translation": "kiwi_aram_missingpingaugment_name"
+        },
+        {
+          "key": "Dropybara_Active",
+          "translation": "kiwi_dropybara_active_name"
+        }
+      ]
+    },
+    {
+      "patch": "16.4",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.4/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "8968fb1acfc44a84bc442eb6ab2b076428495dc99f6cb56918498efa6e10fbd3"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.4/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "7c6d291bd3398ee867cd340e1140cb22ed9deb6a12e5602413ea5ed0250b1e6b"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.5",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.5/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "30d7ec917edf1466d9976f7de021d66045e5e16f251aa8d2ae4536224057dfee"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.5/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "a7723d9bf05b576f38b5b9689cf31b97be277e1d6a2ac5ed01b36b73178f6a0c"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.6",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.6/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "c8eaca442952ff5bc2fdbbb412a069b47cd4310cc09b986888b35a97ab4ca552"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.6/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "8260ebccd622c762c8a9955ccfcff87d7ab5b9a01e5eb9f5708293e85222ec9c"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.7",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.7/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "4180465e2d0824910949f68304d05a4c5470e12fda59f6219119abfcb9364a66"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.7/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "07a1b4966d8a9b936d9d5d5b4a60614ff3dcae69fc08b47ba10ce9e6484906d5"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.8",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.8/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "5775f65b7b7073d246f52dad888417357b20ad390793d3d1bb2280fb9c3f4e97"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.8/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "cb45f7f9f965b41f6a3705ac2c1b8c48f387a135ba7e667a1e4ee57475ff1a12"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.9",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.9/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "5d0beea053f615809851cccea485b736297a52236f0865a96b452d10ba4c2364"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.9/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "db893dd99da390cc94bc7a342b774930ed43ebd1308daef91e969312b019f6b0"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.10",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.10/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "84f3b645b70b605f13eb6edf30cdb6e4a12a939c854d28dbe1a1e0cb586205fd"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.10/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "6569c250729b52347c2ff875d7942a0ea8c054faf17cc60c2b48a4f1ad952808"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.11",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.11/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "823c2ff709c900256bde2edfbd20f549e625e6a322eca9bfa434d97aee189711"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.11/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "420e6b00b1dc2c0e5896534bcf798e4dbf319b74d69642f1cf3c304016cb2e1e"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.12",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.12/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "ca731c6f65911056ae0378c8e8c20e355eb6ac93bade667511af5517b8853d6b"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.12/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "ca9f146e2424439ed59d760ef91e663ae221c61c762ffa437fd9db449ae40f44"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.13",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.13/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "74d9818f0ca2a31405b9298c804025838a02257c2ad864d1d7246f68c354813a"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.13/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "4fcc9dd82b0e85395f7be67d7069f13ca2aa77feb92fbc51832ed3072c74fd96"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.14",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.14/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "a2aa86b21985a6bd800a4ab0907e97c82911e11c45329652a5f48b28ce5fed57"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.14/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "9f3bd07390a62ba27a2111f71cc3102dd81cc4dba869557af68ddd5cdf28e11f"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.15",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.15/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "b89480111dcaaed0188f7ef7dd205e3369ff366429b9e6656d74b52b844237cf"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.15/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "1c284b0dcec1c577a77a4ca0ff860e770ec8e2f60ddc11cb07d0e5d93ba19855"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.16",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.16/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "a0a4572201c085f09ddcbac75ccfd42962184524a05bbbe51bb91e2ff26f4849"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.16/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "213b8768c0383f1d1719a5eed8ce35f8bf49b63d97bcbdcbcec0d08578f37bfa"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.17",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.17/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "4ace9cab20661881ca5126f148fc079f163e9ac7e666aac4089ecacb91e2b196"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.17/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "3bdb4829379195044927237f2c5a97609cb872d1dbd1eb597edffa797333e031"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.18",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.18/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "e4b98acae81132cee73077f378db4908b072ea700402f1c772f1b922138f572d"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.18/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "3d77a6ffd821797e4fe49fc59c4f863aca632fcea5863d8d157e81553102f9da"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.19",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.19/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "d42274fbbfc63499ccd376426bd316ec6d68c35bd001d2acb8fb61faeee4c478"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.19/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "a2e101c2bd0314ccea606215c5c066367959e38972bcec9ab50fef40c0ed363a"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "patch": "16.20",
+      "sources": [
+        {
+          "url": "https://raw.communitydragon.org/16.20/game/maps/modespecificdata/kiwi.bin.json",
+          "sha256": "41d8cf58a5b2bb25d7cc69b94e3f78c98d337135bf0263d35a093eca3c284101"
+        },
+        {
+          "url": "https://raw.communitydragon.org/16.20/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+          "sha256": "a70e6f8ae91f90ca7c6cc558258d254d02f18b7b035afa351427c377918843c7"
+        }
+      ],
+      "unresolved": []
+    }
+  ]
+}

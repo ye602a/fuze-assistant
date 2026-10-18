@@ -31,7 +31,9 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 270;
+const HEIGHT: u32 = 260;
+const TITLE_WIDTH: f32 = 154.;
+const TITLE_HEIGHT: f32 = 64.;
 const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
 const DETAIL_HEIGHT: u32 = 210;
 const BG: u32 = 0x07131e;
@@ -103,11 +105,15 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [11., 14., 20., 24.] {
+            for size in [12., 15., 20., 24., 20., 22.] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
-                    DWRITE_FONT_WEIGHT_NORMAL,
+                    if formats.len() == 5 {
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD
+                    } else {
+                        DWRITE_FONT_WEIGHT_NORMAL
+                    },
                     DWRITE_FONT_STYLE_NORMAL,
                     DWRITE_FONT_STRETCH_NORMAL,
                     size,
@@ -116,6 +122,15 @@ impl Scene {
                 format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
                 formats.push(format);
             }
+            formats[4].SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            let ellipsis = dw.CreateEllipsisTrimmingSign(&formats[5])?;
+            formats[5].SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    ..Default::default()
+                },
+                &ellipsis,
+            )?;
             let icons = [
                 include_bytes!("../ui/assets/courageofthecolossus_large.png").as_slice(),
                 include_bytes!("../ui/assets/apexinventor_large.png").as_slice(),
@@ -139,7 +154,7 @@ impl Scene {
                     description: "离线说明示例。此处仅说明候选强化的效果，不表示玩家已领取。"
                         .into(),
                 }),
-                caption: "整体胜率 · 离线预览，非实际领取".into(),
+                caption: "整体胜率 · 离线样例".into(),
                 image_cache: Default::default(),
                 dw,
                 selected: None,
@@ -162,7 +177,18 @@ impl Scene {
         } else {
             &self.cards[index].description
         };
-        let text = format!("{}{}", text, self.reference.details[index]);
+        let reference = if self.reference.details[index].is_empty() {
+            format!("\n\n{}", self.reference.source)
+        } else {
+            self.reference.details[index].clone()
+        };
+        // The fixed header fits every observed real name; only an exceptional
+        // external title needs a complete copy in the scrollable text.
+        let text = if self.cards[index].title.chars().count() > 20 {
+            format!("{}\n\n{}{}", self.cards[index].title, text, reference)
+        } else {
+            format!("{}{}", text, reference)
+        };
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
             let layout =
@@ -253,9 +279,9 @@ impl Surface {
         self.text(
             scene,
             target,
-            "FUZE  海克斯推荐 · 拖动移动",
+            "FUZE  海克斯推荐",
             0,
-            rect(9., 5., 175., 22.),
+            rect(12., 5., 175., 22.),
             GOLD,
         );
         self.text(
@@ -289,34 +315,34 @@ impl Surface {
                     .cards
                     .iter()
                     .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
-            self.fill(target, rect(x, 34., 242., 190.), PANEL);
+            self.fill(target, rect(x, 34., 242., 196.), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
-            target.DrawRectangle(&rect(x, 34., 242., 190.), &self.brush, 1., None);
+            target.DrawRectangle(&rect(x, 34., 242., 196.), &self.brush, 1., None);
             if (partial && i == 1) || card.id.is_none() {
                 self.text(
                     scene,
                     target,
                     "此位置暂不可读",
                     1,
-                    rect(x + 10., 50., 222., 24.),
+                    rect(x + 14., 66., 214., 26.),
                     GOLD,
                 );
                 self.text(
                     scene,
                     target,
-                    "可能被遮挡或正在刷新。\n保留卡位，等待下一次识别。",
+                    "保留此卡位，等待重新识别。\n可能被遮挡或正在刷新。",
                     0,
-                    rect(x + 10., 84., 222., 46.),
+                    rect(x + 14., 104., 214., 56.),
                     MUTED,
                 );
                 continue;
             }
-            self.fill(target, rect(x + 10., 49., 64., 64.), 0x07131e);
+            self.fill(target, rect(x + 14., 50., 48., 48.), 0x07131e);
             if scene.icons[i].width() > 1 {
                 target.DrawBitmap(
                     &self.icons[i],
-                    Some(&rect(x + 12., 51., 60., 60.)),
+                    Some(&rect(x + 16., 52., 44., 44.)),
                     1.,
                     D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                     None,
@@ -324,11 +350,11 @@ impl Surface {
             } else {
                 self.brush.SetColor(&color(GOLD));
                 let points = [
-                    (x + 42., 58.),
-                    (x + 56., 72.),
-                    (x + 42., 86.),
-                    (x + 28., 72.),
-                    (x + 42., 58.),
+                    (x + 38., 57.),
+                    (x + 50., 69.),
+                    (x + 38., 81.),
+                    (x + 26., 69.),
+                    (x + 38., 57.),
                 ];
                 for p in points.windows(2) {
                     target.DrawLine(
@@ -348,9 +374,9 @@ impl Surface {
                 self.text(
                     scene,
                     target,
-                    "图标待补",
+                    "暂无图标",
                     0,
-                    rect(x + 19., 91., 54., 18.),
+                    rect(x + 14., 83., 52., 18.),
                     MUTED,
                 );
             }
@@ -358,91 +384,64 @@ impl Surface {
                 scene,
                 target,
                 &card.title,
-                1,
-                rect(x + 85., 47., 147., 23.),
+                5,
+                rect(x + 74., 43., TITLE_WIDTH, TITLE_HEIGHT),
                 TEXT,
             );
-            for (j, label) in ["选取率", "整体胜率"].iter().enumerate() {
-                let sx = x + 85. + j as f32 * 75.;
-                self.text(scene, target, label, 0, rect(sx, 74., 72., 17.), MUTED);
+            for (j, label) in ["整体胜率", "选取率"].iter().enumerate() {
+                let sx = x + 14. + j as f32 * 116.;
+                self.text(scene, target, label, 0, rect(sx, 118., 98., 20.), MUTED);
                 self.text(
                     scene,
                     target,
-                    if j == 0 { &card.pick } else { &card.win },
-                    2,
-                    rect(sx, 89., 72., 27.),
-                    if best { GOLD } else { TEXT },
+                    if j == 0 { &card.win } else { &card.pick },
+                    if j == 0 { 3 } else { 2 },
+                    rect(sx, 138., 98., 32.),
+                    if j == 0 { TEXT } else { MUTED },
                 );
             }
             self.text(
                 scene,
                 target,
-                if scene.selected == Some(i) {
-                    "点击收起说明"
+                if best {
+                    "推荐度 · 优先"
                 } else {
-                    "点击查看说明"
+                    "推荐度"
                 },
                 0,
-                rect(x + 10., 119., 134., 18.),
-                MUTED,
+                rect(x + 14., 191., 156., 22.),
+                if best { GOLD } else { MUTED },
             );
             self.text(
                 scene,
                 target,
                 &card
                     .score
-                    .map(|v| format!("推荐度 {:.0}", v * 100.))
-                    .unwrap_or_else(|| "暂无评级".into()),
-                0,
-                rect(x + 145., 119., 90., 18.),
+                    .map(|v| format!("{:.0}", v * 100.))
+                    .unwrap_or_else(|| "—".into()),
+                4,
+                rect(x + 178., 186., 50., 28.),
                 if best { GOLD } else { TEXT },
             );
-            self.fill(target, rect(x + 10., 141., 222., 8.), 0x24343e);
+            self.fill(target, rect(x + 14., 216., 214., 4.), 0x24343e);
             self.fill(
                 target,
                 rect(
-                    x + 11.,
-                    142.,
-                    220. * card.score.unwrap_or(0.).clamp(0., 1.) as f32,
-                    6.,
+                    x + 14.,
+                    216.,
+                    214. * card.score.unwrap_or(0.).clamp(0., 1.) as f32,
+                    4.,
                 ),
                 if best { GOLD } else { 0x42c6cc },
             );
-            self.fill(target, rect(x + 10., 158., 222., 1.), 0x34434c);
-            for j in 0..4 {
-                let sx = x + 10. + j as f32 * 56.;
-                self.text(
-                    scene,
-                    target,
-                    &format!("第 {} 次", j + 1),
-                    0,
-                    rect(sx, 166., 54., 18.),
-                    MUTED,
-                );
-                self.text(
-                    scene,
-                    target,
-                    &scene.reference.values[i][j],
-                    1,
-                    rect(sx, 187., 54., 25.),
-                    TEXT,
-                );
-            }
+            self.fill(target, rect(x + 14., 182., 214., 1.), 0x34434c);
         }
         self.text(
             scene,
             target,
-            &scene.reference.source,
+            "点击卡片查看效果与分阶段统计 · 推荐度用于比较，不代表胜率",
             0,
-            rect(12., 231., 736., 17.),
-            MUTED,
-        );
-        self.text(
-            scene,
-            target,
-            "四阶段仅供比较，不改变整体推荐 · 少于 200 场不显示胜率 · 点卡片查看样本",
-            0,
-            rect(12., 250., 736., 17.),
+            rect(12., 236., 736., 20.),
             MUTED,
         );
         if let Some(index) = scene.selected {
@@ -662,7 +661,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..224.).contains(&y) {
+    } else if (34. ..230.).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -1070,11 +1069,11 @@ impl HostOverlay {
                 }
             }
             let caption = if self.preview_mode {
-                "窗口预览 · 公开数据样例 · 非本局识别或领取"
+                "整体胜率 · 公开数据样例"
             } else if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
             } else {
-                "整体胜率 · 实际领取轮次未确认"
+                "整体胜率 · 候选强化"
             }
             .to_string();
             let scene = &mut self.window.state.scene;
@@ -1344,7 +1343,7 @@ impl HostOverlay {
             return Err("stage-reference-changed-recommendation-or-repainted".into());
         }
         self.render(&output.join("host-cards-four-stage-reference.png"))?;
-        // Click the stage row in our own hidden window; no input is sent to the OS.
+        // Stage statistics live in card details; no input is sent to the OS.
         unsafe {
             handle_click(self.window.hwnd, &mut self.window.state, 100., 196.);
         }
@@ -1666,6 +1665,32 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
         fuze_worker_host::stage_reference::now(),
     ));
     let mut cases = Vec::new();
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/augment-title-corpus.json"))?;
+    let names = corpus["names"].as_array().ok_or("title-corpus-invalid")?;
+    let mut max_title_height = 0f32;
+    for value in names {
+        let name = value.as_str().ok_or("title-corpus-invalid")?;
+        let utf16 = name.encode_utf16().collect::<Vec<_>>();
+        unsafe {
+            // Measure without a height limit so clipping cannot make the test pass.
+            let layout =
+                scene
+                    .dw
+                    .CreateTextLayout(&utf16, &scene.formats[5], TITLE_WIDTH, 32768.)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            max_title_height = max_title_height.max(metrics.height);
+            if metrics.height > TITLE_HEIGHT || metrics.width > TITLE_WIDTH || metrics.lineCount > 2
+            {
+                return Err(format!(
+                    "real-title-does-not-fit:{name}:{:?}",
+                    (metrics.width, metrics.height, metrics.lineCount)
+                )
+                .into());
+            }
+        }
+    }
     unsafe {
         let imaging: IWICImagingFactory =
             CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
@@ -1689,7 +1714,44 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                 surface.draw(&scene, &target, false)?;
                 timings.push(at.elapsed().as_secs_f64() * 1000.);
             }
-            for partial in [false, true] {
+            let original = scene.cards.clone();
+            let original_icons = scene.icons.clone();
+            for variant in [
+                "complete",
+                "partial",
+                "long-title",
+                "overflow-title",
+                "missing-data",
+            ] {
+                scene.cards = original.clone();
+                scene.icons = original_icons.clone();
+                if variant == "long-title" {
+                    scene.cards[0].title = "踢踏舞".into();
+                    scene.cards[1].title = "你摸不到".into();
+                    scene.cards[2].title = "任务：沃格勒特的巫师帽".into();
+                    for (i, icon) in [
+                        "tapdancer_large.png",
+                        "canttouchthis_large.png",
+                        "quest_woogletswitchcap_large.png",
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        let bytes = crate::public_art::bytes(&format!(
+                            "https://cdn.dtodo.cn/hextech/augment-icons/{icon}"
+                        ))
+                        .ok_or("title-fixture-icon-missing")?;
+                        scene.icons[i] = image::load_from_memory(bytes)?.into_rgba8();
+                    }
+                } else if variant == "overflow-title" {
+                    scene.cards[2].title = "超长强化符文名称".repeat(10);
+                } else if variant == "missing-data" {
+                    scene.cards[0].score = None;
+                    scene.cards[0].win = "—".into();
+                    scene.cards[0].pick = "—".into();
+                }
+                let partial = variant == "partial";
+                let surface = Surface::new(&scene, &target)?;
                 surface.draw(&scene, &target, partial)?;
                 let mut pixels = vec![0u8; (width * height * 4) as usize];
                 bitmap.CopyPixels(std::ptr::null(), width * 4, &mut pixels)?;
@@ -1697,16 +1759,15 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     p.swap(0, 2);
                 }
                 image::save_buffer(
-                    output.join(format!(
-                        "direct-{dpi}-{}.png",
-                        if partial { "partial" } else { "complete" }
-                    )),
+                    output.join(format!("direct-{dpi}-{variant}.png")),
                     &pixels,
                     width,
                     height,
                     image::ColorType::Rgba8,
                 )?;
             }
+            scene.cards = original;
+            scene.icons = original_icons;
             cases.push(serde_json::json!({"dpi":dpi,"render":crate::telemetry::samples(&timings)}));
         }
         let before = GetForegroundWindow();
@@ -1748,7 +1809,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             return Err("hidden window invariant failed".into());
         }
         Ok(
-            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","cases":cases,"corners":corners,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
+            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","title_corpus_checked":names.len(),"max_title_height":max_title_height,"title_font_size":22,"cases":cases,"corners":corners,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
         )
     }
 }

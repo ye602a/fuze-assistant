@@ -244,15 +244,12 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         save("home-paused")?;
                         navigation_input(&ui)?;
                         control(&ui, "偏好设置", || ui.set_page(2))?;
-                        control(&ui, "预览选人详情", || {
-                            state.invoke_command("preview-champion".into())
-                        })?;
+                        // Explicit offline fixtures remain available without player-facing controls.
+                        state.invoke_command("preview-champion".into());
                         if !state.get_notice().contains("已打开只读选人预览") {
                             return Err("champion-preview-command".into());
                         }
-                        control(&ui, "预览三卡推荐", || {
-                            state.invoke_command("preview-cards".into())
-                        })?;
+                        state.invoke_command("preview-cards".into());
                         if !state.get_notice().contains("已打开三卡公开样例") {
                             return Err("cards-preview-command".into());
                         }
@@ -276,6 +273,8 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                     }
                     2 if !session.busy() && !state.get_busy() && state.get_backend() == 1 => {
                         ui.set_page(2);
+                        ui.set_settings_section(0);
+                        ui.set_scroll_y(0.);
                         save("settings")?;
                         ui.set_scroll_y(-660.);
                         save("settings-controls")?;
@@ -455,6 +454,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         }
                         ui.set_quit_open(false);
                         ui.set_page(2);
+                        ui.set_settings_section(1);
                         ui.set_scroll_y(0.);
                         control(&ui, "扫描本地占用", || {
                             ui.global::<crate::MaintenanceState>()
@@ -618,6 +618,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         }
                         record.set_notice("".into());
                         ui.set_page(2);
+                        ui.set_settings_section(1);
                         ui.set_scroll_y(0.);
                         records.preview_settings_fixture(settings_fixture.clone())?;
                         step.set(17);

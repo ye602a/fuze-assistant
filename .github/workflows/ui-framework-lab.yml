@@ -51,6 +51,7 @@ jobs:
             ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-
             ui-lab-win-1.90-
       - name: Format and build software and Skia entry points
+        id: native-build
         working-directory: rust/ui-lab
         run: |
           cargo +1.90.0 fmt -- --check
@@ -75,8 +76,9 @@ jobs:
         run: |
           ./target/release/fuze-ui-lab.exe --review-controls artifacts/control-review
           exit $LASTEXITCODE
-      # No installers, upload-artifact, release publication or game/LCU access.
+      # Synthetic own-window images only; no installer, release or game/LCU access.
       - name: Direct cards and bounded motion
+        if: always() && steps.native-build.outcome == 'success'
         working-directory: rust/ui-lab
         run: |
           ./target/release/fuze-ui-lab.exe --review-direct artifacts/direct
@@ -115,8 +117,21 @@ jobs:
           FUZE_RUST_BIN_DIR: rust/ui-lab/target/release
         run: node scripts/check-rust-screen.mjs
       # Owned capture fixtures on disposable CI only; no player game, installer or release.
+      - name: Synthetic UI screenshots for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-ui-screenshots
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            rust/ui-lab/artifacts/restored-*.png
+            rust/ui-lab/artifacts/direct/direct-*.png
+            rust/ui-lab/artifacts/host-review/host-*.png
+            rust/ui-lab/artifacts/control-review/*.png
+            rust/ui-lab/artifacts/motion/*.png
       - name: Preserve compiled dependencies after runtime failures
-        if: always() && steps.production-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        if: always() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: rust/ui-lab/target

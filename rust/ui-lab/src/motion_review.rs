@@ -30,8 +30,8 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
     }))?;
     let ui = MotionReview::new()?;
     ui.show()?;
-    window.set_size(slint::PhysicalSize::new(640, 320));
-    let mut pixels = vec![Rgb8Pixel::default(); 640 * 320];
+    window.set_size(slint::PhysicalSize::new(640, 448));
+    let mut pixels = vec![Rgb8Pixel::default(); 640 * 448];
     let mut step = |ms: u64, name: Option<&str>| -> Result<bool, Box<dyn std::error::Error>> {
         clock.set(ms);
         slint::platform::update_timers_and_animations();
@@ -50,7 +50,7 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
                 output.join(format!("{name}.png")),
                 &bytes,
                 640,
-                320,
+                448,
                 image::ColorType::Rgb8,
             )?;
         }
@@ -96,10 +96,19 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
         return Err("focus-replayed-page".into());
     }
     ui.set_page(1);
+    ui.set_expanded(true);
     step(230, Some("page-enter"))?;
     step(246, None)?;
     step(306, Some("page-middle"))?;
     let entrance = ui.get_entrance_progress();
+    let tab_middle = ui.get_tab_indicator();
+    if !(11.0..211.0).contains(&tab_middle) {
+        return Err(format!("tab-indicator-not-progressive:{tab_middle}").into());
+    }
+    let chevron_middle = ui.get_chevron_progress();
+    if !(0.01..0.99).contains(&chevron_middle) {
+        return Err(format!("chevron-not-progressive:{chevron_middle}").into());
+    }
     if !(0.05..0.95).contains(&entrance) {
         return Err(format!("page-not-progressive:{entrance}").into());
     }
@@ -121,16 +130,21 @@ pub fn run(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error
     }
     // Disable motion while navigation/entrance are both in flight.
     ui.set_page(2);
+    ui.set_expanded(false);
     step(1210, None)?;
     step(1226, None)?;
     step(1266, None)?;
     motion.set_enabled(false);
     step(1267, None)?;
-    if ui.window().has_active_animations() || ui.get_entrance_progress() != 1. {
+    if ui.window().has_active_animations()
+        || ui.get_entrance_progress() != 1.
+        || (ui.get_tab_indicator() - (10. + 608. / 3. * 2.)).abs() > 0.1
+        || ui.get_chevron_progress() != 0.
+    {
         return Err("navigation-keeps-animating-while-disabled".into());
     }
     ui.hide()?;
-    let report = serde_json::json!({"sweep_middle_progress":middle,"new_page_progress":entrance,"duplicate_does_not_restart":true,"interruption_latest_immediate":true,"disabled_motion_settles_immediately":true,"focus_does_not_replay":true,"return_page_does_not_replay":true,"idle_redraws":idle_redraws,"clock":"deterministic","renderer":"software_offscreen","native_gpu_performance":false,"system_input":false,"game_access":false});
+    let report = serde_json::json!({"sweep_middle_progress":middle,"new_page_progress":entrance,"tab_middle_x":tab_middle,"chevron_middle_progress":chevron_middle,"tab_indicator_reduced_motion_settles":true,"duplicate_does_not_restart":true,"interruption_latest_immediate":true,"disabled_motion_settles_immediately":true,"focus_does_not_replay":true,"return_page_does_not_replay":true,"idle_redraws":idle_redraws,"clock":"deterministic","renderer":"software_offscreen","native_gpu_performance":false,"system_input":false,"game_access":false});
     std::fs::write(
         output.join("motion.json"),
         serde_json::to_vec_pretty(&report)?,
