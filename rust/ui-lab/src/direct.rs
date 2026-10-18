@@ -103,7 +103,7 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [12., 15., 20., 24., 20.] {
+            for size in [12., 15., 20., 24., 20., 15.] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
@@ -117,6 +117,14 @@ impl Scene {
                 formats.push(format);
             }
             formats[4].SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            let ellipsis = dw.CreateEllipsisTrimmingSign(&formats[5])?;
+            formats[5].SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    ..Default::default()
+                },
+                &ellipsis,
+            )?;
             let icons = [
                 include_bytes!("../ui/assets/courageofthecolossus_large.png").as_slice(),
                 include_bytes!("../ui/assets/apexinventor_large.png").as_slice(),
@@ -168,7 +176,7 @@ impl Scene {
         } else {
             self.reference.details[index].clone()
         };
-        let text = format!("{}{}", text, reference);
+        let text = format!("{}\n\n{}{}", self.cards[index].title, text, reference);
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
             let layout =
@@ -364,7 +372,7 @@ impl Surface {
                 scene,
                 target,
                 &card.title,
-                1,
+                5,
                 rect(x + 74., 48., 154., 48.),
                 TEXT,
             );
@@ -383,7 +391,11 @@ impl Surface {
             self.text(
                 scene,
                 target,
-                if best { "推荐度 · 优先" } else { "推荐度" },
+                if best {
+                    "推荐度 · 优先"
+                } else {
+                    "推荐度"
+                },
                 0,
                 rect(x + 14., 171., 156., 22.),
                 if best { GOLD } else { MUTED },
@@ -426,7 +438,7 @@ impl Surface {
                 scene,
                 target,
                 &scene.cards[index].title,
-                1,
+                5,
                 rect(20., 183. + DETAIL_OFFSET, 500., 24.),
                 GOLD,
             );
@@ -1665,12 +1677,20 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                 timings.push(at.elapsed().as_secs_f64() * 1000.);
             }
             let original = scene.cards.clone();
-            for variant in ["complete", "partial", "long-title", "missing-data"] {
+            for variant in [
+                "complete",
+                "partial",
+                "long-title",
+                "overflow-title",
+                "missing-data",
+            ] {
                 scene.cards = original.clone();
                 if variant == "long-title" {
                     scene.cards[0].title = "踢踏舞".into();
                     scene.cards[1].title = "你摸不到".into();
                     scene.cards[2].title = "超长强化符文名称换行示例".into();
+                } else if variant == "overflow-title" {
+                    scene.cards[2].title = "超长强化符文名称".repeat(10);
                 } else if variant == "missing-data" {
                     scene.cards[0].score = None;
                     scene.cards[0].win = "—".into();
