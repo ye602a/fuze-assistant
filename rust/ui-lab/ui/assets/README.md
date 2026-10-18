@@ -1,6 +1,8 @@
 # 复用资源
 
-- overview/history/settings/network/capture/recognition/data/rune SVG 的路径直接来自 `v0.6.3:src/renderer/components/RuneGlyph.vue`，保留原有图标体系；diamond 是同版状态菱形的矢量表达。
+- 通用 UI 图标统一使用 Lucide 0.468.0（提交 `f12b0de177fbc2a6795e99be065887e72b237123`），24×24、2px 描边、圆角端点，原始路径来自 https://github.com/lucide-icons/lucide/tree/0.468.0/icons 。只将 `currentColor` 改为蓝金界面的基色，由 Slint 按状态着色。
+- overview/layout-dashboard、history/history、settings/settings、network/plug-zap、capture/scan-line、recognition/scan-text、data/database、rune/gem；窗口和反馈控制使用 x、minus、chevron-down、info。`diamond.svg` 是保留的品牌状态点，不承载按钮含义。
+- 许可证见 `LUCIDE-LICENSE.txt`，同份声明加入随包 `THANKS.md`。游戏图标和品牌没有替换为 UI 图标。
 - 品牌继续引用仓库 `public/fuze.svg`，不创建另一个品牌。
 - champion PNG 与三个 augment PNG 取自此前已缓存的公开数据图标，原 URL 为 `https://cdn.dtodo.cn/hextech/champion-icons/<id>.png` 和 `https://cdn.dtodo.cn/hextech/augment-icons/<name>.png`。对应数据快照为仓库的 `resources/client-data/versions/16.20.1`。
 - 图片用于固定界面预览与生产界面展示，不代表本机英雄、个人战绩或实际领取。沿用仓库现有资源归属要求，不能因迁移 Rust 宣称这些游戏美术为自行创作。

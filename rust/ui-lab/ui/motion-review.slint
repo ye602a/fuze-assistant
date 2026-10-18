@@ -1,21 +1,16 @@
 // Public synthetic content for deterministic offscreen motion acceptance only.
-import { Theme, UiMotion, StatusSurface, PageEntrance, Navigation, Panel, Label } from "components.slint";
+import { Theme, UiMotion, StatusSurface, PageEntrance, Panel, Label, Tabs } from "components.slint";
 export component MotionReview inherits Window {
     width: 640px; height: 320px; background: Theme.background;
-    default-font-family: "Microsoft YaHei"; default-font-size: 13px;
+    default-font-family: "Microsoft YaHei UI"; default-font-size: 13px;
     in-out property <int> health: 0;
     in-out property <int> page: 0;
     out property <float> sweep-progress: status.progress;
     out property <float> entrance-progress: entrance.progress;
+    out property <float> tab-indicator: tabs.indicator-x / 1px;
     out property <string> status-text: root.health == 3 ? "连接异常 · 等待重试" : root.health == 2 ? "部分卡位暂不可读" : root.health == 1 ? "识别正常 · 推荐已就绪" : "正在准备";
     entrance := PageEntrance { page: root.page; }
-    HorizontalLayout { x: 16px; y: 8px; width: 608px; height: 46px; spacing: 12px;
-        for title[index] in ["对局助手", "战绩查询", "偏好设置"]: Navigation {
-            label: title; selected: root.page == index;
-            icon: @image-url("assets/overview.svg");
-            clicked => { root.page = index; }
-        }
-    }
+    tabs := Tabs { x: 16px; y: 8px; width: 608px; labels: ["常用设置", "数据与更新", "帮助与反馈"]; current <=> root.page; }
     status := StatusSurface {
         x: 16px; y: 66px; width: 608px; height: 146px;
         fill: root.health == 0 ? #12324b : root.health == 1 ? #123d34 : root.health == 2 ? #49391b : #4b222b;

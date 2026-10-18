@@ -118,6 +118,7 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
     'rust/ui-lab/artifacts/direct/direct-*.png',
     'rust/ui-lab/artifacts/host-review/host-*.png',
     'rust/ui-lab/artifacts/control-review/*.png',
+    'rust/ui-lab/artifacts/motion/*.png',
   ])
   for (const name of ['rust-lcu-regression', 'rust-detail-startup']) {
     const focused = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))

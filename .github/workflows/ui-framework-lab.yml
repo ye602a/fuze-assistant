@@ -129,6 +129,7 @@ jobs:
             rust/ui-lab/artifacts/direct/direct-*.png
             rust/ui-lab/artifacts/host-review/host-*.png
             rust/ui-lab/artifacts/control-review/*.png
+            rust/ui-lab/artifacts/motion/*.png
       - name: Preserve compiled dependencies after runtime failures
         if: always() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

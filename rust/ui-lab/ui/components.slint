@@ -1,4 +1,4 @@
-// Palette and glyphs from the v0.6.3 Chinese workbench.
+// Incumbent blue/gold palette with a consistent Lucide icon family.
 export global Theme {
     out property <color> background: #07131e;
     out property <color> surface: #101e2a;
@@ -103,6 +103,8 @@ export component Label inherits Text {
     color: Theme.ivory; font-size: 13px; vertical-alignment: center; overflow: elide;
 }
 export component Action inherits Rectangle {
+    in property <image> icon;
+    in property <bool> icon-only: false;
     out property <bool> focused: focus.has-focus;
     in property <string> label;
     in property <string> description: root.label;
@@ -120,7 +122,8 @@ export component Action inherits Rectangle {
     animate background, border-color { duration: root.down ? 0ms : UiMotion.quick; easing: ease-out; }
     border-radius: 2px; opacity: root.enabled || root.busy ? 1 : 0.55;
     accessible-role: button; accessible-label: root.description; forward-focus: focus;
-    Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 13px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
+    if root.icon-only: Image { x: (parent.width - 18px)/2; y: (parent.height - 18px)/2; width: 18px; height: 18px; source: root.icon; colorize: root.primary ? #1a2025 : #dcc794; image-fit: contain; }
+    if !root.icon-only: Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 13px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled && !root.busy; clicked => { focus.focus(); root.clicked(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled && !root.busy; key-pressed(event) => {
         if event.text == " " || event.text == "\n" { root.key-down = true; root.clicked(); return accept; } return reject;
@@ -147,6 +150,26 @@ export component Toggle inherits Rectangle {
     }
     TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.toggled(); return accept; } return reject; } }
+}
+// The indicator follows a user's selection; panel content remains immediate.
+export component Tabs inherits Rectangle {
+    in property <[string]> labels;
+    in-out property <int> current: 0;
+    out property <length> indicator-x: indicator.x;
+    private property <length> cell: root.width / max(1, root.labels.length);
+    height: 42px;
+    background: Theme.surface;
+    border-width: 1px; border-color: Theme.stroke;
+    HorizontalLayout { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 4px; spacing: 0px;
+        for title[index] in root.labels: Action {
+            label: title; quiet: true; min-width: 0px;
+            clicked => { root.current = index; }
+        }
+    }
+    indicator := Rectangle { x: root.current * root.cell + 10px; y: parent.height - 3px;
+        width: max(0px, root.cell - 20px); height: 2px; background: Theme.gold;
+        animate x { duration: UiMotion.selection; easing: cubic-bezier(0.16, 1, 0.3, 1); }
+    }
 }
 export component Panel inherits Rectangle {
     in property <float> entrance: 1;
@@ -202,7 +225,11 @@ export component Disclosure inherits Panel {
     in-out property <bool> expanded: false;
     height: root.expanded ? 114px : 46px;
     accessible-role: button; accessible-label: root.label; forward-focus: focus;
-    Label { y: 0px; x: 20px; height: 46px; width: parent.width - 40px; text: (root.expanded ? "−  " : "+  ") + root.label; color: #bdad88; }
+    Label { y: 0px; x: 20px; height: 46px; width: parent.width - 66px; text: root.label; color: #bdad88; }
+    Image { x: parent.width - 38px; y: 15px; width: 16px; height: 16px; source: @image-url("assets/chevron-down.svg"); colorize: Theme.gold;
+        rotation-angle: root.expanded ? 180deg : 0deg;
+        animate rotation-angle { duration: UiMotion.state; easing: ease-out; }
+    }
     if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
     TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
     focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
@@ -230,12 +257,12 @@ export component NoticeBar inherits Rectangle {
     in property <bool> enabled: true;
     callback dismissed;
     height: 52px; background: #102431; border-width: 1px; border-color: #385361;
-    Image { x: 12px; y: 22px; width: 7px; height: 7px; source: @image-url("assets/diamond.svg"); colorize: Theme.blue; }
+    Image { x: 12px; y: 18px; width: 16px; height: 16px; source: @image-url("assets/info.svg"); colorize: Theme.blue; }
     changed message => { notice-scroll.viewport-y = 0px; }
-    notice-scroll := Flickable { x: 28px; y: 7px; width: parent.width - 80px; height: 38px;
+    notice-scroll := Flickable { x: 38px; y: 7px; width: parent.width - 90px; height: 38px;
         viewport-width: self.width; viewport-height: max(self.height, message-text.preferred-height);
         message-text := Text { width: notice-scroll.width; height: self.preferred-height; text: root.message; color: #d4e2e9; font-size: 12px; wrap: word-wrap; }
     }
     Scrollbar { x: parent.width - 52px; y: 7px; height: 38px; content-height: notice-scroll.viewport-height; offset <=> notice-scroll.viewport-y; }
-    Action { x: parent.width - 40px; y: 9px; width: 32px; min-width: 0px; height: 32px; quiet: true; label: "×"; description: "关闭操作反馈"; enabled: root.enabled; clicked => { root.dismissed(); } }
+    Action { x: parent.width - 40px; y: 9px; width: 32px; min-width: 0px; height: 32px; quiet: true; icon-only: true; icon: @image-url("assets/x.svg"); description: "关闭操作反馈"; enabled: root.enabled; clicked => { root.dismissed(); } }
 }

@@ -2,7 +2,7 @@ import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
 import { HostState, ShellState, RecordState, DiagnosticState } from "host-state.slint";
 import { RecordDetails } from "records.slint";
-import { Theme, Label, Action, Panel, SectionTitle, Toggle } from "components.slint";
+import { Theme, Label, Action, Panel, SectionTitle, Toggle, Tabs } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
     in property <float> entrance: 1;
@@ -10,12 +10,7 @@ export component SettingsPage inherits VerticalLayout {
     in-out property <bool> manual-open: false;
     in-out property <bool> feedback-open: false;
     spacing: 16px;
-    HorizontalLayout { height: 38px; spacing: 10px;
-        for title[index] in ["常用设置", "数据与更新", "帮助与反馈"]: Action {
-            label: title; primary: root.section == index;
-            clicked => { root.section = index; }
-        }
-    }
+    Tabs { labels: ["常用设置", "数据与更新", "帮助与反馈"]; current <=> root.section; }
     if root.section == 0: VerticalLayout { spacing: 16px;
         Panel {
             height: HostState.preferences.length * 68px + 120px;

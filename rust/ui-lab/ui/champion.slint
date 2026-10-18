@@ -1,7 +1,7 @@
 import { Palette } from "std-widgets.slint";
 import { LineEdit, ListView } from "std-widgets.slint";
 import { DetailRow, BuildRow } from "host-state.slint";
-import { Theme, UiMotion, Label, Action, Panel, SectionTitle, Disclosure, Scrollbar, NoticeBar } from "components.slint";
+import { Theme, UiMotion, Label, Action, Panel, SectionTitle, Disclosure, Scrollbar, NoticeBar, Tabs } from "components.slint";
 import { ChampionFixture, ChampionChoice } from "champion-fixture.slint";
 
 export struct StageRow { name: string, win: string, pick: string, samples: string }
@@ -80,7 +80,7 @@ export component ChampionWindow inherits Window {
         Label { x: 15px; y: 0px; height: 42px; text: "FUZE"; color: #79d6ce; font-size: 12px; letter-spacing: 2px; }
         Label { x: 76px; y: 0px; height: 42px; text: root.side-mode ? "局内符文资料" : root.offline ? "英雄详情 · 离线预览" : "选人英雄详情"; font-weight: 600; }
         TouchArea { width: parent.width - 42px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
-        Action { x: parent.width - 42px; y: 0px; width: 42px; height: 42px; label: "×"; description: "关闭英雄详情"; quiet: true; clicked => { root.close-requested(); } }
+        Action { x: parent.width - 42px; y: 0px; width: 42px; height: 42px; icon-only: true; icon: @image-url("assets/x.svg"); description: "关闭英雄详情"; quiet: true; clicked => { root.close-requested(); } }
     }
     scroll := Flickable {
         x: 0px; y: 42px; width: root.width; height: root.footer-top - self.y;
@@ -138,10 +138,7 @@ export component ChampionWindow inherits Window {
                     Label { x: 8px; y: 24px; height: 24px; text: metric.value; font-size: 19px; }
                 }
             }
-            HorizontalLayout { height: 36px; spacing: 8px;
-                Action { label: "海克斯"; primary: root.detail-tab == 0; clicked => { root.detail-tab = 0; } }
-                Action { label: "出装与技能"; primary: root.detail-tab == 1; clicked => { root.detail-tab = 1; } }
-            }
+            Tabs { labels: ["海克斯", "出装与技能"]; current <=> root.detail-tab; }
             if root.guides.length > 0: VerticalLayout { spacing: 6px;
                 SectionTitle { height: 25px; text: "相关攻略"; font-size: 13px; }
                 for title[index] in root.guides: Action { label: title; description: "在默认浏览器打开攻略：" + title; enabled: !root.offline && !root.action-busy; clicked => { root.player-action("guide", index); } }
@@ -159,8 +156,8 @@ export component ChampionWindow inherits Window {
                     for a[index] in root.augments: Panel {
                         height: 82px;
                         Image { x: 10px; y: 14px; width: 45px; height: 45px; source: a.icon; }
-                        Label { x: 65px; y: 10px; width: parent.width - 155px; height: 27px; text: a.title; font-size: 14px; color: a.rarity == 2 ? #bf9ee9 : a.rarity == 1 ? Theme.gold : Theme.ivory; }
-                        Label { x: 65px; y: 42px; width: parent.width - 155px; height: 22px; text: a.tier + " · 选 " + a.pick; color: Theme.muted; font-size: 12px; }
+                        Label { x: 65px; y: 4px; width: parent.width - 155px; height: 44px; text: a.title; wrap: word-wrap; font-size: 16px; font-weight: 600; color: a.rarity == 2 ? #bf9ee9 : a.rarity == 1 ? Theme.gold : Theme.ivory; }
+                        Label { x: 65px; y: 52px; width: parent.width - 155px; height: 22px; text: a.tier + " · 选 " + a.pick; color: Theme.muted; font-size: 12px; }
                         Label { x: parent.width - 83px; y: 12px; width: 70px; height: 19px; text: "胜率"; horizontal-alignment: right; color: Theme.muted; font-size: 12px; }
                         Label { x: parent.width - 88px; y: 34px; width: 75px; height: 30px; text: a.win; horizontal-alignment: right; color: Theme.gold; font-size: 22px; font-weight: 700; }
                         accessible-role: button; accessible-label: "查看" + a.title + "的说明"; forward-focus: card-focus;
@@ -207,7 +204,7 @@ export component ChampionWindow inherits Window {
         x: 12px; y: root.description-top; width: root.width - 24px; height: root.description-height;
         TouchArea { }
         SectionTitle { x: 14px; y: 10px; width: parent.width - 62px; height: 28px; text: root.augments[root.expanded-augment].title; }
-        Action { x: parent.width - 40px; y: 5px; width: 34px; min-width: 0px; height: 34px; label: "×"; description: "关闭符文说明"; quiet: true; clicked => { root.expanded-augment = -1; } }
+        Action { x: parent.width - 40px; y: 5px; width: 34px; min-width: 0px; height: 34px; icon-only: true; icon: @image-url("assets/x.svg"); description: "关闭符文说明"; quiet: true; clicked => { root.expanded-augment = -1; } }
         desc-scroll := Flickable { x: 14px; y: 50px; width: parent.width - 28px; height: 162px; viewport-width: self.width; viewport-height: description-text.preferred-height;
             description-text := Text { width: desc-scroll.width; height: self.preferred-height; text: root.augments[root.expanded-augment].description; color: Theme.ivory; font-size: 12px; wrap: word-wrap; }
         }

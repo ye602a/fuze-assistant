@@ -435,7 +435,8 @@ impl Pipeline {
                     epoch: capture.key().0,
                     sequence: capture.key().1,
                 };
-                if let Some(evidence) = capture.selection() {
+                let evidence = capture.selection();
+                if let Some(evidence) = evidence {
                     let now = self.now();
                     let decision = self.screen_gate.observe(evidence, now);
                     if !decision.recognize {
@@ -455,7 +456,11 @@ impl Pipeline {
                     }
                 }
                 let atlas = capture.titles().map_err(|_| "capture-atlas")?;
-                self.recognize(key, &atlas)
+                let delivery = self.recognize(key, &atlas)?;
+                if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible) {
+                    self.session.screen_visible(self.now());
+                }
+                Ok(delivery)
             }
             FrameStatus::Resized => {
                 self.capture_state = "resizing";

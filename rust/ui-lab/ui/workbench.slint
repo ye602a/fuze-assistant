@@ -80,8 +80,8 @@ export component Workbench inherits Window {
         Rectangle { x: 0px; y: 41px; height: 1px; background: #253340; }
         Label { y: 0px; x: root.inset; height: 41px; text: root.page == 0 ? "对局助手" : root.page == 1 ? "战绩查询" : "偏好设置"; color: #91a0ac; font-size: 12px; }
         TouchArea { x: 0px; y: 0px; width: parent.width - 92px; pointer-event(event) => { if event.kind == PointerEventKind.down { root.drag-window(); } } }
-        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; label: "−"; description: "最小化窗口"; clicked => { root.minimize(); } }
-        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; label: "×"; description: "关闭窗口"; clicked => { root.request-close(); } }
+        Action { y: 0px; x: parent.width - 92px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; icon-only: true; icon: @image-url("assets/minus.svg"); description: "最小化窗口"; clicked => { root.minimize(); } }
+        Action { y: 0px; x: parent.width - 46px; width: 46px; height: 41px; enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == ""; quiet: true; icon-only: true; icon: @image-url("assets/x.svg"); description: "关闭窗口"; clicked => { root.request-close(); } }
     }
     content-focus := FocusScope { focus-on-click: false;
     enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
