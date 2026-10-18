@@ -6,7 +6,9 @@ The repository is public. The active native preview is Rust (`rust/crates/`) wit
 Slint and Direct2D/DirectWrite UI (`rust/ui-lab/`). Electron/Vue under `src/`
 remains the v0.6.3 stable implementation and migration reference. The Electron
 commands and architecture rules below apply to that implementation, not to Rust UI.
-Use `docs/development/README.md` and current CI for native build/check entry points.
+Read `docs/CODEX_HANDOFF.md` first for current scope, published build identity,
+remaining work and validation boundaries. Historical milestone checklists do not
+supersede it. Use `docs/development/README.md` and current CI for native build/check entry points.
 Public Rust update downloads need no token; optional GitHub issue uploads require
 separate local authorization. Never embed a shared credential.
 
@@ -71,7 +73,7 @@ The GitHub release workflow runs on Node `22.18.0` with npm 10, installs with `n
 
 After dependency or lockfile changes, verify the lockfile with `npx -p npm@10 npm ci --ignore-scripts` before publishing. Use the existing `npm run release:*` scripts so `npm version` creates the version commit and annotated tag; avoid ad hoc lightweight release tags. If a bad release tag must be cleaned up, delete the intended local and remote tags explicitly and recreate only the confirmed version tag.
 
-Fuze uses the private `ye602a/fuze-assistant` GitHub Releases feed, independent of the upstream data API. Publish a complete reviewed release with its installer, blockmap, `latest.yml`, checksums and release notes, and verify the latest-release pointer. Keep packaged local changelog entries current for the installed version; they cannot update older installed copies. Do not change the original author's `/api/client/v1/config` to announce Fuze releases. Keep automatic download/installation disabled; never embed a GitHub credential in source or release assets.
+Fuze uses the public `ye602a/fuze-assistant` GitHub Releases feed, independent of the upstream data API. The Electron stable release format is installer, blockmap, `latest.yml`, checksums and release notes; the Rust preview uses ZIP, FUZ, its blockmap and `rust-update.json`. Do not mix these formats or replace the stable channel without authorization. Verify the appropriate channel pointer. Keep packaged local changelog entries current for the installed version; they cannot update older installed copies. Do not change the original author's `/api/client/v1/config` to announce Fuze releases. Keep automatic download/installation disabled; never embed a GitHub credential in source or release assets.
 
 Match-history production uploads are release-gated. Source and local packages must default to localhost; only `.github/workflows/release-windows.yml` may inject `ARAMGG_DISTRIBUTION_CHANNEL=official` with the production `ARAMGG_MATCH_HISTORY_UPLOAD_ORIGIN`. Keep the runtime check for both `app.isPackaged` and the official channel, and do not reuse the read-only `ARAMGG_DATA_API_ORIGIN` for uploads.
 

@@ -1,5 +1,7 @@
 # 屏幕采集与整链路验收
 
+> 历史实现说明：下表记录最初迁回屏幕策略时的 WGC 版本。后续为消除黄框已改成 DXGI 主屏持久流，GDI 回退继续保留；当前代码、调度与最新整链证据见 [交接文档](../../CODEX_HANDOFF.md)。不要根据旧表恢复 WGC 为默认生产后端。
+
 基准为 v0.6.3 的 auto-screenshot-service.ts、screenshot.ts、capture-stream.ts；不以原型窗口能产生帧替代生产捕获入口验收。
 
 ## 恢复的行为

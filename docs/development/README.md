@@ -2,6 +2,8 @@
 
 [玩家首页](../../README.md) · [玩家指南](../PLAYER_GUIDE.md)
 
+**接续开发先读：[当前状态与 Codex 交接](../CODEX_HANDOFF.md)。** 其中按已实现、已发布、实际未验收、未闭环目标和已取消项整理了本轮迁移。不要把历史阶段报告重复转成待办。
+
 ## 当前代码与发布边界
 
 `master` 已通过 [集成 PR #95](https://github.com/ye602a/fuze-assistant/pull/95) 纳入 Rust 开发历史。当前开发方向是 Rust 原生测试版；已发布的 v0.6.3 Electron 稳定版继续保留。合并源码、通过 CI 与发布安装包是三个不同步骤，不按每个 PR 自动打包。
