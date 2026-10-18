@@ -1100,6 +1100,9 @@ pub fn run(output: &Path) -> Result<serde_json::Value> {
         }
     }
     let failures = audit.rows.iter().filter(|r| r["passed"] != true).count();
+    for row in audit.rows.iter().filter(|r| r["passed"] != true) {
+        eprintln!("control-audit-failure: {row}");
+    }
     let report = serde_json::json!({"checks":audit.rows.len(),"failures":failures,"system_input":false,"game_access":false,"external_effects_executed":false,"scope":"real component hit testing; external callback targets recorded only","rows":audit.rows});
     std::fs::write(
         output.join("controls.json"),
