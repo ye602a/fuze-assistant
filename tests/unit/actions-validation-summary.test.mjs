@@ -108,7 +108,17 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
   assert.ok(steps.some(step => step.run?.includes('--review-host') && !step.if))
   assert.ok(steps.some(step => step.run?.includes('--review-controls') && !step.if))
   assert.ok(steps.some(step => step.run?.includes('--features gpu -j 2') && !step.if))
-  assert.ok(!steps.some(step => /package-rust-|gh release/.test(step.run || '') || step.uses?.startsWith('actions/upload-artifact')))
+  assert.ok(!steps.some(step => /package-rust-|gh release/.test(step.run || '')))
+  const uploads = steps.filter(step => step.uses?.startsWith('actions/upload-artifact'))
+  assert.equal(uploads.length, 1)
+  assert.equal(uploads[0].with.name, 'synthetic-ui-screenshots')
+  assert.equal(uploads[0].with['retention-days'], 7)
+  assert.deepEqual(uploads[0].with.path.trim().split('\n'), [
+    'rust/ui-lab/artifacts/restored-*.png',
+    'rust/ui-lab/artifacts/direct/direct-*.png',
+    'rust/ui-lab/artifacts/host-review/host-*.png',
+    'rust/ui-lab/artifacts/control-review/*.png',
+  ])
   for (const name of ['rust-lcu-regression', 'rust-detail-startup']) {
     const focused = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
     assert.equal(focused.on.pull_request, undefined)

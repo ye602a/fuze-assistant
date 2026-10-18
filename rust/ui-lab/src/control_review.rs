@@ -2,7 +2,7 @@
 //! is attached: external effects are recorded at the callback boundary, not executed.
 //! This report proves event routing, not network/installer/game success.
 use crate::{
-    ChampionWindow, ClaimState, HostState, MaintenanceState, RecordState, ShellState, Workbench,
+    ChampionWindow, DiagnosticState, HostState, MaintenanceState, RecordState, ShellState, Workbench,
 };
 use i_slint_core::{
     accessibility::AccessibleStringProperty as Prop, items::ItemRc, window::WindowInner,
@@ -150,7 +150,7 @@ fn target(ui: &impl Surface, label: &str) -> Result<(f32, f32)> {
             })
             .ok_or_else(|| format!("control-not-found:{label}"))?;
         let (x, y) = point(&item);
-        let fixed = matches!(label, "最小化窗口" | "关闭窗口" | "×")
+        let fixed = matches!(label, "最小化窗口" | "关闭窗口" | "关闭英雄详情")
             || label.contains("套装备方案")
             || matches!(label, "关闭操作反馈" | "局内资料 · 只读参考");
         if (45. ..ui.bottom() - 6.).contains(&y) || (fixed && y >= 0. && y < h) {
@@ -187,6 +187,12 @@ impl Audit {
             .push(serde_json::json!({"control":name,"passed":ok,"detail":detail.to_string()}));
     }
     fn click(&mut self, ui: &impl Surface, label: &str, expected: Option<&str>) -> bool {
+        self.activate(ui, label, expected, true)
+    }
+    fn click_once(&mut self, ui: &impl Surface, label: &str, expected: Option<&str>) -> bool {
+        self.activate(ui, label, expected, false)
+    }
+    fn activate(&mut self, ui: &impl Surface, label: &str, expected: Option<&str>, keyboard: bool) -> bool {
         self.events.borrow_mut().clear();
         match target(ui, label) {
             Ok((x, y)) => {
@@ -213,7 +219,7 @@ impl Audit {
                         );
                     }
                 }
-                if ok
+                if ok && keyboard
                     && expected.is_some_and(|e| {
                         e != "__must_not_dispatch__" && e != "stage:false" && e != "stage-reset"
                     })
@@ -263,11 +269,11 @@ fn bind(ui: &Workbench, events: &Events) {
     ui.global::<MaintenanceState>()
         .on_action(move |v| e.borrow_mut().push(format!("maintenance:{v}")));
     let e = events.clone();
-    ui.global::<ClaimState>()
-        .on_action(move |v| e.borrow_mut().push(format!("claim:{v}")));
-    let e = events.clone();
-    ui.global::<crate::DiagnosticState>()
+    ui.global::<DiagnosticState>()
         .on_action(move |v| e.borrow_mut().push(format!("diagnostic:{v}")));
+    let e = events.clone();
+    ui.global::<DiagnosticState>()
+        .on_upload_action(move |v| e.borrow_mut().push(format!("upload:{v}")));
     let e = events.clone();
     ui.global::<RecordState>()
         .on_action(move |v, i| e.borrow_mut().push(format!("record:{v}:{i}")));
@@ -288,7 +294,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     let s = ui.global::<HostState>();
     let m = ui.global::<MaintenanceState>();
     let r = ui.global::<RecordState>();
-    let c = ui.global::<ClaimState>();
+    let d = ui.global::<DiagnosticState>();
     s.set_connected(true);
     s.set_offline(false);
     s.set_running(false);
@@ -388,6 +394,9 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     s.set_running(false);
     ui.set_page(0);
     ui.set_scroll_y(0.);
+    a.check("运行详情默认收起", !ui.get_runtime_open(), "normal overview stays compact");
+    a.click(ui, "查看运行详情", None);
+    a.check("展开运行详情", ui.get_runtime_open(), "details revealed via hit test");
     for label in ["等级调度 · 等待对局", "数据来源与版本"] {
         a.click(ui, label, None);
         a.check(
@@ -410,12 +419,21 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
             "collapsed",
         );
     }
+    a.click(ui, "收起运行详情", None);
+    a.check("收起运行详情结果", !ui.get_runtime_open(), "details collapsed");
     ui.set_page(2);
     ui.set_scroll_y(0.);
+    for (label, section) in [("数据与更新", 1), ("帮助与反馈", 2), ("常用设置", 0)] {
+        a.click(ui, label, None);
+        a.check(label, ui.get_settings_section() == section, "settings section changed via hit test");
+        for removed in ["查看运行状态", "预览选人详情", "预览三卡推荐", "检查一次", "标记操作前", "清除对比", "领取验证场景", "查看字段详情", "移除旧更新令牌", "界面语言"] {
+            a.check(&format!("普通设置移除 {removed}"), !items(ui).iter().any(|i| i.accessible_string_property(Prop::Label).is_some_and(|v| v == removed)), "development or obsolete control absent");
+        }
+    }
+    a.click(ui, "数据与更新", None);
     for (label, command) in [
         ("检查新版", "check"),
         ("退出并打开更新程序", "install"),
-        ("移除旧更新令牌", "forget"),
         ("扫描本地占用", "scan"),
         ("清理可回收文件", "clean"),
     ] {
@@ -427,6 +445,8 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         "public channel has no credential entry or private toggle",
     );
     a.click(ui, "选择旧设置并预览", Some("record:import-settings:0"));
+    a.click(ui, "更新推荐数据与字典", Some("host:data-update"));
+    a.click(ui, "常用设置", None);
     for (key, title) in prefs {
         a.click(ui, title, Some(&format!("pref:{key}:false")));
     }
@@ -451,36 +471,8 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "保存目录", Some("directory:fixture-client"));
     a.click(ui, "清除手动回退", Some("directory:"));
     a.click(ui, "高级回退：自动连接失败时手动指定目录", None);
-    for (label, cmd) in [
-        ("查看运行状态", "show-status"),
-        ("预览选人详情", "preview-champion"),
-        ("预览三卡推荐", "preview-cards"),
-        ("更新推荐数据与字典", "data-update"),
-        ("重新打开局内资料", "show-reference"),
-    ] {
-        a.click(ui, label, Some(&format!("host:{cmd}")));
-    }
-    for index in 1..6 {
-        a.events.borrow_mut().clear();
-        select_next(ui, "领取验证场景")?;
-        let ev = a.events.borrow().clone();
-        a.check(
-            "领取验证场景",
-            c.get_scenario() == index && ev == ["claim:clear"],
-            format!("scenario={index}; resets comparison"),
-        );
-    }
-    a.click(ui, "检查一次", Some("claim:inspect"));
-    c.set_can_mark(true);
-    a.click(ui, "标记操作前", Some("claim:mark"));
-    a.click(ui, "清除对比", Some("claim:clear"));
-    a.click(ui, "查看字段详情", None);
-    a.check(
-        "字段详情展开",
-        c.get_details_open(),
-        "local detail disclosure",
-    );
-    a.click(ui, "收起字段详情", None);
+    a.click(ui, "重新打开局内资料", Some("host:show-reference"));
+    a.click(ui, "帮助与反馈", None);
     a.click(ui, "查看最近状态", None);
     a.check(
         "最近状态展开",
@@ -494,10 +486,31 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     ui.global::<crate::DiagnosticState>().set_log_retry(true);
     a.click(ui, "重试日志", Some("diagnostic:retry-log"));
     ui.global::<crate::DiagnosticState>().set_log_retry(false);
-    c.set_cooldown(30);
-    a.disabled(ui, "稍候 30 秒");
-    c.set_cooldown(0);
-    for kind in ["clean", "forget", "install"] {
+    a.check("公开反馈默认收起", target(ui, "配置上传令牌").is_err(), "advanced feedback controls hidden");
+    a.click(ui, "展开公开诊断反馈", None);
+    d.set_upload_ready(true);
+    d.set_upload_has_report(true);
+    for (label, action) in [("每局自动上传到公开 Issues", "toggle"), ("获取上传令牌", "help"), ("配置上传令牌", "configure"), ("验证授权", "verify"), ("重试待传报告", "retry"), ("查看报告", "open"), ("删除上传令牌", "remove")] {
+        a.click(ui, label, Some(&format!("upload:{action}")));
+    }
+    a.click(ui, "补传最近对局", None);
+    a.check("补传必须确认", d.get_upload_confirm() && a.events.borrow().is_empty(), "opening confirmation performs no upload");
+    a.click(ui, "取消", None);
+    a.check("取消补传不上传", !d.get_upload_confirm() && a.events.borrow().is_empty(), "cancel closes confirmation only");
+    a.click(ui, "补传最近对局", None);
+    a.click_once(ui, "确认公开补传", Some("upload:recover"));
+    a.check("补传确认关闭", !d.get_upload_confirm(), "callback recorded only; no host or network attached");
+    d.set_upload_busy(true);
+    for label in ["每局自动上传到公开 Issues", "获取上传令牌", "配置上传令牌", "正在验证…", "补传最近对局", "重试待传报告", "删除上传令牌"] {
+        a.disabled(ui, label);
+    }
+    d.set_upload_busy(false);
+    s.set_running(true);
+    a.disabled(ui, "补传最近对局");
+    s.set_running(false);
+    a.click(ui, "收起公开诊断反馈", None);
+    a.click(ui, "数据与更新", None);
+    for kind in ["clean", "install"] {
         m.set_confirmation(kind.into());
         a.click(ui, "取消", Some("maintenance:cancel"));
         a.click(ui, "确认", Some("maintenance:confirm"));
@@ -511,7 +524,9 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         m.set_confirmation("".into());
     }
     s.set_running(true);
+    a.click(ui, "帮助与反馈", None);
     a.disabled(ui, "导出脱敏反馈");
+    a.click(ui, "数据与更新", None);
     a.click(ui, "检查新版", Some("maintenance:check"));
     a.disabled(ui, "扫描本地占用");
     a.disabled(ui, "更新推荐数据与字典");
@@ -562,7 +577,12 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         s.set_history_can_more(true);
         a.click(ui, label, Some(&format!("host:{cmd}")));
     }
+    a.check("战绩管理默认收起", !ui.get_history_tools_open(), "import and unbound observations hidden initially");
+    a.click(ui, "战绩管理", None);
+    a.check("展开战绩管理", ui.get_history_tools_open(), "management controls revealed via hit test");
     a.click(ui, "选择旧战绩并预览", Some("record:import-history:0"));
+    let history_fixture = s.get_history();
+    s.set_history(Default::default());
     a.click(ui, "查看未绑定本地观察", Some("unbound:open:1"));
     r.set_unbound_open(true);
     r.set_unbound(model(vec![crate::ObservationRow {
@@ -578,6 +598,9 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "收起完整事件", Some("unbound:select:0"));
     a.click(ui, "收起未绑定本地观察", Some("unbound:open:0"));
     r.set_unbound_open(false);
+    a.click(ui, "收起战绩管理", None);
+    a.check("收起战绩管理结果", !ui.get_history_tools_open(), "management controls collapsed");
+    s.set_history(history_fixture);
     a.click(ui, "查看详情", Some("record:select:0"));
     s.set_history_selected(0);
     a.click(ui, "收起详情", Some("record:select:0"));
@@ -627,6 +650,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         "cancel without exit",
     );
     ui.set_page(2);
+    ui.set_settings_section(0);
     ui.set_scroll_y(0.);
     let _ = ui.window().take_snapshot()?;
     ui.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -721,7 +745,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     ]));
     ui.set_augments(model(vec![crate::DetailRow {
         title: "测试符文".into(),
-        description: "仅供界面验证".into(),
+        description: "仅供界面验证。长说明应能完整滚动阅读，且不会覆盖底部反馈与装备操作。".repeat(24).into(),
         ..Default::default()
     }]));
     use slint::Model;
@@ -770,12 +794,34 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         ui.get_expanded_augment() == 0,
         "description selected",
     );
+    key(ui, " ".into());
+    a.check("符文说明键盘重复收起", ui.get_expanded_augment() == -1, "Space matches pointer toggle");
+    key(ui, "\n".into());
+    a.check("符文说明 Enter 展开", ui.get_expanded_augment() == 0, "focus remains on originating augment");
+    key(ui, slint::platform::Key::Escape.into());
+    a.check("符文说明 Escape 关闭", ui.get_expanded_augment() == -1, "Escape dismisses without changing hero");
+    key(ui, "\n".into());
+    a.check("符文说明关闭后焦点保留", ui.get_expanded_augment() == 0, "Enter reopens the same focused augment");
+    ui.set_action_notice("装备配置失败，请稍后重试。长反馈保留在独立底栏，不遮住当前符文说明。".repeat(4).into());
+    let pixels = ui.window().take_snapshot()?;
+    a.check("符文说明避让反馈区", ui.get_description_bottom() <= ui.get_feedback_top(), format!("description-bottom={}; feedback-top={}", ui.get_description_bottom(), ui.get_feedback_top()));
+    image::save_buffer(a.output.join(format!("champion-description-feedback-{}.png", pixels.width())), pixels.as_bytes(), pixels.width(), pixels.height(), image::ColorType::Rgba8)?;
     a.click(ui, "关闭符文说明", None);
     a.check(
         "收起符文说明",
         ui.get_expanded_augment() == -1,
         "description cleared",
     );
+    ui.set_action_notice("".into());
+    let augment_fixture = ui.get_augments();
+    ui.set_augments(Default::default());
+    a.click(ui, "棱彩", Some("augment-filter::2"));
+    let pixels = ui.window().take_snapshot()?;
+    let position = |label: &str| items(ui).iter().find(|i| i.accessible_string_property(Prop::Label).is_some_and(|v| v == label)).map(point);
+    let compact_empty = position("棱彩").zip(position("查看分阶段胜率参考")).is_some_and(|(filter, next)| next.1 - filter.1 < 160. && next.1 > filter.1);
+    a.check("空符文结果不留空白列表", compact_empty, "next section stays directly after filters and empty state");
+    image::save_buffer(a.output.join(format!("champion-empty-{}.png", pixels.width())), pixels.as_bytes(), pixels.width(), pixels.height(), image::ColorType::Rgba8)?;
+    ui.set_augments(augment_fixture);
     for i in 0..2 {
         a.click(
             ui,
@@ -829,9 +875,12 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     );
     ui.set_item_confirm(false);
     ui.set_side_mode(true);
-    a.disabled(ui, "局内资料 · 只读参考");
+    a.check("局内资料不显示配置按钮", target(ui, "配置 4 套装备方案").is_err(), "read-only mode uses explanatory text");
     ui.set_side_mode(false);
-    a.click(ui, "×", Some("champion:close"));
+    ui.set_offline(true);
+    a.check("离线预览不显示配置按钮", target(ui, "配置 4 套装备方案").is_err(), "preview cannot configure equipment");
+    ui.set_offline(false);
+    a.click(ui, "关闭英雄详情", Some("champion:close"));
     Ok(())
 }
 pub fn run(output: &Path) -> Result<serde_json::Value> {

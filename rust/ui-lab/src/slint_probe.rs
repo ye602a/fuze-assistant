@@ -110,6 +110,7 @@ pub fn native_review(
                 ui.set_health(state);
                 ui.set_paused(paused);
                 ui.set_quit_open(quit);
+                ui.set_runtime_open(bottom);
                 ui.set_level_open(bottom);
                 ui.set_sources_open(bottom);
                 ui.set_scroll_y(0.);
@@ -136,13 +137,16 @@ pub fn native_review(
                 }
             }
             ui.set_quit_open(false);
-            for (name, page, bottom, sample) in [
-                ("settings", 2, false, false),
-                ("settings-bottom", 2, true, false),
-                ("history-empty", 1, false, false),
-                ("history-sample", 1, false, true),
+            for (name, page, section, bottom, sample) in [
+                ("settings", 2, 0, false, false),
+                ("settings-bottom", 2, 0, true, false),
+                ("settings-data", 2, 1, false, false),
+                ("settings-help", 2, 2, false, false),
+                ("history-empty", 1, 0, false, false),
+                ("history-sample", 1, 0, false, true),
             ] {
                 ui.set_page(page);
+                ui.set_settings_section(section);
                 ui.set_history_sample(sample);
                 ui.set_scroll_y(0.);
                 let _ = ui.window().take_snapshot()?;
@@ -189,6 +193,7 @@ pub fn native_review(
             }
             ui.set_level_open(false);
             ui.set_sources_open(false);
+            ui.set_runtime_open(false);
             ui.set_scroll_y(0.);
             Ok(
                 serde_json::json!({"champion_native_visibility_observed":champion_visibility,"requested_backend":name,"native_window_created":true,"visible":false,"foreground_unchanged_observed":foreground_unchanged,"hidden_native_resize":resize_checks,"elapsed_including_400ms_timer":start.elapsed().as_secs_f64()*1000.,"first_raster_snapshot_ms":snapshot_ms,"warm_raster_snapshot":crate::telemetry::samples(&timings),"warm_process_cpu_ms":cpu_ms,"gpu_performance_verified":false,"real_ime_verified":false}),

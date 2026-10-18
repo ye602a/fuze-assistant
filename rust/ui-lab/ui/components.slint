@@ -111,7 +111,7 @@ export component Action inherits Rectangle {
     in property <bool> quiet: false;
     in property <bool> busy: false;
     callback clicked;
-    height: 38px; min-width: 100px;
+    height: 36px; min-width: 100px;
     private property <bool> down: root.enabled && (touch.pressed || root.key-down);
     private property <bool> key-down: false;
     changed enabled => { if !root.enabled { root.key-down = false; } }
@@ -120,7 +120,7 @@ export component Action inherits Rectangle {
     animate background, border-color { duration: root.down ? 0ms : UiMotion.quick; easing: ease-out; }
     border-radius: 2px; opacity: root.enabled || root.busy ? 1 : 0.55;
     accessible-role: button; accessible-label: root.description; forward-focus: focus;
-    Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 12px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
+    Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 13px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled && !root.busy; clicked => { focus.focus(); root.clicked(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled && !root.busy; key-pressed(event) => {
         if event.text == " " || event.text == "\n" { root.key-down = true; root.clicked(); return accept; } return reject;
@@ -203,7 +203,7 @@ export component Disclosure inherits Panel {
     height: root.expanded ? 114px : 46px;
     accessible-role: button; accessible-label: root.label; forward-focus: focus;
     Label { y: 0px; x: 20px; height: 46px; width: parent.width - 40px; text: (root.expanded ? "−  " : "+  ") + root.label; color: #bdad88; }
-    if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 11px; }
+    if root.expanded: Label { x: 20px; y: 46px; width: parent.width - 40px; height: 60px; text: root.detail; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
     TouchArea { x: 0px; y: 0px; height: 46px; clicked => { focus.focus(); root.expanded = !root.expanded; } }
     focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.expanded = !root.expanded; return accept; } return reject; } }
     if focus.has-focus: Rectangle { x: 0px; y: 0px; background: transparent; border-width: 1px; border-color: Theme.blue; height: 46px; }
