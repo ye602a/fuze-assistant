@@ -738,6 +738,8 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     ui.set_page(2);
     ui.set_settings_section(0);
     ui.set_scroll_y(0.);
+    // A real tab click settles its scroll reset before a later wheel event.
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
     let _ = ui.window().take_snapshot()?;
     ui.window().dispatch_event(WindowEvent::PointerScrolled {
         position: slint::LogicalPosition::new(650., 350.),
