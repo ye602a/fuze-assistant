@@ -5,7 +5,7 @@ import {managedFiles,managedPath,previewPath,updateEntries} from '../../scripts/
 const entry = entryName => ({entryName,isDirectory:false,header:{size:8}})
 test('portable exact-build launchers stay in ZIP but never reach managed updates',()=>{
  const names=[...managedFiles,'resources/inference.onnx','resources/dictionary.json','resources/client-data/current.json','resources/client-data/versions/zh-TW/16.20.1/augments.json']
- const direct=['Start-this-build.cmd','Start-this-build.ps1']
+ const direct=['Start-this-build.cmd','Start-this-build.ps1','Install-local.ps1']
  for(const name of names)assert.equal(managedPath(name),true,name)
  for(const name of direct){assert.equal(previewPath(name),true);assert.equal(managedPath(name),false)}
  const result=updateEntries([...names,...direct].map(entry))

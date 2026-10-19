@@ -1,5 +1,36 @@
 # FUZE 当前开发状态与新会话交接
 
+## 2026-10-19：按用户要求发布最新 master 测试包
+
+最新公开 Rust Pre-release 为 **`e941c7e124c7`**，来自已合入 PR #108 的 master，
+包含反馈构建身份（#105）和系统代理下载路由修复（#107）。
+[本次完整阶段构建 39269372287](https://github.com/ye602a/fuze-assistant/actions/runs/39269372287)
+通过，随后发布原始 CI 产物，ZIP / FUZ / blockmap 散列与构建身份一致。
+[下载 ZIP](https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/fuze-rust-preview-e941c7e124c7.zip)，
+68,186,641 字节，SHA-256 `aa945b11021f05133eaf90d9eda3a9068b69e9d74aea29a992d94a7705afb730`。
+公开 `rust-update.json` 序号 `1792419325`；旧清单另存
+`rust-update-before-e941c7e124c7.json`，旧载荷与 v0.6.3 稳定版保留。
+
+用户临时要求尽快取得当前版本测试，因此先发布已合并的 master。
+**下面这批新的 VC++ 构建记录 / 安装引导未包含在该包中。**
+发布只发生在 GitHub 隔离构建环境；没有在本机安装运行库、启动或切换 FUZE。
+CI 和发布成功仍不等于同版本玩家实测、正式签名安装或实机更新回滚验收通过。
+
+## 2026-10-19：PR #108 合并与 VC++ 安装前接线
+
+[PR #108](https://github.com/ye602a/fuze-assistant/pull/108) 的 Windows 和发布前静态契约
+检查通过后已合入 master：`e941c7e124c799cec7edc76e92d4ffa1202a3a16`。
+后续开发分支补充构建回执、VC++ 项目支持基线 `14.51.36247.0`、ZIP 安装前检查及
+明确确认后的微软运行库引导；旧包缺失字段时保持未知，不使用开发机版本回填。
+本机原有两份未提交文件保留，未安装运行库或启动 / 切换 FUZE。
+
+24 项 Node 定向测试及其中的 30 项 PowerShell 状态 / 文件断言通过；还检查了只读入口
+和真实微软下载文件的散列、签名及静态 CAB 载荷。没有执行该安装器。
+未来构建回执入口已接入阶段工作流，但新入口的真实完整构建及运行库安装 / 重启仍待验证；
+没有以合成测试冒充实机安装。新引导不覆盖旧受管更新器或直接 EXE 启动，也不等于正式签名
+安装器完成。依据、兼容范围、签名所需信息和实机矩阵见
+[VC++ 构建记录与引导](development/rust/VC_RUNTIME_BOOTSTRAP.md)。
+
 ## 2026-10-19：PR #107 合并与正式发布前置检查（未打包）
 
 [PR #107](https://github.com/ye602a/fuze-assistant/pull/107) 的 Windows、Rust 核心、

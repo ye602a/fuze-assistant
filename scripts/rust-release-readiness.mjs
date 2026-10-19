@@ -86,7 +86,18 @@ export function assessReadiness(build, binaries, windows, policy = {}) {
   if (!/^[a-f0-9]{12,40}$/.test(build?.revision) || !Number.isSafeInteger(build.sequence)
       || build.sequence <= 0 || build.uiFrontend !== 'slint') throw new Error('release-build-invalid')
   const publisher = policy.publisherSha256?.toLowerCase() || null
-  const minimum = policy.minimumVcRuntime || null
+  const record = build.vcRuntime
+  if (record && (record.schema !== 1 || record.architecture !== 'x64' || !version(record.minimumVersion)
+      || record.basis !== 'supported-baseline-not-lowest-abi-version'
+      || !/^[a-f0-9]{64}$/.test(record.policySha256)
+      || !/^19\.\d+\.\d+\.\d+$/.test(record.compilerVersion)
+      || !atLeast(record.minimumVersion, record.compilerVersion.replace(/^19\./, '14.'))
+      || !atLeast(record.minimumVersion, record.linkerVersion)
+      || !Array.isArray(record.requiredDlls) || !record.requiredDlls.length
+      || record.requiredDlls.length > 7 || new Set(record.requiredDlls).size !== record.requiredDlls.length
+      || Object.keys(record.binaries || {}).length !== nativeFiles.length)) throw new Error('release-runtime-record-invalid')
+  if (record && policy.minimumVcRuntime && !atLeast(policy.minimumVcRuntime, record.minimumVersion)) throw new Error('release-runtime-policy-weakened')
+  const minimum = policy.minimumVcRuntime || record?.minimumVersion || null
   if (publisher && !/^[a-f0-9]{64}$/.test(publisher)) throw new Error('release-publisher-invalid')
   if (minimum && !version(minimum)) throw new Error('release-runtime-version-invalid')
   const blockers = []
@@ -103,6 +114,7 @@ export function assessReadiness(build, binaries, windows, policy = {}) {
       return { name, inspected: false }
     }
     if (binary.architecture !== 'x64') blockers.push(`architecture:${name}`)
+    if (record && binary.sha256 !== record.binaries[name]) blockers.push(`runtime-record-hash:${name}`)
     if (observed.signatureStatus !== 'Valid') blockers.push(`signature:${name}`)
     if (own && publisher && observed.signerSha256 !== publisher) blockers.push(`publisher:${name}`)
     if (own && !observed.timestampPresent) blockers.push(`timestamp:${name}`)
@@ -112,6 +124,7 @@ export function assessReadiness(build, binaries, windows, policy = {}) {
     return { ...binary, signatureStatus: observed.signatureStatus,
       signerSha256: observed.signerSha256, timestampPresent: observed.timestampPresent }
   })
+  if (record && (record.requiredDlls.length !== dependencies.size || record.requiredDlls.some(name => !dependencies.has(name)))) blockers.push('runtime-record-dependencies')
   const runtime = [...dependencies].sort().map(name => {
     const installed = windows?.runtime?.find(item => item.name === name)
     const present = installed?.present === true
@@ -127,6 +140,7 @@ export function assessReadiness(build, binaries, windows, policy = {}) {
     schema: 1, revision: build.revision, sequence: build.sequence,
     onnxRuntimeVersion: typeof build.runtime === 'string' && /^\d+\.\d+\.\d+$/.test(build.runtime) ? build.runtime : null,
     approvedPublisherSha256: publisher, minimumVcRuntime: minimum,
+    minimumVcRuntimeSource: policy.minimumVcRuntime ? 'operator-policy' : record ? 'build-record' : 'unrecorded',
     files, runtime, staticChecksPassed: blockers.length === 0, blockers,
     // Static trust/dependency evidence is never a production release authorization.
     releaseReady: false, installerVerified: false, runtimeLoadVerified: false,

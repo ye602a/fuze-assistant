@@ -12,6 +12,11 @@ on:
       - 'scripts/package-rust-preview.mjs'
       - 'scripts/package-rust-update.mjs'
       - 'scripts/rust-bundle-policy.mjs'
+      - 'scripts/rust-runtime-contract.mjs'
+      - 'scripts/build-rust-with-evidence.ps1'
+      - 'scripts/install-rust-prerequisites.ps1'
+      - 'tests/unit/rust-runtime-contract.test.mjs'
+      - 'tests/unit/rust-runtime-bootstrap.ps1'
       - 'tests/unit/rust-bundle-policy.test.mjs'
       - 'scripts/check-rust-update.mjs'
       - 'scripts/check-rust-desktop.mjs'
@@ -118,12 +123,16 @@ jobs:
           node --test tests/unit/rust-feedback-export.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-bundle-policy.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/unit/rust-runtime-contract.test.mjs
           exit $LASTEXITCODE
-      - name: Build the selected milestone frontend from the same checkout
+      - name: Build milestone binaries with toolchain and runtime evidence
         id: frontend
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.ui_frontend == 'slint'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
+        env:
+          FUZE_UI_FRONTEND: ${{ inputs.ui_frontend }}
         run: |
-          cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --target-dir rust/target --release --features gpu --locked -j 2
+          ./scripts/build-rust-with-evidence.ps1 -Frontend $env:FUZE_UI_FRONTEND
           exit $LASTEXITCODE
       - name: Assemble and self-check milestone Rust preview
         id: package

@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs'
 
 export const managedFiles = Object.freeze(readFileSync(new URL('../rust/bundle-files.txt',import.meta.url),'utf8').trim().split(/\r?\n/))
 const managed = new Set(managedFiles)
-const portable = new Set(['Start-this-build.cmd','Start-this-build.ps1'])
+const portable = new Set(['Start-this-build.cmd','Start-this-build.ps1','Install-local.ps1'])
 
 export function managedPath(name) {
  if(typeof name!=='string' || !name || name.length>240 || name.includes('\\'))return false
@@ -20,7 +20,7 @@ export function updateEntries(entries) {
   const name=entry.entryName, key=typeof name==='string' ? name.toLowerCase() : ''
   if(!previewPath(name) || names.has(key))throw new Error('Invalid or duplicate update package path')
   names.add(key)
-  // Exact-build launchers are for ZIP testing only. Existing installed updaters reject them.
+  // ZIP launchers/bootstrap stay outside the existing native managed-file whitelist.
   if(!portable.has(name)) {
    const size=entry.header?.size
    if(!Number.isSafeInteger(size) || size<0 || size>128*1024*1024)throw new Error('Invalid update package file size')
