@@ -184,6 +184,15 @@ impl Pipeline {
     pub fn clear_level(&mut self) {
         self.session.clear_level();
     }
+    pub(crate) fn closed_window(&self) -> Option<fuze_runtime::gate::ClosedWindow> {
+        self.session.closed_window()
+    }
+    pub(crate) fn restore_closed_window(&mut self, state: fuze_runtime::gate::ClosedWindow) {
+        self.session.restore_closed_window(state);
+    }
+    pub fn level_gate(&mut self, enabled: bool) {
+        self.session.level_gate(enabled);
+    }
     pub fn level_sample(&mut self, level: u8, age: u64) {
         self.session
             .update_level(level, self.now().saturating_sub(age));
@@ -337,8 +346,8 @@ impl Pipeline {
             return Ok(None);
         }
         let Reply::Result {
-            slots,
-            title_kind,
+            mut slots,
+            mut title_kind,
             title_reads,
             ocr_ms,
             ..
@@ -347,6 +356,10 @@ impl Pipeline {
             self.session.fail(ticket, self.now());
             return Err("worker-result");
         };
+        if !self.screen_gate.accept_titles(&slots, title_kind) {
+            slots = std::array::from_fn(|_| fuze_contract::Slot::Unreadable);
+            title_kind = TitleKind::Unknown;
+        }
         let selection = match title_kind {
             TitleKind::StatShard => Selection::StatShard,
             TitleKind::Candidate => Selection::Candidate,
@@ -442,7 +455,9 @@ impl Pipeline {
                     if !decision.recognize {
                         self.session.screen_probe(
                             evidence == fuze_contract::selection_pixels::Evidence::Visible,
-                            decision.closed,
+                            // Occlusion may hide cards without ending this level's window.
+                            decision.closed
+                                && evidence == fuze_contract::selection_pixels::Evidence::Absent,
                             now,
                         );
                         if decision.closed {

@@ -82,20 +82,18 @@ impl Matcher {
             if text.len() > chars.len() + 8 {
                 continue;
             }
-            let candidate = if text.windows(chars.len()).any(|w| w == chars) {
+            let candidate = if &text == chars {
                 Some((0, Exact))
             } else if name == "一板一眼" && text == ['板', '一', '眼'] {
                 Some((0, Alias))
             } else if chars.len() >= 3
-                && text.len() >= chars.len()
+                && text.len() == chars.len()
                 && confidence >= 0.9
                 && best.is_none_or(|(d, _, _, _)| d > 0)
             {
                 // Keep the legacy tolerance, reject ties instead of guessing by numeric ID.
                 let limit = (chars.len() / 3).max(1).min(2);
-                text.windows(chars.len())
-                    .map(|w| distance(w, chars, limit))
-                    .min()
+                Some(distance(&text, chars, limit))
                     .filter(|d| *d <= limit)
                     .map(|d| (d, Fuzzy))
             } else {
@@ -139,6 +137,14 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shop_item_or_description_cannot_match_a_substring() {
+        let m = matcher(&["海克斯科技", "科技核心", "量子计算"]);
+        for text in ["海克斯科技核心", "购买量子计算", "量子计算装备"] {
+            assert_eq!(m.read(text, 0.99).1, TitleRead::NoCatalog);
+        }
+        assert_eq!(m.read("量子计算", 0.99).1, TitleRead::Exact);
+    }
     fn matcher(names: &[&str]) -> Matcher {
         Matcher::new(
             names

@@ -23,6 +23,7 @@ struct Pixels {
 }
 #[derive(Default)]
 struct Input {
+    evidence: Option<fuze_contract::selection_pixels::Evidence>,
     image: usize,
     stalled: bool,
     reads: u64,
@@ -35,6 +36,9 @@ struct Feed {
     selected: usize,
 }
 impl ScreenDriver for Feed {
+    fn selection(&self, _: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
+        self.input.lock().unwrap().evidence
+    }
     fn start(&mut self) -> Result<()> {
         self.input.lock().unwrap().starts += 1;
         Ok(())
@@ -374,10 +378,16 @@ pub fn run(
     )?;
     let reroll = r.next(playing, Some(3), 1)?;
     require(
-        ids(&reroll) == [Some(1332), None, None]
-            && !reroll.pipeline.overlay.as_ref().unwrap().retained,
-        "capture-review-reroll-mixed",
+        !ids(&reroll).contains(&Some(1332)),
+        "capture-review-isolated-new-title",
     )?;
+    let until = Instant::now() + Duration::from_secs(4);
+    while r.next(playing, Some(3), 1)?.pipeline.overlay.is_some() {
+        require(
+            Instant::now() < until,
+            "capture-review-rejected-title-expiry",
+        )?;
+    }
     let shard = r.next(playing, Some(3), 4)?;
     require(
         shard.pipeline.capture == "stat-shards" && shard.pipeline.overlay.is_none(),
@@ -410,6 +420,26 @@ pub fn run(
         }),
         "capture-review-statistics",
     )?;
+    let enriched_context = frame.context;
+    r.input.lock().unwrap().evidence = Some(fuze_contract::selection_pixels::Evidence::Visible);
+    r.next(known, Some(3), 0)?;
+    r.input.lock().unwrap().evidence = Some(fuze_contract::selection_pixels::Evidence::Absent);
+    let until = Instant::now() + Duration::from_secs(3);
+    while r.tick(known, Some(3))?.pipeline.overlay.is_some() {
+        require(Instant::now() < until, "capture-review-gate-close")?;
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let reads = r.input.lock().unwrap().reads;
+    r.controller.suspend();
+    r.monitor.control().enable(false);
+    r.input.lock().unwrap().evidence = Some(fuze_contract::selection_pixels::Evidence::Visible);
+    for level in [4, 5, 6] {
+        let resumed = r.tick(known, Some(level))?;
+        require(
+            resumed.pipeline.overlay.is_none() && r.input.lock().unwrap().reads == reads,
+            "capture-review-pause-rearmed-gate",
+        )?;
+    }
     for level in [7, 11, 15] {
         require(
             ids(&r.next(known, Some(level), 0)?) == ids(&full),
@@ -430,7 +460,7 @@ pub fn run(
     let next = r.next(context(Phase::InProgress, 8, 2)?, None, 0)?;
     require(
         ids(&next) == ids(&full)
-            && next.pipeline.overlay.as_ref().unwrap().context != frame.context,
+            && next.pipeline.overlay.as_ref().unwrap().context != enriched_context,
         "capture-review-new-match",
     )?;
     let cancellation = r.controller.review_pipeline().unwrap().cancellation();
@@ -454,6 +484,7 @@ pub fn run(
         "occlusion_expired_without_frames":true,"reroll_preserved_positions":true,"shards_hidden":true,
         "title_offsets_recognized":true,"continuous_partial_remained_visible":true,
         "formal_after_shards_recognized":true,"new_match_isolated":true,"statistics_scope":"overall",
+        "pause_keeps_closed_gate":true,"isolated_new_title_rejected":true,
         "selection_confirmed":false,"actual_stage":null,"game_access":false,"system_input":false,
         "native_screen_tested":false,"real_game_verified":false}),
     )

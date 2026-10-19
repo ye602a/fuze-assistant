@@ -672,7 +672,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         *control = None;
                     }
                     monitor = None;
-                    controller = Controller::new({
+                    controller.reconfigure({
                         let mut c = config.clone();
                         if shared.external_overlays {
                             c.augment_overlay = false;

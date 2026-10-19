@@ -152,7 +152,8 @@ fn target(ui: &impl Surface, label: &str) -> Result<(f32, f32)> {
             .ok_or_else(|| format!("control-not-found:{label}"))?;
         let (x, y) = point(&item);
         let fixed = matches!(label, "最小化窗口" | "关闭窗口" | "关闭英雄详情")
-            || label.contains("套装备方案")
+            || (label.starts_with("导入路线 ") && label.ends_with(" 到游戏商店"))
+            || label == "正在配置装备方案…"
             || matches!(label, "关闭操作反馈" | "局内资料 · 只读参考");
         if (45. ..ui.bottom() - 6.).contains(&y) || (fixed && y >= 0. && y < h) {
             if !item.is_visible() {
@@ -319,6 +320,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         ("champ_topmost", "选人阶段窗口置顶"),
         ("close_to_tray", "最小化时收入托盘"),
         ("icon_downloads", "补充缺失图标"),
+        ("auto_item_sets", "自动导入装备方案（本次运行）"),
         ("pause_hotkey", "暂停快捷键"),
         ("local_records", "保存本地观察记录"),
     ];
@@ -819,12 +821,22 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     ui.on_route_changed(move |v| e.borrow_mut().push(format!("route:{v}")));
     let e = a.events.clone();
     ui.on_close_requested(move || e.borrow_mut().push("champion:close".into()));
+    let e = a.events.clone();
+    ui.on_retry_portraits(move || e.borrow_mut().push("champion:retry-portraits".into()));
     ui.set_offline(false);
     ui.set_item_count(4);
     ui.set_local_id(4);
     ui.set_inspected_id(4);
     ui.set_detail_champion(4);
     ui.set_guides(model(vec!["测试攻略一".into(), "测试攻略二".into()]));
+    ui.set_portraits_missing(true);
+    a.click(ui, "重试头像", Some("champion:retry-portraits"));
+    ui.set_portraits_missing(false);
+    a.check(
+        "头像完整时隐藏重试",
+        target(ui, "重试头像").is_err(),
+        "retry action is only available for missing portraits",
+    );
     ui.set_build_routes(model(vec![
         "出装路线 1".into(),
         "出装路线 2".into(),
@@ -860,6 +872,16 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
             ui,
             &format!("出装路线 {}", i + 1),
             Some(&format!("route:{i}")),
+        );
+        a.check(
+            &format!("当前出装路线 {}", i + 1),
+            ui.get_build_route() == i,
+            "route selection updates the import target",
+        );
+        a.click(
+            ui,
+            &format!("导入路线 {} 到游戏商店", i + 1),
+            Some("player:prepare-items:0"),
         );
     }
     a.click(ui, "海克斯", None);
@@ -1006,7 +1028,11 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         closed,
         "keyboard cancel and clear route",
     );
-    a.click(ui, "配置 4 套装备方案", Some("player:prepare-items:0"));
+    let import_label = "导入路线 4 到游戏商店";
+    a.click(ui, import_label, Some("player:prepare-items:0"));
+    ui.set_action_busy(true);
+    a.disabled(ui, "正在配置装备方案…");
+    ui.set_action_busy(false);
     ui.set_item_confirm(true);
     a.click(ui, "取消", Some("player:cancel:0"));
     a.click(ui, "确认配置", Some("player:confirm-items:0"));
@@ -1025,17 +1051,32 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
     ui.set_side_mode(true);
     a.check(
         "局内资料不显示配置按钮",
-        target(ui, "配置 4 套装备方案").is_err(),
+        target(ui, import_label).is_err(),
         "read-only mode uses explanatory text",
     );
     ui.set_side_mode(false);
     ui.set_offline(true);
     a.check(
         "离线预览不显示配置按钮",
-        target(ui, "配置 4 套装备方案").is_err(),
+        target(ui, import_label).is_err(),
         "preview cannot configure equipment",
     );
     ui.set_offline(false);
+    ui.set_inspected_id(8);
+    a.check(
+        "候选英雄不显示配置按钮",
+        target(ui, import_label).is_err(),
+        "only the player's selected champion may configure equipment",
+    );
+    ui.set_inspected_id(4);
+    ui.set_item_count(0);
+    a.check(
+        "无装备方案时隐藏配置按钮",
+        target(ui, import_label).is_err(),
+        "missing data cannot dispatch equipment configuration",
+    );
+    ui.set_item_count(4);
+    a.click(ui, import_label, Some("player:prepare-items:0"));
     a.click(ui, "关闭英雄详情", Some("champion:close"));
     Ok(())
 }

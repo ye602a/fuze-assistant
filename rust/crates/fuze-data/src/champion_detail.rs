@@ -13,6 +13,7 @@ pub struct Detail {
     pub augments: Vec<Augment>,
     pub guides: Vec<Guide>,
     pub item_sets: Vec<Value>,
+    pub item_routes: Vec<usize>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augment {
@@ -500,16 +501,20 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
             });
         }
     }
+    let (item_routes, item_sets) = crate::item_sets::create_indexed(
+        c["id"].as_u64().unwrap_or(0) as u32,
+        &clean(&c["name"]),
+        &builds,
+    )
+    .into_iter()
+    .unzip();
     Detail {
         title: format!("{} · {}", clean(&c["name"]), clean(&c["title"])),
         lines,
         augments: cards,
         guides,
-        item_sets: crate::item_sets::create(
-            c["id"].as_u64().unwrap_or(0) as u32,
-            &clean(&c["name"]),
-            &builds,
-        ),
+        item_sets,
+        item_routes,
     }
 }
 #[cfg(test)]

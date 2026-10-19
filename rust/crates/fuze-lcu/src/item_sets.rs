@@ -83,9 +83,50 @@ pub fn merge(
     }
     Ok(payload)
 }
+/// A successful PUT is not evidence of persistence. Compare only our contract
+/// fields; the client may add its own metadata to the returned sets.
+pub fn verify_saved(expected: &Value, observed: &Value) -> crate::history::Result<()> {
+    if expected["accountId"] != observed["accountId"] {
+        return Err("item-sets-readback-mismatch");
+    }
+    let actual = observed["itemSets"]
+        .as_array()
+        .ok_or("item-sets-readback-mismatch")?;
+    for set in expected["itemSets"].as_array().ok_or("item-sets-invalid")? {
+        let uid = set["uid"].as_str().ok_or("item-sets-readback-mismatch")?;
+        let found: Vec<_> = actual.iter().filter(|s| s["uid"] == uid).collect();
+        if found.len() != 1 {
+            return Err("item-sets-readback-mismatch");
+        }
+        let fields: &[&str] = if managed(uid) {
+            &["title", "associatedChampions", "associatedMaps", "blocks"]
+        } else {
+            &["title", "blocks"]
+        };
+        if fields.iter().any(|key| set[*key] != found[0][*key]) {
+            return Err("item-sets-readback-mismatch");
+        }
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readback_detects_missing_changed_or_wrong_account_sets() {
+        let set = json!({"uid":"aramgg-aram-current","title":"route","associatedChampions":[21],"associatedMaps":[11,12],"blocks":[{"type":"core","items":[{"id":"3001","count":1}]}]});
+        let expected = json!({"accountId":1,"itemSets":[set]});
+        assert!(verify_saved(&expected, &expected).is_ok());
+        let mut actual = expected.clone();
+        actual["timestamp"] = json!(99);
+        assert!(verify_saved(&expected, &actual).is_ok());
+        actual["itemSets"][0]["blocks"][0]["items"][0]["id"] = json!("3002");
+        assert!(verify_saved(&expected, &actual).is_err());
+        assert!(verify_saved(&expected, &json!({"accountId":1,"itemSets":[]})).is_err());
+        actual = expected.clone();
+        actual["accountId"] = json!(2);
+        assert!(verify_saved(&expected, &actual).is_err());
+    }
     #[test]
     fn preserve_unrelated_sets_and_metadata_reject_wrong_owner() {
         let current = json!({"accountId":1,"custom":"preserve","itemSets":[{"uid":"my-custom","title":"ARAMGG ARAM similar name"},{"uid":"aramgg-aram-current"}]});

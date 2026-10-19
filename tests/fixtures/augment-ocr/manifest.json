@@ -8,9 +8,10 @@
   },
   {
     "file": "partial-one-card.png",
-    "description": "Partial frame where only the left title should match.",
+    "description": "OCR reads the left title, but this isolated new title must not open or replace a pipeline recommendation.",
     "expectedCardCount": 1,
     "expectedIds": [1332],
+    "expectedPipelineIds": [],
     "expectedNames": ["不祥契约"]
   },
   {

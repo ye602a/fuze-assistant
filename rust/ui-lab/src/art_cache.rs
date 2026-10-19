@@ -10,7 +10,7 @@ pub struct Cache {
     memory: HashMap<String, Arc<Picture>>,
     root: Option<PathBuf>,
     offline: bool,
-    retry: Instant,
+    retry: HashMap<String, (Instant, u8)>,
 }
 impl Cache {
     pub fn new(offline: bool) -> Self {
@@ -24,7 +24,7 @@ impl Cache {
                     .map(|p| p.join("FuzeRustPreview/icon-cache"))
             },
             offline,
-            retry: Instant::now(),
+            retry: HashMap::new(),
         }
     }
     pub fn get(
@@ -48,7 +48,12 @@ impl Cache {
                 url,
                 &key,
                 self.root.as_ref(),
-                self.offline || !download || Instant::now() < self.retry,
+                self.offline
+                    || !download
+                    || self
+                        .retry
+                        .get(&key)
+                        .is_some_and(|(at, attempts)| *attempts >= 3 || Instant::now() < *at),
                 cancelled,
             )
         };
@@ -57,7 +62,7 @@ impl Cache {
             .err()
             .is_some_and(|e| e.starts_with("update-"))
         {
-            self.retry = Instant::now() + Duration::from_secs(60);
+            self.failed(&key, Instant::now());
         }
         let pic = Arc::new(result.ok()?);
         if self.memory.len() >= 192 {
@@ -65,6 +70,72 @@ impl Cache {
         }
         self.memory.insert(key, pic.clone());
         Some(pic)
+    }
+    pub fn begin_request(&mut self) {
+        self.retry.clear();
+    }
+    fn failed(&mut self, key: &str, now: Instant) {
+        let attempt = self.retry.get(key).map_or(1, |(_, n)| n.saturating_add(1));
+        self.retry.insert(
+            key.into(),
+            (
+                now + Duration::from_secs(match attempt {
+                    1 => 2,
+                    2 => 10,
+                    _ => 30,
+                }),
+                attempt,
+            ),
+        );
+    }
+    pub fn next_retry(&self, version: &str, urls: &[String]) -> Option<Instant> {
+        urls.iter()
+            .filter_map(|url| {
+                let key = format!("{version}|{url}");
+                if self.memory.contains_key(&key) {
+                    return None;
+                }
+                self.retry
+                    .get(&key)
+                    .filter(|(_, n)| *n < 3)
+                    .map(|(at, _)| *at)
+            })
+            .min()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_failed_image_does_not_block_other_images_and_retries_are_bounded() {
+        let mut c = Cache::new(true);
+        let now = Instant::now();
+        c.failed("v|a", now);
+        assert_eq!(
+            c.next_retry("v", &["a".into()]),
+            Some(now + Duration::from_secs(2))
+        );
+        assert_eq!(c.next_retry("v", &["b".into()]), None);
+        c.failed("v|a", now);
+        c.failed("v|a", now);
+        assert_eq!(c.next_retry("v", &["a".into()]), None);
+        c.begin_request();
+        assert!(c.retry.is_empty());
+    }
+    #[test]
+    fn every_bundled_champion_decodes_offline_including_reported_missing_portraits() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../ui/assets/champion-portraits.json")).unwrap();
+        let mut c = Cache::new(true);
+        let rows = manifest["portraits"].as_array().unwrap();
+        assert_eq!(rows.len(), 173);
+        for row in rows {
+            let url = format!(
+                "https://cdn.dtodo.cn/hextech/champion-icons/{}.png",
+                row["id"]
+            );
+            assert!(c.get(&url, "fixture", false, &|| false).is_some(), "{url}");
+        }
     }
 }
 pub fn image(pic: &Picture) -> slint::Image {

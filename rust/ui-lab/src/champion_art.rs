@@ -37,6 +37,7 @@ impl Binding {
             .name("fuze-slint-champion-art".into())
             .spawn(move || {
                 let mut cache = crate::art_cache::Cache::new(offline);
+                let mut active_generation = None;
                 loop {
                     let mut s = match work.0.lock() {
                         Ok(s) => s,
@@ -54,6 +55,10 @@ impl Binding {
                     let generation = s.generation;
                     let request = s.next.take().unwrap();
                     drop(s);
+                    if active_generation != Some(generation) {
+                        cache.begin_request();
+                        active_generation = Some(generation);
+                    }
                     let cancelled = || {
                         work.0
                             .lock()
@@ -80,7 +85,29 @@ impl Binding {
                     }
                     if let Ok(mut s) = work.0.lock() {
                         if !s.stop && s.generation == generation {
-                            s.reply = Some((images, true));
+                            let retry = if request.download && !offline {
+                                cache.next_retry(&request.version, &request.urls)
+                            } else {
+                                None
+                            };
+                            s.reply = Some((images, retry.is_none()));
+                            if let Some(at) = retry {
+                                while !s.stop
+                                    && s.generation == generation
+                                    && std::time::Instant::now() < at
+                                {
+                                    s = match work.1.wait_timeout(
+                                        s,
+                                        at.saturating_duration_since(std::time::Instant::now()),
+                                    ) {
+                                        Ok((s, _)) => s,
+                                        Err(_) => return,
+                                    };
+                                }
+                                if !s.stop && s.generation == generation {
+                                    s.next = Some(request);
+                                }
+                            }
                         }
                     }
                 }
@@ -161,7 +188,11 @@ impl Binding {
             s.generation = s.generation.wrapping_add(1);
             s.next = None;
             s.reply = None;
+            self.shared.1.notify_one();
         }
+    }
+    pub fn retry(&self) {
+        *self.wanted.borrow_mut() = None;
     }
 }
 impl Drop for Binding {

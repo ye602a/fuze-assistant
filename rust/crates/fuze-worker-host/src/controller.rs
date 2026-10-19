@@ -477,6 +477,8 @@ pub struct PipelineStatus {
     pub level: Option<u8>,
 }
 pub struct Controller {
+    gate_context: Option<Context>,
+    gate_resume: Option<(Context, fuze_runtime::gate::ClosedWindow)>,
     recent_tiers: [Option<u64>; 3],
     analyses: u64,
     analysis_ms: Option<f64>,
@@ -559,6 +561,20 @@ impl Controller {
         self.last_error = None;
         self.retry = Retry::default();
     }
+    pub(crate) fn reconfigure(&mut self, config: Config) {
+        self.suspend();
+        let resume = self.gate_resume.take();
+        *self = Self::new(config);
+        self.gate_resume = resume;
+    }
+    fn resume_window(&mut self, context: Context) -> Option<fuze_runtime::gate::ClosedWindow> {
+        self.gate_resume.take().and_then(|(old, state)| {
+            (context.observed_game_id().is_some()
+                && old.same_game(&context)
+                && old.champion == context.champion)
+                .then_some(state)
+        })
+    }
     pub fn idle_wait(&self) -> Duration {
         let now = self.epoch.elapsed().as_millis() as u64;
         if now < self.retry.next {
@@ -577,6 +593,8 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            gate_context: None,
+            gate_resume: None,
             recent_tiers: [None; 3],
             analyses: 0,
             analysis_ms: None,
@@ -601,6 +619,9 @@ impl Controller {
         self.records.finish();
         self.last_frame = None;
         if let Some(p) = self.pipeline.take() {
+            if let Some((context, state)) = self.gate_context.zip(p.closed_window()) {
+                self.gate_resume = Some((context, state));
+            }
             p.cancellation().cancel();
             drop(p);
         }
@@ -634,6 +655,9 @@ impl Controller {
             self.last_error = None;
             self.retry = Retry::default();
         }
+        if fresh && context.is_some_and(|c| c.phase != Phase::InProgress || !c.supported) {
+            self.gate_resume = None;
+        }
         self.records.bind(if fresh { journal } else { None });
         let active = context.filter(|c| {
             fresh && matches!(c.phase, Phase::Loading | Phase::InProgress) && c.supported
@@ -642,6 +666,7 @@ impl Controller {
             self.clear();
             return Ok(());
         };
+        self.gate_context = Some(context);
         let now = self.epoch.elapsed().as_millis() as u64;
         let locale = self.config.locale.or_else(|| {
             detected_locale.map(|l| match l {
@@ -682,12 +707,17 @@ impl Controller {
                     .map(|c| c.phase)
                     .ok_or("lcu-context-missing")?
             };
+            let resume = self.resume_window(context);
             let pipeline = self.pipeline.as_mut().ok_or("pipeline-missing")?;
             if let Some(art) = pipeline.art.as_mut() {
                 art.download = self.config.icon_downloads;
                 art.poll(&pipeline.overlay);
             }
             pipeline.phase(phase)?;
+            if let Some(state) = resume {
+                pipeline.restore_closed_window(state);
+            }
+            pipeline.level_gate(self.config.level_gate);
             if phase == Phase::Loading {
                 pipeline.capture_state = "prewarmed";
                 return Ok(()); // No window discovery, capture or level requests during loading.
@@ -801,6 +831,48 @@ impl Drop for Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn suspended_closed_window_survives_reconfiguration_only_for_the_same_game_and_hero() {
+        let config = Config {
+            roots: vec![],
+            locale: None,
+            worker: PathBuf::new(),
+            ort: PathBuf::new(),
+            model: PathBuf::new(),
+            dictionary: PathBuf::new(),
+            backend: "cpu".into(),
+            icon_downloads: false,
+            level_gate: true,
+            augment_overlay: false,
+        };
+        let context = |hero, game| {
+            let flow = format!(
+                r#"{{"phase":"InProgress","gameData":{{"queue":{{"id":2400}},"gameId":{game},"teamOne":[{{"summonerId":7,"championId":{hero}}}],"teamTwo":[]}}}}"#
+            );
+            fuze_lcu::context::parse(Phase::InProgress, flow.as_bytes(), br#"{"summonerId":7}"#)
+                .unwrap()
+        };
+        let mut gate = fuze_runtime::gate::LevelGate::default();
+        gate.update_level(3, 0);
+        gate.observe(fuze_runtime::gate::Selection::Candidate, 1);
+        gate.screen_closed();
+        let closed = gate.closed_window().unwrap();
+        let mut controller = Controller::new(config.clone());
+        controller.gate_resume = Some((context(8, 1), closed));
+        controller.suspend();
+        controller.reconfigure(config);
+        let saved = controller.resume_window(context(8, 1)).unwrap();
+        let mut resumed = fuze_runtime::gate::LevelGate::default();
+        resumed.restore_closed_window(saved);
+        resumed.update_level(6, 0);
+        assert!(!resumed.decision(50000).capture);
+        resumed.update_level(7, 50001);
+        assert!(resumed.decision(50001).capture);
+        for next in [context(9, 1), context(8, 2), Context::idle(Phase::PostGame)] {
+            controller.gate_resume = Some((context(8, 1), closed));
+            assert!(controller.resume_window(next).is_none());
+        }
+    }
     #[test]
     fn window_diagnostics_preserve_worker_without_masking_real_ocr_failures() {
         for error in [

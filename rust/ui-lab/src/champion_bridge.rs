@@ -156,6 +156,9 @@ pub struct Binding {
     version: RefCell<String>,
 }
 impl Binding {
+    pub fn automatic(&self, ui: &ChampionWindow, enabled: bool) {
+        self.actions.automatic(ui, enabled);
+    }
     /// Every changed selection snapshot replaces both models; never retain an obsolete bench.
     pub fn selection(
         &self,
@@ -313,6 +316,7 @@ struct Presentation {
     icons: HashMap<String, slint::Image>,
 }
 fn request_art(ui: &ChampionWindow, p: &Presentation, art: &crate::champion_art::Binding) {
+    ui.set_portraits_missing(p.heroes.iter().any(|(_, u)| !p.icons.contains_key(u)));
     let mut urls = p
         .heroes
         .iter()
@@ -493,8 +497,15 @@ pub fn attach_shared(
         ui.get_offline(),
         move |images| {
             let Some(ui) = weak.upgrade() else { return };
-            artwork_state.borrow_mut().icons = images;
+            {
+                let mut p = artwork_state.borrow_mut();
+                if p.icons.len() > 192 {
+                    p.icons.clear();
+                }
+                p.icons.extend(images);
+            }
             let p = artwork_state.borrow();
+            ui.set_portraits_missing(p.heroes.iter().any(|(_, u)| !p.icons.contains_key(u)));
             let rows = |model: slint::ModelRc<ChampionChoice>| {
                 Rc::new(VecModel::from(
                     model
@@ -536,6 +547,15 @@ pub fn attach_shared(
             builds(&ui, &p);
         },
     )?);
+    let retry_art = art.clone();
+    let retry_state = state.clone();
+    let retry_ui = ui.as_weak();
+    ui.on_retry_portraits(move || {
+        if let Some(ui) = retry_ui.upgrade() {
+            retry_art.retry();
+            request_art(&ui, &retry_state.borrow(), &retry_art);
+        }
+    });
     let timer = Rc::new(slint::Timer::default());
     let reload = timer.clone();
     let weak = ui.as_weak();

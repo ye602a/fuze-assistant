@@ -61,6 +61,9 @@ export component ChampionWindow inherits Window {
     in-out property <bool> item-confirm: false;
     in-out property <string> item-summary;
     in-out property <bool> action-busy: false;
+    in-out property <bool> auto-items: false;
+    in-out property <bool> portraits-missing: false;
+    callback retry-portraits;
     out property <float> content-bottom: (scroll.y + scroll.height) / 1px;
     in-out property <string> action-notice;
     private property <length> footer-top: root.height - 64px - (root.action-notice == "" ? 0px : 60px);
@@ -89,6 +92,7 @@ export component ChampionWindow inherits Window {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
             if !root.side-mode: Panel { height: 181px + ceil(root.bench.length / 3) * 64px;
                 SectionTitle { x: 12px; y: 10px; height: 24px; text: "选人参考"; font-size: 13px; }
+                if root.portraits-missing: Action { x: parent.width - 104px; y: 8px; width: 92px; height: 26px; label: "重试头像"; clicked => { root.retry-portraits(); } }
                 Label { x: 12px; y: 36px; height: 20px; text: "我方阵容 · 五人选择"; color: Theme.gold; font-size: 12px; }
                 HorizontalLayout { x: 12px; y: 60px; width: parent.width - 24px; height: 84px; spacing: 5px;
                     for hero in root.team: Rectangle {
@@ -214,7 +218,7 @@ export component ChampionWindow inherits Window {
         message: root.action-notice; dismissed => { root.action-notice = ""; }
     }
     Rectangle { x: 0px; y: root.height - 64px; height: 64px; background: #101e2a;
-        if root.can-configure-items: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "配置 " + root.item-count + " 套装备方案"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
+        if root.can-configure-items: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "导入路线 " + (root.build-route + 1) + " 到游戏商店"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
         if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "该英雄暂无可用装备方案。"; color: Theme.muted; font-size: 12px; }
     }
     }
