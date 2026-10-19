@@ -920,7 +920,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         ("CPU", u.shown.resources.cpu.map(|v| format!("{v:.1}%"))),
         (
             "内存",
-            u.shown.resources.memory_mb.map(|v| format!("{v:.0} MB")),
+            u.shown.resources.memory_mb.map(|v| format!("{v:.0} MiB")),
         ),
         ("识别次数", Some(p.analyses.to_string())),
         ("最近识别耗时", p.analysis_ms.map(|v| format!("{v:.0} ms"))),
