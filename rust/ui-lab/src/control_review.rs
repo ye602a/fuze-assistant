@@ -152,7 +152,8 @@ fn target(ui: &impl Surface, label: &str) -> Result<(f32, f32)> {
             .ok_or_else(|| format!("control-not-found:{label}"))?;
         let (x, y) = point(&item);
         let fixed = matches!(label, "最小化窗口" | "关闭窗口" | "关闭英雄详情")
-            || label.contains("套装备方案")
+            || (label.starts_with("导入路线 ") && label.ends_with(" 到游戏商店"))
+            || label == "正在配置装备方案…"
             || matches!(label, "关闭操作反馈" | "局内资料 · 只读参考");
         if (45. ..ui.bottom() - 6.).contains(&y) || (fixed && y >= 0. && y < h) {
             if !item.is_visible() {
