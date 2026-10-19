@@ -222,6 +222,14 @@ pub fn reconstruct_observed<R: Read + Seek, W: Read + Write + Seek>(
     Ok(downloaded)
 }
 pub(crate) fn hash_reader(reader: &mut dyn Read, cancel: &dyn Fn() -> bool) -> Result<Vec<u8>> {
+    hash_reader_with_algorithm(reader, cancel, true)
+}
+/// Shared bounded-buffer hashing for update archives and native prerequisite checks.
+pub(crate) fn hash_reader_with_algorithm(
+    reader: &mut dyn Read,
+    cancel: &dyn Fn() -> bool,
+    sha512: bool,
+) -> Result<Vec<u8>> {
     use windows_sys::Win32::Security::Cryptography::*;
     struct Hash(BCRYPT_HASH_HANDLE);
     impl Drop for Hash {
@@ -234,7 +242,11 @@ pub(crate) fn hash_reader(reader: &mut dyn Read, cancel: &dyn Fn() -> bool) -> R
     unsafe {
         let mut raw = std::ptr::null_mut();
         if BCryptCreateHash(
-            BCRYPT_SHA512_ALG_HANDLE,
+            if sha512 {
+                BCRYPT_SHA512_ALG_HANDLE
+            } else {
+                BCRYPT_SHA256_ALG_HANDLE
+            },
             &mut raw,
             std::ptr::null_mut(),
             0,
@@ -259,8 +271,8 @@ pub(crate) fn hash_reader(reader: &mut dyn Read, cancel: &dyn Fn() -> bool) -> R
                 return Err("delta-hash");
             }
         }
-        let mut out = vec![0; 64];
-        if BCryptFinishHash(hash.0, out.as_mut_ptr(), 64, 0) < 0 {
+        let mut out = vec![0; if sha512 { 64 } else { 32 }];
+        if BCryptFinishHash(hash.0, out.as_mut_ptr(), out.len() as u32, 0) < 0 {
             return Err("delta-hash");
         }
         Ok(out)
@@ -334,6 +346,51 @@ pub fn range(
 mod tests {
     use super::*;
     use std::io::Cursor;
+    #[test]
+    fn streaming_sha256_matches_known_digest_and_both_algorithms_bound_reads() {
+        let hash = hash_reader_with_algorithm(&mut Cursor::new(b"abc"), &|| false, false).unwrap();
+        assert_eq!(
+            update_io::hex(&hash),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        struct Chunks(usize);
+        impl Read for Chunks {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                assert!(bytes.len() <= 65536);
+                // Deliberately short reads across several buffer boundaries.
+                let n = self.0.min(bytes.len()).min(8191);
+                bytes[..n].fill(7);
+                self.0 -= n;
+                Ok(n)
+            }
+        }
+        for sha512 in [false, true] {
+            let expected = update_io::digest(&vec![7; 196_621], sha512).unwrap();
+            assert_eq!(
+                hash_reader_with_algorithm(&mut Chunks(196_621), &|| false, sha512).unwrap(),
+                expected
+            );
+        }
+    }
+    #[test]
+    fn streaming_hash_keeps_cancellation_and_read_errors() {
+        struct Failed;
+        impl Read for Failed {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            }
+        }
+        for sha512 in [false, true] {
+            assert_eq!(
+                hash_reader_with_algorithm(&mut Failed, &|| false, sha512),
+                Err("delta-read")
+            );
+            assert_eq!(
+                hash_reader_with_algorithm(&mut Failed, &|| true, sha512),
+                Err("delta-cancelled")
+            );
+        }
+    }
     fn map(sizes: &[u64], checksums: &[&str]) -> Vec<u8> {
         let v = serde_json::json!({"version":"2","files":[{"name":"file","offset":0,"sizes":sizes,"checksums":checksums}]});
         let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());

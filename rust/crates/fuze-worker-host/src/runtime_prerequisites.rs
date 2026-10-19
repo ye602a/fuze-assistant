@@ -21,6 +21,7 @@ const DLLS: [&str; 7] = [
     "msvcp140_atomic_wait.dll",
     "concrt140.dll",
 ];
+const MAX_NATIVE_BYTES: u64 = 128 * 1024 * 1024;
 type Version = [u32; 4];
 fn version(s: &str, major: u32) -> Option<Version> {
     let parts = s
@@ -214,14 +215,20 @@ fn check_with(directory: &Path, inventory: &dyn Fn(&str) -> Option<Version>) -> 
         let meta = fs::symlink_metadata(&path).map_err(|_| "runtime-artifact-changed")?;
         if !meta.is_file()
             || meta.file_attributes() & 0x400 != 0
-            || meta.len() > 128 * 1024 * 1024
+            || meta.len() > MAX_NATIVE_BYTES
             || !x64(&path)
         {
             return Err("runtime-artifact-changed");
         }
-        let bytes = update_channel::bounded(&path, 128 * 1024 * 1024)
-            .map_err(|_| "runtime-artifact-changed")?;
-        if update_io::hex(&update_io::digest(&bytes, false)?) != hash {
+        // Reuse the updater's 64 KiB buffer rather than allocating an entire native DLL.
+        // One extra byte detects a file growing past the limit after the metadata check.
+        let mut reader = fs::File::open(&path)
+            .map_err(|_| "runtime-artifact-changed")?
+            .take(MAX_NATIVE_BYTES + 1);
+        let actual =
+            crate::private_update::hash_reader_with_algorithm(&mut reader, &|| false, false)
+                .map_err(|_| "runtime-artifact-changed")?;
+        if reader.limit() == 0 || update_io::hex(&actual) != hash {
             return Err("runtime-artifact-changed");
         }
     }
