@@ -5,7 +5,10 @@ use slint::{ComponentHandle, VecModel};
 use std::{
     cell::RefCell,
     rc::Rc,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     time::Duration,
 };
 
@@ -53,9 +56,11 @@ impl State {
 pub struct Binding {
     state: Rc<RefCell<State>>,
     timer: Rc<slint::Timer>,
+    consent: Arc<AtomicBool>,
 }
 impl Binding {
     pub fn automatic(&self, ui: &ChampionWindow, enabled: bool) {
+        self.consent.store(enabled, Ordering::Release);
         ui.set_auto_items(enabled);
         let mut s = self.state.borrow_mut();
         let ready = enabled
@@ -120,10 +125,13 @@ impl Binding {
 }
 impl Drop for Binding {
     fn drop(&mut self) {
+        self.consent.store(false, Ordering::Release);
         self.timer.stop();
     }
 }
 pub fn attach(ui: &ChampionWindow) -> Binding {
+    let consent = Arc::new(AtomicBool::new(false));
+    let permission = consent.clone();
     let state = Rc::new(RefCell::new(State::default()));
     let timer = Rc::new(slint::Timer::default());
     let weak = ui.as_weak();
@@ -164,14 +172,15 @@ pub fn attach(ui: &ChampionWindow) -> Binding {
             if pending.epoch!=current.epoch || pending.id!=current.id || pending.version!=current.version || pending.route!=ui.get_build_route().max(0) as usize {return Err("changed");}
             shared.borrow_mut().auto_attempt=Some((pending.id,pending.version.clone(),pending.route));
             let (tx,rx)=mpsc::sync_channel(1);
+            let permission=permission.clone();
             std::thread::Builder::new().name("fuze-slint-item-sets".into()).spawn(move || {
                 let result=(|| {
                     let prefs=fuze_worker_host::preferences::read(&fuze_worker_host::preferences::path()?)?;
-                    if pending.automatic && !prefs.auto_item_sets {return Err("item-sets-auto-disabled");}
                     let manual=(!prefs.manual_directory.is_empty()).then(||std::path::Path::new(&prefs.manual_directory));
                     let client=fuze_lcu::discovery::HistorySession::open(manual)?;
                     // Existing transaction revalidates phase, current hero and account before writing.
                     let index=pending.detail.item_routes.iter().position(|r|*r==pending.route).ok_or("item-sets-route-unavailable")?;
+                    if pending.automatic && !permission.load(Ordering::Acquire) {return Err("item-sets-auto-disabled");}
                     client.install_item_sets(pending.id,&[pending.detail.item_sets[index].clone()])
                 })();
                 let _=tx.send((pending.epoch,result));
@@ -232,7 +241,11 @@ pub fn attach(ui: &ChampionWindow) -> Binding {
         },
     );
     timer.stop();
-    Binding { state, timer }
+    Binding {
+        state,
+        timer,
+        consent,
+    }
 }
 
 #[cfg(test)]

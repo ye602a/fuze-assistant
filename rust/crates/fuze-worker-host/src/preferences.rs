@@ -23,14 +23,12 @@ pub struct Preferences {
     #[serde(deserialize_with = "public_update_setting")]
     pub private_updates: bool,
     pub icon_downloads: bool,
-    #[serde(skip_serializing_if = "is_false")]
+    // Session-only consent: older rollback builds deny unknown persisted fields.
+    #[serde(skip)]
     pub auto_item_sets: bool,
     pub pause_hotkey: bool,
     pub manual_directory: String,
     pub local_records: bool,
-}
-fn is_false(value: &bool) -> bool {
-    !value
 }
 fn public_update_setting<'de, D: serde::Deserializer<'de>>(
     input: D,
@@ -283,7 +281,11 @@ mod tests {
         ui_only.auto_item_sets = true;
         let enabled: Preferences =
             serde_json::from_value(serde_json::to_value(&ui_only).unwrap()).unwrap();
-        assert!(enabled.auto_item_sets);
+        assert!(!enabled.auto_item_sets);
+        assert!(serde_json::to_value(&ui_only)
+            .unwrap()
+            .get("auto_item_sets")
+            .is_none());
         assert!(!p.recognition_changed(&ui_only));
         ui_only.backend = "dml".into();
         assert!(p.recognition_changed(&ui_only));

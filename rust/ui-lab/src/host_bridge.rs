@@ -141,8 +141,8 @@ fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
         ),
         (
             "auto_item_sets",
-            "选人时自动导入装备方案",
-            "开启即允许为本人英雄写入所选路线；保留个人方案，不购买装备。",
+            "自动导入装备方案（本次运行）",
+            "开启即允许选人时导入本人所选路线，重启后关闭；保留个人方案。",
             p.auto_item_sets,
         ),
         (
