@@ -44,7 +44,7 @@ GET /lol-gameflow/v1/gameflow-phase
 - 英雄详情窗口：`src/main/modules/window-manager.ts` 的 `createPopupWindow()` 和 renderer 路由 `/augment-overlay`
 - 海克斯顶部浮窗：`src/main/modules/window-manager.ts` 的 `createFloatingWindow()` 和 renderer 路由 `/floating-overlay`
 - 海克斯右侧推荐列表：`src/main/modules/window-manager.ts` 的 `createAugmentSidePanelWindow()` 和 renderer 路由 `/augment-side-panel`
-- 窗口偏好：主界面 `OverlayPreferences` 写入 electron-store，由 `src/main/modules/user-preferences.ts` 读取
+- 窗口偏好：生产 `Display.vue` 的设置入口写入 electron-store，由 `src/main/modules/user-preferences.ts` 读取；未挂载的旧 `OverlayPreferences` 已清理。
 - 席位推荐组件：`src/renderer/components/AramBenchRecommendation.vue`
 - Renderer 事件监听：`src/preload/preload.ts`、`src/renderer/native/electron-api.ts`
 

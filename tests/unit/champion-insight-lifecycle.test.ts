@@ -34,7 +34,7 @@ describe('champion insight lifecycle', () => {
         'utf8',
       ),
       readFile(new URL('../../src/main/auto-screenshot-service.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../../src/renderer/components/OverlayPreferences.vue', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/main/modules/user-preferences.ts', import.meta.url), 'utf8'),
     ])
     const overlay = overlaySource.replace(/\r\n/g, '\n')
     const augmentClearedBlock = screenshotService.slice(
