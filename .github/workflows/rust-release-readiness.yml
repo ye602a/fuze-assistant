@@ -1,0 +1,25 @@
+name: Rust release readiness contracts
+on:
+  pull_request:
+    paths:
+      - 'scripts/rust-release-readiness.mjs'
+      - 'scripts/check-rust-release-readiness.mjs'
+      - 'scripts/inspect-rust-release-windows.ps1'
+      - 'tests/unit/rust-release-readiness.test.mjs'
+      - '.github/workflows/rust-release-readiness.yml'
+permissions:
+  contents: read
+jobs:
+  static-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      # Pure Node and Windows metadata checks on non-executable synthetic PE files only.
+      - name: Static dependency and signature policy contracts
+        run: node --test tests/unit/rust-release-readiness.test.mjs
+      - name: Tracked privacy boundary
+        run: node scripts/check-secrets.mjs
