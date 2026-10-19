@@ -158,6 +158,83 @@ pub fn transport(
     transfer_check(session, root, old_archive, old_map).map(|(_, report)| report)
 }
 
+/// Archive and pointer evidence only. Deliberately never calls check_bundle, launch_with,
+/// local_setup, registry or shortcut APIs. It cannot establish runtime health or restart success.
+pub fn staging(
+    root: &Path,
+    manifest: &Manifest,
+    archive: &Path,
+    baseline: &Manifest,
+    old_archive: &Path,
+) -> Result<serde_json::Value> {
+    manifest.validate()?;
+    baseline.validate()?;
+    if manifest.sequence <= baseline.sequence || manifest.revision == baseline.revision {
+        return Err("validation-distinct-upgrade-required");
+    }
+    // No existing installation (including a previously used validation root) can be modified.
+    fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
+    install::safe_dir(root)?;
+    let _lock = install::lock(root)?;
+    for (meta, path) in [(baseline, old_archive), (manifest, archive)] {
+        let bytes = update_channel::bounded(path, meta.size)?;
+        if bytes.len() as u64 != meta.size {
+            return Err("update-size");
+        }
+        if crate::update_io::digest(&bytes, true)? != update_channel::decode_hex(&meta.sha512, 64)?
+        {
+            return Err("update-final-hash");
+        }
+    }
+    let expected = |meta: &Manifest| install::Installed {
+        revision: meta.revision.clone(),
+        sequence: meta.sequence,
+    };
+    // Structural validation only, never substitute this callback for production health checks.
+    let inspect = |directory: &Path, meta: &Manifest| {
+        if install::bundled_version(directory)? != expected(meta) {
+            return Err("validation-build-identity");
+        }
+        install::desktop_program(directory)?;
+        Ok(())
+    };
+    for (meta, path) in [(baseline, old_archive), (manifest, archive)] {
+        let destination = root.join("versions").join(&meta.revision);
+        install::unpack(path, &destination, &meta.revision)?;
+        inspect(&destination, meta)?;
+    }
+    let initial = install::State {
+        current: Some(expected(baseline)),
+        ..Default::default()
+    };
+    install::save(root, &initial)?;
+    let inspect_target = |directory: &Path| inspect(directory, manifest);
+    install::activate(root, manifest, &inspect_target)?;
+    let pending = install::read(root)?;
+    if pending.current != Some(expected(manifest))
+        || pending.previous != initial.current
+        || !pending.pending
+    {
+        return Err("validation-activation");
+    }
+    if install::activate(root, manifest, &inspect_target) != Err("install-validation-pending") {
+        return Err("validation-pending-guard");
+    }
+    install::rollback(root)?;
+    verify_rollback(root, &initial, manifest)?;
+    if install::activate(root, manifest, &inspect_target) != Err("install-old-or-rejected") {
+        return Err("validation-rejected-guard");
+    }
+    Ok(serde_json::json!({
+        "revision": manifest.revision, "baseline_revision": baseline.revision,
+        "final_hashes_verified": true, "native_extracted": true, "build_identity_verified": true,
+        "pending_pointer_verified": true, "pending_guard": true, "pointer_rollback": true,
+        "rejected_guard": true, "installed": false, "process_launch": false,
+        "runtime_health_verified": false, "restart_verified": false,
+        "registration_changed": false, "game_access": false
+    }))
+}
+
 /// Two explicit processes: seed a real prefix then reopen it in a later invocation.
 /// No archive extraction, application launch or install lifecycle is reachable here.
 pub fn resume_transport(session: Session, root: &Path, seed: bool) -> Result<serde_json::Value> {
@@ -270,7 +347,9 @@ pub fn resume_transport(session: Session, root: &Path, seed: bool) -> Result<ser
         "package_bytes": release.manifest.size, "retained_before": before,
         "retained_after": cache.borrow().retained_bytes()?, "resume_offset": prefix.get(),
         "received_bytes": received.load(Ordering::Relaxed), "total_ms": started.elapsed().as_millis(),
-        "revision": release.manifest.revision, "installed": false, "game_access": false, "credential_persisted": false
+        "revision": release.manifest.revision, "installed": false, "game_access": false, "credential_persisted": false,
+        "public_download": !session.uses_credential(), "private_download": session.uses_credential(),
+        "process_launch": false
     }))
 }
 
@@ -312,6 +391,11 @@ fn transfer_check(
     fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
     install::safe_dir(root)?;
     let release = session.check(&cancel)?;
+    fs::write(
+        root.join("manifest.json"),
+        serde_json::to_vec(&release.manifest).map_err(|_| "validation-manifest")?,
+    )
+    .map_err(|_| "validation-manifest")?;
     let map = session.bytes(&release.map, 8 * 1024 * 1024, &cancel)?;
     // Avoid a redundant full transfer when the supplied baseline cannot exercise real reuse.
     let plan = crate::private_update::plan(&old_map, old_bytes, &map, release.manifest.size)?;
@@ -389,11 +473,12 @@ fn transfer_check(
     }
     let report = serde_json::json!({
         "revision":release.manifest.revision, "package_bytes":release.manifest.size,
-        "private_download":true, "real_range_bytes":delta.downloaded, "full_bytes":fallback.downloaded,
+        "private_download":session.uses_credential(), "public_download":!session.uses_credential(),
+        "real_range_bytes":delta.downloaded, "full_bytes":fallback.downloaded,
         "delta_received_bytes":delta_received, "fallback_received_bytes":received.load(Ordering::Relaxed)-delta_received,
         "delta_range_requests":delta_requests, "delta_ms":delta_ms, "total_ms":started.elapsed().as_millis(),
         "final_hashes_verified":true, "full_fallback":true, "installed":false,
-        "game_access":false, "credential_persisted":false
+        "game_access":false, "credential_persisted":false, "process_launch":false
     });
     Ok((release.manifest, report))
 }
