@@ -184,6 +184,12 @@ impl Pipeline {
     pub fn clear_level(&mut self) {
         self.session.clear_level();
     }
+    pub(crate) fn closed_window(&self) -> Option<fuze_runtime::gate::ClosedWindow> {
+        self.session.closed_window()
+    }
+    pub(crate) fn restore_closed_window(&mut self, state: fuze_runtime::gate::ClosedWindow) {
+        self.session.restore_closed_window(state);
+    }
     pub fn level_gate(&mut self, enabled: bool) {
         self.session.level_gate(enabled);
     }

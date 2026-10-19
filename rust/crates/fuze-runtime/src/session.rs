@@ -156,6 +156,12 @@ impl Session {
     pub fn clear_level(&mut self) {
         self.gate.clear_level();
     }
+    pub fn closed_window(&self) -> Option<crate::gate::ClosedWindow> {
+        self.gate.closed_window()
+    }
+    pub fn restore_closed_window(&mut self, state: crate::gate::ClosedWindow) {
+        self.gate.restore_closed_window(state);
+    }
     pub fn level_gate(&mut self, enabled: bool) {
         self.gate.enable(enabled);
     }

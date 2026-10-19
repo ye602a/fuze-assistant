@@ -23,6 +23,9 @@ pub struct Decision {
 const BURST_MS: u64 = 20_000;
 const EVIDENCE_HOLD_MS: u64 = 6_000;
 const LEVEL_TTL_MS: u64 = 10_000;
+/// In-memory scheduling state only; no timing, card identity or claim evidence.
+#[derive(Clone, Copy)]
+pub struct ClosedWindow(u8);
 #[derive(Default)]
 pub struct LevelGate {
     level: Option<(u8, u64)>,
@@ -48,6 +51,13 @@ fn band(level: u8) -> u8 {
     }
 }
 impl LevelGate {
+    pub fn closed_window(&self) -> Option<ClosedWindow> {
+        self.window_closed.then_some(ClosedWindow(self.band))
+    }
+    pub fn restore_closed_window(&mut self, state: ClosedWindow) {
+        self.band = state.0;
+        self.window_closed = true;
+    }
     pub fn enable(&mut self, enabled: bool) {
         self.disabled = !enabled;
     }
@@ -112,7 +122,7 @@ impl LevelGate {
     pub fn screen_closed(&mut self) {
         // Close a recognition window, not a reward/claim counter. Shards alone
         // must not suppress a delayed real choice in the same level band.
-        self.window_closed |= self.candidate_seen;
+        self.window_closed |= self.candidate_seen && self.band != 0;
         self.last_evidence = None;
         self.unreadable_since = None;
         self.burst_started = None;
@@ -321,6 +331,9 @@ mod tests {
     #[test]
     fn shards_do_not_close_reward_window_and_explicit_disable_allows_probes() {
         let mut g = LevelGate::default();
+        g.observe(Selection::Candidate, 0);
+        g.screen_closed();
+        assert!(g.decision(0).capture); // No level context: keep bounded fallback probes.
         g.update_level(3, 0);
         g.observe(Selection::StatShard, 1);
         g.screen_closed();

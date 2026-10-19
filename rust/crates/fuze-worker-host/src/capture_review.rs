@@ -306,6 +306,11 @@ pub fn run(
                 _ => None,
             });
             let expected: [Option<u32>; 3] = std::array::from_fn(|i| {
+                // Cold single-title fixture is still read by OCR (separately tested),
+                // but must not open a production recommendation on its own.
+                if sample.expected_names.len() < 2 {
+                    return None;
+                }
                 sample
                     .expected_names
                     .get(i)
@@ -313,6 +318,9 @@ pub fn run(
             });
             if actual != expected {
                 return Err("capture-review-ocr-mismatch".into());
+            }
+            if sample.expected_names.len() < 2 && pipeline.frames.current().is_some() {
+                return Err("capture-review-single-title-popup".into());
             }
             if delivery.snapshot.selection_confirmed
                 || delivery.snapshot.actual_stage != fuze_contract::ActualStage::Unknown
