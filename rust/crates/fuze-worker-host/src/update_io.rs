@@ -1,4 +1,5 @@
-//! Remote downloads are separate from LCU: strict public TLS, no cookies/proxy/redirect.
+//! Remote downloads are separate from LCU: strict public TLS, no cookies or automatic redirects.
+//! Release distribution follows the user's system proxy routing, without ambient authentication.
 use crate::Result;
 use std::{
     ffi::c_void,
@@ -40,6 +41,16 @@ impl Drop for Handle {
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+fn access_type(host: &str) -> u32 {
+    // Match the existing desktop updater's system routing only for fixed release hosts.
+    // Other data requests retain their existing direct policy; LCU uses a separate client.
+    match host {
+        "api.github.com"
+        | "release-assets.githubusercontent.com"
+        | "objects.githubusercontent.com" => WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        _ => WINHTTP_ACCESS_TYPE_NO_PROXY,
+    }
 }
 fn handle(p: *mut c_void) -> Result<Handle> {
     if p.is_null() {
@@ -153,7 +164,7 @@ pub(crate) fn transfer(
     unsafe {
         let session = handle(WinHttpOpen(
             wide("Fuze-Rust-update").as_ptr(),
-            WINHTTP_ACCESS_TYPE_NO_PROXY,
+            access_type(host),
             null(),
             null(),
             0,
@@ -278,7 +289,7 @@ pub(crate) fn transfer(
                     .to_owned(),
             ));
         }
-        if code == 401 || code == 403 || code == 404 {
+        if matches!(code, 401 | 403 | 404 | 407) {
             return Err("update-access-or-release");
         }
         if code != if range.is_some() { 206 } else { 200 } {
@@ -381,6 +392,25 @@ fn request_budget(limit: usize, ranged: bool) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn system_proxy_routing_is_confined_to_release_distribution() {
+        for host in [
+            "api.github.com",
+            "release-assets.githubusercontent.com",
+            "objects.githubusercontent.com",
+        ] {
+            assert_eq!(access_type(host), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY);
+        }
+        for host in [
+            "data.dtodo.cn",
+            "localhost",
+            "127.0.0.1",
+            "api.github.com.other",
+            "other.example",
+        ] {
+            assert_eq!(access_type(host), WINHTTP_ACCESS_TYPE_NO_PROXY);
+        }
+    }
     #[test]
     fn fixed_buffer_preserves_short_read_eof_size_and_cancellation_boundaries() {
         use std::io::{Cursor, Read};
