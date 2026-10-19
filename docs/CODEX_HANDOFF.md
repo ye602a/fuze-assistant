@@ -13,6 +13,24 @@ Controller 暂停 / 配置重建后，仅确认同局同英雄才恢复已关闭
 LCU 回读不等于游戏商店展示验收；具体根因、行为边界和实机清单见
 [本批修复记录](development/rust/GAMEPLAY_FIXES_20261019.md)。
 
+## 2026-10-19：PR #109 已合并，真实回执与依赖检测复验
+
+[PR #109](https://github.com/ye602a/fuze-assistant/pull/109) 的四项检查全部通过后合并到
+master，提交 `3d2f697e066d3015e04e793e6da8f24815815f70`。在固定该提交的隔离源码与
+空 target 目录完成真实核心 / Slint-Skia release 编译，回执绑定工具链、策略和 4 个
+自有 EXE；实际 8 个原生文件的契约校验通过。CheckOnly 正确阻断本机低于支持基线的
+CRT、未知旧记录和被改动产物；固定微软安装器与提取 DLL 仅做只读验证，没有安装。
+
+随后按用户要求检查依赖与入口，清理 74 个无生产入口文件及 6 个独占开发依赖。
+生产入口可达的 146 个模块集合不变，未改动其源码。保留旧 Electron 稳定实现、显式
+兼容入口、离线诊断和 Rust 原型工具，不按文件名删除。干净依赖安装后的 468 项单测、
+lint / 类型检查 / build 及 24 项运行库定向测试通过。详见
+[构建证据、删除依据与保留项](development/rust/POST109_VALIDATION_CLEANUP.md)。
+
+本轮未打包、发布、安装运行库、启动或切换 FUZE；公开包仍是下节 `e941c7e124c7`。
+正式签名安装器、真实安装/在线更新/回滚/再启动及玩家环境验收仍未完成，不能宣布正式版通过。
+原有 `docs/STAGE_STATISTICS.md` 和 `docs/LOCAL_VALIDATION_NEXT.md` 保持原样且未纳入提交。
+
 ## 2026-10-19：按用户要求发布最新 master 测试包
 
 最新公开 Rust Pre-release 为 **`e941c7e124c7`**，来自已合入 PR #108 的 master，
