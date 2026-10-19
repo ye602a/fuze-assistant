@@ -59,6 +59,18 @@ pub struct Report {
     first_fault: Option<Event>,
     dropped_events: u64,
     events: VecDeque<Event>,
+    #[serde(
+        default,
+        rename = "packageRevision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    package_revision: Option<crate::build_identity::Revision>,
+    #[serde(
+        default,
+        rename = "runtimeRevision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    runtime_revision: Option<crate::build_identity::Revision>,
 }
 impl Report {
     fn title(&self) -> String {
@@ -84,6 +96,7 @@ impl Report {
                 e.elapsed_ms <= 86_400_000
                     && crate::runtime_log::Record {
                         schema: 1,
+                        runtime_revision: None,
                         event: crate::runtime_log::Event::State,
                         elapsed_ms: e.elapsed_ms,
                         state: e.state.clone(),
@@ -109,7 +122,7 @@ impl Report {
         } else {
             "自动跟踪：开启后的对局记录。"
         };
-        let body = format!("符择诊断 · {status}\n{source}\n\n反馈格式：rust-public-feedback-2；截图来源和回退状态以记录字段为准。\n仅固定状态、相对耗时、计数及三个卡位的识别分类。没有账号、对局 ID、截图、路径、OCR 原文或凭据。\n整体胜率推荐；实际领取轮次未知。分析耗时不代表弹窗出现后的等待时间。\n\n```json\n{safe}\n```\n");
+        let body = format!("符择诊断 · {status}\n{source}\n\n反馈格式：rust-public-feedback-2；截图来源和回退状态以记录字段为准。\npackageRevision 是报告生成包；runtimeRevision 是记录对应的运行包，缺失表示未知，不能从生成包推断历史版本。\n仅受限构建标识、固定状态、相对耗时、计数及三个卡位的识别分类。没有账号、对局 ID、截图、路径、OCR 原文或凭据。\n整体胜率推荐；实际领取轮次未知。分析耗时不代表弹窗出现后的等待时间。\n\n```json\n{safe}\n```\n");
         let bytes = serde_json::to_vec(&serde_json::json!({"title": self.title(), "body": body}))
             .map_err(|_| "feedback-invalid")?;
         if bytes.len() > 60 * 1024 {
@@ -120,6 +133,7 @@ impl Report {
 }
 /// In-memory match tracking. A disconnect or pause never masquerades as a finished match.
 pub struct Tracker {
+    revision: Option<crate::build_identity::Revision>,
     nonce: u64,
     serial: u64,
     active: Option<Report>,
@@ -142,10 +156,17 @@ impl Tracker {
                 return Err("feedback-random");
             }
         }
-        Ok(Self::with_nonce(u64::from_le_bytes(bytes)))
+        Ok(Self::with_revision(
+            u64::from_le_bytes(bytes),
+            crate::build_identity::current(),
+        ))
     }
     fn with_nonce(nonce: u64) -> Self {
+        Self::with_revision(nonce, None)
+    }
+    fn with_revision(nonce: u64, revision: Option<crate::build_identity::Revision>) -> Self {
         Self {
+            revision,
             nonce,
             serial: 0,
             active: None,
@@ -176,6 +197,8 @@ impl Tracker {
                 first_fault: None,
                 dropped_events: 0,
                 events: VecDeque::new(),
+                package_revision: self.revision.clone(),
+                runtime_revision: self.revision.clone(),
             });
         }
         let r = self.active.as_mut()?;
@@ -259,21 +282,36 @@ impl Tracker {
 }
 /// Explicit recovery only, on the feedback worker. Typed allowlist is applied again.
 fn recover_recent(value: serde_json::Value) -> Result<Report> {
+    recover_with_revision(value, crate::build_identity::current())
+}
+fn recover_with_revision(
+    value: serde_json::Value,
+    exporter: Option<crate::build_identity::Revision>,
+) -> Result<Report> {
     let rows: Vec<crate::runtime_log::Record> =
         serde_json::from_value(value["records"].clone()).map_err(|_| "feedback-no-local-match")?;
     let mut tracker = Tracker::with_nonce(0);
     let mut latest = None;
     let mut previous = 0;
+    let mut previous_revision = None;
+    let mut seen = false;
     for row in rows {
         if !row.valid() {
             return Err("feedback-invalid");
         }
-        if row.event == crate::runtime_log::Event::Start || row.elapsed_ms < previous {
+        // A version boundary is also a session boundary when rotation removed its start line.
+        if !seen
+            || row.event == crate::runtime_log::Event::Start
+            || row.elapsed_ms < previous
+            || row.runtime_revision != previous_revision
+        {
             if let Some(r) = tracker.finish() {
                 latest = Some(r);
             }
-            tracker = Tracker::with_nonce(0);
+            tracker = Tracker::with_revision(0, row.runtime_revision.clone());
         }
+        seen = true;
+        previous_revision = row.runtime_revision;
         previous = row.elapsed_ms;
         if let Some(report) = tracker.observe(row.state, row.elapsed_ms) {
             if report.end != End::Fault {
@@ -294,8 +332,12 @@ fn recover_recent(value: serde_json::Value) -> Result<Report> {
     }
     // Once per explicit recovery, never per frame. Stable identity prevents repeated manual POSTs.
     report.id.clear();
+    // Preserve the exact legacy hash when runtime identity is absent. Exporting the
+    // same logs from a newer package must not create a second issue or bypass a receipt.
+    report.package_revision = None;
     let bytes = serde_json::to_vec(&report).map_err(|_| "feedback-invalid")?;
     report.id = crate::update_io::hex(&crate::update_io::digest(&bytes, false)?)[..32].into();
+    report.package_revision = exporter;
     if !report.valid() {
         return Err("feedback-invalid");
     }
@@ -353,6 +395,14 @@ impl Store {
     fn enqueue(&mut self, report: Report) -> Result<()> {
         if !report.valid() {
             return Err("feedback-invalid");
+        }
+        if report.recovered {
+            if let Some((id, issue)) = &self.recovered_receipt {
+                if id == &report.id {
+                    self.latest_issue = Some(*issue);
+                    return Err("feedback-already-sent");
+                }
+            }
         }
         if let Some(entry) = self.entries.iter_mut().find(|e| e.report.id == report.id) {
             entry.report = report;
@@ -658,13 +708,6 @@ fn worker(
                     .and_then(recover_recent);
                     match result {
                         Ok(report) => {
-                            if let Some((id, issue)) = &store.recovered_receipt {
-                                if id == &report.id {
-                                    store.latest_issue = Some(*issue);
-                                    error = Some("feedback-already-sent");
-                                    continue;
-                                }
-                            }
                             error = store.enqueue(report).and_then(|_| store.save(&path)).err();
                             manual = error.is_none();
                             if manual {

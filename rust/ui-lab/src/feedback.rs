@@ -1,4 +1,4 @@
-//! Bounded state transitions from the existing host poll. No files, network or raw payloads.
+//! Bounded state transitions from the existing host poll. No network or raw payloads.
 use fuze_worker_host::desktop::Status;
 use serde_json::{json, Value};
 use std::{collections::VecDeque, time::Instant};
@@ -17,6 +17,7 @@ struct Event {
     state: State,
 }
 pub struct Recorder {
+    revision: Option<fuze_worker_host::build_identity::Revision>,
     started: Instant,
     events: VecDeque<Event>,
     dropped: u64,
@@ -26,6 +27,7 @@ pub struct Recorder {
 impl Default for Recorder {
     fn default() -> Self {
         Self {
+            revision: fuze_worker_host::build_identity::current(),
             started: Instant::now(),
             events: VecDeque::with_capacity(CAPACITY),
             dropped: 0,
@@ -123,6 +125,7 @@ impl Recorder {
         })).collect::<Vec<_>>();
         let value = json!({
             "schema":1,"kind":"fuze-runtime-safe-feedback",
+            "packageRevision":self.revision,"runtimeRevision":self.revision,
             "events":events,"droppedEvents":self.dropped,"latestMetrics":{
                 "completedAnalyses":self.metrics.0,"skippedFrames":self.metrics.1,
                 "lastAnalysisMs":self.metrics.2,"level":self.metrics.3,
@@ -146,6 +149,21 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_identifies_this_run_and_unknown_build_is_not_inferred() {
+        let mut recorder = Recorder {
+            revision: Some("111111111111".to_owned().try_into().unwrap()),
+            ..Default::default()
+        };
+        recorder.observe(&Status::default(), true);
+        let report: Value = serde_json::from_slice(&recorder.encode(json!({})).unwrap()).unwrap();
+        assert_eq!(report["packageRevision"], "111111111111");
+        assert_eq!(report["runtimeRevision"], "111111111111");
+        recorder.revision = None;
+        let unknown: Value = serde_json::from_slice(&recorder.encode(json!({})).unwrap()).unwrap();
+        assert!(unknown["packageRevision"].is_null());
+        assert!(unknown["runtimeRevision"].is_null());
+    }
     #[test]
     fn state_changes_are_bounded_and_private_host_fields_never_export() {
         let mut r = Recorder::default();

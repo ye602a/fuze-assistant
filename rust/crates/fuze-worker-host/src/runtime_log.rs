@@ -377,6 +377,12 @@ impl Snapshot {
 #[serde(deny_unknown_fields)]
 pub struct Record {
     pub schema: u8,
+    #[serde(
+        default,
+        rename = "runtimeRevision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_revision: Option<crate::build_identity::Revision>,
     pub event: Event,
     pub elapsed_ms: u64,
     pub state: Snapshot,
@@ -575,6 +581,7 @@ enum Command {
     Export(mpsc::Sender<Result<serde_json::Value>>),
 }
 pub struct Journal {
+    revision: Option<crate::build_identity::Revision>,
     tx: Option<SyncSender<Command>>,
     worker: Option<JoinHandle<()>>,
     status: Arc<AtomicU8>,
@@ -586,16 +593,23 @@ pub struct Journal {
 }
 impl Journal {
     pub fn start(dir: PathBuf) -> Self {
+        Self::start_with_revision(dir, crate::build_identity::current())
+    }
+    fn start_with_revision(
+        dir: PathBuf,
+        revision: Option<crate::build_identity::Revision>,
+    ) -> Self {
         let (tx, rx) = mpsc::sync_channel(64);
         let status = Arc::new(AtomicU8::new(0));
         let state = status.clone();
         let dropped = Arc::new(AtomicU64::new(0));
         let loss = dropped.clone();
         let started = Instant::now();
+        let worker_revision = revision.clone();
         let worker = std::thread::Builder::new()
             .name("fuze-runtime-log".into())
             .spawn(move || {
-                let result = write_loop(&dir, rx, &state, &loss, started);
+                let result = write_loop(&dir, rx, &state, &loss, started, worker_revision);
                 if let Err(e) = result {
                     state.store(if e == "log-busy" { 3 } else { 2 }, Ordering::Release);
                 }
@@ -605,6 +619,7 @@ impl Journal {
             status.store(2, Ordering::Release);
         }
         Self {
+            revision,
             tx: Some(tx),
             worker,
             status,
@@ -639,6 +654,7 @@ impl Journal {
         }
         let record = Record {
             schema: 1,
+            runtime_revision: self.revision.clone(),
             event: if changed {
                 Event::State
             } else {
@@ -673,6 +689,7 @@ impl Journal {
             if let Some(state) = self.latest.take() {
                 let _ = tx.send(Command::Record(Record {
                     schema: 1,
+                    runtime_revision: self.revision.clone(),
                     event: Event::Metrics,
                     elapsed_ms: self.started.elapsed().as_millis() as u64,
                     state,
@@ -696,10 +713,12 @@ fn write_loop(
     status: &AtomicU8,
     dropped: &AtomicU64,
     started: Instant,
+    revision: Option<crate::build_identity::Revision>,
 ) -> Result<()> {
     let mut store = Store::open(dir, FILE_BYTES)?;
     let mut last = Record {
         schema: 1,
+        runtime_revision: revision,
         event: Event::Start,
         elapsed_ms: 0,
         state: Snapshot::from_status(&Status::default()),
@@ -788,6 +807,7 @@ mod tests {
         status.pipeline.dataset = Some("private-do-not-export".into());
         Record {
             schema: 1,
+            runtime_revision: None,
             event: Event::State,
             elapsed_ms: 1,
             state: Snapshot::from_status(&status),
@@ -827,6 +847,7 @@ mod tests {
         fs::write(&sentinel, "keep").unwrap();
         let mut store = Store::open(&fixture.0, 4096).unwrap();
         let mut row = record();
+        row.runtime_revision = Some("111111111111".to_owned().try_into().unwrap());
         for i in 0..80 {
             row.elapsed_ms = i;
             store.append(&row).unwrap();
@@ -837,6 +858,11 @@ mod tests {
             assert!(fs::metadata(fixture.0.join(name)).unwrap().len() <= 4096);
         }
         let before = read(&fixture.0).unwrap();
+        assert!(before["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["runtimeRevision"] == "111111111111"));
         assert!(before["records"].as_array().unwrap().len() < 80);
         assert!(!before.to_string().contains("private-do-not-export"));
         let mut store = Store::open(&fixture.0, 4096).unwrap();
@@ -924,6 +950,39 @@ mod tests {
                 .len(),
             before + 2
         );
+    }
+    #[test]
+    fn journal_keeps_each_build_and_never_relabels_legacy_records() {
+        let fixture = Fixture::new();
+        let mut store = Store::open(&fixture.0, FILE_BYTES).unwrap();
+        store.append(&record()).unwrap();
+        store.flush(true).unwrap();
+        drop(store);
+        let mut journal = Journal::start_with_revision(
+            fixture.0.clone(),
+            Some("111111111111".to_owned().try_into().unwrap()),
+        );
+        journal.observe(&Status::default());
+        journal.stop();
+        let mut next = Journal::start_with_revision(
+            fixture.0.clone(),
+            Some("222222222222".to_owned().try_into().unwrap()),
+        );
+        next.observe(&Status::default());
+        next.stop();
+        let report = read(&fixture.0).unwrap();
+        let rows = report["records"].as_array().unwrap();
+        assert!(rows[0].get("runtimeRevision").is_none());
+        for (offset, revision) in [(1, "111111111111"), (5, "222222222222")] {
+            assert_eq!(rows[offset]["event"], "start");
+            assert_eq!(rows[offset + 3]["event"], "stop");
+            assert!(rows[offset..offset + 4]
+                .iter()
+                .all(|r| r["runtimeRevision"] == revision));
+        }
+        let mut invalid = serde_json::to_value(record()).unwrap();
+        invalid["runtimeRevision"] = serde_json::json!("private-do-not-export");
+        assert!(serde_json::from_value::<Record>(invalid).is_err());
     }
     #[test]
     fn lock_and_write_failure_do_not_touch_other_files_or_pretend_success() {
