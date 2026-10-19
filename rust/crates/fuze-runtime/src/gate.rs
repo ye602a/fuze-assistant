@@ -10,7 +10,6 @@ pub enum Mode {
     Fallback,
     Selection,
     Pending,
-    Preparing,
     Saving,
 }
 #[derive(Debug, Clone, Copy)]
@@ -170,11 +169,7 @@ impl LevelGate {
         {
             Mode::Saving
         } else if burst && self.last_evidence.is_none() {
-            if matches!(self.band, 2 | 6 | 10 | 14) {
-                Mode::Preparing
-            } else {
-                Mode::Pending
-            }
+            Mode::Pending
         } else {
             Mode::Fallback
         };
@@ -188,7 +183,7 @@ impl LevelGate {
             capture: self
                 .last_probe
                 .is_none_or(|at| now >= at && now - at >= interval_ms),
-            prepare: matches!(mode, Mode::Preparing | Mode::Pending | Mode::Selection),
+            prepare: matches!(mode, Mode::Pending | Mode::Selection),
             interval_ms,
         }
     }
