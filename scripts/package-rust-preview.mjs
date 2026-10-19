@@ -64,16 +64,11 @@ await text('Export-feedback.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --launch\r\n')
 // A targeted test must not silently route through a previously installed revision.
-await text('Start-this-build.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Start-this-build.ps1"\r\n')
+await text('Start-this-build.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -File "%~dp0Start-this-build.ps1"\r\nexit /b %errorlevel%\r\n')
 await text('Start-this-build.ps1',[
  "$ErrorActionPreference = 'Stop'",
- '$start = New-Object System.Diagnostics.ProcessStartInfo',
- "$start.FileName = Join-Path $PSScriptRoot '"+(frontend==='slint'?'fuze-ui-lab.exe':'fuze-rust-host.exe')+"'",
- "$start.Arguments = '--desktop preview.json'",
- '$start.WorkingDirectory = $PSScriptRoot',
- '$start.UseShellExecute = $false',
- '$start.CreateNoWindow = $true',
- '[void][System.Diagnostics.Process]::Start($start)',
+ "& (Join-Path $PSScriptRoot 'Install-local.ps1') -LaunchThisBuild",
+ 'exit $LASTEXITCODE',
  ''
 ].join('\r\n'))
 await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
@@ -86,7 +81,7 @@ await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
 
 这是独立预览，保留已安装的稳定版。不要让两套助手同时识别。
 启动、两局测试要点与脱敏反馈步骤统一见 TESTING-zh-CN.txt。
-便携 ZIP 验证请运行 Start-this-build.cmd，直接启动当前解压版本；受管安装不包含此专用入口。
+便携 ZIP 验证请运行 Start-this-build.cmd，先检查依赖，再启动当前解压版本；受管安装不包含此专用入口。
 Start-preview.cmd 和开始菜单可能启动此前安装的受管版本。
 
 安装与卸载

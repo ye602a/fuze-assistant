@@ -134,6 +134,7 @@ codes!(CaptureFallback {
     Readback,
     Frame
 });
+// Preparing is a historical on-disk value; the current scheduler no longer emits it.
 codes!(Gate {
     Unknown,
     Fallback,
@@ -284,7 +285,6 @@ impl Snapshot {
                 fuze_runtime::gate::Mode::Fallback => Gate::Fallback,
                 fuze_runtime::gate::Mode::Selection => Gate::Selection,
                 fuze_runtime::gate::Mode::Pending => Gate::Pending,
-                fuze_runtime::gate::Mode::Preparing => Gate::Preparing,
                 fuze_runtime::gate::Mode::Saving => Gate::Saving,
             })
             .unwrap_or(Gate::Unknown);
@@ -953,6 +953,10 @@ mod tests {
     }
     #[test]
     fn journal_keeps_each_build_and_never_relabels_legacy_records() {
+        assert_eq!(
+            serde_json::from_str::<Gate>(r#""preparing""#).unwrap(),
+            Gate::Preparing
+        );
         let fixture = Fixture::new();
         let mut store = Store::open(&fixture.0, FILE_BYTES).unwrap();
         store.append(&record()).unwrap();

@@ -587,7 +587,7 @@ pub fn attach_recovered(
             }
             state.set_resources(Rc::new(VecModel::from(vec![
                 next.resources.cpu.map(|v| format!("{v:.1}%")).unwrap_or("—".into()).into(),
-                next.resources.memory_mb.map(|v| format!("{v:.0} MB")).unwrap_or("—".into()).into(),
+                next.resources.memory_mb.map(|v| format!("{v:.0} MiB")).unwrap_or("—".into()).into(),
                 next.pipeline.analyses.to_string().into(),
                 next.pipeline.analysis_ms.map(|v| format!("{v:.0} ms")).unwrap_or("—".into()).into(),
             ])).into());

@@ -281,6 +281,7 @@ pub fn unpack(archive: &Path, destination: &Path, revision: &str) -> Result<()> 
     Ok(())
 }
 pub fn check_bundle(directory: &Path) -> Result<()> {
+    crate::runtime_prerequisites::check(directory)?;
     desktop_program(directory)?;
     let mut child = Command::new(directory.join("fuze-rust-host.exe"))
         .arg("--check-bundle")
@@ -524,13 +525,17 @@ pub(crate) fn launch_with(
     if launched == Err("install-launch-cancelled") {
         return launched;
     }
-    if launched.is_err() {
+    if let Err(error) = launched {
         if state.previous.is_some() {
             rollback(root)?;
             let old = read(root)?.current.ok_or("rollback-unavailable")?;
             start(&root.join("versions").join(old.revision))?;
         } else {
-            return Err("install-launch-readiness");
+            return Err(if crate::runtime_prerequisites::guidance(error).is_some() {
+                error
+            } else {
+                "install-launch-readiness"
+            });
         }
     } else if state.pending {
         // Do not commit health before the launched UI has acknowledged readiness.
@@ -565,6 +570,7 @@ pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
+    crate::runtime_prerequisites::check(directory)?;
     let program = desktop_program(directory)?;
     // Slint can perform one bounded graphics recovery before committing readiness.
     let readiness_seconds =

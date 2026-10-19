@@ -154,9 +154,9 @@ export component Workbench inherits Window {
                             SectionTitle { x: 21px; y: 17px; height: 26px; text: "运行开销"; }
                             Label { x: parent.width - 130px; y: 17px; height: 26px; text: HostState.sampled; color: Theme.muted; font-size: 12px; }
                             HorizontalLayout { x: 21px; y: 60px; width: parent.width - 42px; height: 58px; spacing: 12px;
-                                for metric[index] in ["CPU", "内存", "累计 OCR 分析", "最近分析耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 12px; } Label { text: HostState.resources[index]; font-size: 24px; } }
+                                for metric[index] in ["CPU", "工作集内存", "累计 OCR 分析", "最近分析耗时"]: VerticalLayout { spacing: 5px; Label { text: metric; color: Theme.muted; font-size: 12px; } Label { text: HostState.resources[index]; font-size: 24px; } }
                             }
-                            Label { x: 21px; y: 130px; height: 22px; text: "仅统计本软件及其识别进程；离线预览不采集运行数据。"; color: #98a9b3; font-size: 12px; }
+                            Label { x: 21px; y: 130px; height: 22px; text: "当前界面与识别进程 · 内存为工作集之和；离线预览不采样。"; color: #98a9b3; font-size: 12px; }
                         }
                         Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: HostState.connected ? HostState.schedule : "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
                         Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：" + HostState.data-version + " · 实际领取轮次未确认，继续使用整体胜率。"; }
