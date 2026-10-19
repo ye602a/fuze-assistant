@@ -1,9 +1,59 @@
-//! Developer-only binary, excluded from player packages. Secret enters only via anonymous stdin.
+//! Developer-only binary, excluded from player packages. Public transfer/staging never launch apps.
+//! Private-mode secrets enter only via anonymous stdin.
 #[cfg(windows)]
 fn run() -> Result<(), &'static str> {
     use fuze_worker_host::{update_channel, update_credential::Secret, update_validation};
     use std::{io::Read, path::Path};
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let Some(mode) = args.first().map(String::as_str) {
+        if matches!(
+            mode,
+            "--transport-public" | "--resume-seed-public" | "--resume-public"
+        ) {
+            let transfer = mode == "--transport-public";
+            if args.len() != if transfer { 4 } else { 2 } {
+                return Err("validation-arguments");
+            }
+            let session = update_channel::Session::public();
+            let report = if transfer {
+                update_validation::transport(
+                    session,
+                    Path::new(&args[1]),
+                    Path::new(&args[2]),
+                    Path::new(&args[3]),
+                )?
+            } else {
+                update_validation::resume_transport(
+                    session,
+                    Path::new(&args[1]),
+                    mode == "--resume-seed-public",
+                )?
+            };
+            println!("{report}");
+            return Ok(());
+        }
+        if mode == "--stage-only" {
+            if args.len() != 6 {
+                return Err("validation-arguments");
+            }
+            let read_manifest = |path: &str| {
+                serde_json::from_slice::<update_channel::Manifest>(&update_channel::bounded(
+                    Path::new(path),
+                    16384,
+                )?)
+                .map_err(|_| "validation-manifest")
+            };
+            let report = update_validation::staging(
+                Path::new(&args[5]),
+                &read_manifest(&args[1])?,
+                Path::new(&args[2]),
+                &read_manifest(&args[3])?,
+                Path::new(&args[4]),
+            )?;
+            println!("{report}");
+            return Ok(());
+        }
+    }
     let transport_only = args.first().is_some_and(|arg| arg == "--transport-private");
     let resume = args
         .first()

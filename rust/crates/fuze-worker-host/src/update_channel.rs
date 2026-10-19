@@ -57,6 +57,9 @@ impl Session {
     pub fn public() -> Self {
         Self { secret: None }
     }
+    pub(crate) fn uses_credential(&self) -> bool {
+        self.secret.is_some()
+    }
     pub fn private() -> Result<Self> {
         Ok(Self {
             secret: Some(crate::update_credential::read()?),
