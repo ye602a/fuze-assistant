@@ -140,6 +140,12 @@ fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
             p.icon_downloads,
         ),
         (
+            "auto_item_sets",
+            "选人时自动导入装备方案",
+            "开启即允许为本人英雄写入所选路线；保留个人方案，不购买装备。",
+            p.auto_item_sets,
+        ),
+        (
             "pause_hotkey",
             "暂停快捷键",
             "Ctrl + Shift + F8；不向游戏发送按键。",
@@ -174,6 +180,7 @@ fn change(p: &mut Preferences, key: &str, value: bool) -> Result<(), &'static st
         "champ_topmost" => &mut p.champ_topmost,
         "close_to_tray" => &mut p.close_to_tray,
         "icon_downloads" => &mut p.icon_downloads,
+        "auto_item_sets" => &mut p.auto_item_sets,
         "pause_hotkey" => &mut p.pause_hotkey,
         "local_records" => &mut p.local_records,
         "private_updates" => &mut p.private_updates,

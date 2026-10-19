@@ -23,9 +23,14 @@ pub struct Preferences {
     #[serde(deserialize_with = "public_update_setting")]
     pub private_updates: bool,
     pub icon_downloads: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub auto_item_sets: bool,
     pub pause_hotkey: bool,
     pub manual_directory: String,
     pub local_records: bool,
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 fn public_update_setting<'de, D: serde::Deserializer<'de>>(
     input: D,
@@ -48,6 +53,7 @@ impl Default for Preferences {
             close_to_tray: true,
             private_updates: false,
             icon_downloads: true,
+            auto_item_sets: false,
             pause_hotkey: false,
             manual_directory: String::new(),
             local_records: false,
@@ -261,6 +267,11 @@ mod tests {
     fn older_preferences_receive_safe_defaults_and_reject_remote_fallback() {
         let mut p:Preferences=serde_json::from_str(r#"{"schema":1,"backend":"cpu","locale":"auto","champ_select":true,"champ_topmost":false,"close_to_tray":true}"#).unwrap();
         p.validate().unwrap();
+        assert!(!p.auto_item_sets);
+        assert!(serde_json::to_value(&p)
+            .unwrap()
+            .get("auto_item_sets")
+            .is_none());
         assert!(p.starts_automatically(false, true));
         assert!(!p.starts_automatically(true, true));
         assert!(!p.starts_automatically(false, false));
@@ -269,6 +280,10 @@ mod tests {
         let mut ui_only = p.clone();
         ui_only.champ_topmost = !ui_only.champ_topmost;
         ui_only.close_to_tray = !ui_only.close_to_tray;
+        ui_only.auto_item_sets = true;
+        let enabled: Preferences =
+            serde_json::from_value(serde_json::to_value(&ui_only).unwrap()).unwrap();
+        assert!(enabled.auto_item_sets);
         assert!(!p.recognition_changed(&ui_only));
         ui_only.backend = "dml".into();
         assert!(p.recognition_changed(&ui_only));

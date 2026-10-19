@@ -380,6 +380,10 @@ impl Manager {
                 .details
                 .options(&panel.ui, status.preferences.icon_downloads);
             panel.update(choose, status.preferences.champ_topmost, visible)?;
+            panel.details.automatic(
+                &panel.ui,
+                choose.is_some() && active && status.preferences.auto_item_sets,
+            );
         }
         if side.is_some() || self.side.is_some() {
             let visible = self.visible;

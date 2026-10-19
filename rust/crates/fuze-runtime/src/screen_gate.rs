@@ -5,12 +5,38 @@ pub struct ScreenGate {
     positive: u8,
     open: bool,
     missing_since: Option<u64>,
+    titles: [Option<u32>; 3],
 }
 pub struct Decision {
     pub recognize: bool,
     pub closed: bool,
 }
 impl ScreenGate {
+    /// A lone shop/tooltip title cannot open a recommendation. Partial OCR may
+    /// only retain already admitted cards in the same slots; a reroll needs two.
+    pub fn accept_titles(
+        &mut self,
+        slots: &[fuze_contract::Slot; 3],
+        kind: fuze_contract::wire::TitleKind,
+    ) -> bool {
+        use fuze_contract::{wire::TitleKind, Slot};
+        if kind == TitleKind::StatShard {
+            self.titles = [None; 3];
+            return true;
+        }
+        let ids = slots.each_ref().map(|s| match s {
+            Slot::Known { id, .. } => Some(*id),
+            _ => None,
+        });
+        let unique: std::collections::HashSet<_> = ids.iter().flatten().collect();
+        if unique.len() >= 2 {
+            self.titles = ids;
+            return true;
+        }
+        ids.iter()
+            .zip(self.titles)
+            .all(|(new, old)| new.is_none() || *new == old)
+    }
     pub fn observe(&mut self, evidence: Evidence, now: u64) -> Decision {
         match evidence {
             Evidence::Visible => {
@@ -42,6 +68,7 @@ impl ScreenGate {
                 let closed = self.open && now.saturating_sub(since) >= grace;
                 if closed {
                     self.open = false;
+                    self.titles = [None; 3];
                 }
                 Decision {
                     recognize: false,
@@ -54,6 +81,31 @@ impl ScreenGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn isolated_shop_title_cannot_open_or_replace_a_confirmed_card() {
+        use fuze_contract::{wire::TitleKind, Slot};
+        let slot = |id| Slot::Known {
+            id,
+            name: format!("fixture-{id}"),
+            confidence: 1.,
+        };
+        let mut g = ScreenGate::default();
+        assert!(!g.accept_titles(
+            &[slot(1), Slot::Unreadable, Slot::Unreadable],
+            TitleKind::Candidate
+        ));
+        assert!(!g.accept_titles(&[slot(1), slot(1), Slot::Unreadable], TitleKind::Candidate));
+        assert!(g.accept_titles(&[slot(1), slot(2), slot(3)], TitleKind::Candidate));
+        assert!(g.accept_titles(
+            &[slot(1), Slot::Unreadable, Slot::Unreadable],
+            TitleKind::Candidate
+        ));
+        assert!(!g.accept_titles(
+            &[slot(9), Slot::Unreadable, Slot::Unreadable],
+            TitleKind::Candidate
+        ));
+        assert!(g.accept_titles(&[slot(9), slot(8), Slot::Unreadable], TitleKind::Candidate));
+    }
     #[test]
     fn first_choice_reroll_occlusion_and_close_are_distinct() {
         let mut g = ScreenGate::default();

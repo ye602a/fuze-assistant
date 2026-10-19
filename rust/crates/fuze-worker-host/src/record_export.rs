@@ -490,6 +490,7 @@ mod tests {
                 augments: vec![],
                 guides: vec![],
                 item_sets: vec![],
+                item_routes: vec![],
                 title: if locale == "en-US" {
                     "Synthetic champion".into()
                 } else {

@@ -96,6 +96,7 @@ impl Session {
             return Ok(None);
         }
         self.phase = phase;
+        self.gate.reset();
         self.invalidate().map(Some)
     }
     pub fn pause(&mut self, paused: bool) -> Result<Option<Cleanup>, &'static str> {
@@ -119,11 +120,11 @@ impl Session {
         self.invalidate()
     }
     fn invalidate(&mut self) -> Result<Cleanup, &'static str> {
+        self.gate.invalidate_capture();
         self.generation = self
             .generation
             .checked_add(1)
             .ok_or("generation-overflow")?;
-        self.gate.reset();
         self.last_frame = None;
         self.failures = 0;
         self.retry_at = 0;
@@ -155,6 +156,9 @@ impl Session {
     pub fn clear_level(&mut self) {
         self.gate.clear_level();
     }
+    pub fn level_gate(&mut self, enabled: bool) {
+        self.gate.enable(enabled);
+    }
     /// Pixel-only probe consumes scheduling time without creating an OCR ticket.
     pub fn screen_probe(&mut self, visible: bool, closed: bool, now: u64) {
         self.gate.record_capture(now);
@@ -167,7 +171,7 @@ impl Session {
     /// Visible selection pixels keep capture fast even when OCR cannot read a title.
     /// The completed OCR ticket already recorded this capture.
     pub fn screen_visible(&mut self, now: u64) {
-        self.gate.observe(Selection::Candidate, now);
+        self.gate.screen_visible(now);
     }
     pub fn level_schedule(&self, now: u64) -> (crate::gate::Decision, Option<u8>) {
         (self.gate.decision(now), self.gate.next_level())
@@ -305,6 +309,30 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closed_window_survives_pause_dataset_and_capture_changes_until_next_threshold() {
+        let mut s = Session::new("zh-CN@v1".into()).unwrap();
+        s.update_phase(Phase::InProgress).unwrap();
+        s.update_level(3, 0);
+        let t = s.begin(key(1), 0).unwrap();
+        s.finish(t, blank(), Selection::Candidate, 1).unwrap();
+        s.screen_probe(false, true, 1000);
+        s.pause(true).unwrap();
+        s.pause(false).unwrap();
+        s.dataset_changed("zh-CN@v2".into()).unwrap();
+        s.capture_replaced().unwrap();
+        s.update_level(6, 2000);
+        assert!(s.begin(key(2), 50000).is_none());
+        s.update_level(7, 50001);
+        let t = s.begin(key(3), 50001).unwrap();
+        s.finish(t, blank(), Selection::Candidate, 50002).unwrap();
+        s.screen_probe(false, true, 51000);
+        assert!(s.begin(key(4), 52000).is_none());
+        s.update_phase(Phase::PostGame).unwrap();
+        s.update_phase(Phase::InProgress).unwrap();
+        s.update_level(3, 53000);
+        assert!(s.begin(key(5), 53000).is_some());
+    }
     #[test]
     fn visible_selection_retries_unreadable_titles_at_fast_interval() {
         let mut s = Session::new("zh-CN@v1".into()).unwrap();

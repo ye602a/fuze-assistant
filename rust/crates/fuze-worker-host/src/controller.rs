@@ -688,6 +688,7 @@ impl Controller {
                 art.poll(&pipeline.overlay);
             }
             pipeline.phase(phase)?;
+            pipeline.level_gate(self.config.level_gate);
             if phase == Phase::Loading {
                 pipeline.capture_state = "prewarmed";
                 return Ok(()); // No window discovery, capture or level requests during loading.

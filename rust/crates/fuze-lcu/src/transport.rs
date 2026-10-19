@@ -200,7 +200,13 @@ impl ReadOnlyClient {
             .map(|_| ())
             .map_err(|_| "item-sets-write-failed");
         wipe(&mut bytes);
-        result
+        result?;
+        let (_, mut saved) = self
+            .request_at(pid, &path, "GET", &[], 1024 * 1024, false)
+            .map_err(|_| "item-sets-readback-failed")?;
+        let decoded = serde_json::from_slice(&saved).map_err(|_| "item-sets-readback-failed");
+        wipe(&mut saved);
+        crate::item_sets::verify_saved(&merged, &decoded?)
     }
     pub fn websocket(&self) -> Result<crate::websocket::Socket> {
         crate::websocket::Socket::connect(&self.credentials)

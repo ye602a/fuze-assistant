@@ -33,22 +33,30 @@ pub struct LevelGate {
     last_probe: Option<u64>,
     dead: Option<bool>,
     death_wake: Option<u64>,
+    candidate_seen: bool,
+    window_closed: bool,
+    disabled: bool,
 }
-// Only approaching/crossing a threshold starts a burst; ordinary telemetry cannot renew it.
+// Only crossing a threshold starts a burst; ordinary telemetry cannot renew it.
 fn band(level: u8) -> u8 {
     match level {
         0..=1 => 0,
-        2 | 6 | 10 | 14 => level,
-        3..=5 => 3,
-        7..=9 => 7,
-        11..=13 => 11,
+        2..=6 => 3,
+        7..=10 => 7,
+        11..=14 => 11,
         _ => 15,
     }
 }
 impl LevelGate {
+    pub fn enable(&mut self, enabled: bool) {
+        self.disabled = !enabled;
+    }
+    pub fn invalidate_capture(&mut self) {
+        self.last_probe = None;
+    }
     /// Next level threshold, not an unclaimed reward or actual selection stage.
     pub fn next_level(&self) -> Option<u8> {
-        let level = self.level.map_or(0, |(v, _)| v);
+        let level = self.level.map_or(self.band, |(v, _)| v);
         [3, 7, 11, 15].into_iter().find(|n| *n > level)
     }
     pub fn clear_level(&mut self) {
@@ -62,11 +70,16 @@ impl LevelGate {
             return;
         }
         if self.level.is_some_and(|(old, _)| level < old) {
-            self.reset();
+            return; // A new match resets through phase changes, not regressive telemetry.
         }
         let next = band(level);
+        if next < self.band {
+            return;
+        }
         if next != self.band {
             self.band = next;
+            self.window_closed = false;
+            self.candidate_seen = false;
             self.burst_started = (next != 0).then_some(now);
             if self
                 .last_evidence
@@ -79,6 +92,10 @@ impl LevelGate {
         self.level = Some((level, now));
     }
     pub fn observe(&mut self, selection: Selection, now: u64) {
+        if self.window_closed && !self.disabled {
+            return;
+        }
+        self.candidate_seen |= selection == Selection::Candidate;
         if selection != Selection::Unknown {
             self.last_evidence = Some(now);
             self.unreadable_since = None;
@@ -93,6 +110,9 @@ impl LevelGate {
         }
     }
     pub fn screen_closed(&mut self) {
+        // Close a recognition window, not a reward/claim counter. Shards alone
+        // must not suppress a delayed real choice in the same level band.
+        self.window_closed |= self.candidate_seen;
         self.last_evidence = None;
         self.unreadable_since = None;
         self.burst_started = None;
@@ -108,6 +128,14 @@ impl LevelGate {
         }
     }
     pub fn decision(&self, now: u64) -> Decision {
+        if self.window_closed && !self.disabled {
+            return Decision {
+                mode: Mode::Saving,
+                capture: false,
+                prepare: false,
+                interval_ms: 8000,
+            };
+        }
         let level = self
             .level
             .filter(|(_, at)| now >= *at && now - *at <= LEVEL_TTL_MS)
@@ -125,7 +153,7 @@ impl LevelGate {
             Mode::Selection
         } else if level.is_none() {
             Mode::Fallback
-        } else if death {
+        } else if death && !self.window_closed {
             Mode::Pending
         } else if level.is_some_and(|v| matches!(v, 1 | 4 | 5 | 8 | 9 | 12 | 13 | 16..=30))
             && !burst
@@ -157,7 +185,16 @@ impl LevelGate {
     pub fn record_capture(&mut self, now: u64) {
         self.last_probe = Some(now);
     }
+    pub fn screen_visible(&mut self, now: u64) {
+        if !self.window_closed || self.disabled {
+            self.last_evidence = Some(now);
+            self.unreadable_since = None;
+        }
+    }
     pub fn wake_at(&self, now: u64) -> u64 {
+        if self.window_closed && !self.disabled {
+            return now.saturating_add(8000);
+        }
         let due = self.last_probe.map_or(now, |last| {
             last.saturating_add(self.decision(now).interval_ms).max(now)
         });
@@ -254,9 +291,44 @@ mod tests {
         assert_eq!(g.decision(17000).interval_ms, 1500);
         g.update_level(7, 18000);
         assert_eq!(g.decision(18000).mode, Mode::Pending);
-        g.update_level(1, 25000);
-        assert_eq!(g.decision(25000).mode, Mode::Saving);
+        g.update_level(7, 25000);
+        g.update_level(1, 25001);
         g.update_level(15, 24000);
-        assert_eq!(g.next_level(), Some(3));
+        assert_eq!(g.next_level(), Some(11));
+    }
+    #[test]
+    fn closed_opening_stays_off_through_six_death_and_missing_telemetry() {
+        let mut g = LevelGate::default();
+        g.update_level(3, 0);
+        g.observe(Selection::Candidate, 1);
+        g.screen_closed();
+        for (now, level) in [(1000, 4), (2000, 5), (3000, 6)] {
+            g.update_level(level, now);
+            g.update_dead(Some(true), now);
+            g.update_dead(Some(false), now + 1);
+            g.screen_visible(now + 2);
+            assert!(!g.decision(now + 3).capture);
+        }
+        g.clear_level();
+        assert!(!g.decision(100000).capture);
+        g.update_level(1, 100000);
+        assert!(!g.decision(100000).capture);
+        assert_eq!(g.next_level(), Some(7));
+        g.update_level(7, 100001);
+        assert!(g.decision(100001).capture);
+        assert_eq!(g.next_level(), Some(11));
+    }
+    #[test]
+    fn shards_do_not_close_reward_window_and_explicit_disable_allows_probes() {
+        let mut g = LevelGate::default();
+        g.update_level(3, 0);
+        g.observe(Selection::StatShard, 1);
+        g.screen_closed();
+        assert!(g.decision(2).capture);
+        g.observe(Selection::Candidate, 3);
+        g.screen_closed();
+        assert!(!g.decision(4).capture);
+        g.enable(false);
+        assert!(g.decision(5).capture);
     }
 }
