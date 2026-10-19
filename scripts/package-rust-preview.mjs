@@ -7,6 +7,7 @@ import AdmZip from 'adm-zip'
 import {inspectUpload} from './check-secrets.mjs'
 import {prepare,root,ort} from './rust-prototype-tools.mjs'
 import {previewPath} from './rust-bundle-policy.mjs'
+import {makeRuntimeContract,installCommand} from './rust-runtime-contract.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 if(!/^[a-f0-9]{12}$/.test(revision))throw new Error('Invalid revision')
 const frontend=process.env.FUZE_UI_FRONTEND || 'slint'
@@ -17,6 +18,10 @@ await mkdir(previewRoot,{recursive:true})
 // Never mix stale files or different frontends in an existing payload.
 await mkdir(dir)
 const bin=process.env.FUZE_RUST_BIN_DIR || path.join(root,'rust/target/release')
+const onnxVersion=JSON.parse(await readFile(path.join(root,'node_modules/onnxruntime-node/package.json'),'utf8')).version
+const runtimePolicyBytes=await readFile(path.join(root,'rust/vc-runtime-policy.json'))
+const runtimeEvidence=JSON.parse(await readFile(path.join(bin,'fuze-build-evidence.json'),'utf8'))
+const runtimeBinaries={}
 const files=[]
 async function copy(source,destination){
  if(!previewPath(destination))throw new Error('Invalid package path')
@@ -27,6 +32,10 @@ async function text(name,body){if(!previewPath(name))throw new Error('Invalid pa
 for(const file of ['fuze-rust-host.exe','fuze-ocr-worker.exe','fuze-update.exe'])await copy(path.join(bin,file),file)
 if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'fuze-ui-lab.exe')
 for(const file of ['onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll'])await copy(path.join(path.dirname(ort),file),file)
+// Inspect the copied bytes, not mutable source paths. Missing/stale build receipts block new packages.
+for(const file of files)runtimeBinaries[file]=await readFile(path.join(dir,file))
+const vcRuntime=makeRuntimeContract({policyBytes:runtimePolicyBytes,evidence:runtimeEvidence,revision,frontend,onnxVersion,binaries:runtimeBinaries})
+await copy(path.join(root,'scripts/install-rust-prerequisites.ps1'),'Install-local.ps1')
 const args=await prepare()
 await copy(args[1],'resources/inference.onnx')
 await copy(args[2],'resources/dictionary.json')
@@ -69,7 +78,7 @@ await text('Start-this-build.ps1',[
 ].join('\r\n'))
 await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
 await text('Uninstall-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --uninstall-local\r\n')
-await text('Install-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --install-local\r\n')
+await text('Install-local.cmd',installCommand())
 await text('Update.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update\r\n')
 await text('Forget-private-token.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --forget-credentials\r\n')
 await text('Rollback.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --rollback\r\n')
@@ -81,7 +90,9 @@ await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
 Start-preview.cmd 和开始菜单可能启动此前安装的受管版本。
 
 安装与卸载
-Install-local.cmd 安装到独立用户目录，登记到 Windows 已安装应用，不自动启动。
+Install-local.cmd 先检查本构建记录的 x64 VC++ 依赖，再安装到独立用户目录，不自动启动。
+缺少依赖时显示微软下载地址；仅明确确认后才运行已验证的运行库安装程序，不自动重启。
+需要重启时请自行安排，之后再次运行原始 ZIP 中的 Install-local.cmd。
 安装后可使用开始菜单 Fuze Rust Preview；目录为 %LOCALAPPDATA%/FuzeRustPreview/releases。
 Uninstall-local.cmd 只删除受管程序与快捷方式，保留设置、记录、缓存、凭据及未知文件。
 删除私有频道授权请单独运行 Forget-private-token.cmd。
@@ -105,7 +116,7 @@ Rust 频道使用 rust-update.json、.fuz 和配套 .blockmap，不读取 Electr
 真实游戏、跨屏、独占全屏及最终安装更新仍需验收，本包不代表完整迁移或正式稳定发布。
 来源与致谢见 THANKS.md。
 `.replace(/\n/g,'\r\n'))
-await text('build.json',JSON.stringify({revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:JSON.parse(await readFile(path.join(root,'node_modules/onnxruntime-node/package.json'),'utf8')).version,stable_replacement:false},null,2))
+await text('build.json',JSON.stringify({revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}

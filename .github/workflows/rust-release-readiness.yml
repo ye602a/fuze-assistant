@@ -6,6 +6,15 @@ on:
       - 'scripts/check-rust-release-readiness.mjs'
       - 'scripts/inspect-rust-release-windows.ps1'
       - 'tests/unit/rust-release-readiness.test.mjs'
+      - 'rust/vc-runtime-policy.json'
+      - 'scripts/rust-runtime-contract.mjs'
+      - 'scripts/build-rust-with-evidence.ps1'
+      - 'scripts/install-rust-prerequisites.ps1'
+      - 'scripts/package-rust-preview.mjs'
+      - 'scripts/rust-bundle-policy.mjs'
+      - 'tests/unit/rust-runtime-contract.test.mjs'
+      - 'tests/unit/rust-runtime-bootstrap.ps1'
+      - 'tests/unit/rust-bundle-policy.test.mjs'
       - '.github/workflows/rust-release-readiness.yml'
 permissions:
   contents: read
@@ -20,6 +29,6 @@ jobs:
           node-version: '22.18.0'
       # Pure Node and Windows metadata checks on non-executable synthetic PE files only.
       - name: Static dependency and signature policy contracts
-        run: node --test tests/unit/rust-release-readiness.test.mjs
+        run: node --test tests/unit/rust-release-readiness.test.mjs tests/unit/rust-runtime-contract.test.mjs tests/unit/rust-bundle-policy.test.mjs
       - name: Tracked privacy boundary
         run: node scripts/check-secrets.mjs

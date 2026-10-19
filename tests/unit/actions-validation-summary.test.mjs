@@ -11,21 +11,26 @@ test('summary reports actual failure even when a step conclusion was overridden'
   assert.match(summary, /离线 OCR 与原生窗口 \| 未运行或未知/)
 })
 
-test('milestone frontend selection builds Slint before bundling without enabling ordinary PR packages', () => {
+test('milestone build records runtime evidence before bundling without enabling ordinary PR packages', () => {
   const workflow = yaml.load(readFileSync(new URL('../../.github/workflows/rust-prototypes.yml', import.meta.url), 'utf8'))
   assert.equal(workflow.on.workflow_dispatch.inputs.ui_frontend.default, 'slint')
   const steps = workflow.jobs.prototypes.steps
   const frontend = steps.find(step => step.id === 'frontend')
   assert.ok(steps.indexOf(frontend) < steps.findIndex(step => step.id === 'package'))
-  assert.match(frontend.run, /--manifest-path rust\/ui-lab\/Cargo.toml/)
-  assert.match(frontend.run, /--target-dir rust\/target --release --features gpu --locked/)
+  assert.match(frontend.run, /build-rust-with-evidence.ps1 -Frontend \$env:FUZE_UI_FRONTEND/)
+  const builder = readFileSync(new URL('../../scripts/build-rust-with-evidence.ps1', import.meta.url), 'utf8')
+  assert.match(builder, /rust\/ui-lab\/Cargo.toml.*--features gpu/)
+  assert.match(builder, /\$Frontend -eq 'slint'/)
+  assert.match(builder, /'build','--release','--locked'/)
+  assert.match(builder, /fuze-build-evidence.json/)
+  assert.equal(frontend.env.FUZE_UI_FRONTEND, '${{ inputs.ui_frontend }}')
   assert.equal(steps.find(step => step.id === 'package').env.FUZE_UI_FRONTEND, '${{ inputs.ui_frontend }}')
   for (const event of ['pull_request', 'push', 'workflow_dispatch']) {
     for (const stage of [true, false]) {
       for (const ui of ['slint', 'win32']) {
         assert.equal(runInNewContext(frontend.if, {
           github: { event_name: event }, inputs: { stage_acceptance: stage, ui_frontend: ui },
-        }), event === 'workflow_dispatch' && stage && ui === 'slint')
+        }), event === 'workflow_dispatch' && stage)
       }
     }
   }
