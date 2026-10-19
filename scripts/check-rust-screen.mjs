@@ -40,8 +40,13 @@ for(const {mode,data,label} of cases) {
   results.push(report)
   console.log(JSON.stringify({case:label,...report}))
   const completeStatistics = label==='bundled-current' || report.controller_lifecycle===true || report.frames?.filter(f=>f.sample===0).every(f=>f.statistics_slots?.every(Boolean))
+  // The cold single-title fixture must not open a popup. Only the full three-card
+  // fixture renders once; lifecycle reviews still exercise multiple admitted states.
+  const expectedRenders = report.controller_lifecycle===true
+    ? report.hidden_native_popup_renders>=2
+    : report.hidden_native_popup_renders===1
   if(!report.exit_ok || !report.passed || report.production_ui_publisher!==true ||
-     !report.foreground_unchanged || report.hidden_native_popup_renders<2 || !report.worker_reaped || !completeStatistics) {
+     !report.foreground_unchanged || !expectedRenders || !report.worker_reaped || !completeStatistics) {
     process.exitCode=1
     break
   }
