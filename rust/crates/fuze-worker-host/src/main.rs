@@ -166,6 +166,7 @@ fn lifecycle() -> Result<()> {
 struct Sample {
     file: String,
     expected_ids: Vec<u32>,
+    expected_pipeline_ids: Option<Vec<u32>>,
 }
 
 #[cfg(windows)]
@@ -324,9 +325,13 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
                     _ => None,
                 })
                 .collect();
-            let expected: Vec<Option<u32>> = (0..3)
-                .map(|i| sample.expected_ids.get(i).copied())
-                .collect();
+            // OCR may read a lone new title without admitting it as a recommendation.
+            // Keep raw OCR expectations separate from this post-ScreenGate contract.
+            let expected_ids = sample
+                .expected_pipeline_ids
+                .as_ref()
+                .unwrap_or(&sample.expected_ids);
+            let expected: Vec<Option<u32>> = (0..3).map(|i| expected_ids.get(i).copied()).collect();
             let expected_kind = if expected.iter().any(Option::is_some) {
                 wire::TitleKind::Candidate
             } else {
