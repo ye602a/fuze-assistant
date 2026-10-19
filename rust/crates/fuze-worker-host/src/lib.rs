@@ -22,6 +22,8 @@ pub mod account_history;
 #[cfg(windows)]
 mod background_data;
 #[cfg(windows)]
+pub mod build_identity;
+#[cfg(windows)]
 pub mod cache_maintenance;
 #[cfg(windows)]
 mod catalog_session;

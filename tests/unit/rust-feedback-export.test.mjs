@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync} from 'node:fs'
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
 import {spawnSync} from 'node:child_process'
@@ -75,6 +75,63 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     assert.equal(typed[2].state.process_cpu_percent,null)
     assert.ok(!JSON.stringify(typed).includes(secret))
   }finally{
+    assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
+    assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))
+    rmSync(dir,{recursive:true,force:true})
+  }
+})
+
+test('exporter identity never overwrites old or mixed runtime builds', {skip:process.platform !== 'win32'}, () => {
+  const dir=mkdtempSync(path.join(tmpdir(),'fuze-feedback-fixture-'))
+  try {
+    const pkg=path.join(dir,'package'), data=path.join(dir,'data')
+    mkdirSync(pkg); mkdirSync(data); mkdirSync(path.join(data,'logs'))
+    const script=path.join(pkg,'export.ps1'), source=path.join(data,'observations.json')
+    copyFileSync(fileURLToPath(new URL('../../scripts/export-rust-feedback.ps1',import.meta.url)),script)
+    writeFileSync(source,JSON.stringify({segments:[]}))
+    const row={schema:1,event:'state',elapsed_ms:100,dropped:0,state:{connection:'connected',phase:'playing',capture:'waiting',ocr:'waiting',issue:'none',failure:'none',stream:'waiting',gate:'fallback',analyses:0,skipped:0,analysis_ms:null,level:3,interval_ms:1000,readable_slots:null,overlay_prepared:false}}
+    const log=path.join(data,'logs','runtime-v1.jsonl')
+    const original=[row,{...row,runtimeRevision:'111111111111'},{...row,runtimeRevision:'222222222222'}].map(r=>JSON.stringify(r)).join('\n')+'\n'
+    writeFileSync(log,original)
+    const build=path.join(pkg,'build.json')
+    const manifest={revision:'333333333333',channel:'rust-development-preview',private:'do-not-export'}
+    writeFileSync(build,JSON.stringify(manifest))
+    // Neither CWD nor the historical data directory is the exporter's package.
+    writeFileSync(path.join(data,'build.json'),JSON.stringify({...manifest,revision:'444444444444'}))
+    let serial=0
+    const run=()=>{
+      const destination=path.join(dir,`report-${serial++}.json`)
+      const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',destination],{cwd:data,encoding:'utf8',windowsHide:true,timeout:15000})
+      assert.equal(result.status,0,result.stdout+result.stderr)
+      const raw=readFileSync(destination,'utf8')
+      assert.ok(!raw.includes('do-not-export'))
+      return JSON.parse(raw)
+    }
+    const report=run()
+    assert.equal(report.schema,1)
+    assert.equal(report.packageRevision,'333333333333')
+    assert.equal(report.runtimeRevision,null)
+    assert.equal(report.persistentLog.status,'ok')
+    assert.deepEqual(report.persistentLog.records.map(r=>r.runtimeRevision??null),[null,'111111111111','222222222222'])
+    assert.equal(readFileSync(log,'utf8'),original)
+    for(const revision of ['ABCDEF123456','12345678901','1234567890123','111111111111\n',123456789012,'do-not-export']) {
+      writeFileSync(build,JSON.stringify({...manifest,revision}))
+      assert.equal(run().packageRevision,null)
+    }
+    writeFileSync(build,JSON.stringify({...manifest,channel:'stable'}))
+    assert.equal(run().packageRevision,null)
+    writeFileSync(build,JSON.stringify(manifest)+' '.repeat(16385))
+    assert.equal(run().packageRevision,null)
+    writeFileSync(build,'invalid')
+    assert.equal(run().packageRevision,null)
+    rmSync(build)
+    assert.equal(run().packageRevision,null)
+    writeFileSync(log,original+JSON.stringify({...row,runtimeRevision:'do-not-export'})+'\n')
+    const invalid=run().persistentLog
+    assert.equal(invalid.skippedLines,1)
+    assert.equal(invalid.status,'partial')
+    assert.equal(invalid.records.length,3)
+  } finally {
     assert.equal(path.dirname(path.resolve(dir)),path.resolve(tmpdir()))
     assert.ok(path.basename(dir).startsWith('fuze-feedback-fixture-'))
     rmSync(dir,{recursive:true,force:true})

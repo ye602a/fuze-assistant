@@ -1,5 +1,11 @@
 # FUZE 当前开发状态与新会话交接
 
+## 2026-10-19：反馈构建身份（源码修复，未打包）
+
+应用内导出、自动 Issue 和退出后脚本已统一受限构建字段；`packageRevision` 表示报告生成包，`runtimeRevision` 表示有记录支持的运行包。新日志逐条保存运行版本，旧报告、旧队列和历史日志缺失版本时保持未知，不用当前导出包补值。补传去重排除导出器版本，保留旧摘要 ID、旧成功回执及发送结果未知时先查回原 Issue 的规则。字段与测试范围见 [反馈构建身份](development/rust/FEEDBACK_BUILD_IDENTITY.md)。
+
+此项尚未进入公开测试包；当前已发布运行代码仍为下节的 `1c2281940730`。正式签名与依赖处理、公开在线升级整链、同版本实战和真实环境验收仍未因此完成。
+
 ## 2026-10-19：识别与 UI 修复
 
 本轮运行代码构建为 **`1c2281940730`**，包含 [OCR PR #103](https://github.com/ye602a/fuze-assistant/pull/103) 和 [原生 UI PR #104](https://github.com/ye602a/fuze-assistant/pull/104)。用户要求完成后上传，继续作为 Rust 测试版；v0.6.3 稳定频道保留。下载与公开更新身份以 [Rust 测试频道](https://github.com/ye602a/fuze-assistant/releases/tag/rust-preview)、包内 `build.json` 和在线 `rust-update.json` 为准。

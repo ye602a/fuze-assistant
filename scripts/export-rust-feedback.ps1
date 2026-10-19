@@ -1,6 +1,10 @@
 param([string]$Source, [string]$Destination)
 # Explicit post-game export. Reads only observation summaries and the three typed FUZE log files.
 $ErrorActionPreference = 'Stop'
+function SafeRevision($Value) {
+    if ($Value -is [string] -and $Value -cmatch '\A[0-9a-f]{12}\z') { return $Value }
+    return $null
+}
 function SafeNumber($Value, [double]$Max, [bool]$Integer = $false) {
     if ($null -eq $Value -or $Value -is [string] -or $Value -is [bool]) { return $null }
     if ($Value -isnot [ValueType]) { return $null }
@@ -91,7 +95,11 @@ function ReadRuntimeLogs([string]$Directory) {
                         }
                         if ($row.state.overlay_prepared -isnot [bool]) { throw 'invalid-overlay' }
                         $safe.overlay_prepared = $row.state.overlay_prepared
-                        $records.Add([ordered]@{schema=1;event=$row.event;elapsed_ms=$elapsed;state=$safe;dropped=$dropped})
+                        $record = [ordered]@{schema=1;event=$row.event;elapsed_ms=$elapsed;state=$safe;dropped=$dropped}
+                        $runtimeRevision = SafeRevision $row.runtimeRevision
+                        if ($null -ne $row.runtimeRevision -and $null -eq $runtimeRevision) { throw 'invalid-runtime-revision' }
+                        if ($null -ne $runtimeRevision) { $record.runtimeRevision = $runtimeRevision }
+                        $records.Add($record)
                     } catch { $skipped++ }
                 }
             } catch { $unavailable++ }
@@ -152,11 +160,12 @@ try {
     try { if (Test-Path -LiteralPath $buildPath -PathType Leaf) {
         if ((Get-Item -LiteralPath $buildPath).Length -le 16384) {
             $build = [IO.File]::ReadAllText($buildPath) | ConvertFrom-Json
-            if ($build.revision -is [string] -and $build.revision -cmatch '^[a-f0-9]{12}$') { $revision = $build.revision }
+            if ($build.channel -is [string] -and $build.channel -ceq 'rust-development-preview') { $revision = SafeRevision $build.revision }
         }
     } } catch { $revision = $null }
     $report = [ordered]@{
-        schema=1; kind='fuze-private-safe-feedback'; packageRevision=$revision
+        # The script package is NOT evidence of the runtime that produced observations or old logs.
+        schema=1; kind='fuze-private-safe-feedback'; packageRevision=$revision; runtimeRevision=$null
         observationStatus=$status; scope='last-five-segments-not-match-count'; segments=$summaries
         recommendationScope='overall'; actualClaimRound=$null
         persistentLog=$logs

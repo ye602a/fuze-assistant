@@ -1,10 +1,172 @@
 use super::*;
 use crate::desktop::Status;
+
+fn revision(value: &str) -> crate::build_identity::Revision {
+    value.to_owned().try_into().unwrap()
+}
+fn recovery_rows(runtime: Option<&str>) -> serde_json::Value {
+    use crate::runtime_log::{Event as LogEvent, Record};
+    let row = |phase, elapsed_ms, event| Record {
+        schema: 1,
+        runtime_revision: runtime.map(revision),
+        event,
+        elapsed_ms,
+        state: state(phase),
+        dropped: 0,
+    };
+    serde_json::json!({"records":[row(Phase::Loading,10,LogEvent::Start),row(Phase::Playing,20,LogEvent::State),row(Phase::PostGame,30,LogEvent::State)]})
+}
+
+#[test]
+fn live_fault_and_final_issue_keep_the_recording_build() {
+    let mut tracker = Tracker::with_revision(42, Some(revision("111111111111")));
+    let mut playing = state(Phase::Playing);
+    tracker.observe(playing.clone(), 0);
+    playing.capture = Capture::Failed;
+    let fault = tracker.observe(playing, 10).unwrap();
+    let final_report = tracker.observe(state(Phase::PostGame), 20).unwrap();
+    assert_eq!(fault.id, final_report.id);
+    for report in [&fault, &final_report] {
+        let value = serde_json::to_value(report).unwrap();
+        assert_eq!(value["packageRevision"], "111111111111");
+        assert_eq!(value["runtimeRevision"], "111111111111");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&report.payload().unwrap()).unwrap();
+        assert!(payload["body"].as_str().unwrap().contains("111111111111"));
+    }
+    let mut store = Store::default();
+    store.enqueue(fault).unwrap();
+    let mut api = FakeApi::default();
+    upload(&mut store, 0, |_| Ok(()), &mut api).unwrap();
+    // Persistence/restart must retain the source build and the existing issue number.
+    let mut restored: Store = serde_json::from_slice(&serde_json::to_vec(&store).unwrap()).unwrap();
+    restored.enqueue(final_report).unwrap();
+    upload(&mut restored, 0, |_| Ok(()), &mut api).unwrap();
+    assert_eq!(api.calls, vec![None, Some(42)]);
+}
+
+#[test]
+fn exporter_upgrade_preserves_legacy_receipt_and_unknown_runtime() {
+    let first = recover_with_revision(recovery_rows(None), Some(revision("111111111111"))).unwrap();
+    let second =
+        recover_with_revision(recovery_rows(None), Some(revision("222222222222"))).unwrap();
+    assert_eq!(first.id, "02dea9293ba7aa6ee26dcd4550863baf");
+    assert_eq!(first.id, second.id);
+    assert!(second.runtime_revision.is_none());
+    assert_eq!(second.package_revision, Some(revision("222222222222")));
+    // Exact old receipt shape, created before either identity field existed.
+    let mut store: Store = serde_json::from_value(serde_json::json!({
+        "enabled":false, "entries":[], "latest_issue":null,
+        "recovered_receipt":["02dea9293ba7aa6ee26dcd4550863baf",42]
+    }))
+    .unwrap();
+    assert_eq!(store.enqueue(second), Err("feedback-already-sent"));
+    assert!(store.entries.is_empty());
+    assert_eq!(store.latest_issue, Some(42));
+}
+
+#[test]
+fn recovering_new_logs_with_new_exporter_never_reposts_uncertain_upload() {
+    let first = recover_with_revision(
+        recovery_rows(Some("111111111111")),
+        Some(revision("222222222222")),
+    )
+    .unwrap();
+    let second = recover_with_revision(
+        recovery_rows(Some("111111111111")),
+        Some(revision("333333333333")),
+    )
+    .unwrap();
+    assert_eq!(first.id, second.id);
+    assert_eq!(second.runtime_revision, Some(revision("111111111111")));
+    let mut store = Store::default();
+    store.enqueue(first).unwrap();
+    let mut api = FakeApi {
+        fail: Some("feedback-network"),
+        ..Default::default()
+    };
+    let snapshots = std::cell::RefCell::new(Vec::new());
+    assert_eq!(
+        upload(
+            &mut store,
+            0,
+            |s| {
+                snapshots.borrow_mut().push(serde_json::to_vec(s).unwrap());
+                Ok(())
+            },
+            &mut api
+        ),
+        Err("feedback-network")
+    );
+    store = serde_json::from_slice(snapshots.borrow().last().unwrap()).unwrap();
+    store.enqueue(second.clone()).unwrap();
+    assert_eq!(store.entries.len(), 1);
+    assert!(store.entries[0].uncertain);
+    api.fail = None;
+    assert_eq!(
+        upload(&mut store, 0, |_| Ok(()), &mut api),
+        Err("feedback-uncertain")
+    );
+    assert_eq!(api.calls, vec![None]); // A missing lookup result is not permission to POST again.
+    api.found = Some(42);
+    upload(&mut store, 0, |_| Ok(()), &mut api).unwrap();
+    assert_eq!(api.calls, vec![None, Some(42)]);
+    store = serde_json::from_slice(&serde_json::to_vec(&store).unwrap()).unwrap();
+    assert_eq!(store.enqueue(second), Err("feedback-already-sent"));
+    assert!(store.entries.is_empty());
+}
+
+#[test]
+fn old_queued_reports_are_readable_without_inventing_a_build() {
+    let mut tracker = Tracker::with_nonce(55);
+    tracker.observe(state(Phase::Playing), 0);
+    let mut legacy = serde_json::to_value(tracker.finish().unwrap()).unwrap();
+    assert!(legacy.get("packageRevision").is_none());
+    assert!(legacy.get("runtimeRevision").is_none());
+    let mut store: Store = serde_json::from_value(serde_json::json!({
+        "enabled":true, "entries":[{"report":legacy,"issue":42,"uncertain":false,"sent":false}],
+        "latest_issue":42
+    }))
+    .unwrap();
+    assert!(store.entries[0].report.package_revision.is_none());
+    assert!(store.entries[0].report.runtime_revision.is_none());
+    let mut api = FakeApi::default();
+    upload(&mut store, 0, |_| Ok(()), &mut api).unwrap();
+    assert_eq!(api.calls, vec![Some(42)]);
+    for key in ["packageRevision", "runtimeRevision"] {
+        legacy[key] = serde_json::json!("private-do-not-upload");
+        assert!(serde_json::from_value::<Report>(legacy.clone()).is_err());
+        legacy.as_object_mut().unwrap().remove(key);
+    }
+}
+
+#[test]
+fn recovery_splits_build_changes_even_without_a_start_or_clock_reset() {
+    let mut value = recovery_rows(Some("111111111111"));
+    value["records"].as_array_mut().unwrap().pop(); // Earlier application's unfinished match.
+    let mut second = recovery_rows(Some("222222222222"));
+    second["records"].as_array_mut().unwrap().remove(0); // Rotated-away start.
+    for row in second["records"].as_array_mut().unwrap() {
+        row["elapsed_ms"] = serde_json::json!(row["elapsed_ms"].as_u64().unwrap() + 1000);
+    }
+    value["records"]
+        .as_array_mut()
+        .unwrap()
+        .extend(second["records"].as_array().unwrap().clone());
+    let report = recover_with_revision(value, Some(revision("333333333333"))).unwrap();
+    assert_eq!(report.runtime_revision, Some(revision("222222222222")));
+    assert_eq!(report.package_revision, Some(revision("333333333333")));
+    assert_eq!(report.events.len(), 2);
+    assert_eq!(report.duration_ms, 10);
+    assert!(report.started_in_progress);
+    assert!(report.incomplete_log);
+}
 #[test]
 fn recovery_is_bounded_deterministic_and_preserves_incomplete_status() {
     use crate::runtime_log::{Event as LogEvent, Record};
     let row = |phase, elapsed_ms, event| Record {
         schema: 1,
+        runtime_revision: None,
         event,
         elapsed_ms,
         state: state(phase),
@@ -12,6 +174,8 @@ fn recovery_is_bounded_deterministic_and_preserves_incomplete_status() {
     };
     let value = serde_json::json!({"records":[row(Phase::Loading, 10, LogEvent::Start), row(Phase::Playing, 20, LogEvent::State), row(Phase::PostGame, 30, LogEvent::State)]});
     let report = recover_recent(value.clone()).unwrap();
+    // Captured from the pre-identity implementation, not computed by the new code.
+    assert_eq!(report.id, "02dea9293ba7aa6ee26dcd4550863baf");
     assert!(report.recovered);
     assert_eq!(report.end, End::PostGame);
     assert_eq!(report.id, recover_recent(value).unwrap().id);
@@ -39,6 +203,7 @@ fn recovery_does_not_join_two_application_sessions() {
     use crate::runtime_log::{Event as LogEvent, Record};
     let row = |phase, elapsed_ms, event| Record {
         schema: 1,
+        runtime_revision: None,
         event,
         elapsed_ms,
         state: state(phase),
