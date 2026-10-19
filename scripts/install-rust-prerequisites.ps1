@@ -1,5 +1,5 @@
 # ZIP-only bootstrap. Dot sourcing loads pure/testable functions without executing main.
-param([switch] $CheckOnly, [string] $RuntimeInstaller = '')
+param([switch] $CheckOnly, [string] $RuntimeInstaller = '', [switch] $LaunchThisBuild)
 $ErrorActionPreference = 'Stop'
 
 function Test-VcVersion([string] $Actual, [string] $Minimum) {
@@ -27,7 +27,7 @@ function Read-VcContract([string] $Bundle) {
     if ($info.Length -gt 16384 -or ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'runtime-build-invalid' }
     $build = Get-Content -LiteralPath $buildFile -Raw | ConvertFrom-Json
     # Legacy build.json remains readable; no current-machine version is substituted.
-    if (-not $build.vcRuntime) { return $null }
+    if ($build.PSObject.Properties.Name -cnotcontains 'vcRuntime') { return $null }
     $c = $build.vcRuntime
     $dlls = @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','msvcp140_atomic_wait.dll','concrt140.dll')
     $names = @('fuze-rust-host.exe','fuze-ocr-worker.exe','fuze-update.exe','onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll')
@@ -108,6 +108,24 @@ function Invoke-VcFlow($Contract, [scriptblock] $Inspect, [scriptblock] $ChooseI
     $code = & $StartSetup
     return [pscustomobject]@{state='setup-returned';exitCode=$code}
 }
+function Get-VcStartInfo([string] $Bundle, [switch] $Portable) {
+    # Recheck payload after user interaction. This function prepares, but never launches, a process.
+    if (-not (Read-VcContract $Bundle)) { throw 'runtime-build-unknown' }
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.WorkingDirectory = $Bundle
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    if ($Portable) {
+        $build = Get-Content -LiteralPath (Join-Path $Bundle 'build.json') -Raw | ConvertFrom-Json
+        $program = if ($build.uiFrontend -eq 'slint') { 'fuze-ui-lab.exe' } else { 'fuze-rust-host.exe' }
+        $start.FileName = Join-Path $Bundle $program
+        $start.Arguments = '--desktop preview.json'
+    } else {
+        $start.FileName = Join-Path $Bundle 'fuze-update.exe'
+        $start.Arguments = '--install-local'
+    }
+    return $start
+}
 function Invoke-VcBootstrap {
     if (-not [Environment]::Is64BitProcess) { throw 'runtime-x64-powershell-required' }
     $bundle = $PSScriptRoot
@@ -138,10 +156,13 @@ function Invoke-VcBootstrap {
         }
     }
     $setup = {
-        # Recheck payload after user interaction before launching the existing native setup.
-        $null = Read-VcContract $bundle
-        $process = Start-Process -FilePath (Join-Path $bundle 'fuze-update.exe') -ArgumentList '--install-local' -WorkingDirectory $bundle -Wait -PassThru -WindowStyle Hidden
-        return $process.ExitCode
+        $start = Get-VcStartInfo $bundle -Portable:$LaunchThisBuild
+        $process = [Diagnostics.Process]::Start($start)
+        try {
+            if ($LaunchThisBuild) { return 0 }
+            $process.WaitForExit()
+            return $process.ExitCode
+        } finally { $process.Dispose() }
     }
     return Invoke-VcFlow $contract $inspect $choose $confirm $validate $install $setup -InspectOnly:$CheckOnly
 }
@@ -151,13 +172,13 @@ if ($MyInvocation.InvocationName -ne '.') {
         $result | ConvertTo-Json -Depth 5
         if (-not $CheckOnly) {
             if ($result.state -eq 'unknown-build') { Write-Host 'This older build has no verified runtime record. Use a newer original ZIP; no version was inferred.' }
-            if ($result.state -eq 'restart-required') { Write-Host 'Windows restart is required. Restart when convenient, then run Install-local.cmd again.' }
-            $null = Read-Host 'Press Enter to close'
+            if ($result.state -eq 'restart-required') { Write-Host 'Windows restart is required. Restart when convenient, then run this original ZIP entry again.' }
+            if (-not ($LaunchThisBuild -and $result.state -eq 'setup-returned' -and $result.exitCode -eq 0)) { $null = Read-Host 'Press Enter to close' }
         }
         if ($result.state -eq 'ready' -or ($result.state -eq 'setup-returned' -and $result.exitCode -eq 0)) { exit 0 }
         exit 2
     } catch {
-        [Console]::Error.WriteLine('runtime-preflight-failed: verify the original ZIP and the Microsoft installer; no FUZE setup was completed.')
+        [Console]::Error.WriteLine('runtime-preflight-failed: verify the original ZIP and the Microsoft installer; FUZE setup or launch was not completed.')
         if (-not $CheckOnly) { $null = Read-Host 'Press Enter to close' }
         exit 1
     }

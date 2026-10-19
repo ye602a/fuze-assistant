@@ -345,7 +345,9 @@ fn run() -> Result<(), &'static str> {
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
-        install::activate(&root, &release.manifest, &|_| Ok(()))?;
+        install::activate(&root, &release.manifest, &|path| {
+            fuze_worker_host::runtime_prerequisites::check(path).map(|_| ())
+        })?;
         fuze_worker_host::app_registration::refresh(&root)?;
         message("Rust 更新已准备好。下次使用 Start-preview.cmd 启动新版；验证失败自动回到上一版。没有重启任何程序。",false);
         Ok(())
@@ -400,7 +402,11 @@ fn main() {
             std::process::exit(1);
         }
         if !fuze_worker_host::update_progress::cancelled() {
-            message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
+            if let Some(guidance) = fuze_worker_host::runtime_prerequisites::guidance(error) {
+                message(guidance, false);
+            } else {
+                message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
+            }
         }
         std::process::exit(1);
     }

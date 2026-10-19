@@ -64,6 +64,11 @@ $build.vcRuntime=$c
 $build | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildFile -Encoding UTF8
 $loaded=Read-VcContract $FixtureRoot
 Assert ($loaded.minimumVersion -eq $c.minimumVersion) 'recorded-contract'
+$start = Get-VcStartInfo $FixtureRoot -Portable
+Assert ($start.FileName -eq (Join-Path $FixtureRoot 'fuze-ui-lab.exe') -and $start.Arguments -eq '--desktop preview.json') 'portable-this-slint-build'
+Assert ($start.WorkingDirectory -eq $FixtureRoot -and -not $start.UseShellExecute -and $start.CreateNoWindow) 'portable-path-with-spaces'
+$start = Get-VcStartInfo $FixtureRoot
+Assert ($start.FileName -eq (Join-Path $FixtureRoot 'fuze-update.exe') -and $start.Arguments -eq '--install-local') 'install-unchanged'
 $failed=$false
 try { Assert-VcInstaller (Join-Path $FixtureRoot 'fuze-update.exe') $loaded } catch { $failed=$true }
 Assert $failed 'installer-hash-rejected'
@@ -77,6 +82,9 @@ $build | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildFile -Encoding
 $failed=$false
 try { $null=Read-VcContract $FixtureRoot } catch { $failed=$true }
 Assert $failed 'changed-payload'
+$failed=$false
+try { $null=Get-VcStartInfo $FixtureRoot -Portable } catch { $failed=$true }
+Assert $failed 'portable-rechecks-payload-before-start'
 $c.binaries['fuze-update.exe']=(Get-FileHash -LiteralPath (Join-Path $FixtureRoot 'fuze-update.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
 $build | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $buildFile -Encoding UTF8
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../../scripts/install-rust-prerequisites.ps1') -Destination (Join-Path $FixtureRoot 'Install-local.ps1')
