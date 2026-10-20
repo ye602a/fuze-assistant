@@ -253,6 +253,12 @@ jobs:
           name: rust-prototype-tools
           path: rust/artifacts/tools/
           retention-days: 3
+      - name: Preserve compiled dependencies even if later installer checks fail
+        if: always() && steps.build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: rust/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
       - name: Keep validation results in the job summary
         if: always()
         env:
@@ -260,9 +266,3 @@ jobs:
           FUZE_CI_STATUS: ${{ job.status }}
           FUZE_CI_STEPS: ${{ toJSON(steps) }}
         run: node scripts/actions-validation-summary.mjs
-      - name: Preserve compiled dependencies even if later installer checks fail
-        if: always() && steps.build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: rust/target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
