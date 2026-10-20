@@ -15,9 +15,24 @@ if (-not $VcToolsDir) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'runtime-msvc-missing' }
-    $version = (Get-Content -LiteralPath (Join-Path $vs 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt') -Raw).Trim()
-    if ($version -notmatch '^14\.\d+\.\d+$') { throw 'runtime-msvc-version' }
-    $VcToolsDir = Join-Path $vs "VC/Tools/MSVC/$version"
+    # Hosted runners may update their default toolchain ahead of our reviewed CRT baseline.
+    # Select an installed, compatible compiler/linker pair; never relax the policy.
+    $baseline = (Get-Content -LiteralPath (Join-Path $repo 'rust/vc-runtime-policy.json') -Raw | ConvertFrom-Json).minimumVersion
+    $candidates = @(Get-ChildItem -LiteralPath (Join-Path $vs 'VC/Tools/MSVC') -Directory |
+        Where-Object { $_.Name -match '^14\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending)
+    foreach ($candidate in $candidates) {
+        $cl = Join-Path $candidate.FullName 'bin/Hostx64/x64/cl.exe'
+        $ld = Join-Path $candidate.FullName 'bin/Hostx64/x64/link.exe'
+        if (-not (Test-Path -LiteralPath $cl) -or -not (Test-Path -LiteralPath $ld)) { continue }
+        $cv = [Diagnostics.FileVersionInfo]::GetVersionInfo($cl).FileVersion
+        $lv = [Diagnostics.FileVersionInfo]::GetVersionInfo($ld).FileVersion
+        if ($cv -match '^19\.\d+\.\d+\.\d+$' -and $lv -match '^14\.\d+\.\d+\.\d+$' -and
+            [version]$baseline -ge [version]$lv -and [version]$baseline -ge [version]($cv -replace '^19\.', '14.')) {
+            $VcToolsDir = $candidate.FullName
+            break
+        }
+    }
+    if (-not $VcToolsDir) { throw 'runtime-no-reviewed-installed-toolchain' }
 }
 if (-not $SdkLibDir -or -not $SdkIncludeDir) {
     $sdk = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
