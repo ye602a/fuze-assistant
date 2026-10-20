@@ -16,7 +16,7 @@ on:
       - 'scripts/build-rust-with-evidence.ps1'
       - 'scripts/install-rust-prerequisites.ps1'
       - 'scripts/*rust*setup*'
-      - 'installer/rust-setup.iss'
+      - 'installer/**'
       - 'tests/unit/rust-setup*'
       - 'tests/unit/rust-runtime-contract.test.mjs'
       - 'tests/unit/rust-runtime-bootstrap.ps1'
@@ -76,7 +76,8 @@ jobs:
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
       - name: Reuse Rust build dependencies
-        uses: actions/cache@v4
+        id: rust-cache
+        uses: actions/cache/restore@v4
         with:
           path: rust/target
           key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
@@ -259,3 +260,9 @@ jobs:
           FUZE_CI_STATUS: ${{ job.status }}
           FUZE_CI_STEPS: ${{ toJSON(steps) }}
         run: node scripts/actions-validation-summary.mjs
+      - name: Preserve compiled dependencies even if later installer checks fail
+        if: always() && steps.build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: rust/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

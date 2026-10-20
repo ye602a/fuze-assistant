@@ -9,9 +9,22 @@ if ((Test-Path -LiteralPath $root) -or (Test-Path -LiteralPath $key)) { throw 's
 $build = Get-Content -LiteralPath (Join-Path $Bundle 'build.json') -Raw | ConvertFrom-Json
 function Run-Checked([string] $File, [string[]] $Arguments) {
     $p = Start-Process -FilePath $File -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    $null = $p.Handle
     if (-not $p.WaitForExit(180000)) { throw 'setup-ci-timeout' }
     $p.Refresh()
     if ($p.ExitCode -ne 0) { throw "setup-ci-exit-$($p.ExitCode)" }
+}
+# An explicitly restricted parent session must be honored, with no installation effects.
+$oldPolicy = $env:PSExecutionPolicyPreference
+try {
+    $env:PSExecutionPolicyPreference = 'Restricted'
+    $blocked = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -WindowStyle Hidden -PassThru
+    $null = $blocked.Handle
+    if (-not $blocked.WaitForExit(60000)) { throw 'setup-ci-policy-timeout' }
+    $blocked.Refresh()
+    if ($blocked.ExitCode -eq 0 -or (Test-Path -LiteralPath $root) -or (Test-Path -LiteralPath $key)) { throw 'setup-ci-policy-overridden' }
+} finally {
+    $env:PSExecutionPolicyPreference = $oldPolicy
 }
 Run-Checked $Installer @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')
 $pointer = Join-Path $managed 'current.json'
@@ -32,5 +45,5 @@ if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath (Join-Path $progra
 if ([IO.File]::ReadAllText((Join-Path $root 'user-note.fixture')) -ne 'preserve-user-data' -or
     [IO.File]::ReadAllText((Join-Path $managed 'unknown.fixture')) -ne 'preserve-unknown-file') { throw 'setup-ci-user-data' }
 if (Test-Path -LiteralPath (Join-Path $managed "versions/$($build.revision)/fuze-rust-host.exe")) { throw 'setup-ci-uninstall-files' }
-$report = [ordered]@{schema=1;revision=$build.revision;setupExe=$true;installed=$true;repeatInstall=$true;uninstalled=$true;userDataPreserved=$true;gameAccess=$false}
+$report = [ordered]@{schema=1;revision=$build.revision;setupExe=$true;explicitPolicyRespected=$true;installed=$true;repeatInstall=$true;uninstalled=$true;userDataPreserved=$true;gameAccess=$false}
 $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path (Split-Path $Installer -Parent) 'installer-validation.json') -Encoding utf8

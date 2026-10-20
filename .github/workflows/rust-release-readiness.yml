@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'scripts/rust-release-readiness.mjs'
+      - 'scripts/publish-rust-release.mjs'
+      - 'tests/unit/rust-publication.test.mjs'
+      - '.github/workflows/publish-rust.yml'
       - 'scripts/check-rust-release-readiness.mjs'
       - 'scripts/inspect-rust-release-windows.ps1'
       - 'tests/unit/rust-release-readiness.test.mjs'
@@ -29,6 +32,6 @@ jobs:
           node-version: '22.18.0'
       # Pure Node and Windows metadata checks on non-executable synthetic PE files only.
       - name: Static dependency and signature policy contracts
-        run: node --test tests/unit/rust-release-readiness.test.mjs tests/unit/rust-runtime-contract.test.mjs tests/unit/rust-bundle-policy.test.mjs
+        run: node --test tests/unit/rust-release-readiness.test.mjs tests/unit/rust-runtime-contract.test.mjs tests/unit/rust-bundle-policy.test.mjs tests/unit/rust-publication.test.mjs
       - name: Tracked privacy boundary
         run: node scripts/check-secrets.mjs

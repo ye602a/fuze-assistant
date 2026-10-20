@@ -6,6 +6,12 @@ Original repository history and third-party notices are retained. This acknowled
 
 The Rust production client uses `https://data.dtodo.cn/api/client/v1/` for data configuration and datasets, and `https://cdn.dtodo.cn` for some image resources. These endpoints are also referenced by the original client. Sharing an endpoint does not establish who owns the service or where its underlying match data originates; this repository does not independently verify those facts. FUZE's program updates come from its own GitHub Releases. Historical code attribution and current data-service dependencies are separate matters.
 
+## Inno Setup
+
+The standalone Windows installer uses [Inno Setup](https://jrsoftware.org/).
+Its original Simplified Chinese translation and license are retained in
+[`installer/languages/`](installer/languages/).
+
 ## Lucide UI icons
 
 Lucide 0.468.0, https://lucide.dev . Native UI assets retain the upstream license below.

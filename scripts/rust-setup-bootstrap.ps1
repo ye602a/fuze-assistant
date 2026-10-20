@@ -49,7 +49,14 @@ function Invoke-FuzeSetup([string] $Payload, [bool] $Silent) {
         try {
             $p = Start-Process -FilePath $file -ArgumentList '/install','/passive','/norestart' -Verb RunAs -WindowStyle Hidden -Wait -PassThru
             return $p.ExitCode
-        } catch { return 1223 }
+        } catch {
+            $cause = $_.Exception
+            for ($i=0; $i -lt 4 -and $cause; $i++) {
+                if ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq 1223) { return 1223 }
+                $cause = $cause.InnerException
+            }
+            throw 'runtime-installer-launch-failed'
+        }
     }
     $setup = {
         $start = Get-VcStartInfo $Payload

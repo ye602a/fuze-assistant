@@ -28,8 +28,8 @@ const receipt = await json('release-payload/installer-build.json')
 const validation = await json('release-payload/installer-validation.json')
 const lifecycle = await json('stage-evidence/update-validation.json')
 if (receipt.version !== version || receipt.installerSource !== source || receipt.packageRevision !== revision ||
-    receipt.signed !== false || validation.revision !== revision || validation.gameAccess !== false ||
-    !['setupExe','installed','repeatInstall','uninstalled','userDataPreserved'].every(k=>validation[k]===true) ||
+    receipt.signed !== false || receipt.signatureStatus !== 'NotSigned' || validation.revision !== revision || validation.gameAccess !== false ||
+    !['setupExe','explicitPolicyRespected','installed','repeatInstall','uninstalled','userDataPreserved'].every(k=>validation[k]===true) ||
     lifecycle.game_access !== false ||
     !['local_setup','setup_idempotent','uninstall','installed','repeat_launch','health_failure_rollback','process_start_failure_rollback'].every(k=>lifecycle[k]===true))
  throw Error('publication-receipt-or-validation')

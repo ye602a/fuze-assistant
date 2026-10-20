@@ -26,11 +26,13 @@ if (Test-Path -LiteralPath $exe) { throw 'setup-output-exists' }
 & $Compiler "/DPayload=$Bundle" "/DOutput=$Output" "/DVersion=$Version" (Join-Path $repo 'installer/rust-setup.iss')
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) { throw 'setup-build-failed' }
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$signature = (Get-AuthenticodeSignature -LiteralPath $exe).Status.ToString()
+if ($signature -ne 'NotSigned') { throw 'setup-unexpected-signature-state' }
 [IO.File]::WriteAllText("$exe.sha256", "$hash  $([IO.Path]::GetFileName($exe))`n")
 $receipt = [ordered]@{
     schema=1; version=$Version; installerSource=$head; packageRevision=$build.revision
     installerSha256=$hash; compilerVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($Compiler).FileVersion
-    signed=$false; minimumVcRuntime=$contract.minimumVersion
+    signed=$false; signatureStatus=$signature; minimumVcRuntime=$contract.minimumVersion
     nativeHashes=$contract.binaries
 }
 $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Output 'installer-build.json') -Encoding utf8

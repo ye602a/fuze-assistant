@@ -1,0 +1,39 @@
+name: Rust installer bootstrap contracts
+on:
+  pull_request:
+    paths:
+      - 'installer/**'
+      - 'scripts/*rust*setup*'
+      - 'tests/unit/rust-setup*'
+      - '.github/workflows/rust-installer-contracts.yml'
+permissions:
+  contents: read
+jobs:
+  bootstrap:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer states, syntax and input boundary
+        run: |
+          ./tests/unit/rust-setup-bootstrap.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/unit/rust-setup-input.test.mjs
+          exit $LASTEXITCODE
+      - name: Compile real wizard with a deliberately invalid non-executable payload
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'setup-contract-payload'
+          $output = Join-Path $env:RUNNER_TEMP 'setup-contract-output'
+          New-Item -ItemType Directory -Path $fixture,$output | Out-Null
+          [IO.File]::WriteAllText((Join-Path $fixture 'build.json'), '{}')
+          Copy-Item scripts/install-rust-prerequisites.ps1 (Join-Path $fixture 'Install-local.ps1')
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DPayload=$fixture" "/DOutput=$output" '/DVersion=0.0.0' installer/rust-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $appRoot = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview'
+          if (Test-Path -LiteralPath $appRoot) { throw 'fixture-existing-user-data' }
+          $process = Start-Process -FilePath (Join-Path $output 'FUZE-Setup-0.0.0-windows-x64.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -WindowStyle Hidden -PassThru
+          $null = $process.Handle
+          if (-not $process.WaitForExit(60000)) { throw 'fixture-timeout' }
+          $process.Refresh()
+          if ($process.ExitCode -eq 0 -or (Test-Path -LiteralPath $appRoot)) { throw 'fixture-invalid-payload-was-installed' }
+          Write-Host 'Real wizard compiled; invalid payload rejected without installation.'
