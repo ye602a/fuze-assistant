@@ -80,14 +80,14 @@ fn run() -> Result<(), &'static str> {
             .map_err(|_| "uninstall-helper")?;
         return Ok(());
     }
-    if action == "--uninstall-worker" || action == "--uninstall-local-confirmed" {
+    if action == "--uninstall-worker" {
         if fs::canonicalize(&bundled)
             .map_err(|_| "uninstall-helper-location")?
             .starts_with(&root)
         {
             return Err("uninstall-helper-location");
         }
-        if action != "--uninstall-local-confirmed" && !message("卸载 FUZE 和开始菜单快捷方式？设置、个人记录、缓存与凭据会保留。未知文件不会删除。", true) { return Ok(()); }
+        if !message("卸载独立 Rust 预览版和开始菜单快捷方式？设置、个人记录、缓存与私有令牌会保留。未知文件不会删除；临时卸载工具由系统临时文件清理。", true) { return Ok(()); }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
@@ -98,16 +98,11 @@ fn run() -> Result<(), &'static str> {
             &fuze_worker_host::install_entries::programs()?,
         )?;
         fuze_worker_host::app_registration::remove(&root)?;
-        if action != "--uninstall-local-confirmed" {
-            message(
-                "FUZE 程序、快捷方式与应用登记已移除。用户数据、凭据、未识别文件和安装锁文件保留。",
-                false,
-            );
-        }
+        message("Rust 程序、快捷方式与应用登记已移除。用户数据、令牌、未识别文件和安装锁文件保留。Electron 稳定版未改动。", false);
         return Ok(());
     }
-    if action == "--install-local" || action == "--install-local-confirmed" {
-        if action != "--install-local-confirmed" && !message("将 FUZE 安装到当前用户目录？将登记到 Windows 已安装应用，创建开始菜单入口，不自动启动。设置和个人记录保留。", true) { return Ok(()); }
+    if action == "--install-local" {
+        if !message("将当前 Rust 测试包安装到独立用户目录？无需管理员权限，将登记到 Windows 已安装应用，不修改稳定版，不自动启动。安装后可删除解压目录；设置和个人记录独立保留。", true) { return Ok(()); }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
@@ -127,16 +122,14 @@ fn run() -> Result<(), &'static str> {
             &fuze_worker_host::install_entries::programs()?,
         )?;
         fuze_worker_host::app_registration::register(&root)?;
-        if action != "--install-local-confirmed" {
-            message(
-                if changed {
-                    "安装完成，已登记到 Windows 已安装应用。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；当前程序未签名。"
-                } else {
-                    "当前版本已安装，启动入口已检查。没有重复安装或启动程序。"
-                },
-                false,
-            );
-        }
+        message(
+            if changed {
+                "安装完成，已登记到 Windows 已安装应用。开始菜单已有 Fuze Rust Preview 启动与卸载快捷方式。首次启动通过健康检查后确认新版；此包仍为未签名开发预览。"
+            } else {
+                "当前版本已安装，启动入口已检查。没有重复安装或启动程序。"
+            },
+            false,
+        );
         return Ok(());
     }
     if action == "--launch" {
@@ -404,10 +397,7 @@ fn main() {
     } else {
         run()
     } {
-        if matches!(
-            std::env::args().nth(1).as_deref(),
-            Some("--verify-package" | "--install-local-confirmed" | "--uninstall-local-confirmed")
-        ) {
+        if std::env::args().nth(1).as_deref() == Some("--verify-package") {
             eprintln!("{error}");
             std::process::exit(1);
         }

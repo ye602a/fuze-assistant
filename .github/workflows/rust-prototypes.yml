@@ -15,9 +15,6 @@ on:
       - 'scripts/rust-runtime-contract.mjs'
       - 'scripts/build-rust-with-evidence.ps1'
       - 'scripts/install-rust-prerequisites.ps1'
-      - 'scripts/*rust*setup*'
-      - 'installer/**'
-      - 'tests/unit/rust-setup*'
       - 'tests/unit/rust-runtime-contract.test.mjs'
       - 'tests/unit/rust-runtime-bootstrap.ps1'
       - 'tests/unit/rust-bundle-policy.test.mjs'
@@ -76,8 +73,7 @@ jobs:
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
       - name: Reuse Rust build dependencies
-        id: rust-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
           path: rust/target
           key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
@@ -129,10 +125,6 @@ jobs:
           node --test tests/unit/rust-bundle-policy.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/unit/rust-runtime-contract.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./tests/unit/rust-setup-bootstrap.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-setup-input.test.mjs
           exit $LASTEXITCODE
       - name: Build milestone binaries with toolchain and runtime evidence
         id: frontend
@@ -155,16 +147,6 @@ jobs:
           node scripts/package-rust-update.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-rust-update.mjs
-          exit $LASTEXITCODE
-      - name: Build and exercise unsigned standalone installer
-        id: setup
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.ui_frontend == 'slint'
-        run: |
-          $revision = (git rev-parse --short=12 HEAD).Trim()
-          $bundle = Join-Path $PWD "rust/artifacts/preview/fuze-rust-preview-$revision"
-          ./scripts/package-rust-setup.ps1 -Bundle $bundle
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/check-rust-setup.ps1 -Bundle $bundle -Installer (Join-Path $PWD 'rust/artifacts/setup/FUZE-Setup-0.7.1-windows-x64.exe')
           exit $LASTEXITCODE
       - name: Native desktop pause and exit (own window only)
         id: desktop
@@ -195,14 +177,6 @@ jobs:
             rust/artifacts/preview/*.fuz
             rust/artifacts/preview/*.blockmap
             rust/artifacts/preview/rust-update.json
-          retention-days: 3
-      - name: Upload verified standalone installer
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts != 'none' && inputs.ui_frontend == 'slint'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-standalone-installer
-          path: rust/artifacts/setup/
-          if-no-files-found: error
           retention-days: 3
       - name: Upload sanitized prototype reports
         id: upload_evidence
@@ -253,12 +227,6 @@ jobs:
           name: rust-prototype-tools
           path: rust/artifacts/tools/
           retention-days: 3
-      - name: Preserve compiled dependencies even if later installer checks fail
-        if: always() && steps.build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: rust/target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
       - name: Keep validation results in the job summary
         if: always()
         env:

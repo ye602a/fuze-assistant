@@ -1,38 +1,29 @@
+# Repackage the immutable public v0.7.0 ZIP. Never compiles or launches FUZE.
 param(
-    [Parameter(Mandatory)] [string] $Bundle,
-    [string] $Output = '',
-    [string] $Version = '0.7.1',
+    [Parameter(Mandatory)] [string] $Archive,
+    [Parameter(Mandatory)] [string] $Output,
     [string] $Compiler = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
 )
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path $PSScriptRoot -Parent
-$Bundle = (Resolve-Path -LiteralPath $Bundle).Path
-if (-not $Output) { $Output = Join-Path $repo 'rust/artifacts/setup' }
+$expectedHash = '35ab61daad95f128310ab77b111ea9db4284264f8e930bb8d120faa2c110e892'
+if ((Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) { throw 'original-v070-zip-mismatch' }
 $Output = [IO.Path]::GetFullPath($Output)
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'setup-version' }
-& node (Join-Path $PSScriptRoot 'check-rust-setup-input.mjs') $Bundle
-if ($LASTEXITCODE -ne 0) { throw 'setup-payload-not-allowlisted' }
-. (Join-Path $repo 'scripts/install-rust-prerequisites.ps1')
-$contract = Read-VcContract $Bundle
-if (-not $contract) { throw 'setup-runtime-contract-missing' }
-$build = Get-Content -LiteralPath (Join-Path $Bundle 'build.json') -Raw | ConvertFrom-Json
-$head = (& git -C $repo rev-parse HEAD).Trim()
-if ($build.revision -ne $head.Substring(0,12)) { throw 'setup-source-mismatch' }
-$changes = & git -C $repo status --porcelain --untracked-files=all -- installer scripts rust
-if ($LASTEXITCODE -ne 0 -or $changes) { throw 'setup-uncommitted-sources' }
-New-Item -ItemType Directory -Path $Output -Force | Out-Null
-$exe = Join-Path $Output "FUZE-Setup-$Version-windows-x64.exe"
-if (Test-Path -LiteralPath $exe) { throw 'setup-output-exists' }
-& $Compiler "/DPayload=$Bundle" "/DOutput=$Output" "/DVersion=$Version" (Join-Path $repo 'installer/rust-setup.iss')
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) { throw 'setup-build-failed' }
+if (Test-Path -LiteralPath $Output) { throw 'use-new-isolated-output' }
+New-Item -ItemType Directory -Path $Output | Out-Null
+$payload = Join-Path $Output 'payload'
+Expand-Archive -LiteralPath $Archive -DestinationPath $payload
+$build = Get-Content -LiteralPath (Join-Path $payload 'build.json') -Raw | ConvertFrom-Json
+if ($build.revision -ne 'dc0957fd7617') { throw 'original-v070-revision-mismatch' }
+$repo = Split-Path $PSScriptRoot -Parent
+& $Compiler "/DPayload=$payload" "/DOutput=$Output" (Join-Path $repo 'installer/rust-setup.iss')
+if ($LASTEXITCODE -ne 0) { throw 'setup-compile-failed' }
+$exe = Join-Path $Output 'FUZE-Setup-0.7.0-windows-x64.exe'
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-$signature = (Get-AuthenticodeSignature -LiteralPath $exe).Status.ToString()
-if ($signature -ne 'NotSigned') { throw 'setup-unexpected-signature-state' }
-[IO.File]::WriteAllText("$exe.sha256", "$hash  $([IO.Path]::GetFileName($exe))`n")
-$receipt = [ordered]@{
-    schema=1; version=$Version; installerSource=$head; packageRevision=$build.revision
-    installerSha256=$hash; compilerVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($Compiler).FileVersion
-    signed=$false; signatureStatus=$signature; minimumVcRuntime=$contract.minimumVersion
-    nativeHashes=$contract.binaries
-}
-$receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Output 'installer-build.json') -Encoding utf8
+if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'NotSigned') { throw 'unexpected-signature-state' }
+[IO.File]::WriteAllText("$exe.sha256", "$hash  FUZE-Setup-0.7.0-windows-x64.exe`n")
+@{
+    version='0.7.0'; packageRevision=$build.revision
+    installerSource=(& git -C $repo rev-parse HEAD).Trim()
+    sourceZipSha256=$expectedHash; installerSha256=$hash; signed=$false
+    applicationRebuilt=$false; applicationLaunched=$false; installerExecuted=$false
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'setup-build.json') -Encoding utf8
