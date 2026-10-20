@@ -280,7 +280,13 @@ pub fn unpack(archive: &Path, destination: &Path, revision: &str) -> Result<()> 
     }
     Ok(())
 }
+fn supply_runtime(directory: &Path) -> Result<()> {
+    let helper = std::env::current_exe().map_err(|_| "update-location")?;
+    let source = helper.parent().ok_or("update-location")?;
+    crate::runtime_prerequisites::supply_app_local(directory, source)
+}
 pub fn check_bundle(directory: &Path) -> Result<()> {
+    supply_runtime(directory)?;
     crate::runtime_prerequisites::check(directory)?;
     desktop_program(directory)?;
     let mut child = Command::new(directory.join("fuze-rust-host.exe"))
@@ -570,6 +576,7 @@ pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
+    supply_runtime(directory)?;
     crate::runtime_prerequisites::check(directory)?;
     let program = desktop_program(directory)?;
     // Slint can perform one bounded graphics recovery before committing readiness.

@@ -55,7 +55,10 @@ function Read-VcContract([string] $Bundle) {
 }
 function Get-VcInventory($Contract) {
     foreach ($name in $Contract.requiredDlls) {
-        $file = Join-Path ([Environment]::SystemDirectory) $name
+        $file = Join-Path $PSScriptRoot $name
+        if (-not (Test-Path -LiteralPath $file)) {
+            $file = Join-Path ([Environment]::SystemDirectory) $name
+        }
         $present = [IO.File]::Exists($file)
         $version = $null; $architecture = $null
         if ($present) {

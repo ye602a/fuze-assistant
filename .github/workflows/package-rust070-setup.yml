@@ -12,15 +12,34 @@ permissions:
 jobs:
   package:
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Extract Microsoft CRT without installing it
+        shell: pwsh
+        run: ./scripts/extract-rust-crt.ps1 -Output (Join-Path $env:RUNNER_TEMP 'fuze-crt')
+      - uses: actions/cache@v4
+        with:
+          path: rust/target
+          key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-app-local
+          restore-keys: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-
+      - name: Build only updater and check local runtime selection
+        shell: pwsh
+        working-directory: rust
+        env:
+          FUZE_APP_LOCAL_CRT: ${{ runner.temp }}/fuze-crt/dlls
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          cargo +1.90.0 test -p fuze-worker-host --lib runtime_prerequisites:: --locked -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build -p fuze-worker-host --bin fuze-update --release --locked -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Download original ZIP and wrap it without rebuilding or running FUZE
         shell: pwsh
         run: |
           $zip = Join-Path $env:RUNNER_TEMP 'FUZE-v0.7.0-windows-x64.zip'
           Invoke-WebRequest 'https://github.com/ye602a/fuze-assistant/releases/download/rust-v0.7.0/FUZE-v0.7.0-windows-x64.zip' -OutFile $zip
-          ./scripts/package-rust-setup.ps1 -Archive $zip -Output (Join-Path $env:RUNNER_TEMP 'fuze-setup-output')
+          ./scripts/package-rust-setup.ps1 -Archive $zip -Output (Join-Path $env:RUNNER_TEMP 'fuze-setup-output') -RuntimeDirectory (Join-Path $env:RUNNER_TEMP 'fuze-crt/dlls') -Updater ./rust/target/release/fuze-update.exe
       - name: Replace only the Setup wrapper and its receipts in the existing release
         shell: pwsh
         env:
