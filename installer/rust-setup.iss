@@ -76,6 +76,7 @@ begin
   end;
   if Code <> 0 then
   begin
+    Log('FUZE policy-check exit=' + IntToStr(Code));
     Result := '系统、组织或当前会话明确限制了脚本运行。本安装器不会修改这些策略；安装未开始。';
     exit;
   end;
@@ -87,6 +88,8 @@ begin
     Args, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then
     Result := '无法启动 Windows PowerShell。请检查系统策略后重试；未完成安装。'
   else
+  begin
+    Log('FUZE bootstrap exit=' + IntToStr(Code));
     case Code of
       0: Installed := True;
       2: Result := '运行库安装已取消。FUZE 尚未安装；可退出或准备好运行库后重试。';
@@ -95,4 +98,5 @@ begin
     else
       Result := '安装未完成。请退出正在运行的 FUZE，并确认原始安装包及系统策略后重试。已有用户数据会保留。';
     end;
+  end;
 end;

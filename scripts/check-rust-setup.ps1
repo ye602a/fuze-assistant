@@ -26,7 +26,18 @@ try {
 } finally {
     $env:PSExecutionPolicyPreference = $oldPolicy
 }
-Run-Checked $Installer @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')
+$setupLog = Join-Path (Split-Path $Installer -Parent) 'setup-ci.log'
+try {
+    Run-Checked $Installer @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=`"$setupLog`"")
+} catch {
+    # Synthetic CI only; emit fixed installer diagnostics, never the complete log or paths.
+    if (Test-Path -LiteralPath $setupLog) {
+        foreach ($line in [IO.File]::ReadLines($setupLog)) {
+            if ($line -match 'FUZE (policy-check|bootstrap) exit=\d+') { Write-Host $Matches[0] }
+        }
+    }
+    throw
+}
 $pointer = Join-Path $managed 'current.json'
 $state = Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json
 if ($state.current.revision -ne $build.revision -or -not $state.pending) { throw 'setup-ci-pointer' }
