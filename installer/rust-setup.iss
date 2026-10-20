@@ -17,6 +17,7 @@ AppPublisherURL=https://github.com/ye602a/fuze-assistant
 OutputDir={#Output}
 OutputBaseFilename=FUZE-Setup-{#Version}-windows-x64
 PrivilegesRequired=lowest
+SetupArchitecture=x64
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 CreateAppDir=no
@@ -67,7 +68,7 @@ begin
   if Installed then exit;
   { Restricted is the client default when all scopes are undefined. Allow the bundled
     local script in this child only, but never override an explicitly restrictive policy. }
-  Args := '-NoProfile -NonInteractive -Command "foreach ($s in @(''MachinePolicy'',''UserPolicy'',''Process'',''CurrentUser'',''LocalMachine'')) { if ((Get-ExecutionPolicy -Scope $s) -in @(''AllSigned'',''Restricted'')) { exit 6 } }; exit 0"';
+  Args := '-NoProfile -NonInteractive -Command "if (-not [Environment]::Is64BitProcess) { exit 7 }; foreach ($s in @(''MachinePolicy'',''UserPolicy'',''Process'',''CurrentUser'',''LocalMachine'')) { if ((Get-ExecutionPolicy -Scope $s) -in @(''AllSigned'',''Restricted'')) { exit 6 } }; exit 0"';
   if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     Args, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then
   begin

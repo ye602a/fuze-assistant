@@ -31,9 +31,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $appRoot = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview'
           if (Test-Path -LiteralPath $appRoot) { throw 'fixture-existing-user-data' }
-          $process = Start-Process -FilePath (Join-Path $output 'FUZE-Setup-0.0.0-windows-x64.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -WindowStyle Hidden -PassThru
+          $log = Join-Path $output 'fixture-setup.log'
+          $process = Start-Process -FilePath (Join-Path $output 'FUZE-Setup-0.0.0-windows-x64.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=`"$log`"" -WindowStyle Hidden -PassThru
           $null = $process.Handle
           if (-not $process.WaitForExit(60000)) { throw 'fixture-timeout' }
           $process.Refresh()
           if ($process.ExitCode -eq 0 -or (Test-Path -LiteralPath $appRoot)) { throw 'fixture-invalid-payload-was-installed' }
-          Write-Host 'Real wizard compiled; invalid payload rejected without installation.'
+          $text = [IO.File]::ReadAllText($log)
+          if ($text -notmatch 'FUZE bootstrap exit=5' -or $text -match 'FUZE policy-check exit=') { throw 'fixture-did-not-reach-x64-bootstrap' }
+          Write-Host 'Real x64 wizard reached bootstrap; invalid payload rejected without installation.'
