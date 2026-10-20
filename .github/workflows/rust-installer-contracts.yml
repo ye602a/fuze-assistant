@@ -17,7 +17,7 @@ jobs:
       - name: Installer states, syntax and input boundary
         run: |
           ./tests/unit/rust-setup-bootstrap.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
           node --test tests/unit/rust-setup-input.test.mjs
           exit $LASTEXITCODE
       - name: Compile real wizard with a deliberately invalid non-executable payload
@@ -38,5 +38,8 @@ jobs:
           $process.Refresh()
           if ($process.ExitCode -eq 0 -or (Test-Path -LiteralPath $appRoot)) { throw 'fixture-invalid-payload-was-installed' }
           $text = [IO.File]::ReadAllText($log)
-          if ($text -notmatch 'FUZE bootstrap exit=5' -or $text -match 'FUZE policy-check exit=') { throw 'fixture-did-not-reach-x64-bootstrap' }
+          if ($text -notmatch 'fuze-setup-state-unknown-build' -or $text -notmatch 'FUZE bootstrap exit=5' -or $text -match 'FUZE policy-check exit=') {
+            Get-Content -LiteralPath $log -Tail 35
+            throw 'fixture-did-not-reach-x64-bootstrap'
+          }
           Write-Host 'Real x64 wizard reached bootstrap; invalid payload rejected without installation.'

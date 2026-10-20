@@ -17,7 +17,6 @@ AppPublisherURL=https://github.com/ye602a/fuze-assistant
 OutputDir={#Output}
 OutputBaseFilename=FUZE-Setup-{#Version}-windows-x64
 PrivilegesRequired=lowest
-SetupArchitecture=x64
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 CreateAppDir=no
@@ -49,6 +48,11 @@ Source: "{#Payload}\*"; DestDir: "{tmp}\payload"; Flags: dontcopy recursesubdirs
 [Code]
 var
   Installed: Boolean;
+
+procedure BootstrapLog(const S: String; const Error, FirstLine: Boolean);
+begin
+  if not Error and (Pos('fuze-setup-', S) = 1) then Log(S);
+end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
@@ -85,8 +89,8 @@ begin
   Args := '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + ExpandConstant('{tmp}\rust-setup-bootstrap.ps1') +
     '" -Bundle "' + ExpandConstant('{tmp}\payload') + '"';
   if WizardSilent then Args := Args + ' -Unattended';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    Args, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+  if not ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Args, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code, @BootstrapLog) then
     Result := '无法启动 Windows PowerShell。请检查系统策略后重试；未完成安装。'
   else
   begin

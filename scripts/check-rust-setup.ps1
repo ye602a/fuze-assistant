@@ -34,6 +34,7 @@ try {
     if (Test-Path -LiteralPath $setupLog) {
         foreach ($line in [IO.File]::ReadLines($setupLog)) {
             if ($line -match 'FUZE (policy-check|bootstrap) exit=\d+') { Write-Host $Matches[0] }
+            if ($line -match 'fuze-setup-[a-z-]+') { Write-Host $Matches[0] }
         }
     }
     throw

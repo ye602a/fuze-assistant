@@ -16,8 +16,11 @@ function Get-SetupExitCode($Result) {
 }
 
 function Invoke-FuzeSetup([string] $Payload, [bool] $Silent) {
+    $script:SetupPhase = 'architecture'
     if (-not [Environment]::Is64BitProcess) { throw 'setup-x64-required' }
+    $script:SetupPhase = 'load-bootstrap'
     . (Join-Path $Payload 'Install-local.ps1')
+    $script:SetupPhase = 'contract'
     $contract = Read-VcContract $Payload
     $inspect = { @(Get-VcInventory $contract) }
     $choose = {
@@ -59,12 +62,15 @@ function Invoke-FuzeSetup([string] $Payload, [bool] $Silent) {
         }
     }
     $setup = {
+        $script:SetupPhase = 'native-preflight'
         $start = Get-VcStartInfo $Payload
         # The wizard Install button (or explicit /VERYSILENT) supplies confirmation.
         $start.Arguments = '--install-local-confirmed'
+        $script:SetupPhase = 'native-install'
         $p = [Diagnostics.Process]::Start($start)
         try { $p.WaitForExit(); return $p.ExitCode } finally { $p.Dispose() }
     }
+    $script:SetupPhase = 'runtime-inventory'
     if ($Silent -and (Get-VcDecision $contract (& $inspect)).state -eq 'runtime-required') {
         return [pscustomobject]@{state='runtime-required'}
     }
@@ -74,10 +80,11 @@ function Invoke-FuzeSetup([string] $Payload, [bool] $Silent) {
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         $result = Invoke-FuzeSetup $Bundle $Unattended.IsPresent
+        [Console]::Error.WriteLine("fuze-setup-state-$($result.state)")
         exit (Get-SetupExitCode $result)
     } catch {
         # Never surface raw exception paths, commands, or runtime installer output.
-        [Console]::Error.WriteLine('fuze-setup-failed')
+        [Console]::Error.WriteLine("fuze-setup-failed-$script:SetupPhase")
         exit 5
     }
 }
