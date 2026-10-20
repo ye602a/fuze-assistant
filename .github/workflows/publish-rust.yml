@@ -1,0 +1,69 @@
+name: Publish verified Rust release
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Rust stage acceptance run (including installer)
+        required: true
+        type: string
+      version:
+        description: Release version
+        required: true
+        default: '0.7.1'
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: fuze-rust-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-development-preview
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: release-payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-update-bundle
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: release-payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-standalone-installer
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: release-payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-prototype-evidence
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: stage-evidence
+      - name: Verify source, receipts and exact bytes before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FUZE_BUILD_RUN: ${{ inputs.build_run }}
+          FUZE_RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/publish-rust-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-publication-receipt
+          path: publication-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
