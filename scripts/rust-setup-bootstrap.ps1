@@ -85,6 +85,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     } catch {
         # Never surface raw exception paths, commands, or runtime installer output.
         [Console]::Error.WriteLine("fuze-setup-failed-$script:SetupPhase")
+        [Console]::Error.WriteLine("fuze-setup-error-type-$($_.Exception.GetType().Name)")
+        [Console]::Error.WriteLine("fuze-setup-error-line-$($_.InvocationInfo.ScriptLineNumber)")
         if ($_.Exception.Message -match '^runtime-[a-z-]{1,64}$') {
             [Console]::Error.WriteLine("fuze-setup-reason-$($_.Exception.Message)")
         }
