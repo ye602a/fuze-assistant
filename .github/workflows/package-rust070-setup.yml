@@ -21,11 +21,11 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP 'FUZE-v0.7.0-windows-x64.zip'
           Invoke-WebRequest 'https://github.com/ye602a/fuze-assistant/releases/download/rust-v0.7.0/FUZE-v0.7.0-windows-x64.zip' -OutFile $zip
           ./scripts/package-rust-setup.ps1 -Archive $zip -Output (Join-Path $env:RUNNER_TEMP 'fuze-setup-output')
-      - name: Add installer to the existing release without replacing existing assets
+      - name: Replace only the Setup wrapper and its receipts in the existing release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'fuze-setup-output'
-          gh release upload rust-v0.7.0 "$out/FUZE-Setup-0.7.0-windows-x64.exe" "$out/FUZE-Setup-0.7.0-windows-x64.exe.sha256" "$out/setup-build.json" --repo ye602a/fuze-assistant
+          gh release upload rust-v0.7.0 "$out/FUZE-Setup-0.7.0-windows-x64.exe" "$out/FUZE-Setup-0.7.0-windows-x64.exe.sha256" "$out/setup-build.json" --repo ye602a/fuze-assistant --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
