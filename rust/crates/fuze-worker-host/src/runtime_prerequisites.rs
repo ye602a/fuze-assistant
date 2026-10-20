@@ -242,12 +242,18 @@ fn check_with(directory: &Path, inventory: &dyn Fn(&str) -> Option<Version>) -> 
 /// `false` preserves legacy compatibility and means unknown, never dependency acceptance.
 pub fn check(directory: &Path) -> Result<bool> {
     let system = system_directory()?;
-    check_with(directory, &|name| inspect(&runtime_path(directory, &system, name)))
+    check_with(directory, &|name| {
+        inspect(&runtime_path(directory, &system, name))
+    })
 }
 fn runtime_path(directory: &Path, system: &Path, name: &str) -> PathBuf {
     let local = directory.join(name);
     // Match the loader: a present local DLL takes precedence, even if invalid.
-    if local.exists() { local } else { system.join(name) }
+    if local.exists() {
+        local
+    } else {
+        system.join(name)
+    }
 }
 /// Older update/rollback bundles omitted the CRT. Carry our private runtime with them.
 /// Never replace a DLL shipped by the target bundle or change the system runtime.
@@ -290,7 +296,9 @@ mod tests {
     }
     #[test]
     fn bundled_crt_covers_missing_system_and_survives_legacy_bundle_copy() {
-        let Some(source) = std::env::var_os("FUZE_APP_LOCAL_CRT") else { return };
+        let Some(source) = std::env::var_os("FUZE_APP_LOCAL_CRT") else {
+            return;
+        };
         let (root, build) = fixture();
         write(&root, &build);
         supply_app_local(&root, Path::new(&source)).unwrap();
@@ -301,12 +309,18 @@ mod tests {
         supply_app_local(&target, &root).unwrap();
         for name in DLLS {
             if root.join(name).exists() {
-                assert_eq!(fs::read(root.join(name)).unwrap(), fs::read(target.join(name)).unwrap());
+                assert_eq!(
+                    fs::read(root.join(name)).unwrap(),
+                    fs::read(target.join(name)).unwrap()
+                );
             }
         }
         fs::write(target.join("vcruntime140.dll"), b"target-owned").unwrap();
         supply_app_local(&target, &root).unwrap();
-        assert_eq!(fs::read(target.join("vcruntime140.dll")).unwrap(), b"target-owned");
+        assert_eq!(
+            fs::read(target.join("vcruntime140.dll")).unwrap(),
+            b"target-owned"
+        );
     }
     fn fixture() -> (PathBuf, Value) {
         let root = std::env::temp_dir().join(format!(
