@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
-import { lstat, readFile, readdir } from 'node:fs/promises'
 
 // Findings contain locations and rule names only, never matched credential material.
 export function inspectUpload(name, buffer) {
@@ -28,7 +27,7 @@ export function inspectUpload(name, buffer) {
     const toys = new Set(['manual-lock-token', 'manual-log-token', 'private-lcu-token', 'private-token',
       'private-entitlements-token', 'lockfile-token', 'log-token', 'url-token', 'stale-private-token',
       'first-token', 'second-token', 'status-token', 'test-token-123', 'PRIVATE_TOKEN_AND_IDENTITY_MUST_NOT_ESCAPE'])
-    if (file.startsWith('tests/unit/')) {
+    if ((file.startsWith('tests/unit/') || file.startsWith('legacy/electron/tests/unit/'))) {
       if (rule === 'literal-credential' && toys.has(match[1])) continue
       if (rule === 'credential-url') {
         try { const url = new URL(match[0]); if (['127.0.0.1', 'localhost'].includes(url.hostname) && toys.has(url.password)) continue } catch { /* Report unparseable credentials. */ }
@@ -46,27 +45,8 @@ function git(args, input) {
 }
 export async function checkUploads(args = []) {
   let findings = [], checked = 0
-  if (args.includes('--packaged')) {
-    const asar = await import('@electron/asar')
-    const archive = path.resolve('build/win-unpacked/resources/app.asar')
-    for (const file of asar.listPackage(archive)) {
-      const name = file.replaceAll('\\', '/').replace(/^\//, '')
-      const info = asar.statFile(archive, path.normalize(name), false)
-      if ('files' in info || info.link) continue
-      checked++; findings.push(...inspectUpload(name, asar.extractFile(archive, path.normalize(name), false)))
-    }
-    const resources = path.dirname(archive)
-    const scanResource = async relative => {
-      const target = path.join(resources, relative)
-      const info = await lstat(target)
-      if (info.isSymbolicLink()) throw new Error('Unexpected packaged resource link')
-      if (info.isDirectory()) { for (const child of await readdir(target)) await scanResource(path.join(relative, child)); return }
-      checked++; findings.push(...inspectUpload(relative, await readFile(target)))
-    }
-    for (const relative of ['client-data', 'recognition-catalog.json', 'app-update.yml']) {
-      try { await scanResource(relative) } catch (error) { if (error.code !== 'ENOENT') throw error }
-    }
-  } else {
+  if (args.includes('--packaged')) throw new Error('Electron package inspection is archived under legacy/electron/scripts')
+  {
     const files = git(['ls-files', '--stage', '-z']).toString('utf8').split('\0').filter(Boolean).map(line => {
       const [, mode, id, name] = /^(\d+) ([a-f0-9]+) \d\t([\s\S]+)$/.exec(line) || []
       if (!id || mode !== '100644' && mode !== '100755') throw new Error('Unsupported Git entry; review links and submodules before upload')

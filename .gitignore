@@ -3,6 +3,10 @@ node_modules
 /dist
 /dist-electron
 /build
+/legacy/electron/dist/
+/legacy/electron/dist-electron/
+/legacy/electron/build/
+/legacy/electron/resources/client-data/
 /resources/client-data
 /.runtime
 /.codex-tmp

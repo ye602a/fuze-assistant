@@ -7,7 +7,7 @@ import {
   normalizeClientDataPath,
   resolveClientDataFilePath,
   resolveTrustedClientDataUrl,
-} from '../src/shared/client-data-security.ts'
+} from './lib/client-data-security.ts'
 
 const DATA_API_ORIGIN = process.env.ARAMGG_DATA_API_ORIGIN || 'https://data.dtodo.cn'
 const DATA_ALLOWED_ORIGINS = process.env.ARAMGG_DATA_ALLOWED_ORIGINS || ''
