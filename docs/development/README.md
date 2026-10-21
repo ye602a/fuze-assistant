@@ -6,17 +6,17 @@
 
 ## 当前代码与发布边界
 
-`master` 已通过 [集成 PR #95](https://github.com/ye602a/fuze-assistant/pull/95) 纳入 Rust 开发历史。当前开发方向是 Rust 原生测试版；已发布的 v0.6.3 Electron 稳定版继续保留。合并源码、通过 CI 与发布安装包是三个不同步骤，不按每个 PR 自动打包。
+`master` 已通过 [集成 PR #95](https://github.com/ye602a/fuze-assistant/pull/95) 纳入 Rust 开发历史。当前程序为 Rust v0.7.0；v0.6.3 Electron 源码已归档，历史发布继续保留。合并源码、通过 CI 与发布安装包是三个不同步骤，不按每个 PR 自动打包。
 
 | 目录 | 用途 |
 | --- | --- |
 | `rust/crates/` | LCU、截图、OCR、数据、调度与宿主服务 |
 | `rust/ui-lab/` | 当前 Slint 主界面及 Direct2D / DirectWrite 三卡浮窗；目录名沿用原型阶段 |
-| `src/` | 保留的 Electron / Vue 实现及 v0.6.3 对照基线 |
+| `legacy/electron/` | 归档的 Electron / Vue v0.6.3 源码、专属测试与构建配置 |
 | `scripts/`、`tests/` | 数据准备、隔离验证、发布与维护脚本 |
 | `docs/development/rust/`、`rust/ui-lab/evidence/` | 迁移设计、阶段证据与历史检查记录 |
 
-Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust 工作区](../../rust/README.md)、[原生界面入口](../../rust/ui-lab/README.md)及当前 Actions 工作流中的命令为准。Electron 开发使用 `npm ci`、`npm run dev`、`npm run build`。
+Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust 工作区](../../rust/README.md)、[原生界面入口](../../rust/ui-lab/README.md)及当前 Actions 工作流中的命令为准。根目录 Node 工具使用 `npm ci --ignore-scripts` 安装、`npm test` 检查；复现 Electron 请在独立目录检出旧版标签。
 
 ## 验证与发布
 
@@ -24,7 +24,7 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 
 - `rust-prototypes.yml`：Rust 核心契约、OCR、采集、回退与生命周期。
 - `ui-framework-lab.yml`：控件、正式宿主回调、窗口恢复、截图至生产弹窗。
-- `release-windows.yml`：保留的 Electron 检查与显式发布流程。
+- `release-windows.yml`：新版工具与源码检查，保留原分支保护检查名称，不再打包 Electron。
 - 专项诊断工作流保留为手动入口。普通 PR 不发布安装包。
 
 测试截图必须使用已提交夹具或自建窗口。单元测试、隐藏窗口、CI 和实战是不同证据层级。实际领取轮次未确认，自动推荐保持整体统计。

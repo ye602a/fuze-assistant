@@ -1,5 +1,14 @@
 # FUZE 当前开发状态与新会话交接
 
+## 2026-10-21：旧 Electron 工程归档，根目录以 Rust 为主
+
+Electron v0.6.3 的源码、专属测试、配置和工作流移至 `legacy/electron/`，保留原版本与锁文件。
+根目录 npm 清单只保留 Rust 开发工具；共享美术、模型和识别样本保持原路径。
+数据下载校验模块保留在 `scripts/lib/client-data-security.ts`，活跃脚本不再引用旧 `src/`。
+旧发布工作流归档；原必需检查的 job 名保留，以新版工具检查履行检查，避免分支保护失去对应状态。
+Setup 工作流改为仅手动触发。本次不重打包、不改 Rust 源码、版本、公开更新清单或现有发布附件。
+
+
 ## 2026-10-20：v0.7.0 已发布，公开载荷更新为 dc0957fd7617
 
 按维护者本轮明确决定，发布 [FUZE v0.7.0](https://github.com/ye602a/fuze-assistant/releases/tag/rust-v0.7.0)

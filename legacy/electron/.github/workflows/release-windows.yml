@@ -1,0 +1,259 @@
+name: Build Windows Release
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      stage_acceptance:
+        description: '阶段版本验收：生成安装包并执行安装包窗口验证'
+        type: boolean
+        default: false
+      upload_artifacts:
+        description: '保留安装包和窗口诊断供下载（正式标签直接发布到 Releases）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      ARAMGG_DISTRIBUTION_CHANNEL: fuze-private
+      ARAMGG_MATCH_HISTORY_UPLOAD_ORIGIN: http://127.0.0.1:1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+
+      - name: Print tool versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $packageVersion = node -p "require('./package.json').version"
+          $expectedTag = "v$packageVersion"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            Write-Error "Release tag '$env:GITHUB_REF_NAME' does not match package.json version '$packageVersion'. Expected '$expectedTag'."
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Check upload secrets
+        id: secrets
+        # Scan before building/uploading; findings never contain credential values.
+        run: npm run security:check
+
+      - name: Code lint
+        id: lint
+        run: npm run lint
+
+      - name: Type check
+        id: types
+        run: npm run type-check
+
+      - name: Unit tests
+        id: tests
+        run: npm run test:unit
+
+      - name: Compile application without packaging
+        id: build
+        run: npm run build
+
+      - name: Validate workflow policy
+        id: contracts
+        run: node --test tests/unit/actions-validation-summary.test.mjs
+
+      - name: OCR fixture regression
+        id: ocr
+        run: npm run test:augment-ocr
+
+      - name: Stage statistics cache regression
+        id: stages
+        run: node --experimental-transform-types tests/electron/test-stage-statistics.js
+
+      - name: Stage signal privacy and transport regression
+        id: signals
+        run: node --experimental-transform-types tests/electron/test-stage-signal.js
+
+      - name: Private differential update regression
+        id: differential
+        run: node scripts/test-private-update.mjs
+
+      - name: Verify private release differential download
+        id: download
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
+        env:
+          FUZE_UPDATE_TEST_ACCESS: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/test-private-update-live.mjs
+
+      - name: Package Windows installer
+        id: package
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
+        shell: pwsh
+        run: |
+          $env:ELECTRON_CACHE = Join-Path $env:RUNNER_TEMP 'electron-cache'
+          $env:ELECTRON_BUILDER_CACHE = Join-Path $env:RUNNER_TEMP 'electron-builder-cache'
+          npm run pack
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $localeBundles = @(
+            @{ Locale = 'zh-CN'; Pointer = 'current.json'; VersionPrefix = 'versions' },
+            @{ Locale = 'en-US'; Pointer = 'current.en-US.json'; VersionPrefix = 'versions/en-US' },
+            @{ Locale = 'zh-TW'; Pointer = 'current.zh-TW.json'; VersionPrefix = 'versions/zh-TW' }
+          )
+
+          foreach ($bundle in $localeBundles) {
+            $clientDataCurrent = Join-Path $PWD "build/win-unpacked/resources/client-data/$($bundle.Pointer)"
+            if (!(Test-Path $clientDataCurrent)) {
+              Write-Error "Packaged client-data pointer was not found: $clientDataCurrent"
+              exit 1
+            }
+
+            $clientData = Get-Content $clientDataCurrent -Raw | ConvertFrom-Json
+            if ($clientData.locale -ne $bundle.Locale) {
+              Write-Error "Packaged client-data locale mismatch in $($bundle.Pointer): expected $($bundle.Locale), got $($clientData.locale)"
+              exit 1
+            }
+
+            $versionDir = Join-Path $PWD "build/win-unpacked/resources/client-data/$($bundle.VersionPrefix)/$($clientData.dataVersion)"
+            $requiredFiles = @('manifest.json', 'augments.json', 'champions.json', 'items.json', 'champion-shards/index.json')
+            foreach ($requiredFile in $requiredFiles) {
+              $requiredPath = Join-Path $versionDir $requiredFile
+              if (!(Test-Path $requiredPath)) {
+                Write-Error "Packaged $($bundle.Locale) client-data file was not found: $requiredPath"
+                exit 1
+              }
+            }
+
+            $shardDir = Join-Path $versionDir 'champion-shards'
+            $shardCount = @(Get-ChildItem $shardDir -Filter '*.json' -File | Where-Object { $_.Name -ne 'index.json' }).Count
+            Write-Host "Packaged client-data locale=$($bundle.Locale) dataVersion=$($clientData.dataVersion) gamePatch=$($clientData.gamePatch) files=$($clientData.bundledFileCount) shards=$shardCount bytes=$($clientData.bundledBytes)"
+
+            if ($shardCount -lt 40) {
+              Write-Error "Packaged $($bundle.Locale) client-data shard count is too low: $shardCount"
+              exit 1
+            }
+          }
+
+      - name: Check packaged upload secrets
+        id: upload_scan
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
+        run: npm run security:check -- --packaged
+
+      - name: Smoke test packaged Windows application
+        id: desktop
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.stage_acceptance)
+        timeout-minutes: 4
+        run: npm run test:packaged-windows
+
+      - name: Upload packaged smoke diagnostics
+        id: upload_evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuze-window-smoke
+          retention-days: 7
+          if-no-files-found: warn
+          path: build/release-smoke/
+
+      - name: Upload workflow artifact
+        id: upload_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuze-windows
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            build/*.exe
+            build/*.exe.blockmap
+            build/latest.yml
+
+      - name: Publish GitHub Release
+        id: publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $existingDraft = gh release view $tag --json isDraft --jq '.isDraft' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $existingDraft -eq 'false') {
+            Write-Host 'Release already published; preserving its verified assets.'
+            exit 0
+          }
+          $assets = @(
+            Get-ChildItem -Path build -Filter '*.exe' -File
+            Get-ChildItem -Path build -Filter '*.exe.blockmap' -File
+            Get-Item -Path build/latest.yml
+          )
+
+          if ($assets.Count -lt 3) {
+            Write-Error "Expected release assets were not found in build/"
+            exit 1
+          }
+
+          $checksumPath = Join-Path $PWD 'build/SHA256SUMS.txt'
+          $checksums = @($assets | ForEach-Object {
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          })
+          [IO.File]::WriteAllLines($checksumPath, $checksums)
+          $assets += Get-Item -LiteralPath $checksumPath
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $notesPath = Join-Path $PWD "docs/releases/$tag.md"
+            if (!(Test-Path -LiteralPath $notesPath)) {
+              Write-Error "Reviewed release notes missing: $tag"
+              exit 1
+            }
+            gh release create $tag --draft --title "符择 Fuze $tag" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+          foreach ($asset in $assets) {
+            gh release upload $tag $asset.FullName
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep validation results in the job summary
+        if: always()
+        env:
+          FUZE_CI_KIND: electron
+          FUZE_CI_STATUS: ${{ job.status }}
+          FUZE_CI_STEPS: ${{ toJSON(steps) }}
+        run: node scripts/actions-validation-summary.mjs

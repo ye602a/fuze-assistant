@@ -53,7 +53,13 @@ test('summary never includes arbitrary output, account data or error text', () =
 })
 
 test('ordinary PRs never package; milestone acceptance preserves package validation', () => {
-  for (const name of ['rust-prototypes', 'release-windows']) {
+  const sourceChecks = yaml.load(readFileSync(new URL('../../.github/workflows/release-windows.yml', import.meta.url), 'utf8'))
+  assert.equal(sourceChecks.jobs.build.name, 'Build Windows installer') // Existing branch-protection context.
+  assert.ok(sourceChecks.jobs.build.steps.some(step => step.run === 'npm test'))
+  assert.ok(sourceChecks.jobs.build.steps.every(step => !/release upload|npm run pack|package-rust/.test(step.run || '')))
+  const setup = yaml.load(readFileSync(new URL('../../.github/workflows/package-rust070-setup.yml', import.meta.url), 'utf8'))
+  assert.deepEqual(Object.keys(setup.on), ['workflow_dispatch'])
+  for (const name of ['rust-prototypes']) {
     const workflow = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
     const steps = Object.values(workflow.jobs)[0].steps
     const uploads = steps.filter((step) => step.uses?.startsWith('actions/upload-artifact@'))

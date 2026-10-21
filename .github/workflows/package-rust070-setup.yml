@@ -1,17 +1,6 @@
 name: Package existing v0.7.0 Setup
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/rust-standalone-installer]
-    paths:
-      - .github/workflows/package-rust070-setup.yml
-      - scripts/package-rust-setup.ps1
-      - scripts/extract-rust-crt.ps1
-      - scripts/bundle-rust-crt.mjs
-      - rust/bundle-files.txt
-      - rust/crates/fuze-worker-host/src/runtime_prerequisites.rs
-      - rust/crates/fuze-worker-host/src/managed_install.rs
-      - installer/**
 permissions:
   contents: write
 jobs:
