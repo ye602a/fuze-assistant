@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
-import { lstat, readFile, readdir } from 'node:fs/promises'
 
 // Findings contain locations and rule names only, never matched credential material.
 export function inspectUpload(name, buffer) {
