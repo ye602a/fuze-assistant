@@ -6,7 +6,15 @@ Original repository history and third-party notices are retained. This acknowled
 
 The Rust production client still uses the upstream `https://data.dtodo.cn/api/client/v1/` API for data configuration and datasets, and `https://cdn.dtodo.cn` for some image resources. FUZE's program updates come from its own GitHub Releases. Independent client development does not mean an independent data service or official endorsement by the upstream project.
 
+## Riot client augment metadata
+
+The pinned 16.21 Simplified Chinese augment names, descriptions and icon references
+come from Riot client assets exported by [CommunityDragon](https://www.communitydragon.org/).
+Source URLs and SHA-256 hashes are recorded in `resources/augments-16.21-zh-CN.json`.
+These game assets belong to Riot Games; they are not FUZE-authored art or statistics.
+
 ## Lucide UI icons
+
 
 Lucide 0.468.0, https://lucide.dev . Native UI assets retain the upstream license below.
 

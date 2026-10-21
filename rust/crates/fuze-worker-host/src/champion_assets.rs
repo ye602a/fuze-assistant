@@ -232,20 +232,46 @@ fn publish(lock: &Mutex<State>, generation: u64, reply: &mut Reply) {
     }
 }
 fn load(roots: &[Root], r: &Request) -> Result<Detail> {
-    let (locale, version) = r.version.split_once('@').ok_or("detail-version")?;
+    let (locale, _) = r.version.split_once('@').ok_or("detail-version")?;
     let locale = match locale {
         "zh-CN" => Locale::ZhCn,
         "zh-TW" => Locale::ZhTw,
         "en-US" => Locale::EnUs,
         _ => return Err("detail-locale"),
     };
-    let data = fuze_data::prepare_version(roots, locale, Scope::Detail(r.id), Some(version))?;
+    let data = fuze_data::current_augments::prepare_identity(
+        roots,
+        locale,
+        Scope::Detail(r.id),
+        &r.version,
+    )?;
     if data.identity() != r.version {
         return Err("detail-version-changed");
     }
     data.champion_detail(r.id)
 }
 pub(crate) fn icon_path(url: &str) -> Result<&str> {
+    if let Some(p) = url.strip_prefix("https://raw.communitydragon.org") {
+        if p == "/16.21/plugins/rcp-be-lol-game-data/global/default/assets/maps/particles/kiwi/magicmissile_small.png" {
+            return Ok(p);
+        }
+        let base = "/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/";
+        let relative = p.strip_prefix(base).ok_or("icon-path")?;
+        let file = relative
+            .strip_prefix("kiwi/augments/icons/")
+            .or_else(|| relative.strip_prefix("cherry/augments/icons/"))
+            .ok_or("icon-path")?;
+        if file.len() <= 100
+            && file.ends_with(".png")
+            && !file.contains("..")
+            && file
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
+        {
+            return Ok(p);
+        }
+        return Err("icon-path");
+    }
     let p = url
         .strip_prefix("https://cdn.dtodo.cn")
         .ok_or("icon-origin")?;
@@ -327,7 +353,12 @@ pub fn picture(
     if offline {
         return Err("icon-offline");
     }
-    let bytes = crate::update_io::get("cdn.dtodo.cn", path, 512 * 1024, None, None, cancel)?;
+    let host = if url.starts_with("https://raw.communitydragon.org/") {
+        "raw.communitydragon.org"
+    } else {
+        "cdn.dtodo.cn"
+    };
+    let bytes = crate::update_io::get(host, path, 512 * 1024, None, None, cancel)?;
     let pic = decode(&bytes)?;
     if !cancel() {
         if let Some(f) = file {
@@ -351,6 +382,21 @@ pub fn picture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn current_client_icons_use_only_the_pinned_asset_directories() {
+        let data = fuze_data::current_augments::metadata().unwrap();
+        for row in data["data"].as_array().unwrap() {
+            assert!(
+                icon_path(row["iconUrl"].as_str().unwrap()).is_ok(),
+                "{}",
+                row["id"]
+            );
+        }
+        for suffix in ["../secret.png", "a.png?x=1", "a/b.png"] {
+            assert!(icon_path(&format!("https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/{suffix}")).is_err());
+        }
+        assert!(icon_path("https://raw.communitydragon.org/16.22/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/a.png").is_err());
+    }
     #[test]
     fn cached_icons_work_without_network_and_versions_are_isolated() {
         let root = std::env::temp_dir().join(format!("fuze-icon-test-{}", std::process::id()));

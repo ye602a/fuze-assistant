@@ -1,0 +1,2218 @@
+{
+  "gamePatch": "16.21",
+  "locale": "zh-CN",
+  "source": "Riot client assets exported by CommunityDragon; KIWI mode only",
+  "sources": [
+    {
+      "url": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/zh_cn/v1/cherry-augments.json",
+      "sha256": "68e8dca7f4fc3426a4754604da7c96df7b218d5dbac1ae189a339306466eee63"
+    },
+    {
+      "url": "https://raw.communitydragon.org/16.21/game/maps/modespecificdata/kiwi.bin.json",
+      "sha256": "e1ed4bfa49ae574f9ea27e9261587e363f2ac3b0f2299a78b5ca42e518053351"
+    },
+    {
+      "url": "https://raw.communitydragon.org/16.21/game/zh_cn/data/menu/en_us/lol.stringtable.json",
+      "sha256": "5fca25e067fa2b83701bb407f9c68707fd50056785cbb22fee7790b697b985d7"
+    }
+  ],
+  "descriptionNote": "Client runtime values are shown as ?; no estimated values or statistics.",
+  "data": [
+    {
+      "id": 1001,
+      "key": "ARAM_ImTheJuggernaut",
+      "name": "泰坦的坚决",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/iamthejuggernaut_small.png",
+      "description": "在承受或造成伤害时获得层数。每?层，获得 适应之力 、 护甲 、 魔法抗性 、 体型 和 韧性 。",
+      "enabled": true
+    },
+    {
+      "id": 1002,
+      "key": "ARAM_ApexInventor",
+      "name": "尖端发明家",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/apexinventor_small.png",
+      "description": "获得 ?装备急速 (相当于?%装备冷却缩减)。 装备急速可缩减所有装备技能的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 1004,
+      "key": "ARAM_BacktoBasics",
+      "name": "回归基本功",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/backtobasics_small.png",
+      "description": "获得提升过的技能伤害、 治疗效果 、 护盾 和 技能急速 ，但你 不能使用你的终极技能 。",
+      "enabled": true
+    },
+    {
+      "id": 1005,
+      "key": "ARAM_WeeWooWeeWoo",
+      "name": "喂呜喂呜",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/weewooweewoo_small.png",
+      "description": "在朝着 低生命值 的友军移动时，获得 移动速度 。你的 治疗 和 护盾 获得提升，基于你目标的低生命值程度。",
+      "enabled": true
+    },
+    {
+      "id": 1006,
+      "key": "ARAM_BladeWaltz",
+      "name": "利刃华尔兹",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/bladewaltz_small.png",
+      "description": "获得 利刃华尔兹 作为一个召唤师技能。",
+      "enabled": true
+    },
+    {
+      "id": 1007,
+      "key": "ARAM_BluntForce",
+      "name": "大力",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/bluntforce_small.png",
+      "description": "获得 ?%攻击力 。",
+      "enabled": true
+    },
+    {
+      "id": 1011,
+      "key": "ARAM_CantTouchThis",
+      "name": "你摸不到",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/canttouchthis_small.png",
+      "description": "施放你的 终极技能 会使你进入短时间的 免疫伤害 状态。",
+      "enabled": true
+    },
+    {
+      "id": 1013,
+      "key": "ARAM_CelestialBody",
+      "name": "星界躯体",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/celestialbody_small.png",
+      "description": "获得 ?生命值 ，但你造成的伤害降低?%。",
+      "enabled": true
+    },
+    {
+      "id": 1015,
+      "key": "ARAM_CircleofDeath",
+      "name": "死亡之环",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/circleofdeath_small.png",
+      "description": "治疗效果 和 生命回复效果 还会对相距最近的那个敌方英雄造成 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1018,
+      "key": "ARAM_CourageoftheColossus",
+      "name": "巨像的勇气",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/courageofthecolossus_small.png",
+      "description": "定身 或 缚地 一个敌方英雄后获得 ?护盾值 。",
+      "enabled": true
+    },
+    {
+      "id": 1019,
+      "key": "ARAM_Dashing",
+      "name": "全凭身法",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dashing_small.png",
+      "description": "你的冲刺、跳跃、闪烁或传送类技能获得 ?技能急速 。",
+      "enabled": true
+    },
+    {
+      "id": 1020,
+      "key": "ARAM_DawnbringersResolve",
+      "name": "黎明使者的坚决",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dawnbringersresolve_small.png",
+      "description": "在跌到 ?%生命值 以下时， 在3秒里持续回复共?%最大生命值 。 阵亡时或每?秒重置。",
+      "enabled": true
+    },
+    {
+      "id": 1022,
+      "key": "ARAM_Deft",
+      "name": "灵巧",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/deft_small.png",
+      "description": "获得 ?% 攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1025,
+      "key": "ARAM_DiveBomber",
+      "name": "俯冲轰炸",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/divebomber_small.png",
+      "description": "在你阵亡时爆炸，造成 巨量真实伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1026,
+      "key": "ARAM_DontBlink",
+      "name": "唯快不破",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dontblink_small.png",
+      "description": "你每比目标多 10移动速度 ，则对其多造成?%额外伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1027,
+      "key": "ARAM_Earthwake",
+      "name": "大地苏醒",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/earthwake_small.png",
+      "description": "你的冲刺、闪烁或传送类技能会留下一条在?秒后爆炸的轨迹。",
+      "enabled": true
+    },
+    {
+      "id": 1028,
+      "key": "ARAM_Erosion",
+      "name": "侵蚀",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/erosion_small.png",
+      "description": "对敌人造成伤害时会施加一层持续?秒且可叠加的 护甲 和 魔法抗性 击碎效果。",
+      "enabled": true
+    },
+    {
+      "id": 1029,
+      "key": "ARAM_EtherealWeapon",
+      "name": "虚幻武器",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/etherealweapon_small.png",
+      "description": "你的技能可施加 攻击特效 。每个目标有1秒冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 1030,
+      "key": "ARAM_Eureka",
+      "name": "尤里卡",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/eureka_small.png",
+      "description": "获得相当于 ?%法术强度 的 技能急速 。",
+      "enabled": true
+    },
+    {
+      "id": 1034,
+      "key": "VeilOfWarding",
+      "name": "防护面纱",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/poltergeist_small.png",
+      "description": "每?秒获得一层 法术护盾 来格挡下一个敌方技能。",
+      "enabled": true
+    },
+    {
+      "id": 1036,
+      "key": "ARAM_Firebrand",
+      "name": "火上浇油",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/firebrand_small.png",
+      "description": "你的攻击会施加一个可无限叠加的 灼烧 攻击特效 ，持续造成伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1037,
+      "key": "ARAM_FirstAidKit",
+      "name": "急救用具",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/firstaidkit_small.png",
+      "description": "获得 ?%治疗和护盾强度 。",
+      "enabled": true
+    },
+    {
+      "id": 1038,
+      "key": "ARAM_FromBeginningToEnd",
+      "name": "有始有终",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/frombeginningtoend_small.png",
+      "description": "获得 先攻 和 黑暗收割 基石符文。",
+      "enabled": true
+    },
+    {
+      "id": 1041,
+      "key": "ARAM_Goliath",
+      "name": "歌利亚巨人",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/goliath_small.png",
+      "description": "体型变大，获得 ?%生命值 和 ?%适应之力 。",
+      "enabled": true
+    },
+    {
+      "id": 1044,
+      "key": "ARAM_IceCold",
+      "name": "冰寒",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/icecold_small.png",
+      "description": "你的 减速 效果可使 移动速度 降低额外的?。",
+      "enabled": true
+    },
+    {
+      "id": 1045,
+      "key": "ARAM_InfernalConduit",
+      "name": "炼狱导管",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/infernalconduit_small.png",
+      "description": "你的技能会施加一层可叠加的 灼烧 ，持续造成魔法伤害。 你的 灼烧 效果会降低你各基础技能的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 1046,
+      "key": "ARAM_InfernalSoul",
+      "name": "炼狱龙魂",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/infernalsoul_small.png",
+      "description": "你获得炼狱龙魂，使用技能或攻击命中敌人时造成额外伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1047,
+      "key": "ARAM_ItsCritical",
+      "name": "关键暴击",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/itscritical_small.png",
+      "description": "获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1048,
+      "key": "ARAM_JeweledGauntlet",
+      "name": "珠光护手",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/jeweledgauntlet_small.png",
+      "description": "你的技能可以造成 暴击 。 获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1051,
+      "key": "ARAM_LightemUp",
+      "name": "点亮他们！",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/lightemup_small.png",
+      "description": "每第4次攻击发射4个飞弹以造成 魔法伤害 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 1053,
+      "key": "ARAM_MadScientist",
+      "name": "科学狂人",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/madscientist_small.png",
+      "description": "每次重生时，你的体型要么变大(获得 适应之力 和 生命值 )，要么变小(获得技能急速和 移动速度 )。",
+      "enabled": true
+    },
+    {
+      "id": 1054,
+      "key": "ARAM_MasterofDuality",
+      "name": "物法皆修",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/masterofduality_small.png",
+      "description": "你的每次攻击为你提供可叠加的 法术强度 ，并且你的每次技能在伤害敌人时为你提供可叠加的 攻击力 。",
+      "enabled": true
+    },
+    {
+      "id": 1056,
+      "key": "ARAM_MindtoMatter",
+      "name": "由心及物",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/mindtomatter_small.png",
+      "description": "使你的 最大生命值 提升，数额相当于你一半的 法力值 。",
+      "enabled": true
+    },
+    {
+      "id": 1057,
+      "key": "ARAM_MountainSoul",
+      "name": "山脉龙魂",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/mountainsoul_small.png",
+      "description": "你获得山脉龙魂，在脱离战斗之后获得一个持续一小段时间的 护盾 。",
+      "enabled": true
+    },
+    {
+      "id": 1058,
+      "key": "ARAM_MysticPunch",
+      "name": "秘术冲拳",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/mysticpunch_small.png",
+      "description": "攻击特效 使你的各个技能的冷却时间缩减?秒。",
+      "enabled": true
+    },
+    {
+      "id": 1060,
+      "key": "ARAM_OceanSoul",
+      "name": "海洋龙魂",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/oceansoul_small.png",
+      "description": "获得【海洋龙魂】，在对敌方英雄造成伤害后提供高额的 生命 和 法力 回复。",
+      "enabled": true
+    },
+    {
+      "id": 1061,
+      "key": "ARAM_OkBoomerang",
+      "name": "回力OK镖",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/okboomerang_small.png",
+      "description": "每?秒朝着一个附近的敌人 自动施放 投掷一个回力镖。",
+      "enabled": true
+    },
+    {
+      "id": 1062,
+      "key": "ARAM_OmniSoul",
+      "name": "全能龙魂",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/omnisoul_small.png",
+      "description": "获得?个随机 龙魂 。",
+      "enabled": true
+    },
+    {
+      "id": 1063,
+      "key": "ARAM_OutlawsGrit",
+      "name": "狂徒豪气",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/outlawsgrit_small.png",
+      "description": "在使用一次冲刺、闪烁或传送之后，你获得 ?护甲 和 魔法抗性 ，这个效果至多可叠加至?层。",
+      "enabled": true
+    },
+    {
+      "id": 1064,
+      "key": "ARAM_Perseverance",
+      "name": "坚韧",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/perseverance_small.png",
+      "description": "获得巨幅提升的 生命回复 ，这个数额会在低 生命值 时进一步提升。",
+      "enabled": true
+    },
+    {
+      "id": 1066,
+      "key": "ARAM_QuantumComputing",
+      "name": "量子计算",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/quantumcomputing_small.png",
+      "description": "周期性地 自动施放 一次巨型斩击。被击中的敌人会被 减速 ，受到额外 最大生命值伤害 ，并且治疗你。",
+      "enabled": true
+    },
+    {
+      "id": 1067,
+      "key": "ARAM_RabbleRousing",
+      "name": "活力焕发",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/rabblerousing_small.png",
+      "description": "使用【 ? 】技能时回复 生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 1068,
+      "key": "ARAM_Recursion",
+      "name": "循环往复",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/recursion_small.png",
+      "description": "获得?技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1071,
+      "key": "ARAM_ScopierWeapons",
+      "name": "更万用的瞄准镜",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/scopierweapons_small.png",
+      "description": "获得?攻击距离。",
+      "enabled": true
+    },
+    {
+      "id": 1072,
+      "key": "ARAM_SearingDawn",
+      "name": "炽烈黎明",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/searingdawn_small.png",
+      "description": "你的技能会标记敌人，使其在被你的友军的下一个攻击或技能命中时会受到额外 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1073,
+      "key": "ARAM_ShadowRunner",
+      "name": "暗影疾奔",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/shadowrunner_small.png",
+      "description": "在使用一个冲刺、闪烁或传送类技能或离开 潜行 状态之后，获得 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1074,
+      "key": "ARAM_ShrinkRay",
+      "name": "缩小射线",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/shrinkray_small.png",
+      "description": "你的攻击会将目标的伤害与体型削减?% 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 1076,
+      "key": "ARAM_SonicBoom",
+      "name": "天音爆",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/sonicboom_small.png",
+      "description": "在为你的友军提供增益效果、 治疗效果 或 护盾效果 时，会对其附近的敌人们造成伤害和 减速 。",
+      "enabled": true
+    },
+    {
+      "id": 1077,
+      "key": "ARAM_SoulSiphon",
+      "name": "灵魂虹吸",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/soulsiphon_small.png",
+      "description": "暴击 造成伤害的?%会等额治疗你自身 。 获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1079,
+      "key": "ARAM_SymphonyofWar",
+      "name": "战争交响乐",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/symphonyofwar_small.png",
+      "description": "获得 致命节奏 和 征服者 基石符文。",
+      "enabled": true
+    },
+    {
+      "id": 1080,
+      "key": "ARAM_TankItOrLeaveIt",
+      "name": "会心防御",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/tankitorleaveit_small.png",
+      "description": "你可以使用你的 暴击几率(最大?%几率) 来进行 会心防御 ，使你有一定几率来使所受伤害降低。 获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1081,
+      "key": "ARAM_TapDancer",
+      "name": "踢踏舞",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/tapdancer_small.png",
+      "description": "你的攻击会为你提供 移动速度 。基于你的移动速度获得 攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1084,
+      "key": "ARAM_ThreadtheNeedle",
+      "name": "穿针引线",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/threadtheneedle_small.png",
+      "description": "获得?% 护甲穿透 和 法术穿透 。",
+      "enabled": true
+    },
+    {
+      "id": 1087,
+      "key": "ARAM_Typhoon",
+      "name": "台风",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/typhoon_small.png",
+      "description": "你的攻击会对一个额外目标发射一个飞弹，从而造成削减过的伤害并施加 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 1088,
+      "key": "ARAM_UltimateRevolution",
+      "name": "终极刷新",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/ultimaterevolution_small.png",
+      "description": "在施放 终极技能 后刷新你的终极技能(?秒冷却时间或阵亡时重置)。",
+      "enabled": true
+    },
+    {
+      "id": 1092,
+      "key": "ARAM_Vulnerability",
+      "name": "易损",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/vulnerability_small.png",
+      "description": "你的装备效果和持续伤害效果可以 暴击 。 获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1095,
+      "key": "ARAM_WindspeakersBlessing",
+      "name": "风语者的祝福",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/windspeakersblessing_small.png",
+      "description": "你的 治疗效果 和 护盾效果 还会提升目标的 护甲 和 魔法抗性 ，这些加成持续3秒。",
+      "enabled": true
+    },
+    {
+      "id": 1097,
+      "key": "ARAM_WitchfulThinking",
+      "name": "巫师式思考",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/witchfulthinking_small.png",
+      "description": "获得 ?法术强度 。",
+      "enabled": true
+    },
+    {
+      "id": 1098,
+      "key": "ARAM_WithHaste",
+      "name": "急急小子",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/withhaste_small.png",
+      "description": "获得 移动速度 ，相当于你的?%技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1103,
+      "key": "ARAM_BreadAndButter",
+      "name": "面包和黄油",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "你的【 ? 】技能获得?技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1104,
+      "key": "ARAM_Minionmancer",
+      "name": "仆从大师",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/minionmancer_small.png",
+      "description": "你的召唤物获得?%体型提升、生命值和伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1105,
+      "key": "ARAM_Homeguard",
+      "name": "家园卫士",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/homeguard_small.png",
+      "description": "获得 ?%移动速度 ，在受到伤害后失效?秒。",
+      "enabled": true
+    },
+    {
+      "id": 1112,
+      "key": "ARAM_UltimateUnstoppable",
+      "name": "终极不可阻挡",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/ultimateunstoppable_small.png",
+      "description": "在你使用你的终极技能后，你获得持续?秒的 控制免疫 。 (?秒冷却时间)。",
+      "enabled": true
+    },
+    {
+      "id": 1113,
+      "key": "ARAM_SkilledSniper",
+      "name": "老练狙神",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/skilledsniper_small.png",
+      "description": "用一个非终极技能 狙击 一个敌人时，返还该技能?%冷却时间(周期性技能返还?%)。",
+      "enabled": true
+    },
+    {
+      "id": 1115,
+      "key": "ARAM_ScopiestWeapons",
+      "name": "最万用的瞄准镜",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/scopiestweapons_small.png",
+      "description": "获得?攻击距离。",
+      "enabled": true
+    },
+    {
+      "id": 1116,
+      "key": "ARAM_Flashy",
+      "name": "闪现向前",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/flashy_small.png",
+      "description": "你的闪现有?层充能。在?秒后，再次获得所有充能。",
+      "enabled": true
+    },
+    {
+      "id": 1118,
+      "key": "ARAM_CriticalHealing",
+      "name": "会心治疗",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/criticalhealing_small.png",
+      "description": "你的 治疗 和 护盾 可以暴击，造成?%额外数额的效果。获得 ?%暴击几率。",
+      "enabled": true
+    },
+    {
+      "id": 1129,
+      "key": "ARAM_Marksmage",
+      "name": "神射法师",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/marksmage_small.png",
+      "description": "你的攻击造成相当于你 ?%法术强度 的额外 物理伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1133,
+      "key": "ARAM_MagicMissile",
+      "name": "魔法飞弹",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/maps/particles/kiwi/magicmissile_small.png",
+      "description": "造成技能伤害会发射?个飞弹，每个造成基于飞行距离的 百分比最大生命值的真实伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1134,
+      "key": "ARAM_DrawYourSword",
+      "name": "亮出你的剑",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/drawyoursword_small.png",
+      "description": "变为近战状态，并且获得 攻击力 、 生命值 、 攻击速度 、 生命偷取 和 移动速度 (每个属性都基于舍弃的攻击距离而进一步提升)。",
+      "enabled": true
+    },
+    {
+      "id": 1136,
+      "key": "ARAM_SlapAround",
+      "name": "扇巴掌",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/slaparound_small.png",
+      "description": "每当你 定身 或 缚地 一个敌人时，获得?适应之力。阵亡时损失?%。",
+      "enabled": true
+    },
+    {
+      "id": 1138,
+      "key": "ARAM_Goredrink",
+      "name": "渴血",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/goredrink_small.png",
+      "description": "获得 ?%全能吸血 。",
+      "enabled": true
+    },
+    {
+      "id": 1141,
+      "key": "ARAM_AllForYou",
+      "name": "全心为你",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/allforyou_small.png",
+      "description": "你的 治疗 和 护盾 在用在一个友军身上时会变强。",
+      "enabled": true
+    },
+    {
+      "id": 1149,
+      "key": "ARAM_Impassable",
+      "name": "不动如山",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/impassable_small.png",
+      "description": "获得 余震 和 冰川增幅 基石符文。",
+      "enabled": true
+    },
+    {
+      "id": 1150,
+      "key": "ARAM_BreadAndJam",
+      "name": "面包和果酱",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "你的【 ? 】技能获得?技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1151,
+      "key": "ARAM_BreadAndCheese",
+      "name": "面包和奶酪",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "你的【 ? 】技能获得?技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1152,
+      "key": "ARAM_Quest_SteelYourHeart",
+      "name": "钢化你心",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/quest_steelyourheart_small.png",
+      "description": "任务： 需求：持有【心之钢】且层数在?层或以上。 奖励：将你的心之钢层数乘以?。",
+      "enabled": true
+    },
+    {
+      "id": 1154,
+      "key": "ARAM_Quest_UrfsChampion",
+      "name": "海牛阿福的勇士",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/quest_urfschampion_small.png",
+      "description": "任务： 需求：参与击杀?次。 奖励：【金铲铲】",
+      "enabled": true
+    },
+    {
+      "id": 1156,
+      "key": "ARAM_Quest_WoogletsWitchcap",
+      "name": "沃格勒特的巫师帽",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/quest_woogletswitchcap_small.png",
+      "description": "立刻获得一个 无用大棒 。 任务： 持有 灭世者的死亡之帽 和 中娅沙漏 。 奖励： 获得 沃格勒特的巫师帽 。",
+      "enabled": true
+    },
+    {
+      "id": 1170,
+      "key": "ARAM_ScopedWeapons",
+      "name": "万用瞄准镜",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/scopedweapons_small.png",
+      "description": "获得?攻击距离。",
+      "enabled": true
+    },
+    {
+      "id": 1180,
+      "key": "ARAM_BigBrain",
+      "name": "超强大脑",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/bigbrain_small.png",
+      "description": "每拥有 ?法术强度 就会获得 ?护盾值 。阵亡时或耗尽后70秒重置。",
+      "enabled": true
+    },
+    {
+      "id": 1181,
+      "key": "ARAM_HeavyHitter",
+      "name": "重量级打击手",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/heavyhitter_small.png",
+      "description": "你的攻击造成相当于你?% 最大生命值 的额外 物理伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1187,
+      "key": "ARAM_Flashbang",
+      "name": "闪光弹",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/flashbang_small.png",
+      "description": "你的【闪现】会引发一次爆炸，造成伤害和 减速 （阵亡时重置）。",
+      "enabled": true
+    },
+    {
+      "id": 1194,
+      "key": "ARAM_FeyMagic",
+      "name": "精怪魔法",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/feymagic_small.png",
+      "description": "你的 终极技能 的伤害会对敌人造成持续若干秒的 变形 效果。",
+      "enabled": true
+    },
+    {
+      "id": 1195,
+      "key": "ARAM_GiantSlayer",
+      "name": "巨人杀手",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/giantslayer_small.png",
+      "description": "体型变小，获得 移动速度 ，并基于敌方英雄体型大于你的程度获得额外伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1204,
+      "key": "ARAM_StackosaurusRex",
+      "name": "叠角龙",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/stackosaurusrex_small.png",
+      "description": "在你获得一个技能的永久 层数 时，多获得?%！",
+      "enabled": true
+    },
+    {
+      "id": 1205,
+      "key": "ARAM_ADAPt",
+      "name": "物理转魔法",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/adapt_small.png",
+      "description": "将 额外攻击力 转化为 法术强度 。获得 ?%法术强度 。",
+      "enabled": true
+    },
+    {
+      "id": 1206,
+      "key": "ARAM_escAPADe",
+      "name": "魔法转物理",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/escapade_small.png",
+      "description": "将 法术强度 转化为 额外攻击力 。获得 ?%攻击力 。",
+      "enabled": true
+    },
+    {
+      "id": 1211,
+      "key": "ARAM_ItsKillingTime",
+      "name": "杀戮时间到了",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/itskillingtime_small.png",
+      "description": "在施放你的终极技能后，标记所有敌人并存储你对他们造成的伤害。当它结束时，引爆该伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1214,
+      "key": "ARAM_SpinToWin",
+      "name": "旋转至胜",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/spintowin_small.png",
+      "description": "你的旋转类技能获得?技能急速并且造成?额外伤害，对于终极技能，该额外伤害提升至?。",
+      "enabled": true
+    },
+    {
+      "id": 1225,
+      "key": "ARAM_DualWield",
+      "name": "双刀流",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dualwield_small.png",
+      "description": "在攻击时，发射一个箭矢，它施加效能削减的 攻击特效 。获得 ?%总攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1237,
+      "key": "ARAM_TransmuteGold",
+      "name": "质变：黄金阶",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/transmutegold_small.png",
+      "description": "获得1个随机 黄金阶强化符文 。",
+      "enabled": true
+    },
+    {
+      "id": 1238,
+      "key": "ARAM_TransmutePrismatic",
+      "name": "质变：棱彩阶",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/transmuteprismatic_small.png",
+      "description": "获得1个随机 棱彩阶强化符文 。",
+      "enabled": true
+    },
+    {
+      "id": 1243,
+      "key": "ARAM_TransmuteChaos",
+      "name": "质变：混沌",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/transmutechaos_small.png",
+      "description": "获得 ?个随机强化符文 。",
+      "enabled": true
+    },
+    {
+      "id": 1301,
+      "key": "ARAM_DivineIntervention",
+      "name": "神圣干预",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/slowactingpainkillers_small.png",
+      "description": "每?秒， 自动施放 一颗护体星星。在它着陆时，你和附近的友军们进入持续若干秒的 免疫伤害 状态。",
+      "enabled": true
+    },
+    {
+      "id": 1305,
+      "key": "ARAM_LegDay",
+      "name": "练腿日",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/legday_small.png",
+      "description": "获得 ?移动速度 和 ?%减速抗性 。",
+      "enabled": true
+    },
+    {
+      "id": 1308,
+      "key": "ARAM_Firefox",
+      "name": "火狐",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/firfox_small.png",
+      "description": "自动施放 获得 移动速度 并召唤3道烈焰环绕于你，瞄准距离内相距最近的那个可见英雄并造成 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1310,
+      "key": "ARAM_ClownCollege",
+      "name": "小丑学院",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/clowncollege_small.png",
+      "description": "获得召唤师技能 欺诈魔术 。 获得 背刺 被动。 在你阵亡时，对附近的敌人们造成大量 真实伤害 和 恐惧 。",
+      "enabled": true
+    },
+    {
+      "id": 1311,
+      "key": "ARAM_Overflow",
+      "name": "溢流",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/overflow_small.png",
+      "description": "你的 法力 消耗翻倍。 你的技能的 治疗效果 、 护盾效果 和伤害获得提升，提升幅度基于你的 最大法力值 。",
+      "enabled": true
+    },
+    {
+      "id": 1314,
+      "key": "MightyShield",
+      "name": "强力护盾",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/mightyshield_small.png",
+      "description": "当你获得护盾时，获得 ?适应之力 ，持续?秒。(?秒冷却时间)",
+      "enabled": true
+    },
+    {
+      "id": 1315,
+      "key": "SwiftAndSafe",
+      "name": "快中求稳",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/swiftandsafe_small.png",
+      "description": "在冲刺或闪烁后，获得 护盾值 。",
+      "enabled": true
+    },
+    {
+      "id": 1318,
+      "key": "ARAM_Upgrade_ZH",
+      "name": "升级：中娅",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradezh_small.png",
+      "description": "【中娅沙漏】 的冷却时间降低至?秒。你现在可以在 【中娅沙漏】、【探索者的护臂】 或 【沃格勒特的巫师帽】 凝滞状态持续期间移动并获得 移动速度 。 获得 250金币 。",
+      "enabled": true
+    },
+    {
+      "id": 1319,
+      "key": "ARAM_Upgrade_Immolate",
+      "name": "升级：献祭",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradeimmolate_small.png",
+      "description": "【璀璨回响】 和 【日炎圣盾】 每当有目标受到【献祭】效果影响时，提供 ? 金币 。获得 250金币 。",
+      "enabled": true
+    },
+    {
+      "id": 1320,
+      "key": "ARAM_Upgrade_Collector",
+      "name": "升级：收集者",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradecollector_small.png",
+      "description": "在每次使用【收集者】的被动处决敌人时，会提升处决阈值，并且提供额外金币。 获得 250金币 。",
+      "enabled": true
+    },
+    {
+      "id": 1322,
+      "key": "ARAM_GetExcited",
+      "name": "罪恶快感",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/getexcited_small.png",
+      "description": "参与击杀后，在?秒内提升 移动速度 和 攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1323,
+      "key": "ARAM_Cruelty",
+      "name": "残忍",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/cruelty_small.png",
+      "description": "定身 或 缚地 一个英雄时，召唤一颗会在短暂延迟后着陆的彗星，对附近的敌人们造成 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1324,
+      "key": "ARAM_ProteinShake",
+      "name": "蛋白粉奶昔",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/proteinshake_small.png",
+      "description": "获得 ?%治疗和护盾强度 ，基于额外 护甲 和 魔抗 。",
+      "enabled": true
+    },
+    {
+      "id": 1325,
+      "key": "GlassCannon",
+      "name": "玻璃大炮",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/glasscannon_small.png",
+      "description": "减少 ?%最大生命值 。造成额外的?伤害作为 真实伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 1326,
+      "key": "Nightstalking",
+      "name": "夜狩",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/nightstalking_small.png",
+      "description": "在对敌人造成伤害的?秒内参与击杀该敌人会为你提供 移动速度 并使你进入隐身状态。",
+      "enabled": true
+    },
+    {
+      "id": 1327,
+      "key": "Adamant",
+      "name": "坚若磐石",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/adamant_small.png",
+      "description": "每当你 定身 或 缚地 一个敌人时，获得 护甲 和 魔抗 。",
+      "enabled": true
+    },
+    {
+      "id": 1328,
+      "key": "CriticalRhythm",
+      "name": "暴击律动",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/criticalrhythm_small.png",
+      "description": "你的普攻在 暴击 时获得可叠加的 攻击速度 。 获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1329,
+      "key": "BiggestSnowballEver",
+      "name": "史上最大雪球",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/biggestsnowballever_small.png",
+      "description": "你的 雪球 获得?技能急速。 你的雪球现在变得 非常大 ，并且可以穿过小兵。它会 减速 ， 击飞 英雄，并造成额外 伤害 。 如果你没有雪球，则获得一个 雪球 。",
+      "enabled": true
+    },
+    {
+      "id": 1331,
+      "key": "EmpyreanPromise",
+      "name": "至高天诺言",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/empyreampromise_small.png",
+      "description": "获得?%治疗和护盾强度。获得 至高天诺言 作为一个召唤师技能。 警惕 传送至你的友军并在着陆时提供持续?秒的 ?护盾值 。",
+      "enabled": true
+    },
+    {
+      "id": 1332,
+      "key": "OminousPact",
+      "name": "不祥契约",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/wisdomofages_small.png",
+      "description": "基于 已损失生命值 ，获得 法术强度 、 移动速度 和 全能吸血 ，每次你施放技能时会对自身造成伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1333,
+      "key": "EscapePlan",
+      "name": "逃跑计划",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/escapeplan_small.png",
+      "description": "在降至 ?%生命值 时，获得巨量 持续衰减的护盾 、持续衰减的 移动速度 和持续衰减的缩小效果。",
+      "enabled": true
+    },
+    {
+      "id": 1334,
+      "key": "SnowballUpgrade",
+      "name": "升级：雪球",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/snowballupgrade_small.png",
+      "description": "雪球 获得?技能急速。击中一个敌人时，会产生一次降雪，来对附近的敌人造成 范围伤害 和 减速 效果。 如果你没有雪球，获得一个 雪球 。",
+      "enabled": true
+    },
+    {
+      "id": 1335,
+      "key": "Goldrend",
+      "name": "夺金",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/goldrend_small.png",
+      "description": "用攻击或技能对一个英雄造成伤害时会造成额外 魔法伤害 ，并为你提供 金币 和 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1336,
+      "key": "ARAM_Upgrade_IE",
+      "name": "升级：无尽之刃",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradeie_small.png",
+      "description": "获得 500金币 。 装备 无尽之刃 后，可使你的暴击几率在每次攻击都会提供随机的暴击伤害。",
+      "enabled": true
+    },
+    {
+      "id": 1337,
+      "key": "KingMe",
+      "name": "尊我为王",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/kingme_small.png",
+      "description": "当你第一次 携带一件传说级装备 并乘坐敌人的传送门时，你会 加冕为王 ，升级你的装备并获得一个随机棱彩阶强化符文。",
+      "enabled": true
+    },
+    {
+      "id": 1343,
+      "key": "Quest_Sneakerhead",
+      "name": "王中王，靴中靴",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/sneakerhead_small.png",
+      "description": "即刻：随机获得一双升级后的靴子。 需求：完成其任务，以更换为另一双。 奖励：嘉文一世之靴",
+      "enabled": true
+    },
+    {
+      "id": 1344,
+      "key": "FinalForm",
+      "name": "最终形态",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/finalform_small.png",
+      "description": "在施放你的 终极技能 时，获得持续?秒的 最大生命值护盾 、 全能吸血 和 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1346,
+      "key": "Vampirism",
+      "name": "吸血习性",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/vampired_small.png",
+      "description": "你不再能够被友军治疗或获得 生命回复 。获得 ?% 全能吸血。",
+      "enabled": true
+    },
+    {
+      "id": 1347,
+      "key": "Poltergeist",
+      "name": "吵闹鬼",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/poltergeist_small.png",
+      "description": "获得【吵闹鬼】作为一个召唤师技能。 吵闹鬼会同时施放召唤师技能【屏障】和【幽灵疾步】。",
+      "enabled": true
+    },
+    {
+      "id": 1348,
+      "key": "Flash2",
+      "name": "闪闪现现",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/flash2_small.png",
+      "description": "获得第二个【闪现】召唤师技能和?召唤师技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1349,
+      "key": "UltimateAwakening",
+      "name": "终极唤醒",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/zerohour_small.png",
+      "description": "获得?终极技能急速。 在施放你的 终极技能 后，刷新你的所有基础技能并获得持续?秒的?基础技能急速。(?秒冷却时间)",
+      "enabled": true
+    },
+    {
+      "id": 1353,
+      "key": "ARAM_TankEngine",
+      "name": "坦克引擎",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/tank_engine_small.png",
+      "description": "参与击杀时，获得一个层数，使你的体型增大并提升 最大生命值 。阵亡时损失层数。",
+      "enabled": true
+    },
+    {
+      "id": 1358,
+      "key": "PinballSnowball",
+      "name": "弹球",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/pinballsnowball_small.png",
+      "description": "你的 雪球 获得 技能急速 并且造成额外的 真实伤害 。 当 雪球 从墙体上反弹时，它的体型和伤害获得提升，并缩短它的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 1361,
+      "key": "ARAM_Quest_VoidImmolation",
+      "name": "艾卡西亚的陷落",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/quest_voidimmolation_small.png",
+      "description": "即刻：获得1个【斑比的熔渣】。 任务： 持有 日炎圣盾 和 璀璨回响 。 奖励： 将这些装备合成为 虚空献祭 。",
+      "enabled": true
+    },
+    {
+      "id": 1373,
+      "key": "ShrinkEngine",
+      "name": "缩小引擎",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/shrinkengine_small.png",
+      "description": "参与击杀后会让你变小并且获得技能急速和 移动速度 。 阵亡时损失?%层数。",
+      "enabled": true
+    },
+    {
+      "id": 1375,
+      "key": "SoulEater",
+      "name": "吞噬灵魂",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/souleater_small.png",
+      "description": "定身 一个敌方英雄时会提供 ?最大生命值 。 如果是你的第二个强化符文，会自带 ?生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 1379,
+      "key": "Upgrade_SwordOfBlossom",
+      "name": "升级：花晓之剑",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgrademikaelsblessing_small.png",
+      "description": "获得 ?%攻击速度 。 你对英雄的攻击会使来自【花晓之剑】的治疗效果提升 ?% 。",
+      "enabled": true
+    },
+    {
+      "id": 1384,
+      "key": "Donation",
+      "name": "捐赠",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/donation_small.png",
+      "description": "获得 ? 金币。无需多问。",
+      "enabled": true
+    },
+    {
+      "id": 1386,
+      "key": "YouSpinMeRightRound",
+      "name": "转得我眩晕了",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/youspinmerightround_small.png",
+      "description": "将一个召唤师技能替换为 骄行荡寇 。 骄行荡寇 发射一根钩爪，吸附在地形上，在此之后，你可以 再次施放 来绕着它摆荡。在摆荡状态下，自动攻击相距最近的那个敌人。在与一个敌方英雄碰撞或 再次施放 时结束摆荡。",
+      "enabled": true
+    },
+    {
+      "id": 1388,
+      "key": "InfiniteRecursion",
+      "name": "无限循环往复",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/infiniterecursion_small.png",
+      "description": "获得?技能急速，外加每次参与击杀?技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1389,
+      "key": "HandOfBaron",
+      "name": "男爵之手",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/handofbaron_small.png",
+      "description": "获得 ?%适应之力 。附近友方小兵都获得极大增强。",
+      "enabled": true
+    },
+    {
+      "id": 1390,
+      "key": "ARAM_PhenomenalEvil",
+      "name": "超凡邪恶",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/aram_phenomenalevil_small.png",
+      "description": "在你用技能对敌人造成伤害时永久获得 ?法术强度 。 如果是作为你的第二个强化符文，则自带 ?法术强度 。",
+      "enabled": true
+    },
+    {
+      "id": 1392,
+      "key": "GoldenSnowball",
+      "name": "神圣雪球",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/goldensnowball_small.png",
+      "description": "雪球 获得?技能急速。 你在用【雪球】冲刺后短暂 免疫伤害 。 如果你没有雪球，获得一个 雪球 。",
+      "enabled": true
+    },
+    {
+      "id": 1401,
+      "key": "GrowthSpurt",
+      "name": "生机迸发",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/growthspurt_small.png",
+      "description": "获得 生机迸发 作为一个召唤师技能。 生机迸发会猛然提升你的体型， 击飞 附近的敌人们并提供 最大生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 1402,
+      "key": "ARAM_StatsOnStatsOnStats",
+      "name": "属性叠属性叠属性！",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/statsonstatsonstats_small.png",
+      "description": "获得?个【属性锻造器】，有更高几率出现黄金阶和棱彩阶锻造器！ 在你的下一次强化符文选取时，每个栏位获得一次额外的刷新。",
+      "enabled": true
+    },
+    {
+      "id": 1403,
+      "key": "ARAM_StatsOnStats",
+      "name": "属性叠属性！",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/statsonstats_small.png",
+      "description": "获得?个【属性锻造器】，有更高几率出现黄金阶和棱彩阶锻造器！",
+      "enabled": true
+    },
+    {
+      "id": 1404,
+      "key": "ARAM_Stats",
+      "name": "属性！",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/stats_small.png",
+      "description": "获得?个【属性锻造器】！",
+      "enabled": true
+    },
+    {
+      "id": 1413,
+      "key": "ARAM_StuckInHereWithMe",
+      "name": "和我一起困在这里",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/stuckinherewithme_small.png",
+      "description": "使用你的 终极技能 时会 嘲讽 附近的敌人们并提供给你伤害减免。 获得?终极技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 1415,
+      "key": "Twinfire",
+      "name": "双生火焰",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/twinfire_small.png",
+      "description": "造成技能伤害时，发射1+?个飞弹，每个造成 ?魔法伤害 。 此外，获得 ?%暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 1416,
+      "key": "HextechSoul",
+      "name": "海克斯科技龙魂",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/infernalsoul_small.png",
+      "description": "周期性地使你的下一个伤害型技能或攻击触发一道闪电爆裂，连锁穿过敌人以造成伤害和 减速 。",
+      "enabled": true
+    },
+    {
+      "id": 1420,
+      "key": "Sonata",
+      "name": "咏叹奏鸣",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/sonata_small.png",
+      "description": "每?秒，以一个不断交替的旋律来 自动施放 坚毅咏叹调 和 迅捷奏鸣曲 。 坚毅咏叹调 治疗 附近友军并提供一个临时的 护盾光环 。 迅捷奏鸣曲 提供一个临时光环来提供 额外移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 1421,
+      "key": "PromQueen",
+      "name": "舞会女王",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/promqueen_small.png",
+      "description": "每?秒， 自动施放 一道闪亮宝冠降临在你头上。当它着陆时，获得洛的终极技能，魅惑你碰到的敌人们。",
+      "enabled": true
+    },
+    {
+      "id": 1996,
+      "key": "ARAM_Upgrade_Sheen",
+      "name": "升级：耀光",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradesheen_small.png",
+      "description": "你的 咒刃 效果造成 额外伤害 并 治疗 你自身，治疗量相当于目标生命值的一定百分比。此外，获得 250金币 。",
+      "enabled": true
+    },
+    {
+      "id": 2004,
+      "key": "ARAM_EmpoweredByTheFaithful",
+      "name": "信念者的强化",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/empoweredbythefaithful_small.png",
+      "description": "为友军提供 治疗 或 护盾 会赐福他们，使其伤害填充你的 虔诚 。 当你拥有足够的 虔诚 时，释放一道冲击波来造成 魔法伤害 并处决低生命值的敌人们。",
+      "enabled": true
+    },
+    {
+      "id": 2005,
+      "key": "ARAM_InfernoTriggered",
+      "name": "扳机炼狱",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/madscientist_small.png",
+      "description": "获得 悍勇本色 。在你达到S 评价等级 时，自动使用 炼狱扳机 。",
+      "enabled": true
+    },
+    {
+      "id": 2007,
+      "key": "ARAM_LittleDevil",
+      "name": "你肩上的恶魔",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/littledevil_small.png",
+      "description": "与【大魔王】本尊签订一个契约。 他 持续汲取你的生命力 ，但回报给你力量，让你对英雄造成 额外真实伤害 并且创造 治疗残片 供你获取。",
+      "enabled": true
+    },
+    {
+      "id": 2009,
+      "key": "ARAM_Zealot",
+      "name": "狂热者",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/zealot_small.png",
+      "description": "获得 ?暴击几率 和 ?攻击速度 （随法术强度变化）。",
+      "enabled": true
+    },
+    {
+      "id": 2010,
+      "key": "ARAM_DoubleTap",
+      "name": "双发快射",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dualwield_small.png",
+      "description": "你的 暴击 施加一次额外的 攻击特效 。 获得 ?暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 2016,
+      "key": "ARAM_Juiced",
+      "name": "注魔",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/juiced_small.png",
+      "description": "攻击特效 造成 ?魔法伤害 ，这个伤害可以 暴击 。",
+      "enabled": true
+    },
+    {
+      "id": 2018,
+      "key": "ARAM_Purist_Caster",
+      "name": "纯粹主义者 - 术师",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/puristcaster_small.png",
+      "description": "获得百分比冷却缩减并将你的所有 攻击速度 转化为技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 2026,
+      "key": "KillSecured",
+      "name": "杀意翻涌",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/killsecure_small.png",
+      "description": "在朝着低生命值的敌人时，获得额外 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 2032,
+      "key": "FishBait",
+      "name": "鲨鱼诱饵",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/fishbait_small.png",
+      "description": "在阵亡之后的若干秒，一头鲨鱼会啃噬所有附近的敌人们。你可以在阵亡后进行移动，以给鲨鱼攻击进行定位。",
+      "enabled": true
+    },
+    {
+      "id": 2034,
+      "key": "SharkTempest",
+      "name": "鲨鱼暴风",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/sharktempest_small.png",
+      "description": "鲨鱼们环绕着你的【雪球】，对附近的敌人们造成伤害和 减速 。当你的【雪球】命中一个英雄时，其会陷入一阵鲨鱼风暴之中！",
+      "enabled": true
+    },
+    {
+      "id": 2043,
+      "key": "NatureIsHealing",
+      "name": "自然即是治愈",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/natureishealing_small.png",
+      "description": "进入 草丛 时回复 大量生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 2054,
+      "key": "SpellVolley",
+      "name": "三重射击",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "你的【 ? 】技能会瞄准你前方2个额外的敌人。",
+      "enabled": true
+    },
+    {
+      "id": 2055,
+      "key": "ARAM_Multishot",
+      "name": "多重射击",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "任务： 用【 ? 】技能命中敌方英雄?次。 奖励： 发射数量基于任务等级的额外飞弹。",
+      "enabled": true
+    },
+    {
+      "id": 2062,
+      "key": "Ability_SelfAOE_DoubleCast",
+      "name": "回响施放",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "施放你的【 ? 】技能时会朝你的鼠标位置派出一个复制体并再次施放该技能。",
+      "enabled": true
+    },
+    {
+      "id": 2064,
+      "key": "ARAM_Quickstep",
+      "name": "快步",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "当你使用【 ? 】技能时，朝你的鼠标指针进行冲刺。",
+      "enabled": true
+    },
+    {
+      "id": 2065,
+      "key": "ARAM_Terror",
+      "name": "惊惧",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/desecrator_large.png",
+      "description": "每当你施放【 ? 】技能时， 恐惧 你周围的敌人们.",
+      "enabled": true
+    },
+    {
+      "id": 2072,
+      "key": "Missile_Split",
+      "name": "咒语裂变",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "在命中时、最大距离时或 再次施放 时，你的【 ? 】技能的飞弹会分裂为两部分。",
+      "enabled": true
+    },
+    {
+      "id": 2073,
+      "key": "ARAM_SustainingStrike",
+      "name": "虹吸",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "用【 ? 】技能伤害敌方英雄时会 治疗 你。",
+      "enabled": true
+    },
+    {
+      "id": 2076,
+      "key": "TitansPulse",
+      "name": "保持坚定",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "当【 ? 】技能对敌方英雄造成伤害时，获得? 护甲 和 魔法抗性 。",
+      "enabled": true
+    },
+    {
+      "id": 2077,
+      "key": "DarkWind",
+      "name": "贪欲束缚",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradehubris_small.png",
+      "description": "用你的【 ? 】技能 定身 或 缚地 敌方英雄时造成额外 伤害 并 对你进行治疗 。",
+      "enabled": true
+    },
+    {
+      "id": 2078,
+      "key": "ChainReaction",
+      "name": "连锁反应",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "如果一个被【 ? 】技能 击退 的目标命中了另一个英雄，则二者都会被 击飞 并受到 伤害 。在与地形产生碰撞时，该 击飞 时长会延长并且他们会受到 额外伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 2080,
+      "key": "Snowbomb",
+      "name": "冰雪爆裂",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/snowbomb_small.png",
+      "description": "再次施放 雪球 会造成提升 伤害 、 击飞 该目标、并 击退 附近的敌人们。",
+      "enabled": true
+    },
+    {
+      "id": 2083,
+      "key": "BurstingTeeth",
+      "name": "牙仙子",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/questburstingteeth_small.png",
+      "description": "爆裂敌人会掉落 牙齿 。拾取 牙齿 会提供给你永久的 穿甲 和 法术穿透 。",
+      "enabled": true
+    },
+    {
+      "id": 2087,
+      "key": "ARAM_Archmage",
+      "name": "大法师",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/eureka_small.png",
+      "description": "施放一个技能会返还另一个随机技能的花费，数额相当于?%原技能冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 2088,
+      "key": "ARAM_Snowday",
+      "name": "下雪天",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/snowday_small.png",
+      "description": "你的【雪球】获得100技能急速。在命中一名敌人时造成额外魔法伤害。如果你没有【雪球】，则获得一个【雪球】。",
+      "enabled": true
+    },
+    {
+      "id": 2091,
+      "key": "EndlessDecimation",
+      "name": "无尽大杀四方",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/endlessdecimate_small.png",
+      "description": "在战斗状态下， 自动施放 一次环形斧头挥舞从而造成 物理伤害 。被斧刃命中的敌人们受到额外伤害并 治疗 你。",
+      "enabled": true
+    },
+    {
+      "id": 2096,
+      "key": "LittleExtraHelp",
+      "name": "小小的额外帮助",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "在你的【 ? 】技能持续期间获得?攻击距离和? 攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 2097,
+      "key": "VoidDash",
+      "name": "虚空冲刺",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "用【 ? 】技能冲刺时会产生一片【虚空地带】来对敌方英雄们造成 减速 和魔法伤害。",
+      "enabled": true
+    },
+    {
+      "id": 2098,
+      "key": "ARAM_EndlessHunt",
+      "name": "吃过路兵",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/dashing_small.png",
+      "description": "周期性地识别出敌方英雄身上的 破绽 。用攻击或技能命中破绽时，会造成 最大生命值真实伤害 、 回复生命值 并提供 移动速度 。这些效果可以叠加。",
+      "enabled": true
+    },
+    {
+      "id": 2099,
+      "key": "ARAM_DivineDomain",
+      "name": "飞升仪式",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/glasscannon_small.png",
+      "description": "参与击杀敌方英雄后会留下其精华。攻击该精华会提供 移动速度 并重置基础技能冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 2100,
+      "key": "ARAM_SpecializedRecursion",
+      "name": "急速之追求",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "任务： 用【 ? 】技能命中敌方英雄?次 奖励： 【 ? 】技能获得技能急速，基于任务等级，至多至?。",
+      "enabled": true
+    },
+    {
+      "id": 2102,
+      "key": "PressureCooker",
+      "name": "高压锅",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/questpressurecooker_small.png",
+      "description": "每一秒，对附近的敌方英雄们施加一层可叠加的 灼烧 ，这个效果受益于你的 最大生命值 。 任务： 对敌方英雄造成 灼烧 伤害。 奖励 ：每任务等级都会提升体型和伤害。",
+      "enabled": true
+    },
+    {
+      "id": 2103,
+      "key": "ARAM_BangBang",
+      "name": "狙神飞星",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/questbangbang_small.png",
+      "description": "任务： 用技能 狙击 ?个敌方英雄 奖励： 一颗流星会飞向被 狙击 的敌方英雄，在其周围的一个区域内造成 魔法伤害",
+      "enabled": true
+    },
+    {
+      "id": 2104,
+      "key": "ARAM_SpiritBomb",
+      "name": "灵魄炸弹",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/spiritbomb_small.png",
+      "description": "为友方英雄提供 治疗 和 护盾 时会为你积攒一颗【灵魄炸弹】。在满层时，投掷该炸弹至 生命值最低的那个友军 ，从而对其和附近友军们提供 治疗 和 护盾 。",
+      "enabled": true
+    },
+    {
+      "id": 2107,
+      "key": "ARAM_Hellbent",
+      "name": "濒死悟道",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/hellbent_small.png",
+      "description": "用攻击或技能伤害敌方英雄时会提供层数。在满层时，你会在阵亡时进行 复活强化 。",
+      "enabled": true
+    },
+    {
+      "id": 2108,
+      "key": "SupportMain",
+      "name": "主玩辅助",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/questsupportmain_small.png",
+      "description": "任务： 治疗 友方英雄?生命值。 奖励： 你提供的任何治疗效果现在还会在初始治疗之后提供持续治疗。",
+      "enabled": true
+    },
+    {
+      "id": 2109,
+      "key": "SnapBack",
+      "name": "复位",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "再次施放【 ? 】技能时会产生爆炸，并回到你的原本位置。",
+      "enabled": true
+    },
+    {
+      "id": 2111,
+      "key": "Bonk",
+      "name": "邦！",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/bonk_large.png",
+      "description": "被【 ? 】技能强化的攻击或技能会对目标和附近的敌人们造成额外伤害。",
+      "enabled": true
+    },
+    {
+      "id": 2115,
+      "key": "SquishySlappyGrab",
+      "name": "软弹啪叽抓",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/squishyslappygrab_small.png",
+      "description": "偶尔对所有附近的敌方英雄放出软弹啪叽的手，然后用灵链系住。你的下次攻击将拉拽所有被系住的敌人。",
+      "enabled": true
+    },
+    {
+      "id": 2116,
+      "key": "SpecializedEmpowerment",
+      "name": "威能之追求",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/marksmage_small.png",
+      "description": "任务： 用【 ? 】技能命中敌人?次。 奖励： 永久提升【 ? 】技能伤害。",
+      "enabled": true
+    },
+    {
+      "id": 2119,
+      "key": "Overextender",
+      "name": "过量延伸者",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/overextender_small.png",
+      "description": "回城并进入到你的加农炮发射器。它的距离、飞行速度和伤害已经得到显著提升。",
+      "enabled": true
+    },
+    {
+      "id": 2123,
+      "key": "Overloaded",
+      "name": "超负荷",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "使用另一个技能会重置【 ? 】技能的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 2125,
+      "key": "ItsGoTime",
+      "name": "前进时间到",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "激活【 ? 】技能会在其持续期间为你提供 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 2126,
+      "key": "KeepGoing",
+      "name": "装填",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/lightningstrikes_small.png",
+      "description": "在【 ? 】技能期间的普攻 攻击特效 会降低其冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 2127,
+      "key": "ForgedByTheMaster",
+      "name": "大师铸就",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/forgedbythemaster_small.png",
+      "description": "使你的装备和强化符文伤害提升 ? 。",
+      "enabled": true
+    },
+    {
+      "id": 2129,
+      "key": "Terraind",
+      "name": "地形专家",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/lightningstrikes_small.png",
+      "description": "你的【 ? 】技能会在它周围的一个区域内造成伤害。",
+      "enabled": true
+    },
+    {
+      "id": 2131,
+      "key": "DontChangeTheChannel",
+      "name": "别停止引导",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/dontchangethechannel_small.png",
+      "description": "你每 引导 一秒都会获得 护盾值 。",
+      "enabled": true
+    },
+    {
+      "id": 2132,
+      "key": "WarlockJuicebox",
+      "name": "术士果汁盒",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/warlockjuicebox_small.png",
+      "description": "获得 ?全能吸血 。",
+      "enabled": true
+    },
+    {
+      "id": 2133,
+      "key": "MercysStrike",
+      "name": "仁慈打击",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "在使用【 ? 】技能为你的友军提供治疗或护盾之后，你的下一次普攻获得 攻击距离 、 攻击速度 并造成额外 最大生命值魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 2134,
+      "key": "SurgeField",
+      "name": "电涌力场",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/surgefield_small.png",
+      "description": "在施放终极技能时，在你周围生成一个 地带 来提供 技能急速 和 移动速度 。在其中时，它会发射飞弹，飞弹造成相当于你造成的 ?%伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 2135,
+      "key": "Overkill",
+      "name": "针插垫",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/symphonyofwar_small.png",
+      "description": "在【 ? 】技能期间进行攻击会对你的目标凿下 大钉 。大钉会积累伤害、处决、并在到期时提供 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 2136,
+      "key": "TrustyWeapon",
+      "name": "可靠武器",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "用【 ? 】技能打击敌方英雄时会铸造一条 友谊 纽带。 【 ? 】技能基于你的 友谊 等级获得到临时提升伤害",
+      "enabled": true
+    },
+    {
+      "id": 2137,
+      "key": "PatOnTheBack",
+      "name": "轻拍背部",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/patontheback_small.png",
+      "description": "友军会在你走过时鼓励你，为你提供 护盾 和 移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 2138,
+      "key": "WardingWeapon",
+      "name": "自适应防护",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "用【 ? 】技能打击一个敌方英雄时，为你提供持续?秒的 ? 护甲 或 魔法抗性 ，基于该技能的伤害类型。这个效果可以叠加。",
+      "enabled": true
+    },
+    {
+      "id": 2139,
+      "key": "PinCushion",
+      "name": "豪猪",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/pincushion_small.png",
+      "description": "承受来自英雄的伤害会积攒一次尖针迸发，这些尖针会从你身上飞出，对附近的敌人们造成伤害和减速。",
+      "enabled": true
+    },
+    {
+      "id": 2140,
+      "key": "Upgrade_Ravenous",
+      "name": "升级：贪欲九头蛇",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradesheen_small.png",
+      "description": "你对敌人的技能命中会触发顺劈。提升【贪欲九头蛇】的生命偷取至?。 获得 ?金币 .",
+      "enabled": true
+    },
+    {
+      "id": 2141,
+      "key": "Quest_UltraHydra",
+      "name": "终极九头蛇",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/ultrahydra_small.png",
+      "description": "在完成一个【九头蛇】装备时，获得一个 提亚马特 。 任务： 拥有【贪欲九头蛇】，【亵渎九头蛇】和【巨型九头蛇】。 奖励： 获得【终极九头蛇】。",
+      "enabled": true
+    },
+    {
+      "id": 2143,
+      "key": "Upgrade_SunderedSky",
+      "name": "升级：焚天",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradeie_small.png",
+      "description": "将【焚天】对每个目标的冷却时间缩短至?秒，并且治疗你?已损失生命值。 获得 ?金币 。",
+      "enabled": true
+    },
+    {
+      "id": 2144,
+      "key": "DoubleDefense",
+      "name": "加固护盾",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_silver.png",
+      "description": "来自【 ? 】技能的护盾变得更强并且受益于目标的已损失生命值。",
+      "enabled": true
+    },
+    {
+      "id": 2148,
+      "key": "DoubleStrike",
+      "name": "双重打击",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/adamant_small.png",
+      "description": "【 ? 】技能施加一次额外的 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 2157,
+      "key": "Upgrade_DeathDance",
+      "name": "升级：死亡之舞",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradedeathdance_small.png",
+      "description": "获得 ? 。 死亡之舞 的 无视痛苦 提升至?所受伤害，并且在参与一次击杀后， 即刻 治疗更多 生命值。",
+      "enabled": true
+    },
+    {
+      "id": 3004,
+      "key": "GetJinxed",
+      "name": "罪恶快感！",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/overextender_small.png",
+      "description": "将一个召唤师技能替换为 罪恶快感！ 罪恶快感！ 驾驭一枚飞弹，它会在命中敌方英雄、建筑物或墙体后爆炸。爆炸半径内的敌人会受到 物理伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 3016,
+      "key": "ThirdTimesTheHarm",
+      "name": "伤不过三",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/silverbeats_small.png",
+      "description": "对一个敌方英雄的每第三次连续攻击会造成 真实伤害 并永久提升由这个技能造成的伤害。",
+      "enabled": true
+    },
+    {
+      "id": 3018,
+      "key": "BigShot",
+      "name": "大腕",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/bigshot_small.png",
+      "description": "获得 ?暴击伤害 和 ?额外攻击力 。 你的?攻击速度 转化为 暴击伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 3025,
+      "key": "Sound_Barrier",
+      "name": "音之屏障",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/swiftandsafe_small.png",
+      "description": "为一名友军提供 护盾 时，会在?秒内提供持续衰减的 移动速度 和 幽灵 状态。",
+      "enabled": true
+    },
+    {
+      "id": 3036,
+      "key": "DoubleTime",
+      "name": "翻倍时间",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/aram_phenomenalevil_large.png",
+      "description": "在短时间内用2种不同技能对一名敌方英雄造成伤害时，会造成 魔法伤害 并提供 最大法力值 。",
+      "enabled": true
+    },
+    {
+      "id": 3039,
+      "key": "Salvation",
+      "name": "拯救",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/salvation_small.png",
+      "description": "受到伤害导致你的生命值低于 ?% 时，会释放一道冲击波，对附近敌人造成伤害并将其 击退 ，同时为你周围大范围区域内的 所有友方英雄回复生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 3048,
+      "key": "BouncingBees",
+      "name": "弹跳蜜蜂",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/kingme_large.png",
+      "description": "施放技能后，你的下一次普攻会弹跳至相距最近的那个敌人 任务： 将普攻弹跳至敌方英雄 奖励： 每任务等级获得 +?攻击力 和额外一次弹跳",
+      "enabled": true
+    },
+    {
+      "id": 3049,
+      "key": "ArmoredImpact",
+      "name": "装甲冲击",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/armoredimpact_small.png",
+      "description": "施放技能后，你的下一次普通攻击会对附近敌人造成?额外物理伤害。",
+      "enabled": true
+    },
+    {
+      "id": 3051,
+      "key": "BlueBarrier",
+      "name": "蓝色屏障",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/bluenote_small.png",
+      "description": "获得持续?秒的 护盾 ，数额相当于你花费的? 法力值 。",
+      "enabled": true
+    },
+    {
+      "id": 3052,
+      "key": "HandsOffTheTalent",
+      "name": "远射天资",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/bonk_large.png",
+      "description": "在接近最大攻击距离处打出的攻击会附带额外 物理伤害 攻击特效。",
+      "enabled": true
+    },
+    {
+      "id": 3053,
+      "key": "MoshMonster",
+      "name": "热舞怪兽",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_prismatic.png",
+      "description": "施放【 ? 】技能会获得?额外生命值，并在 ? 持续期间减速附近敌人 每次参与击杀都会永久提升该效果。",
+      "enabled": true
+    },
+    {
+      "id": 3055,
+      "key": "UltimateRecursion",
+      "name": "终极循环往复",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/zealot_large.png",
+      "description": "获得?终极技能急速。",
+      "enabled": true
+    },
+    {
+      "id": 3058,
+      "key": "TickleMonster",
+      "name": "嗡嗡怪兽",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/ticklemonster_small.png",
+      "description": "攻击力 转化 为 攻击速度 。 普攻附带 额外魔法伤害 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 3059,
+      "key": "NoManaNoProblem",
+      "name": "没法力，没问题",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/nomananoproblem_small.png",
+      "description": "来自你的装备的 法力值 转化 为 法术强度 。 使你的总 法术强度提升?% 。",
+      "enabled": true
+    },
+    {
+      "id": 3063,
+      "key": "GiftoftheDrowned",
+      "name": "溺水之赠礼",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/giftofthedrowned_small.png",
+      "description": "额外生命值 转化为 穿甲 。 获得 ?穿甲 。",
+      "enabled": true
+    },
+    {
+      "id": 3071,
+      "key": "BrassBlast",
+      "name": "黄铜爆音",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/camo_large.png",
+      "description": "将一个召唤师技能替换为 黄铜爆音 。 黄铜爆音 ：蓄力吹响大喇叭， 击退 并对敌人造成 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 3075,
+      "key": "Recoil",
+      "name": "反冲",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "你的【 ? 】技能造成额外伤害并且你因反冲力而后退。",
+      "enabled": true
+    },
+    {
+      "id": 3078,
+      "key": "TheBoomAndTheBass",
+      "name": "鼓声暴起 低音轰鸣",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/theboomandthebass_small.png",
+      "description": "施放技能后，你的下一次攻击变得更快，造成 额外魔法伤害 并为你提供 持续衰减的移动速度 。",
+      "enabled": true
+    },
+    {
+      "id": 3079,
+      "key": "Totentanz",
+      "name": "死之舞",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/totentanz_small.png",
+      "description": "将一个召唤师技能替换为 与死亡共舞一曲 。 与死亡共舞一曲 ：向前闪烁并进入 不可被击杀 状态。在?秒内参与击杀一个英雄，否则 你会直接阵亡 。",
+      "enabled": true
+    },
+    {
+      "id": 3081,
+      "key": "WeaponOfDestiny",
+      "name": "命运之武器",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/protagonistssignatureweapon_small.png",
+      "description": "你的第一件传说级装备成为 命运之武器 ，属性基于参与击杀英雄数提升。",
+      "enabled": true
+    },
+    {
+      "id": 3085,
+      "key": "FlowOfSpirit",
+      "name": "灵魂乐流",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "施放【 ? 】技能会为你提供持续一段时间的 攻击速度 。",
+      "enabled": true
+    },
+    {
+      "id": 3086,
+      "key": "BEES",
+      "name": "小蜜蜂！！！",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/bees_small.png",
+      "description": "每过一段时间，你的下一个命中敌方英雄的技能会发射一个会爆炸的 小蜜蜂 巢穴，在一段短时间里造成 魔法伤害 和 减速 。 小蜜蜂 附带 攻击特效 。",
+      "enabled": true
+    },
+    {
+      "id": 3088,
+      "key": "CrimsonCobalt",
+      "name": "深红钴蓝闪光",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "被【 ? 】技能伤害过的敌方英雄会被标记。攻击带标记的敌人会造成 额外魔法伤害 并缩减【 ? 】技能的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 3094,
+      "key": "LichBrain",
+      "name": "巫妖大脑",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/lichbrain_small.png",
+      "description": "获得 ?法术强度 。",
+      "enabled": true
+    },
+    {
+      "id": 3116,
+      "key": "TakeemDownDownDown",
+      "name": "将他们放倒倒倒",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/takeemdowndowndown_small.png",
+      "description": "普攻和技能在命中时造成 额外魔法伤害 并对敌方英雄施加层数。 在满层时，消耗所有层数， 基于已损失生命值造成魔法伤害 ，并基于造成的伤害 回复生命值 。",
+      "enabled": true
+    },
+    {
+      "id": 3118,
+      "key": "ArcaneAxiom",
+      "name": "奥术公理",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/arcaneaxiom_small.png",
+      "description": "在你对一名敌方英雄造成伤害后，如果该英雄在?秒内阵亡，则会返还你终极技能的部分总冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 3121,
+      "key": "Fruitify",
+      "name": "水果化",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/fruitseason_small.png",
+      "description": "参与击杀会引发 水果 爆炸。 水果 可回复 生命值 和 法力值 。",
+      "enabled": true
+    },
+    {
+      "id": 3123,
+      "key": "JeweledBracelet",
+      "name": "珠光手镯",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/genericabilityaugmenticon_gold.png",
+      "description": "【 ? 】技能可以 暴击 。 获得 ?暴击几率 。",
+      "enabled": true
+    },
+    {
+      "id": 3129,
+      "key": "SapMagic",
+      "name": "吸元秘术",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/mercysstrike_small.png",
+      "description": "每?秒，你的下次攻击造成 额外物理伤害 ，并为你回复 生命值 攻击特效 。 施放技能会缩减该效果的冷却时间。",
+      "enabled": true
+    },
+    {
+      "id": 3131,
+      "key": "StillHere",
+      "name": "屹立不倒",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/stillhere_small.png",
+      "description": "基于你的已损失 生命值 获得 攻击速度 和 生命偷取 。",
+      "enabled": true
+    },
+    {
+      "id": 3132,
+      "key": "HeavyIsTheCrown",
+      "name": "王冠之重",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/heavyisthecrown_small.png",
+      "description": "获得 攻击力 、 法术强度 和 攻击速度 ，但 移动速度 降低 。 每次参与击杀都会获得一层【背负】以提升该效果。阵亡时失去一半层数",
+      "enabled": true
+    },
+    {
+      "id": 3134,
+      "key": "LonelyWarrior",
+      "name": "孤勇者",
+      "rarity": 0,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/adamant_small.png",
+      "description": "附近每有一个敌方英雄，你就会获得 攻击速度 、 护甲 和 魔法抗性 。",
+      "enabled": true
+    },
+    {
+      "id": 3149,
+      "key": "GroupHug",
+      "name": "一起抱抱",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/empyreampromise_small.png",
+      "description": "用【 ? 】技能 为友方英雄提供 治疗 或 护盾 时，会对?名其他附近友方英雄再次施放该技能。",
+      "enabled": true
+    },
+    {
+      "id": 3150,
+      "key": "Upgrade_Stormsurge",
+      "name": "升级：风暴狂涌",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/upgradehubris_small.png",
+      "description": "风暴狂涌 - 风啸 现在总会在一个区域内引爆，基于最大生命值造成 魔法伤害 。 被初段引爆命中的敌方英雄会被 风啸 标记。 获得 ?金币 。",
+      "enabled": true
+    },
+    {
+      "id": 3163,
+      "key": "EnchantingButterflies",
+      "name": "迷人蝴蝶",
+      "rarity": 1,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/kiwi/augments/icons/enchantedbuttery_small.png",
+      "description": "为友方英雄提供 治疗 或 护盾 时，会聚集 蝴蝶 。 在收集?只 蝴蝶 之后，对一个敌方英雄造成伤害时会将它们发射出去以造成 魔法伤害 。",
+      "enabled": true
+    },
+    {
+      "id": 12317,
+      "key": "ARAM_PandorasBox",
+      "name": "潘朵拉的盒子",
+      "rarity": 2,
+      "iconUrl": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/default/assets/ux/cherry/augments/icons/pandoras_box_small.png",
+      "description": "将你的所有强化符文变为 随机的棱彩阶强化符文 。",
+      "enabled": true
+    }
+  ]
+}

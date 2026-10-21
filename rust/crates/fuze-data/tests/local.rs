@@ -166,6 +166,12 @@ fn details_pin_displayed_version_across_pointer_updates_and_incomplete_downloads
     );
     let mut old = fuze_data::detail_cache::Cache::prepare(&roots, "zh-CN@16.20.1").unwrap();
     assert_eq!(old.get(25).unwrap().version, "zh-CN@16.20.1");
+    let identity = prepare(&roots, Locale::ZhCn, Scope::Full)
+        .unwrap()
+        .identity();
+    let mut current = fuze_data::detail_cache::Cache::prepare(&roots, &identity).unwrap();
+    assert_eq!(current.get(25).unwrap().version, identity);
+    assert!(current.get(25).unwrap().detail.augments.is_empty()); // fake retired fixture ID
     assert!(fuze_data::detail_cache::Cache::prepare(&roots, "zh-CN@../16.20.1").is_err());
 }
 #[test]
@@ -178,7 +184,7 @@ fn locale_identity_and_failed_prepare_cannot_replace_active_snapshot() {
         .activate(prepare(&roots, Locale::ZhCn, Scope::Ocr).unwrap())
         .unwrap();
     let retained = active.snapshot().unwrap();
-    assert_eq!(retained.catalog().get("测试符文"), Some(&100));
+    assert_eq!(retained.catalog().get("蓝色屏障"), Some(&3051));
     assert!(prepare(&roots, Locale::EnUs, Scope::Ocr).is_err());
     assert_eq!(active.snapshot().unwrap().identity(), retained.identity());
     cache.dataset("en-US", "16.20.2", false);
@@ -186,7 +192,7 @@ fn locale_identity_and_failed_prepare_cannot_replace_active_snapshot() {
         .activate(prepare(&roots, Locale::EnUs, Scope::Ocr).unwrap())
         .unwrap();
     assert_eq!(active.snapshot().unwrap().identity(), "en-US@16.20.2");
-    assert_eq!(retained.identity(), "zh-CN@16.20.1");
+    assert_eq!(retained.identity(), "zh-CN@16.20.1-augments16.21");
     cache.write(
         "versions/en-US/16.20.2/manifest.json",
         json!({"locale":"zh-CN","files":[]}),
@@ -236,7 +242,9 @@ fn champion_scope_reads_only_selected_shard_and_preserves_missing_rates_and_orig
         {"id":102,"stats":{"winRate":60,"pickRate":-1}}
     ]}}}));
     let roots = [root.root(Source::Bundled)];
-    let data = prepare(&roots, Locale::ZhCn, Scope::Champion(8)).unwrap();
+    let data =
+        fuze_data::prepare_version(&roots, Locale::ZhCn, Scope::Champion(8), Some("16.20.1"))
+            .unwrap();
     let stats = data.recommendations(8).unwrap();
     assert_eq!(stats[&100].win_rate, Some(0.6));
     assert!((stats[&100].score.unwrap() - 0.384).abs() < 1e-9);

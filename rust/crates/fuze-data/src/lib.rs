@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 pub mod champion_detail;
+pub mod current_augments;
 pub mod detail_cache;
 pub mod item_sets;
 pub mod recognition;
@@ -66,6 +67,7 @@ pub struct Prepared {
     scope: Scope,
     documents: BTreeMap<String, Value>,
     catalog: HashMap<String, u32>,
+    current_augments: bool,
 }
 impl Prepared {
     pub fn locale(&self) -> Locale {
@@ -81,7 +83,16 @@ impl Prepared {
         self.scope
     }
     pub fn identity(&self) -> String {
-        format!("{}@{}", self.locale.code(), self.version)
+        format!(
+            "{}@{}{}",
+            self.locale.code(),
+            self.version,
+            if self.current_augments {
+                current_augments::IDENTITY_SUFFIX
+            } else {
+                ""
+            }
+        )
     }
     pub fn document(&self, path: &str) -> Option<&Value> {
         self.documents.get(path)
@@ -362,11 +373,14 @@ fn load(
         scope,
         documents,
         catalog,
+        current_augments: false,
     })
 }
 /// Roots are explicitly supplied by the host. No disk scan, automatic directory creation or network.
 pub fn prepare(roots: &[Root], locale: Locale, scope: Scope) -> Result<Prepared> {
-    prepare_version(roots, locale, scope, None)
+    let mut data = prepare_version(roots, locale, scope, None)?;
+    data.apply_current_augments()?;
+    Ok(data)
 }
 /// Pin a consumer to its displayed version even if current.json advances in the meantime.
 /// Only numeric versions under the supplied roots are allowed; never mix documents.
