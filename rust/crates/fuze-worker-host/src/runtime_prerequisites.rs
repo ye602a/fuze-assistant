@@ -303,7 +303,10 @@ mod tests {
         write(&root, &build);
         supply_app_local(&root, Path::new(&source)).unwrap();
         // Inventory is exclusively the application directory: no system CRT fallback.
-        assert_eq!(check_with(&root, &|name| inspect(&root.join(name))), Ok(true));
+        assert_eq!(
+            check_with(&root, &|name| inspect(&root.join(name))),
+            Ok(true)
+        );
         let target = root.join("legacy-update");
         fs::create_dir(&target).unwrap();
         supply_app_local(&target, &root).unwrap();
