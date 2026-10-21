@@ -50,6 +50,9 @@ fn band(level: u8) -> u8 {
     }
 }
 impl LevelGate {
+    fn opening_closed(&self) -> bool {
+        self.window_closed && self.band < 7 && !self.disabled
+    }
     pub fn closed_window(&self) -> Option<ClosedWindow> {
         self.window_closed.then_some(ClosedWindow(self.band))
     }
@@ -101,10 +104,15 @@ impl LevelGate {
         self.level = Some((level, now));
     }
     pub fn observe(&mut self, selection: Selection, now: u64) {
-        if self.window_closed && !self.disabled {
+        if self.opening_closed() {
             return;
         }
-        self.candidate_seen |= selection == Selection::Candidate;
+        match selection {
+            Selection::Candidate => self.candidate_seen = true,
+            // A shard/anvil chain cannot inherit a preceding candidate's closure.
+            Selection::StatShard => self.candidate_seen = false,
+            Selection::Unknown => {}
+        }
         if selection != Selection::Unknown {
             self.last_evidence = Some(now);
             self.unreadable_since = None;
@@ -137,7 +145,7 @@ impl LevelGate {
         }
     }
     pub fn decision(&self, now: u64) -> Decision {
-        if self.window_closed && !self.disabled {
+        if self.opening_closed() {
             return Decision {
                 mode: Mode::Saving,
                 capture: false,
@@ -162,8 +170,12 @@ impl LevelGate {
             Mode::Selection
         } else if level.is_none() {
             Mode::Fallback
-        } else if death && !self.window_closed {
+        } else if death {
             Mode::Pending
+        } else if self.window_closed && !self.disabled {
+            // After level 7, disappearance cannot distinguish an extra offer from
+            // the fixed-level choice. Keep cheap pixel probes, not continuous OCR.
+            Mode::Saving
         } else if level.is_some_and(|v| matches!(v, 1 | 4 | 5 | 8 | 9 | 12 | 13 | 16..=30))
             && !burst
         {
@@ -191,13 +203,14 @@ impl LevelGate {
         self.last_probe = Some(now);
     }
     pub fn screen_visible(&mut self, now: u64) {
-        if !self.window_closed || self.disabled {
+        if !self.opening_closed() {
+            self.window_closed = false;
             self.last_evidence = Some(now);
             self.unreadable_since = None;
         }
     }
     pub fn wake_at(&self, now: u64) -> u64 {
-        if self.window_closed && !self.disabled {
+        if self.opening_closed() {
             return now.saturating_add(8000);
         }
         let due = self.last_probe.map_or(now, |last| {
@@ -322,6 +335,43 @@ mod tests {
         g.update_level(7, 100001);
         assert!(g.decision(100001).capture);
         assert_eq!(g.next_level(), Some(11));
+    }
+    #[test]
+    fn extra_choice_cannot_disable_fixed_level_choices() {
+        for level in [7, 11, 15] {
+            let mut g = LevelGate::default();
+            g.update_level(level - 1, 0);
+            g.observe(Selection::Candidate, 1);
+            g.screen_closed();
+            g.update_level(level, 1000);
+            assert!(g.decision(1000).capture);
+            // Even if an extra candidate is selected at the threshold, a later
+            // fixed-level choice must still be discoverable without a death.
+            g.observe(Selection::Candidate, 1001);
+            g.record_capture(1500);
+            g.screen_closed();
+            assert!(!g.decision(1501).capture);
+            assert_eq!(g.wake_at(1501), 9500);
+            assert!(g.decision(9500).capture);
+            g.screen_visible(9500);
+            assert_eq!(g.decision(9500).mode, Mode::Selection);
+            g.observe(Selection::StatShard, 9501);
+            g.screen_closed();
+            assert!(g.closed_window().is_none());
+        }
+    }
+    #[test]
+    fn death_rechecks_closed_later_band_but_not_closed_opening() {
+        for level in [6, 7, 8, 11, 15] {
+            let mut g = LevelGate::default();
+            g.update_level(level, 0);
+            g.update_dead(Some(false), 0);
+            g.observe(Selection::Candidate, 1);
+            g.screen_closed();
+            g.record_capture(1000);
+            g.update_dead(Some(true), 2000);
+            assert_eq!(g.decision(2000).capture, level >= 7);
+        }
     }
     #[test]
     fn shards_do_not_close_reward_window_and_explicit_disable_allows_probes() {
