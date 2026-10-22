@@ -215,7 +215,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
         move || {
             let checked = (|| -> Result<bool, Box<dyn std::error::Error>> {
                 if start.elapsed() > Duration::from_secs(30) {
-                    return Err("host-review-timeout".into());
+                    return Err(format!("host-review-timeout-step-{}", step.get()).into());
                 }
                 let ui = weak.upgrade().ok_or("window-gone")?;
                 let state = ui.global::<HostState>();

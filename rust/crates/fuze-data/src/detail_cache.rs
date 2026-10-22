@@ -1,5 +1,5 @@
 //! One local version per UI worker. No network or file reads on a hero selection.
-use crate::{champion_detail::Detail, prepare_version, Locale, Prepared, Result, Root, Scope};
+use crate::{champion_detail::Detail, Locale, Prepared, Result, Root, Scope};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 
@@ -24,12 +24,11 @@ impl Cache {
             Some("en-US") => Locale::EnUs,
             _ => Locale::ZhCn,
         };
-        let version = if expected.is_empty() {
-            None
+        let data = if expected.is_empty() {
+            crate::prepare(roots, locale, Scope::Full)?
         } else {
-            Some(expected.split_once('@').ok_or("detail-version-mismatch")?.1)
+            crate::current_augments::prepare_identity(roots, locale, Scope::Full, expected)?
         };
-        let data = prepare_version(roots, locale, Scope::Full, version)?;
         let identity = data.identity();
         if !expected.is_empty() && expected != identity {
             return Err("detail-version-mismatch");

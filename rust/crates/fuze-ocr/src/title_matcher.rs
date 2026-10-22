@@ -76,6 +76,11 @@ impl Matcher {
         if text.len() > 40 {
             return (Slot::Unreadable, NoCatalog);
         }
+        // The shop item differs by only two characters from 海克斯科技龙魂.
+        // Reject it before fuzzy matching; it is not an augment title.
+        if text.iter().collect::<String>() == "海克斯科技核心" {
+            return (Slot::Unreadable, NoCatalog);
+        }
         let mut best: Option<(usize, usize, usize, TitleRead)> = None;
         let mut ambiguous = false;
         for (index, (name, chars, _)) in self.0.iter().enumerate() {
@@ -137,6 +142,40 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn patch_2621_new_chinese_titles_match_without_shop_substrings() {
+        let data: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../../resources/augments-16.21-zh-CN.json"
+        ))
+        .unwrap();
+        let rows = data["data"].as_array().unwrap();
+        let m = Matcher::new(
+            rows.iter()
+                .map(|r| {
+                    (
+                        r["name"].as_str().unwrap().to_owned(),
+                        r["id"].as_u64().unwrap() as u32,
+                    )
+                })
+                .collect(),
+        );
+        let new_ids = [
+            3051, 3085, 3121, 3063, 3052, 3094, 3134, 3059, 3025, 3055, 3118, 3049, 3086, 3071,
+            3088, 3036, 3163, 3004, 3132, 3123, 3075, 3039, 3129, 3131, 3116, 3078, 3058, 3150,
+            3081, 3018, 3048, 3149, 3053, 3016, 3079,
+        ];
+        for id in new_ids {
+            let row = rows.iter().find(|r| r["id"] == id).unwrap();
+            let name = row["name"].as_str().unwrap();
+            assert!(
+                matches!(m.read(name, 0.99).0, Slot::Known { id: actual, .. } if actual == id),
+                "{id}: {name}"
+            );
+        }
+        for text in ["海克斯科技核心", "购买量子计算", "量子计算装备"] {
+            assert_eq!(m.read(text, 0.99).1, TitleRead::NoCatalog);
+        }
+    }
     #[test]
     fn shop_item_or_description_cannot_match_a_substring() {
         let m = matcher(&["海克斯科技", "科技核心", "量子计算"]);
