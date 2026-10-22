@@ -27,7 +27,13 @@ pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
         fs::copy(&executable, &helper).map_err(|_| "update-helper-copy")?;
         crate::runtime_prerequisites::supply_app_local(&temporary, &directory)?;
         let runner = temporary.join("run.ps1");
-        let script = runner_script(&directory, private, confirmed, std::process::id());
+        let script = runner_script(
+            &directory,
+            &temporary,
+            private,
+            confirmed,
+            std::process::id(),
+        );
         // Windows PowerShell needs a BOM to preserve non-ASCII installation paths.
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
             .chain(script.encode_utf16())
@@ -54,8 +60,15 @@ pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
     result
 }
 
-fn runner_script(directory: &Path, private: bool, confirmed: bool, parent: u32) -> String {
+fn runner_script(
+    directory: &Path,
+    temporary: &Path,
+    private: bool,
+    confirmed: bool,
+    parent: u32,
+) -> String {
     let target = directory.to_string_lossy().replace('\'', "''");
+    let helper = temporary.to_string_lossy().replace('\'', "''");
     let action = if private {
         "--update-directory-private"
     } else {
@@ -64,15 +77,16 @@ fn runner_script(directory: &Path, private: bool, confirmed: bool, parent: u32) 
     let confirmation = if confirmed { " --confirmed" } else { "" };
     format!(
         r#"$ErrorActionPreference = 'Stop'
-$helperDirectory = $PSScriptRoot
+$helperDirectory = '{helper}'
 try {{
     Wait-Process -Id {parent} -ErrorAction SilentlyContinue
     $worker = Start-Process -FilePath (Join-Path $helperDirectory 'fuze-update.exe') -ArgumentList '"{action}" "{target}"{confirmation}' -WindowStyle Hidden -Wait -PassThru
 }} finally {{
     # This exact fresh helper directory was created by the updater, under the system temp folder.
     $resolved = [IO.Path]::GetFullPath($helperDirectory)
-    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-    if ($resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved).StartsWith('fuze-update-helper-')) {{
+    # Use the exact Rust-created directory: .NET and Rust may resolve TEMP aliases differently.
+    $expected = [IO.Path]::GetFullPath('{helper}')
+    if ($resolved.Equals($expected, [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved).StartsWith('fuze-update-helper-')) {{
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }}
 }}
@@ -217,7 +231,7 @@ mod tests {
         .unwrap();
         let directory = temporary.join("符择 user's $folder");
         fs::write(temporary.with_extension("keep"), "outside helper").unwrap();
-        let script = runner_script(&directory, false, true, i32::MAX as u32);
+        let script = runner_script(&directory, &temporary, false, true, i32::MAX as u32);
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
             .chain(script.encode_utf16())
             .flat_map(u16::to_le_bytes)
@@ -260,7 +274,9 @@ public class Stub {
     }
     if (args.Length == 1 && args[0] == "--launch") {
       string helper = Environment.GetEnvironmentVariable("FUZE_TEST_HELPER_ROOT");
-      File.AppendAllText(Path.Combine(root, "launches"), !Directory.Exists(helper) && Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) == root ? "ready\n" : "wrong\n");
+      string actual = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+      // The marker belongs only to the target; avoid string equality of Windows path aliases.
+      File.AppendAllText(Path.Combine(root, "launches"), Directory.Exists(helper) ? "helper-not-removed\n" : File.Exists(Path.Combine(actual, "worker-ok")) ? "ready\n" : "wrong-target: " + actual + "\n");
       return 0;
     }
     return 1;
@@ -277,7 +293,7 @@ public class Stub {
             temporary.join("fuze-update.exe"),
         )
         .unwrap();
-        let script = runner_script(&application, false, true, i32::MAX as u32);
+        let script = runner_script(&application, &temporary, false, true, i32::MAX as u32);
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
             .chain(script.encode_utf16())
             .flat_map(u16::to_le_bytes)
