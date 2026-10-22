@@ -477,7 +477,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "数据与更新", None);
     for (label, command) in [
         ("检查新版", "check"),
-        ("退出并打开更新程序", "install"),
+        ("更新并重启", "install"),
         ("扫描本地占用", "scan"),
         ("清理可回收文件", "clean"),
     ] {
