@@ -43,7 +43,7 @@ export component MaintenanceConfirm inherits Rectangle {
             Label { x: 24px; y: 62px; width: 372px; height: 100px; wrap: word-wrap; text: MaintenanceState.confirmation == "clean" ? MaintenanceState.storage-summary + "\n仅清理已预览的过期文件；保留个人记录、设置、当前数据和回滚数据。" : MaintenanceState.confirmation == "forget" ? "公开更新已无需令牌。这里只删除旧更新凭据，反馈上传的独立令牌和本地推荐均保留。" : "将退出 FUZE，下载并覆盖当前程序，完成后自动打开新版。\n设置和个人记录会保留。"; color: Theme.muted; }
             HorizontalLayout { x: 196px; y: 180px; width: 200px; height: 38px; spacing: 10px;
                 cancel := Action { label: "取消"; enabled: root.opened; clicked => { MaintenanceState.action("cancel"); } }
-                confirm := Action { label: MaintenanceState.confirmation == "install" ? "更新并重启" : "确认"; primary: true; enabled: root.opened; clicked => { MaintenanceState.action("confirm"); } }
+                confirm := Action { label: MaintenanceState.confirmation == "install" ? "确认更新" : "确认"; primary: true; enabled: root.opened; clicked => { MaintenanceState.action("confirm"); } }
             }
         }
     }

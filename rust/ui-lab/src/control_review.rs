@@ -589,7 +589,15 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     for kind in ["clean", "install"] {
         m.set_confirmation(kind.into());
         a.click(ui, "取消", Some("maintenance:cancel"));
-        a.click(ui, "确认", Some("maintenance:confirm"));
+        a.click(
+            ui,
+            if kind == "install" {
+                "确认更新"
+            } else {
+                "确认"
+            },
+            Some("maintenance:confirm"),
+        );
         a.events.borrow_mut().clear();
         key(ui, slint::platform::Key::Escape.into());
         let ev = a.events.borrow().clone();
