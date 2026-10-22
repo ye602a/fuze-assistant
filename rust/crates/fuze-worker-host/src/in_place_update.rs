@@ -10,7 +10,7 @@ use std::{
 
 /// The updater must run outside the application so its own EXE/DLLs can be replaced.
 /// A temporary PowerShell runner waits for this EXE to exit, then runs and removes the helper.
-pub fn handoff(private: bool) -> Result<()> {
+pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
     let executable = std::env::current_exe().map_err(|_| "update-location")?;
     let directory = install::application_directory(executable.parent().ok_or("update-location")?)?;
     let temporary = std::env::temp_dir().join(format!(
@@ -27,7 +27,7 @@ pub fn handoff(private: bool) -> Result<()> {
         fs::copy(&executable, &helper).map_err(|_| "update-helper-copy")?;
         crate::runtime_prerequisites::supply_app_local(&temporary, &directory)?;
         let runner = temporary.join("run.ps1");
-        let script = runner_script(&directory, private, std::process::id());
+        let script = runner_script(&directory, private, confirmed, std::process::id());
         // Windows PowerShell needs a BOM to preserve non-ASCII installation paths.
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
             .chain(script.encode_utf16())
@@ -54,19 +54,20 @@ pub fn handoff(private: bool) -> Result<()> {
     result
 }
 
-fn runner_script(directory: &Path, private: bool, parent: u32) -> String {
+fn runner_script(directory: &Path, private: bool, confirmed: bool, parent: u32) -> String {
     let target = directory.to_string_lossy().replace('\'', "''");
     let action = if private {
         "--update-directory-private"
     } else {
         "--update-directory"
     };
+    let confirmation = if confirmed { " --confirmed" } else { "" };
     format!(
         r#"$ErrorActionPreference = 'Stop'
 $helperDirectory = $PSScriptRoot
 try {{
     Wait-Process -Id {parent} -ErrorAction SilentlyContinue
-    $worker = Start-Process -FilePath (Join-Path $helperDirectory 'fuze-update.exe') -ArgumentList '"{action}" "{target}"' -WindowStyle Hidden -Wait -PassThru
+    $worker = Start-Process -FilePath (Join-Path $helperDirectory 'fuze-update.exe') -ArgumentList '"{action}" "{target}"{confirmation}' -WindowStyle Hidden -Wait -PassThru
 }} finally {{
     # This exact fresh helper directory was created by the updater, under the system temp folder.
     $resolved = [IO.Path]::GetFullPath($helperDirectory)
@@ -74,6 +75,10 @@ try {{
     if ($resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved).StartsWith('fuze-update-helper-')) {{
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }}
+}}
+if ($worker.ExitCode -eq 0) {{
+    # Launch only after successful replacement and helper cleanup. Do not wait on the new UI.
+    Start-Process -FilePath (Join-Path '{target}' 'fuze-update.exe') -ArgumentList '--launch' -WindowStyle Hidden
 }}
 "#
     )
@@ -212,7 +217,7 @@ mod tests {
         .unwrap();
         let directory = temporary.join("符择 user's $folder");
         fs::write(temporary.with_extension("keep"), "outside helper").unwrap();
-        let script = runner_script(&directory, false, i32::MAX as u32);
+        let script = runner_script(&directory, false, true, i32::MAX as u32);
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
             .chain(script.encode_utf16())
             .flat_map(u16::to_le_bytes)
@@ -237,5 +242,80 @@ mod tests {
             "outside helper"
         );
         fs::remove_file(temporary.with_extension("keep")).unwrap();
+    }
+    #[test]
+    fn successful_worker_cleans_helper_then_relaunches_the_target_once() {
+        let temporary =
+            std::env::temp_dir().join(format!("fuze-update-helper-success-{}", std::process::id()));
+        let application = temporary.with_extension("application");
+        fs::create_dir(&temporary).unwrap();
+        fs::create_dir(&application).unwrap();
+        // A tiny inert executable exercises the real process handoff. It never loads FUZE.
+        let source = r#"using System; using System.IO; using System.Reflection;
+public class Stub {
+  public static int Main(string[] args) {
+    string root = Environment.GetEnvironmentVariable("FUZE_TEST_HANDOFF_ROOT");
+    if (args.Length == 3 && args[0] == "--update-directory" && args[1] == root && args[2] == "--confirmed") {
+      File.WriteAllText(Path.Combine(root, "worker-ok"), "yes"); return 0;
+    }
+    if (args.Length == 1 && args[0] == "--launch") {
+      string helper = Environment.GetEnvironmentVariable("FUZE_TEST_HELPER_ROOT");
+      File.AppendAllText(Path.Combine(root, "launches"), !Directory.Exists(helper) && Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) == root ? "ready\n" : "wrong\n");
+      return 0;
+    }
+    return 1;
+  }
+}"#;
+        fs::write(application.join("stub.cs"), source).unwrap();
+        let compile = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Add-Type -Path (Join-Path $env:FUZE_TEST_HANDOFF_ROOT 'stub.cs') -OutputAssembly (Join-Path $env:FUZE_TEST_HANDOFF_ROOT 'fuze-update.exe') -OutputType ConsoleApplication"])
+            .env("FUZE_TEST_HANDOFF_ROOT", &application)
+            .creation_flags(0x08000000).status().unwrap();
+        assert!(compile.success());
+        fs::copy(
+            application.join("fuze-update.exe"),
+            temporary.join("fuze-update.exe"),
+        )
+        .unwrap();
+        let script = runner_script(&application, false, true, i32::MAX as u32);
+        let bytes: Vec<u8> = std::iter::once(0xfeffu16)
+            .chain(script.encode_utf16())
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        fs::write(temporary.join("run.ps1"), bytes).unwrap();
+        let result = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(temporary.join("run.ps1"))
+            .env("FUZE_TEST_HANDOFF_ROOT", &application)
+            .env("FUZE_TEST_HELPER_ROOT", &temporary)
+            .creation_flags(0x08000000)
+            .status()
+            .unwrap();
+        assert!(result.success());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !application.join("launches").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(
+            fs::read_to_string(application.join("worker-ok")).unwrap(),
+            "yes"
+        );
+        assert_eq!(
+            fs::read_to_string(application.join("launches")).unwrap(),
+            "ready\n"
+        );
+        // The synthetic startup helper exits immediately; wait for its image handle to close.
+        while fs::remove_file(application.join("fuze-update.exe")).is_err()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        fs::remove_dir_all(application).unwrap();
     }
 }

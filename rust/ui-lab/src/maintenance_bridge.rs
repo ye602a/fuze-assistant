@@ -215,6 +215,7 @@ impl Handoff {
             } else {
                 "--update"
             })
+            .arg("--confirmed")
             .env("FUZE_UPDATE_LOCALE", "zh-CN")
             .creation_flags(0x08000000)
             .spawn()

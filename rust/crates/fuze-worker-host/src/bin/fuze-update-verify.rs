@@ -109,7 +109,7 @@ fn run() -> Result<(), &'static str> {
             Path::new(&args[2]),
             &manifest,
         )?;
-        serde_json::json!({"shortcuts":true,"uninstall":true,"local_setup":true,"setup_idempotent":true,"installed":true,"repeat_launch":true,"health_failure_rollback":true,
+        serde_json::json!({"in_place_replacement":true,"in_place_hidden_launch":true,"shortcuts":true,"uninstall":true,"local_setup":true,"setup_idempotent":true,"installed":true,"repeat_launch":true,"health_failure_rollback":true,
             "process_start_failure_rollback":true,"hidden_native_window":true,"game_access":false})
     } else {
         return Err("validation-arguments");

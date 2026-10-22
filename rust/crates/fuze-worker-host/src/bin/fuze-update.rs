@@ -7,7 +7,7 @@ fn run() -> Result<(), &'static str> {
         update_credential,
     };
     use std::{fs, io::Write};
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 4 && args[0] == "--verify-package" {
         use std::io::Read;
         let manifest: update_channel::Manifest = serde_json::from_slice(&update_channel::bounded(
@@ -36,13 +36,17 @@ fn run() -> Result<(), &'static str> {
         println!("{{\"package_verified\":true,\"native_extracted\":true,\"worker_reaped\":true,\"game_access\":false}}");
         return Ok(());
     }
+    let confirmed = args.last().is_some_and(|arg| arg == "--confirmed");
+    if confirmed {
+        args.pop();
+    }
     let action = args.first().map(String::as_str).unwrap_or("--launch");
     let update_worker = matches!(action, "--update-directory" | "--update-directory-private");
     if (update_worker && args.len() != 2) || (!update_worker && args.len() > 1) {
         return Err("update-arguments");
     }
     if matches!(action, "--update" | "--update-private") {
-        return fuze_worker_host::in_place_update::handoff(action == "--update-private");
+        return fuze_worker_host::in_place_update::handoff(action == "--update-private", confirmed);
     }
     if action == "--credentials" {
         return update_credential::prompt();
@@ -180,10 +184,22 @@ fn run() -> Result<(), &'static str> {
     if current.sequence >= release.manifest.sequence
         || current.revision == release.manifest.revision
     {
-        message("当前已是同版或更新版本，无需重复更新。", false);
         return Ok(());
     }
-    if !message(&fuze_worker_host::update_progress::translated("发现版本 {}，完整包约 {} MB。下载并覆盖当前程序目录？\n优先差分下载，失败转全量。保留个人数据，不保留旧程序备份。", &[release.manifest.revision.clone(), (release.manifest.size/1024/1024).to_string()]),true){return Ok(());}
+    if !confirmed
+        && !message(
+            &fuze_worker_host::update_progress::translated(
+                "发现版本 {}，完整包约 {} MB。更新并重启 FUZE？\n覆盖当前程序，保留个人数据。",
+                &[
+                    release.manifest.revision.clone(),
+                    (release.manifest.size / 1024 / 1024).to_string(),
+                ],
+            ),
+            true,
+        )
+    {
+        return Err("update-cancelled");
+    }
     let stage = root.join(format!(
         "pending-{}-{}",
         std::process::id(),
@@ -312,10 +328,6 @@ fn run() -> Result<(), &'static str> {
             return Err("install-close-preview-first");
         }
         fuze_worker_host::in_place_update::replace(&root, &extracted)?;
-        message(
-            "更新完成。请从原来的快捷方式或程序目录重新打开 FUZE。",
-            false,
-        );
         Ok(())
     })();
     // Delete only the exact freshly created staging directory under this isolated root.
@@ -367,7 +379,7 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        if !fuze_worker_host::update_progress::cancelled() {
+        if error != "update-cancelled" && !fuze_worker_host::update_progress::cancelled() {
             if let Some(guidance) = fuze_worker_host::runtime_prerequisites::guidance(error) {
                 message(guidance, false);
             } else {
