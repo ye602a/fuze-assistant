@@ -123,6 +123,7 @@ fn in_place_lifecycle(
 ) -> Result<()> {
     let directory = root.join("in-place-application");
     let payload = root.join("in-place-payload");
+    install::safe_dir(&directory)?;
     install::copy_bundle(baseline, &directory)?;
     let build_path = directory.join("build.json");
     let mut build: serde_json::Value =
