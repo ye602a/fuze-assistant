@@ -477,7 +477,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "数据与更新", None);
     for (label, command) in [
         ("检查新版", "check"),
-        ("退出并打开更新程序", "install"),
+        ("更新并重启", "install"),
         ("扫描本地占用", "scan"),
         ("清理可回收文件", "clean"),
     ] {
@@ -589,7 +589,15 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     for kind in ["clean", "install"] {
         m.set_confirmation(kind.into());
         a.click(ui, "取消", Some("maintenance:cancel"));
-        a.click(ui, "确认", Some("maintenance:confirm"));
+        a.click(
+            ui,
+            if kind == "install" {
+                "确认更新"
+            } else {
+                "确认"
+            },
+            Some("maintenance:confirm"),
+        );
         a.events.borrow_mut().clear();
         key(ui, slint::platform::Key::Escape.into());
         let ev = a.events.borrow().clone();

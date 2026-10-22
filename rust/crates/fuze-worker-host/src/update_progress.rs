@@ -96,8 +96,8 @@ fn status_text(view: View) -> String {
         return crate::i18n::text(match view.stage {
             1 => "正在检查固定 Rust 频道",
             3 => "正在解包并验证 OCR · 不连接游戏",
-            4 => "正在切换版本指针 · 保留上一版本",
-            _ => "等待确认 · 随时可以取消，旧版本保留",
+            4 => "正在替换当前程序文件 · 请稍候",
+            _ => "等待确认 · 下载期间可以取消",
         })
         .into();
     }
@@ -144,6 +144,10 @@ fn wide(s: &str) -> Vec<u16> {
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
         WM_CLOSE | WM_COMMAND => {
+            // Once copying starts, finish this short operation instead of leaving mixed files.
+            if STAGE.load(Ordering::Acquire) == 4 {
+                return 0;
+            }
             CANCEL.store(true, Ordering::Release);
             SetWindowTextW(
                 GetDlgItem(hwnd, 1),

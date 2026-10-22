@@ -473,6 +473,27 @@ pub fn launch(root: &Path, bundled: &Path) -> Result<()> {
     prune_versions(root, bundled);
     Ok(())
 }
+/// Setup and portable shortcuts always use their adjacent bundle. Only historical
+/// root-only launchers need current.json to locate the application once.
+pub fn application_directory(bundled: &Path) -> Result<PathBuf> {
+    let directory = if bundled.join("build.json").exists() {
+        bundled.to_path_buf()
+    } else {
+        let root = root()?;
+        let current = read(&root)?.current.ok_or("install-build")?;
+        root.join("versions").join(current.revision)
+    };
+    bundled_version(&directory)?;
+    Ok(directory)
+}
+pub fn launch_current(bundled: &Path) -> Result<()> {
+    if desktop_running() {
+        return Err("install-close-preview-first");
+    }
+    let directory = application_directory(bundled)?;
+    let _lock = lock(&directory)?;
+    start(&directory)
+}
 fn prune_versions(root: &Path, bundled: &Path) {
     let Ok(state) = read(root) else { return };
     if state.pending {

@@ -8,7 +8,7 @@ export component MaintenancePage inherits VerticalLayout {
         Label { x: 160px; y: 18px; width: parent.width - 183px; height: 26px; text: "当前版本 · " + MaintenanceState.current-version; horizontal-alignment: right; color: Theme.muted; }
         Label { x: 23px; y: 57px; width: parent.width - 46px; height: 44px; text: MaintenanceState.update-status; wrap: word-wrap; color: Theme.muted; }
         Action { x: 23px; y: 116px; width: 150px; busy: MaintenanceState.busy; label: MaintenanceState.busy ? "正在处理…" : "检查新版"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("check"); } }
-        if MaintenanceState.installable: Action { x: 185px; y: 116px; width: parent.width - 208px; label: "退出并打开更新程序"; enabled: !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("install"); } }
+        if MaintenanceState.installable: Action { x: 185px; y: 116px; width: parent.width - 208px; label: "更新并重启"; enabled: !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("install"); } }
         Label { x: 23px; y: 166px; width: parent.width - 46px; height: 28px; wrap: word-wrap; text: "检查不会下载或中断识别。安装更新前请先暂停识别。"; color: Theme.muted; font-size: 12px; }
     }
     if MaintenanceState.notice != "": Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
@@ -39,11 +39,11 @@ export component MaintenanceConfirm inherits Rectangle {
         }
         Panel { x: (root.width - 420px)/2; y: (root.height - 238px)/2; width: 420px; height: 238px;
             TouchArea { }
-            SectionTitle { x: 24px; y: 20px; height: 26px; text: MaintenanceState.confirmation == "clean" ? "确认清理" : MaintenanceState.confirmation == "forget" ? "移除旧更新令牌" : "打开更新程序"; }
-            Label { x: 24px; y: 62px; width: 372px; height: 100px; wrap: word-wrap; text: MaintenanceState.confirmation == "clean" ? MaintenanceState.storage-summary + "\n仅清理已预览的过期文件；保留个人记录、设置、当前数据和回滚数据。" : MaintenanceState.confirmation == "forget" ? "公开更新已无需令牌。这里只删除旧更新凭据，反馈上传的独立令牌和本地推荐均保留。" : "将退出本次 Rust 会话并打开更新程序。下载与安装还需分别确认；不会退出游戏或替换 Electron 稳定版。"; color: Theme.muted; }
+            SectionTitle { x: 24px; y: 20px; height: 26px; text: MaintenanceState.confirmation == "clean" ? "确认清理" : MaintenanceState.confirmation == "forget" ? "移除旧更新令牌" : "更新并重启"; }
+            Label { x: 24px; y: 62px; width: 372px; height: 100px; wrap: word-wrap; text: MaintenanceState.confirmation == "clean" ? MaintenanceState.storage-summary + "\n仅清理已预览的过期文件；保留个人记录、设置、当前数据和回滚数据。" : MaintenanceState.confirmation == "forget" ? "公开更新已无需令牌。这里只删除旧更新凭据，反馈上传的独立令牌和本地推荐均保留。" : "将退出 FUZE，下载并覆盖当前程序，完成后自动打开新版。\n设置和个人记录会保留。"; color: Theme.muted; }
             HorizontalLayout { x: 196px; y: 180px; width: 200px; height: 38px; spacing: 10px;
                 cancel := Action { label: "取消"; enabled: root.opened; clicked => { MaintenanceState.action("cancel"); } }
-                confirm := Action { label: "确认"; primary: true; enabled: root.opened; clicked => { MaintenanceState.action("confirm"); } }
+                confirm := Action { label: MaintenanceState.confirmation == "install" ? "确认更新" : "确认"; primary: true; enabled: root.opened; clicked => { MaintenanceState.action("confirm"); } }
             }
         }
     }

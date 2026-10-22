@@ -84,26 +84,11 @@ fn perform(
                 .parent()
                 .ok_or("update-location")?
                 .to_owned();
-            let bundled = fuze_worker_host::managed_install::bundled_version(&dir)?;
-            let installed = fuze_worker_host::managed_install::read(
-                &fuze_worker_host::managed_install::root()?,
-            )?;
-            // A portable test build may be newer than a previously managed installation.
-            let current = installed
-                .current
-                .as_ref()
-                .filter(|v| v.sequence > bundled.sequence)
-                .unwrap_or(&bundled);
-            let rejected = installed.rejected.as_ref() == Some(&release.manifest.revision);
-            reply.installable = !installed.pending
-                && !rejected
-                && release.manifest.sequence > current.sequence
+            // Compare the running bundle, not a different installation's old pointer.
+            let current = fuze_worker_host::managed_install::bundled_version(&dir)?;
+            reply.installable = release.manifest.sequence > current.sequence
                 && release.manifest.revision != current.revision;
-            reply.update = Some(if installed.pending {
-                "上一版本仍等待启动验证，暂不能安装更新。".into()
-            } else if rejected {
-                "该版本曾启动失败，已保留当前版本；等待后续修复版。".into()
-            } else if reply.installable {
+            reply.update = Some(if reply.installable {
                 format!(
                     "发现版本 {} · 完整包约 {} MB\n更新程序将优先差分下载，失败时回退全量。",
                     release.manifest.revision,
@@ -230,6 +215,7 @@ impl Handoff {
             } else {
                 "--update"
             })
+            .arg("--confirmed")
             .env("FUZE_UPDATE_LOCALE", "zh-CN")
             .creation_flags(0x08000000)
             .spawn()

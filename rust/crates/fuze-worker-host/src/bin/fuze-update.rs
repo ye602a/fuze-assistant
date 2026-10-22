@@ -7,7 +7,7 @@ fn run() -> Result<(), &'static str> {
         update_credential,
     };
     use std::{fs, io::Write};
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 4 && args[0] == "--verify-package" {
         use std::io::Read;
         let manifest: update_channel::Manifest = serde_json::from_slice(&update_channel::bounded(
@@ -36,9 +36,17 @@ fn run() -> Result<(), &'static str> {
         println!("{{\"package_verified\":true,\"native_extracted\":true,\"worker_reaped\":true,\"game_access\":false}}");
         return Ok(());
     }
+    let confirmed = args.last().is_some_and(|arg| arg == "--confirmed");
+    if confirmed {
+        args.pop();
+    }
     let action = args.first().map(String::as_str).unwrap_or("--launch");
-    if args.len() > 1 {
+    let update_worker = matches!(action, "--update-directory" | "--update-directory-private");
+    if (update_worker && args.len() != 2) || (!update_worker && args.len() > 1) {
         return Err("update-arguments");
+    }
+    if matches!(action, "--update" | "--update-private") {
+        return fuze_worker_host::in_place_update::handoff(action == "--update-private", confirmed);
     }
     if action == "--credentials" {
         return update_credential::prompt();
@@ -48,12 +56,24 @@ fn run() -> Result<(), &'static str> {
         message("私有频道令牌已删除。公开频道无需令牌。", false);
         return Ok(());
     }
-    let bundled = std::env::current_exe()
-        .map_err(|_| "update-location")?
-        .parent()
-        .ok_or("update-location")?
-        .to_path_buf();
-    let root = install::root()?;
+    let bundled = if update_worker {
+        std::path::PathBuf::from(&args[1])
+    } else {
+        std::env::current_exe()
+            .map_err(|_| "update-location")?
+            .parent()
+            .ok_or("update-location")?
+            .to_path_buf()
+    };
+    if action == "--launch" {
+        return install::launch_current(&bundled);
+    }
+    let root = if update_worker {
+        install::bundled_version(&bundled)?;
+        fs::canonicalize(&bundled).map_err(|_| "update-location")?
+    } else {
+        install::root()?
+    };
     if action == "--uninstall-local" {
         // Run outside the managed tree so Windows can release and delete installed binaries.
         use std::os::windows::process::CommandExt;
@@ -132,11 +152,6 @@ fn run() -> Result<(), &'static str> {
         );
         return Ok(());
     }
-    if action == "--launch" {
-        let result = install::launch(&root, &bundled);
-        let _ = fuze_worker_host::app_registration::refresh(&root);
-        return result;
-    }
     if action == "--rollback" {
         if install::desktop_running() {
             return Err("install-close-preview-first");
@@ -147,12 +162,11 @@ fn run() -> Result<(), &'static str> {
         message("已切回上一版，下次启动生效。", false);
         return Ok(());
     }
-    if !["--update", "--update-private"].contains(&action) {
+    if !update_worker {
         return Err("update-arguments");
     }
-    if !message("检查 Rust 开发频道更新？公开频道无需令牌。下载和安装均由你确认；不会操作游戏或 Electron 稳定版。",true){return Ok(());}
     let _lock = install::lock(&root)?;
-    let session = if action == "--update-private" {
+    let session = if action == "--update-directory-private" {
         match Session::private() {
             Ok(session) => session,
             Err("credential-unavailable") => {
@@ -166,25 +180,26 @@ fn run() -> Result<(), &'static str> {
     };
     fuze_worker_host::update_progress::STAGE.store(1, std::sync::atomic::Ordering::Release);
     let release = session.check(&fuze_worker_host::update_progress::cancelled)?;
-    let state = install::read(&root)?;
-    if state.pending {
-        return Err("install-validation-pending");
-    }
-    let current = match state.current.as_ref() {
-        Some(current) => current.clone(),
-        None => install::bundled_version(&bundled)?,
-    };
+    let current = install::bundled_version(&bundled)?;
     if current.sequence >= release.manifest.sequence
         || current.revision == release.manifest.revision
-        || state.rejected.as_ref() == Some(&release.manifest.revision)
     {
-        message(
-            "当前已是同版/更新版本，或此版本曾启动失败。不会重复安装。",
-            false,
-        );
         return Ok(());
     }
-    if !message(&fuze_worker_host::update_progress::translated("发现 Rust 版本 {}，完整包约 {} MB。下载并校验？有可用基线时优先差分，失败最多回退一次全量。", &[release.manifest.revision.clone(), (release.manifest.size/1024/1024).to_string()]),true){return Ok(());}
+    if !confirmed
+        && !message(
+            &fuze_worker_host::update_progress::translated(
+                "发现版本 {}，完整包约 {} MB。更新并重启 FUZE？\n覆盖当前程序，保留个人数据。",
+                &[
+                    release.manifest.revision.clone(),
+                    (release.manifest.size / 1024 / 1024).to_string(),
+                ],
+            ),
+            true,
+        )
+    {
+        return Err("update-cancelled");
+    }
     let stage = root.join(format!(
         "pending-{}-{}",
         std::process::id(),
@@ -206,17 +221,12 @@ fn run() -> Result<(), &'static str> {
         };
         fuze_worker_host::update_progress::reset_transfer();
         let destination = stage.join("package.fuz");
-        let baseline = state
-            .current
-            .as_ref()
-            .map(|v| root.join("versions").join(&v.revision));
-        let baseline_archive = baseline.as_ref().map(|p| p.join("package.fuz"));
-        let baseline_map = baseline.as_ref().and_then(|p| {
-            update_channel::bounded(&p.join("package.blockmap"), 8 * 1024 * 1024).ok()
-        });
-        let old = baseline_archive
+        let baseline_archive = root.join("package.fuz");
+        let baseline_map =
+            update_channel::bounded(&root.join("package.blockmap"), 8 * 1024 * 1024).ok();
+        let old = baseline_map
             .as_deref()
-            .zip(baseline_map.as_deref())
+            .map(|map| (baseline_archive.as_path(), map))
             .filter(|(p, _)| p.is_file());
         // Blockmaps are optional optimization; failed/missing maps cause one full download.
         let map = session
@@ -293,7 +303,7 @@ fn run() -> Result<(), &'static str> {
                 cache.clear()?;
             }
         }
-        let transfer = transfer_result?;
+        transfer_result?;
         fuze_worker_host::update_progress::STAGE.store(3, std::sync::atomic::Ordering::Release);
         let extracted = stage.join("version");
         install::unpack(&destination, &extracted, &release.manifest.revision)?;
@@ -304,52 +314,20 @@ fn run() -> Result<(), &'static str> {
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
-        let summary = fuze_worker_host::update_progress::transfer_summary(
-            transfer.mode,
-            fuze_worker_host::update_progress::received_bytes(),
-        );
-        if !message(&fuze_worker_host::update_progress::translated("下载与离线 OCR 自检通过（{}）。是否安装到独立 Rust 目录？保留上一版，下一次启动前再次自检，失败自动回退。", &[summary]),true){return Ok(());}
-        if fuze_worker_host::update_progress::cancelled() {
-            return Err("update-cancelled");
-        }
-        let versions = root.join("versions");
-        install::safe_dir(&versions)?;
-        let target = versions.join(&release.manifest.revision);
-        if target.exists() {
-            if [state.current.as_ref(), state.previous.as_ref()]
-                .into_iter()
-                .flatten()
-                .any(|v| v.revision == release.manifest.revision)
-            {
-                return Err("install-version-in-use");
-            }
-            install::safe_dir(&target)?;
-            fs::rename(&target, stage.join("abandoned-version"))
-                .map_err(|_| "install-orphan-recovery")?;
-        }
         fs::rename(destination, extracted.join("package.fuz")).map_err(|_| "install-cache")?;
         if !map.is_empty() {
             let mut f = fs::File::create(extracted.join("package.blockmap"))
                 .map_err(|_| "install-cache")?;
             f.write_all(&map).map_err(|_| "install-cache")?;
         }
-        fs::rename(&extracted, &target).map_err(|_| "install-version")?;
-        if fuze_worker_host::update_progress::cancelled() {
-            return Err("update-cancelled");
-        }
         fuze_worker_host::update_progress::STAGE.store(4, std::sync::atomic::Ordering::Release);
-        install::bootstrap(&root, &bundled)?;
         if fuze_worker_host::update_progress::cancelled() {
             return Err("update-cancelled");
         }
         if install::desktop_running() {
             return Err("install-close-preview-first");
         }
-        install::activate(&root, &release.manifest, &|path| {
-            fuze_worker_host::runtime_prerequisites::check(path).map(|_| ())
-        })?;
-        fuze_worker_host::app_registration::refresh(&root)?;
-        message("Rust 更新已准备好。下次使用 Start-preview.cmd 启动新版；验证失败自动回到上一版。没有重启任何程序。",false);
+        fuze_worker_host::in_place_update::replace(&root, &extracted)?;
         Ok(())
     })();
     // Delete only the exact freshly created staging directory under this isolated root.
@@ -391,7 +369,7 @@ fn main() {
     #[cfg(windows)]
     if let Err(error) = if matches!(
         std::env::args().nth(1).as_deref(),
-        Some("--update") | Some("--update-private")
+        Some("--update-directory") | Some("--update-directory-private")
     ) {
         fuze_worker_host::update_progress::run(run)
     } else {
@@ -401,11 +379,11 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        if !fuze_worker_host::update_progress::cancelled() {
+        if error != "update-cancelled" && !fuze_worker_host::update_progress::cancelled() {
             if let Some(guidance) = fuze_worker_host::runtime_prerequisites::guidance(error) {
                 message(guidance, false);
             } else {
-                message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 Rust 预览版后重试。未知文件会保留；安装或卸载可能部分完成。Electron 稳定版未改动。", &[error.to_string()]),false);
+                message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 FUZE 后重试。若程序文件不完整，可重新下载安装包覆盖。", &[error.to_string()]),false);
             }
         }
         std::process::exit(1);

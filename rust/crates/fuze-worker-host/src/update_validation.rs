@@ -10,6 +10,7 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
     // A caller must provide a NEW directory; it cannot target an existing installation.
     fs::create_dir(root).map_err(|_| "validation-root-must-be-new")?;
     install::safe_dir(root)?;
+    in_place_lifecycle(root, baseline, archive, manifest)?;
     let _lock = install::lock(root)?;
     crate::local_setup::install_with(root, baseline, &install::check_bundle)?;
     install::launch_with(
@@ -111,6 +112,46 @@ pub fn lifecycle(root: &Path, baseline: &Path, archive: &Path, manifest: &Manife
         return Err("validation-uninstall");
     }
     Ok(())
+}
+// This acceptance path runs only in the explicitly requested isolated package check.
+// It complements the retained legacy installation/rollback checks below.
+fn in_place_lifecycle(
+    root: &Path,
+    baseline: &Path,
+    archive: &Path,
+    manifest: &Manifest,
+) -> Result<()> {
+    let directory = root.join("in-place-application");
+    let payload = root.join("in-place-payload");
+    install::copy_bundle(baseline, &directory)?;
+    let build_path = directory.join("build.json");
+    let mut build: serde_json::Value =
+        serde_json::from_slice(&update_channel::bounded(&build_path, 16384)?)
+            .map_err(|_| "validation-baseline")?;
+    build["revision"] = "000000000001".into();
+    build["sequence"] = manifest.sequence.saturating_sub(1).into();
+    fs::write(
+        &build_path,
+        serde_json::to_vec(&build).map_err(|_| "validation-baseline")?,
+    )
+    .map_err(|_| "validation-baseline")?;
+    fs::write(directory.join("personal-sentinel.txt"), "preserve")
+        .map_err(|_| "validation-baseline")?;
+    install::unpack(archive, &payload, &manifest.revision)?;
+    install::check_bundle(&payload)?;
+    crate::in_place_update::replace(&directory, &payload)?;
+    if install::bundled_version(&directory)?.revision != manifest.revision
+        || install::application_directory(&directory)? != directory
+        || directory.join("versions").exists()
+        || directory.join("current.json").exists()
+        || fs::read_to_string(directory.join("personal-sentinel.txt"))
+            .ok()
+            .as_deref()
+            != Some("preserve")
+    {
+        return Err("validation-in-place");
+    }
+    install::start_smoke(&directory)
 }
 fn verify_rollback(root: &Path, initial: &install::State, manifest: &Manifest) -> Result<()> {
     let state = install::read(root)?;
