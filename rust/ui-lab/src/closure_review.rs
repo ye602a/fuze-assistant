@@ -21,12 +21,15 @@ impl Review {
         ui.set_page(1);
         ui.global::<HostState>().set_connected(true);
         ui.global::<HostState>().set_offline(true);
-        let binding =
-            crate::unbound_bridge::attach(&ui, crate::host_bridge::offline_config(data).roots);
+        let roots = crate::host_bridge::offline_config(data).roots;
+        let identity =
+            fuze_data::prepare(&roots, fuze_data::Locale::ZhCn, fuze_data::Scope::Champions)?
+                .identity();
+        let binding = crate::unbound_bridge::attach(&ui, roots);
         let diagnostic = crate::diagnostic_bridge::attach(&ui, session.clone());
         let feedback = crate::feedback_bridge::attach(&ui, session, diagnostic.clone(), true);
         let mut status = Status::default();
-        status.available = Some("zh-CN@16.20.1".into());
+        status.available = Some(identity);
         status.unbound_records = UnboundSnapshot(Arc::new(vec![
             Unbound {
                 champion: 4,
@@ -36,7 +39,7 @@ impl Review {
                 events: (0..80)
                     .map(|i| fuze_lcu::history::ObservedCards {
                         observed_at: Some(1709164800000 + i * 1000),
-                        cards: [Some(1), None, Some(3)],
+                        cards: [Some(3051), None, Some(1004)],
                         level: Some(6),
                         partial: true,
                         kind: if i == 0 {
@@ -55,7 +58,7 @@ impl Review {
                 capped: false,
                 interrupted: true,
                 events: vec![],
-                legacy: vec![[Some(99999), None, Some(3)]],
+                legacy: vec![[Some(99999), None, Some(1004)]],
             },
         ]));
         Ok(Self {
@@ -86,7 +89,7 @@ impl Review {
             .ok_or("unbound-event-missing")?;
         if state.get_unbound_pages() != 16
             || state.get_unbound_events().row_count() != 5
-            || !event.cards.contains("巨像的勇气")
+            || !event.cards.contains("蓝色屏障")
             || !event.cards.contains("位置 2：暂未识别")
             || !event.hint.contains("不代表已领取")
         {
@@ -126,7 +129,7 @@ impl Review {
             .ok_or("unbound-context-missing")?;
         if !state.get_unbound_names().starts_with("等待名称数据版本")
             || unknown.cards.contains("回归基本功")
-            || !unknown.cards.contains("#3（名称暂缺）")
+            || !unknown.cards.contains("#1004（名称暂缺）")
         {
             return Err("unbound-context-old-names".into());
         }
