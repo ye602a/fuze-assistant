@@ -51,6 +51,8 @@ pub mod capture_review;
 #[cfg(windows)]
 pub mod github_feedback;
 #[cfg(windows)]
+pub mod in_place_update;
+#[cfg(windows)]
 pub mod legacy_preferences;
 #[cfg(windows)]
 pub mod lifecycle_review;
