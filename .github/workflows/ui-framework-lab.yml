@@ -6,6 +6,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'resources/paddleocr/**'
+      - 'resources/augments-*.json'
       - 'tests/fixtures/augment-ocr/**'
       - 'scripts/check-rust-screen.mjs'
       - 'tests/unit/actions-validation-summary.test.mjs'

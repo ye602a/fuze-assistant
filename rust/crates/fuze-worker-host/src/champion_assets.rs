@@ -320,6 +320,22 @@ pub fn decode(bytes: &[u8]) -> Result<Picture> {
     }
     Ok(Picture { bgra })
 }
+fn icon_endpoint(url: &str) -> Result<(&str, &str)> {
+    let path = icon_path(url)?;
+    // Confirmed 404 in the data provider's item catalog. Tencent's current
+    // public item catalog supplies this exact replacement; no general redirects.
+    if url == "https://cdn.dtodo.cn/hextech/item-icons/4004.png" {
+        return Ok(("game.gtimg.cn", "/images/lol/act/img/item/4004.png"));
+    }
+    Ok((
+        if url.starts_with("https://raw.communitydragon.org/") {
+            "raw.communitydragon.org"
+        } else {
+            "cdn.dtodo.cn"
+        },
+        path,
+    ))
+}
 /// Bounded public image cache access for native frontends. Call only on a worker thread.
 pub fn picture(
     url: &str,
@@ -328,7 +344,7 @@ pub fn picture(
     offline: bool,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Picture> {
-    let path = icon_path(url)?;
+    let (host, path) = icon_endpoint(url)?;
     let file = cache.and_then(|root| {
         crate::managed_install::safe_dir(root).ok()?;
         let hash = crate::update_io::hex(&crate::update_io::digest(key.as_bytes(), false).ok()?);
@@ -353,11 +369,6 @@ pub fn picture(
     if offline {
         return Err("icon-offline");
     }
-    let host = if url.starts_with("https://raw.communitydragon.org/") {
-        "raw.communitydragon.org"
-    } else {
-        "cdn.dtodo.cn"
-    };
     let bytes = crate::update_io::get(host, path, 512 * 1024, None, None, cancel)?;
     let pic = decode(&bytes)?;
     if !cancel() {
@@ -382,6 +393,21 @@ pub fn picture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_spectral_cutlass_icon_uses_the_exact_official_replacement() {
+        assert_eq!(
+            icon_endpoint("https://cdn.dtodo.cn/hextech/item-icons/4004.png"),
+            Ok(("game.gtimg.cn", "/images/lol/act/img/item/4004.png"))
+        );
+        assert_eq!(
+            icon_endpoint("https://cdn.dtodo.cn/hextech/item-icons/3089.png"),
+            Ok(("cdn.dtodo.cn", "/hextech/item-icons/3089.png"))
+        );
+        assert!(icon_endpoint("https://cdn.dtodo.cn.evil/hextech/item-icons/4004.png").is_err());
+        assert!(
+            icon_endpoint("https://cdn.dtodo.cn/hextech/item-icons/4004.png?redirect=1").is_err()
+        );
+    }
     #[test]
     fn current_client_icons_use_only_the_pinned_asset_directories() {
         let data = fuze_data::current_augments::metadata().unwrap();
