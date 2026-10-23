@@ -253,6 +253,33 @@ mod tests {
         assert!(compatibility(Some("zh-CN@16.20.4")).1);
         assert!(!compatibility(Some("zh-CN@16.21.1-augments16.21")).1);
         assert!(compatibility(None).0.contains("未确认"));
+
+        // A stopped transfer must keep both the previous pointer and honest partial progress.
+        let before = fs::read(dir.0.join("current.json")).unwrap();
+        events.borrow_mut().clear();
+        let interrupted = refresh_current_with(
+            &dir.0,
+            &roots,
+            Locale::ZhCn,
+            &|| false,
+            &|p| events.borrow_mut().push(p),
+            &|p, _, _| {
+                if p.ends_with("/items.json") {
+                    Err("update-network")
+                } else {
+                    fixture(p, "1.0.1", false)
+                }
+            },
+        );
+        assert_eq!(interrupted, Err("update-network"));
+        assert_eq!(fs::read(dir.0.join("current.json")).unwrap(), before);
+        let events = events.borrow();
+        let last = events.last().unwrap();
+        assert_eq!((last.completed, last.total), (2, 4));
+        assert!(last.message.contains("装备资料"));
+        assert!(result_message(&interrupted, None).contains("未能连接数据站"));
+        assert!(result_message(&Err("update-cancelled"), None).contains("已取消"));
+        assert!(result_message(&Err("data-update-busy"), None).contains("正在进行"));
     }
 }
 type Fetch<'a> = dyn Fn(&str, usize, &dyn Fn() -> bool) -> Result<Vec<u8>> + 'a;
@@ -270,8 +297,13 @@ type Report<'a> = dyn Fn(Progress) + 'a;
 pub fn result_message(result: &Result<bool>, supplemental_error: Option<&str>) -> String {
     let main = match result {
         Ok(true) => "推荐数据已更新，下次识别使用新数据。",
-        Ok(false) => "本地数据已是数据站最新版本，无需下载。",
-        Err("data-update-cancelled") => "更新已取消，继续使用现有数据。",
+        Ok(false) => "没有更新的推荐数据，无需下载。",
+        Err("data-update-cancelled" | "update-cancelled") => "更新已取消，继续使用现有数据。",
+        Err("update-network") => "未能连接数据站，继续使用现有数据；可稍后重试。",
+        Err("update-http-status" | "update-access-or-release" | "update-redirect") => {
+            "数据站暂未提供可下载的数据，继续使用现有数据；可稍后重试。"
+        }
+        Err("data-update-busy") => "另一次数据更新正在进行，请等待完成。",
         Err("data-update-hash") => "下载校验失败，继续使用现有数据；请重试。",
         Err("data-update-write" | "data-update-directory" | "data-update-activate") => {
             "数据写入失败，继续使用现有数据；请检查磁盘空间和目录权限。"
@@ -531,7 +563,15 @@ fn refresh_for_progress(
                 .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
                 .ok_or("data-update-hash")?;
             report(Progress {
-                message: format!("正在下载并校验 · {completed}/{count} 个文件"),
+                message: format!(
+                    "正在下载{} · {completed}/{count} 个文件已完成",
+                    match name {
+                        "augments.json" => "强化资料",
+                        "champions.json" => "英雄列表",
+                        "items.json" => "装备资料",
+                        _ => "英雄详情",
+                    }
+                ),
                 completed,
                 total: count,
             });

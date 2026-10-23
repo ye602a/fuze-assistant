@@ -5,7 +5,7 @@
   "description": "Development and packaging tools for FUZE Rust; not an application runtime",
   "scripts": {
     "security:check": "node scripts/check-secrets.mjs",
-    "prepare:client-data": "node scripts/fetch-client-data.mjs",
+    "prepare:client-data": "node scripts/prepare-rust-data.mjs",
     "test": "node --test tests/unit/*.test.mjs",
     "test:unit": "node --test tests/unit/*.test.mjs"
   },

@@ -750,7 +750,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     message: "正在检查数据站版本…".into(),
                     ..Default::default()
                 };
-                s.notice = Some("正在下载并校验；旧数据继续保留。");
+                s.notice = Some("正在检查推荐数据，进度显示在数据卡片中。");
             }
             let mut supplemental_error = None;
             let result = if fixture {
