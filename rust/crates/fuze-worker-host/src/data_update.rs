@@ -189,8 +189,139 @@ mod tests {
         )
         .is_ok());
     }
+    #[test]
+    fn chinese_progress_and_bundled_version_skip() {
+        let dir = std::env::temp_dir().join(format!(
+            ".pending-fuze-progress-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let dir = Stage(fs::canonicalize(dir).unwrap(), false);
+        let events = std::cell::RefCell::new(Vec::new());
+        let fetch = |p: &str, _: usize, _: &dyn Fn() -> bool| {
+            assert!(!p.contains("zh-TW") && !p.contains("en-US"));
+            fixture(p, "1.0.0", false)
+        };
+        assert_eq!(
+            refresh_current_with(
+                &dir.0,
+                &[],
+                Locale::ZhCn,
+                &|| false,
+                &|p| events.borrow_mut().push(p),
+                &fetch
+            ),
+            Ok(true)
+        );
+        let counts: Vec<_> = events
+            .borrow()
+            .iter()
+            .filter(|p| p.total > 0)
+            .map(|p| (p.completed, p.total))
+            .collect();
+        assert_eq!(counts.first(), Some(&(0, 4)));
+        assert_eq!(counts.last(), Some(&(4, 4)));
+        assert!(counts.windows(2).all(|p| p[0].0 <= p[1].0));
+        assert!(!dir.0.join("current.en-US.json").exists());
+        let roots = [Root {
+            path: dir.0.clone(),
+            source: Source::Bundled,
+        }];
+        assert_eq!(
+            refresh_current_with(
+                &dir.0,
+                &roots,
+                Locale::ZhCn,
+                &|| false,
+                &|_| {},
+                &|p, _, _| {
+                    assert!(
+                        p.ends_with("/config"),
+                        "unchanged bundled data must not download"
+                    );
+                    fixture(p, "1.0.0", false)
+                }
+            ),
+            Ok(false)
+        );
+        assert!(result_message(&Ok(false), None).contains("无需下载"));
+        assert!(result_message(&Ok(true), Some("failed")).contains("补充识别词库更新失败"));
+        assert!(result_message(&Err("data-update-hash"), None).contains("校验失败"));
+        assert!(compatibility(Some("zh-CN@16.20.4")).1);
+        assert!(!compatibility(Some("zh-CN@16.21.1-augments16.21")).1);
+        assert!(compatibility(None).0.contains("未确认"));
+    }
 }
 type Fetch<'a> = dyn Fn(&str, usize, &dyn Fn() -> bool) -> Result<Vec<u8>> + 'a;
+fn selected(name: &str) -> bool {
+    ["augments.json", "champions.json", "items.json"].contains(&name)
+        || name.starts_with("champion-shards/")
+}
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Progress {
+    pub message: String,
+    pub completed: usize,
+    pub total: usize,
+}
+type Report<'a> = dyn Fn(Progress) + 'a;
+pub fn result_message(result: &Result<bool>, supplemental_error: Option<&str>) -> String {
+    let main = match result {
+        Ok(true) => "推荐数据已更新，下次识别使用新数据。",
+        Ok(false) => "本地数据已是数据站最新版本，无需下载。",
+        Err("data-update-cancelled") => "更新已取消，继续使用现有数据。",
+        Err("data-update-hash") => "下载校验失败，继续使用现有数据；请重试。",
+        Err("data-update-write" | "data-update-directory" | "data-update-activate") => {
+            "数据写入失败，继续使用现有数据；请检查磁盘空间和目录权限。"
+        }
+        Err(_) => "数据更新未完成，继续使用现有数据；可稍后重试。",
+    };
+    if result.is_ok() && supplemental_error.is_some() {
+        format!("{main} 补充识别词库更新失败，可稍后重试。")
+    } else {
+        main.into()
+    }
+}
+/// Compare the two data sources, not an unobserved live client version.
+pub fn compatibility(identity: Option<&str>) -> (String, bool) {
+    let version = identity.unwrap_or("").rsplit('@').next().unwrap_or("");
+    let version = version
+        .strip_suffix(fuze_data::current_augments::IDENTITY_SUFFIX)
+        .unwrap_or(version);
+    let patch = |v: &str| -> Option<(u32, u32)> {
+        let mut parts = v.split('.');
+        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+    };
+    let Some(stats) = patch(version) else {
+        return ("版本匹配：未确认 · 尚无可用统计数据".into(), true);
+    };
+    let builtin = fuze_data::current_augments::PATCH;
+    let metadata = if stats > patch(builtin).unwrap() {
+        version
+    } else {
+        builtin
+    };
+    let matched = patch(metadata) == Some(stats);
+    (
+        format!(
+            "资料 {metadata} · 统计 {version}\n{}",
+            if matched {
+                "版本匹配 · 不代表每个符文已有统计"
+            } else {
+                "版本不匹配 · 不匹配的符文显示暂无统计"
+            }
+        ),
+        !matched,
+    )
+}
+fn phase(report: &Report<'_>, message: &str) {
+    report(Progress {
+        message: message.into(),
+        ..Default::default()
+    });
+}
 fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Result<Vec<String>> {
     refresh_for(
         root,
@@ -207,12 +338,37 @@ pub fn refresh_current(
     locale: Locale,
     cancel: &dyn Fn() -> bool,
 ) -> Result<bool> {
+    refresh_current_with(root, roots, locale, cancel, &|_| {}, &|p, n, c| {
+        update_io::data_get(p, n, c)
+    })
+}
+/// The production manual action only updates the Chinese catalogue, including bundled data
+/// when deciding whether a download is needed.
+pub fn refresh_chinese(
+    root: &Path,
+    roots: &[Root],
+    cancel: &dyn Fn() -> bool,
+    report: &Report<'_>,
+) -> Result<bool> {
+    refresh_current_with(root, roots, Locale::ZhCn, cancel, report, &|p, n, c| {
+        update_io::data_get(p, n, c)
+    })
+}
+fn refresh_current_with(
+    root: &Path,
+    roots: &[Root],
+    locale: Locale,
+    cancel: &dyn Fn() -> bool,
+    report: &Report<'_>,
+    fetch: &Fetch<'_>,
+) -> Result<bool> {
+    phase(report, "正在检查数据站版本…");
     let path = if locale == Locale::ZhCn {
         "/api/client/v1/config".into()
     } else {
         format!("/api/client/v1/config?locale={}", locale.code())
     };
-    let config = update_io::data_get(&path, 65536, cancel)?;
+    let config = fetch(&path, 65536, cancel)?;
     let value: Value = serde_json::from_slice(&config).map_err(|_| "data-update-config")?;
     let version = value["dataVersion"]
         .as_str()
@@ -234,13 +390,19 @@ pub fn refresh_current(
     {
         return Ok(false);
     }
-    refresh_for(root, &[locale], cancel, &|p, n, c| {
-        if p == path {
-            Ok(config.clone())
-        } else {
-            update_io::data_get(p, n, c)
-        }
-    })?;
+    refresh_for_progress(
+        root,
+        &[locale],
+        cancel,
+        &|p, n, c| {
+            if p == path {
+                Ok(config.clone())
+            } else {
+                fetch(p, n, c)
+            }
+        },
+        report,
+    )?;
     Ok(true)
 }
 fn refresh_for(
@@ -248,6 +410,15 @@ fn refresh_for(
     locales: &[Locale],
     cancel: &dyn Fn() -> bool,
     fetch: &Fetch<'_>,
+) -> Result<Vec<String>> {
+    refresh_for_progress(root, locales, cancel, fetch, &|_| {})
+}
+fn refresh_for_progress(
+    root: &Path,
+    locales: &[Locale],
+    cancel: &dyn Fn() -> bool,
+    fetch: &Fetch<'_>,
+    report: &Report<'_>,
 ) -> Result<Vec<String>> {
     clean_dir(root)?;
     let canonical = fs::canonicalize(root).map_err(|_| "data-update-directory")?;
@@ -300,6 +471,7 @@ fn refresh_for(
             }
         }
         let remote = api(locale, version);
+        phase(report, "正在读取下载清单…");
         let manifest_bytes = fetch(&format!("{remote}/manifest.json"), 2 * 1024 * 1024, cancel)?;
         let manifest: Value =
             serde_json::from_slice(&manifest_bytes).map_err(|_| "data-update-manifest")?;
@@ -330,13 +502,16 @@ fn refresh_for(
         write(&destination.join("manifest.json"), &manifest_bytes)?;
         let mut total = 0usize;
         let mut seen = std::collections::HashSet::new();
+        let count = entries
+            .iter()
+            .filter(|e| e["path"].as_str().is_some_and(selected))
+            .count();
+        let mut completed = 0;
         for e in entries {
             check()?;
             let name = e["path"].as_str().ok_or("data-update-manifest")?;
             fuze_data::safe_path(name)?;
-            if !["augments.json", "champions.json", "items.json"].contains(&name)
-                && !name.starts_with("champion-shards/")
-            {
+            if !selected(name) {
                 continue;
             }
             if !name.ends_with(".json") || !seen.insert(name) {
@@ -355,6 +530,11 @@ fn refresh_for(
                 .and_then(|s| s.strip_prefix("sha256-"))
                 .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
                 .ok_or("data-update-hash")?;
+            report(Progress {
+                message: format!("正在下载并校验 · {completed}/{count} 个文件"),
+                completed,
+                total: count,
+            });
             let bytes = fetch(&format!("{remote}/{name}"), size, cancel)?;
             if bytes.len() != size
                 || update_io::hex(&update_io::digest(&bytes, false)?)
@@ -363,7 +543,14 @@ fn refresh_for(
                 return Err("data-update-hash");
             }
             write(&destination.join(name), &bytes)?;
+            completed += 1;
+            report(Progress {
+                message: format!("已下载并校验 · {completed}/{count} 个文件"),
+                completed,
+                total: count,
+            });
         }
+        phase(report, "正在校验完整数据…");
         let pointer_bytes = serde_json::to_vec(
             &json!({"schemaVersion":3,"locale":locale.code(),"dataVersion":version}),
         )
@@ -379,6 +566,7 @@ fn refresh_for(
             Scope::Full,
         )?;
         check()?;
+        phase(report, "正在启用新数据…");
         let final_dir = root.join(&relative);
         clean_dir(final_dir.parent().ok_or("data-update-path")?)?;
         // A crash may have moved the complete version before swapping the pointer.

@@ -7,6 +7,7 @@ import { Theme, Label, Action, Panel, SectionTitle, Toggle, Tabs } from "compone
 export component SettingsPage inherits VerticalLayout {
     in property <float> entrance: 1;
     in-out property <int> section: 0;
+    in-out property <bool> migration-open: false;
     in-out property <bool> manual-open: false;
     in-out property <bool> feedback-open: false;
     spacing: 16px;
@@ -56,13 +57,18 @@ export component SettingsPage inherits VerticalLayout {
             Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行，可以检查新版。安装更新、清理和导入需要先暂停。"; wrap: word-wrap; color: Theme.muted; }
             Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
         }
-        MaintenancePage { entrance: root.entrance; }
-        Panel { height: 153px;
-            SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据 · " + HostState.data-version; }
-            Label { x: 21px; y: 52px; width: parent.width - 42px; height: 42px; text: "更新识别名称与推荐统计。更新失败时继续使用现有数据。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Action { x: 21px; y: 104px; width: 180px; height: 34px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "更新推荐数据与字典"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
+        Panel { height: 206px;
+            SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据"; }
+            Label { x: 21px; y: 50px; width: parent.width - 42px; height: 46px; text: HostState.data-compatibility; wrap: word-wrap; color: HostState.data-mismatch ? Theme.gold : Theme.blue; font-size: 12px; }
+            Label { x: 21px; y: 103px; width: parent.width - 42px; height: 42px; text: HostState.data-progress; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            if HostState.data-total > 0: Rectangle { x: 21px; y: 150px; width: parent.width - 42px; height: 4px; background: Theme.stroke;
+                Rectangle { width: parent.width * HostState.data-completed / max(1, HostState.data-total); height: parent.height; background: Theme.blue; }
+            }
+            Action { x: 21px; y: 163px; width: 180px; height: 30px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
         }
-        Panel { height: 130px;
+        MaintenancePage { entrance: root.entrance; }
+        Action { label: root.migration-open ? "收起旧设置迁移" : "旧设置迁移"; clicked => { root.migration-open = !root.migration-open; } }
+        if root.migration-open: Panel { height: 130px;
             SectionTitle { x: 21px; y: 17px; height: 25px; text: "迁移旧版偏好"; }
             Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "只读取你选择的旧配置；预览确认后导入受支持偏好，保留当前语言与启动状态。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
             Action { x: 21px; y: 88px; width: 165px; height: 30px; label: "选择旧设置并预览"; enabled: HostState.connected && !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-settings",0); } }

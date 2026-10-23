@@ -31,6 +31,7 @@ export global DiagnosticState {
     callback action(string);
 }
 export global MaintenanceState {
+    in-out property <bool> storage-open: false;
     in-out property <bool> attached: false;
     in-out property <bool> offline: true;
     in-out property <bool> busy: false;
@@ -97,6 +98,11 @@ export global HostState {
     // Explicit host transaction; separate from background notices and maintenance.
     in-out property <string> pending-action;
     in-out property <string> notice;
+    in-out property <string> data-progress: "尚未检查数据更新";
+    in-out property <int> data-completed: 0;
+    in-out property <int> data-total: 0;
+    in-out property <string> data-compatibility: "版本匹配：未确认";
+    in-out property <bool> data-mismatch: true;
     in-out property <string> data-version: "—";
     in-out property <[PreferenceRow]> preferences;
     in-out property <int> backend: 0;

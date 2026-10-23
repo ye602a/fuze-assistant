@@ -575,6 +575,12 @@ pub fn attach_recovered(
             }
             ui.set_paused(next.mode == 0);
             state.set_running(next.mode == 1);
+            state.set_data_progress(if next.data_progress.message.is_empty() { "尚未检查数据更新".into() } else { next.data_progress.message.clone().into() });
+            state.set_data_completed(next.data_progress.completed as i32);
+            state.set_data_total(next.data_progress.total as i32);
+            let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref());
+            state.set_data_compatibility(compatibility.into());
+            state.set_data_mismatch(mismatch);
             state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
                 state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {

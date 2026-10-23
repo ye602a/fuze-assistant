@@ -25,7 +25,7 @@ $build | Add-Member -NotePropertyName updaterRevision -NotePropertyValue $update
 $build | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $payload 'build.json') -Encoding utf8
 & node (Join-Path $repo 'scripts/bundle-rust-crt.mjs') $payload $RuntimeDirectory
 if ($LASTEXITCODE -ne 0) { throw 'runtime-bundle-failed' }
-& $Compiler "/DPayload=$payload" "/DOutput=$Output" (Join-Path $repo 'installer/rust-setup.iss')
+& $Compiler "/DAppRelease=0.7.0" "/DPayload=$payload" "/DOutput=$Output" (Join-Path $repo 'installer/rust-setup.iss')
 if ($LASTEXITCODE -ne 0) { throw 'setup-compile-failed' }
 $exe = Join-Path $Output 'FUZE-Setup-0.7.0-windows-x64.exe'
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()

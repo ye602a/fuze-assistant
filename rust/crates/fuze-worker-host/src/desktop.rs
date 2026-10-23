@@ -96,6 +96,7 @@ pub struct Status {
     pub available: Option<String>,
     pub notice: Option<&'static str>,
     pub update_error: Option<&'static str>,
+    pub data_progress: crate::data_update::Progress,
     pub preferences: crate::preferences::Preferences,
     pub selection: Option<crate::champ_select::View>,
     pub playing: Option<crate::champ_select::View>,
@@ -119,6 +120,7 @@ impl Default for Status {
             available: None,
             notice: None,
             update_error: None,
+            data_progress: Default::default(),
             preferences: Default::default(),
             selection: None,
             playing: None,
@@ -450,6 +452,14 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .ok()
                     .map(|(_, s)| s);
                 if let Ok(mut status) = shared.status.lock() {
+                    status.available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+                    status.data_progress = crate::data_update::Progress {
+                        message: crate::data_update::result_message(
+                            &result.as_ref().map(|o| o.updated).map_err(|e| *e),
+                            result.as_ref().ok().and_then(|o| o.supplemental_error),
+                        ),
+                        ..Default::default()
+                    };
                     status.update_error = match result {
                         Ok(o) => o.supplemental_error,
                         Err(e) => Some(e),
@@ -457,6 +467,11 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     if let Some(summary) = supplemental {
                         status.recognition = summary;
                     }
+                }
+            }
+            if background.busy() {
+                if let Ok(mut status) = shared.status.lock() {
+                    status.data_progress = background.progress();
                 }
             }
             if desired == DATA && background.busy() {
@@ -730,16 +745,35 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             controller.suspend();
             if let Ok(mut s) = shared.status.lock() {
                 s.mode = DATA;
+                s.update_error = None;
+                s.data_progress = crate::data_update::Progress {
+                    message: "正在检查数据站版本…".into(),
+                    ..Default::default()
+                };
                 s.notice = Some("正在下载并校验；旧数据继续保留。");
             }
+            let mut supplemental_error = None;
             let result = if fixture {
-                Ok(Vec::new())
+                Ok(false)
             } else {
                 cache.as_ref().ok_or("data-update-cache").and_then(|path| {
                     let cancel = || shared.desired.load(Ordering::Acquire) != DATA;
-                    let supplemental = crate::recognition_sources::refresh(path, &cancel);
-                    let primary = crate::data_update::refresh(path, &cancel);
-                    primary.and_then(|updated| supplemental.map(|_| updated))
+                    let report = |progress| {
+                        if let Ok(mut s) = shared.status.lock() {
+                            s.data_progress = progress;
+                        }
+                    };
+                    let primary =
+                        crate::data_update::refresh_chinese(path, &roots, &cancel, &report);
+                    if primary.is_ok() {
+                        report(crate::data_update::Progress {
+                            message: "正在检查补充识别词库…".into(),
+                            ..Default::default()
+                        });
+                        supplemental_error =
+                            crate::recognition_sources::refresh(path, &cancel).err();
+                    }
+                    primary
                 })
             };
             let refreshed_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
@@ -750,6 +784,10 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     s.recognition = summary;
                 }
                 s.update_error = result.as_ref().err().copied();
+                s.data_progress = crate::data_update::Progress {
+                    message: crate::data_update::result_message(&result, supplemental_error),
+                    ..Default::default()
+                };
                 s.notice = Some(if result.is_ok() {
                     "推荐数据已校验；下次开始识别时使用最新完整版本。"
                 } else {
