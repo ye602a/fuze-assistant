@@ -62,6 +62,12 @@ export component SettingsPage inherits VerticalLayout {
             Label { x: 21px; y: 52px; width: parent.width - 42px; height: 42px; text: "更新识别名称与推荐统计。更新失败时继续使用现有数据。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
             Action { x: 21px; y: 104px; width: 180px; height: 34px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "更新推荐数据与字典"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
         }
+        Panel { height: 177px;
+            SectionTitle { x: 21px; y: 14px; height: 26px; text: "贡献对局数据"; }
+            Toggle { x: parent.width - 65px; y: 17px; label: "贡献自己的海克斯对局"; checked: HostState.contribution-enabled; enabled: HostState.connected && !HostState.offline && !HostState.busy; toggled => { HostState.preference("data_contribution", !HostState.contribution-enabled); } }
+            Label { x: 21px; y: 49px; width: parent.width - 42px; height: 60px; wrap: word-wrap; font-size: 12px; color: Theme.muted; text: "默认开启，可随时关闭。本阶段仅本地整理自己参加且已结束的海克斯对局，暂不上传。\n样本含该局所有参与者的 PUUID、昵称及战绩；不查询他人战绩，不含截图或登录令牌。"; }
+            Label { x: 21px; y: 116px; width: parent.width - 42px; height: 48px; wrap: word-wrap; font-size: 12px; color: Theme.gold; text: HostState.contribution-enabled ? HostState.contribution-status : "已关闭，不整理新样本。已有待传数据保留；当前不会实际上传。"; }
+        }
         Panel { height: 130px;
             SectionTitle { x: 21px; y: 17px; height: 25px; text: "迁移旧版偏好"; }
             Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "只读取你选择的旧配置；预览确认后导入受支持偏好，保留当前语言与启动状态。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }

@@ -86,6 +86,8 @@ export global ShellState {
     callback sync(bool, bool);
 }
 export global HostState {
+    in-out property <bool> contribution-enabled: true;
+    in-out property <string> contribution-status: "真实上传未开放；不会向数据站发送对局。";
     in-out property <[SlotRow]> slots;
     in-out property <[string]> resources: ["—", "—", "—", "—"];
     in-out property <string> sampled: "等待首次采样";

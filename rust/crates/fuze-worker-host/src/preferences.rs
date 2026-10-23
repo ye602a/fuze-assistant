@@ -29,6 +29,9 @@ pub struct Preferences {
     pub pause_hotkey: bool,
     pub manual_directory: String,
     pub local_records: bool,
+    // Separate sidecar keeps older releases' strict preferences schema readable.
+    #[serde(skip)]
+    pub data_contribution: bool,
 }
 fn public_update_setting<'de, D: serde::Deserializer<'de>>(
     input: D,
@@ -55,6 +58,7 @@ impl Default for Preferences {
             pause_hotkey: false,
             manual_directory: String::new(),
             local_records: false,
+            data_contribution: true,
         }
     }
 }
@@ -173,6 +177,8 @@ pub fn path() -> Result<PathBuf> {
     )
 }
 pub fn read(path: &Path) -> Result<Preferences> {
+    let contribution = crate::data_contribution::enabled(path.parent().ok_or("preferences-root")?)
+        .unwrap_or(false);
     let legacy;
     let path = if !path.exists()
         && path
@@ -190,11 +196,16 @@ pub fn read(path: &Path) -> Result<Preferences> {
         path
     };
     if !path.exists() {
-        return Ok(Preferences::default());
+        return Ok(Preferences {
+            data_contribution: contribution,
+            ..Default::default()
+        });
     }
-    let value: Preferences = serde_json::from_slice(&crate::update_channel::bounded(path, 4096)?)
-        .map_err(|_| "preferences-invalid")?;
+    let mut value: Preferences =
+        serde_json::from_slice(&crate::update_channel::bounded(path, 4096)?)
+            .map_err(|_| "preferences-invalid")?;
     value.validate()?;
+    value.data_contribution = contribution;
     Ok(value)
 }
 pub fn save(path: &Path, value: &Preferences) -> Result<()> {
@@ -204,7 +215,11 @@ pub fn save(path: &Path, value: &Preferences) -> Result<()> {
     {
         return Err("preferences-directory-client-missing");
     }
-    save_json(path, value)
+    save_json(path, value)?;
+    crate::data_contribution::set_enabled(
+        path.parent().ok_or("preferences-root")?,
+        value.data_contribution,
+    )
 }
 /// Atomic writes shared by isolated preferences, geometry and reduced local records.
 pub(crate) fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -327,6 +342,7 @@ mod tests {
         assert_eq!(read(&path).unwrap(), previous);
         // Only the files created by this test.
         fs::remove_file(path).unwrap();
+        fs::remove_file(dir.join("data-contribution-setting.json")).unwrap();
         fs::remove_file(dir.join("client/LeagueClient/LeagueClient.exe")).unwrap();
         fs::remove_dir(dir.join("client/LeagueClient")).unwrap();
         fs::remove_dir(dir.join("client")).unwrap();
@@ -354,6 +370,7 @@ mod tests {
         changed.locale = "../private".into();
         assert!(save(&path, &changed).is_err());
         fs::remove_file(path).unwrap();
+        fs::remove_file(dir.join("data-contribution-setting.json")).unwrap();
         fs::remove_dir(dir).unwrap();
     }
 }

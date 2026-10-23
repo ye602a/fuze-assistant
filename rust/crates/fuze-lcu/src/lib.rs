@@ -6,6 +6,7 @@ mod client_log;
 #[cfg(windows)]
 mod command_line;
 pub mod context;
+pub mod contribution;
 #[cfg(windows)]
 mod directory_auth;
 #[cfg(windows)]

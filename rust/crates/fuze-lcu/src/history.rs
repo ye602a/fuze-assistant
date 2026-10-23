@@ -29,6 +29,9 @@ fn reported(v: &Value) -> Result<Option<String>> {
     Ok(a.or(b))
 }
 impl Owner {
+    pub(crate) fn owns_participant(&self, p: &Value) -> bool {
+        p["puuid"].as_str() == Some(&self.puuid)
+    }
     pub fn from_values(summoner: &Value, routing: &[Value]) -> Result<Self> {
         let puuid = summoner["puuid"]
             .as_str()

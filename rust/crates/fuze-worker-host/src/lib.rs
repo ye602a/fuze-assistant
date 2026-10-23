@@ -34,6 +34,8 @@ pub mod champion_assets;
 #[cfg(windows)]
 pub mod controller;
 #[cfg(windows)]
+pub mod data_contribution;
+#[cfg(windows)]
 pub mod data_update;
 #[cfg(windows)]
 pub mod desktop;

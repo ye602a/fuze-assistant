@@ -183,6 +183,7 @@ fn change(p: &mut Preferences, key: &str, value: bool) -> Result<(), &'static st
         "auto_item_sets" => &mut p.auto_item_sets,
         "pause_hotkey" => &mut p.pause_hotkey,
         "local_records" => &mut p.local_records,
+        "data_contribution" => &mut p.data_contribution,
         "private_updates" => &mut p.private_updates,
         _ => return Err("preferences-key"),
     };
@@ -575,6 +576,8 @@ pub fn attach_recovered(
             }
             ui.set_paused(next.mode == 0);
             state.set_running(next.mode == 1);
+            state.set_contribution_enabled(next.preferences.data_contribution);
+            state.set_contribution_status(next.contribution.label().into());
             state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
                 state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {

@@ -23,7 +23,8 @@ pub(super) fn fetch(
     owner: &crate::history::Owner,
     token: &serde_json::Value,
     start: u32,
-) -> crate::history::Result<Vec<crate::history::Match>> {
+    patch: Option<&str>,
+) -> crate::history::Result<crate::contribution::Page> {
     let (host, port) = route(owner.platform()).ok_or("history-platform-unsupported")?;
     let bearer = token["accessToken"]
         .as_str()
@@ -117,7 +118,7 @@ pub(super) fn fetch(
     })?;
     let parsed = serde_json::from_slice(&body)
         .map_err(|_| "history-invalid-response")
-        .and_then(|v| crate::history::parse_sgp(owner, &v));
+        .and_then(|v| crate::contribution::page(owner, &v, patch));
     wipe(&mut body);
     parsed
 }

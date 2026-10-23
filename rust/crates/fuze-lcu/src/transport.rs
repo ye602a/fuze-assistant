@@ -142,7 +142,8 @@ impl ReadOnlyClient {
         pid: u32,
         owner: &crate::history::Owner,
         start: u32,
-    ) -> crate::history::Result<Vec<crate::history::Match>> {
+        patch: Option<&str>,
+    ) -> crate::history::Result<crate::contribution::Page> {
         if start > 950 || start % 50 != 0 {
             return Err("history-page-limit");
         }
@@ -150,7 +151,7 @@ impl ReadOnlyClient {
             return Err("history-account-changed");
         }
         let token = self.history_value(pid, Endpoint::Entitlements)?;
-        let result = sgp::fetch(owner, &token, start);
+        let result = sgp::fetch(owner, &token, start, patch);
         if &self.history_owner(pid)? != owner {
             return Err("history-account-changed");
         }
