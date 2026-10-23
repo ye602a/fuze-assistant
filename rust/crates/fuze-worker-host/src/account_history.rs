@@ -34,6 +34,7 @@ struct Account {
 }
 #[derive(Clone, Debug, Default)]
 pub struct View {
+    pub contribution: Option<crate::data_contribution::Summary>,
     pub augment_names: std::sync::Arc<std::collections::HashMap<u32, String>>,
     pub observations: std::sync::Arc<Vec<fuze_lcu::history::Observation>>,
     pub details: std::sync::Arc<Vec<std::sync::Arc<fuze_data::champion_detail::Detail>>>,
@@ -52,7 +53,8 @@ pub struct View {
 // adds no information. New snapshots invalidate once, even when their contents match.
 impl PartialEq for View {
     fn eq(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.rows, &other.rows)
+        self.contribution == other.contribution
+            && std::sync::Arc::ptr_eq(&self.rows, &other.rows)
             && std::sync::Arc::ptr_eq(&self.details, &other.details)
             && std::sync::Arc::ptr_eq(&self.observations, &other.observations)
             && std::sync::Arc::ptr_eq(&self.augment_names, &other.augment_names)
@@ -250,7 +252,25 @@ pub fn refresh_page(
     expected: Option<(&str, &str)>,
     source: Option<&str>,
 ) -> View {
+    refresh_page_inner(manual, path, start, expected, source, false)
+}
+pub fn refresh_after_game(manual: Option<&Path>, path: &Path) -> View {
+    let enabled = path
+        .parent()
+        .is_some_and(|p| crate::data_contribution::enabled(p).unwrap_or(false));
+    refresh_page_inner(manual, path, 0, None, None, enabled)
+}
+fn refresh_page_inner(
+    manual: Option<&Path>,
+    path: &Path,
+    start: u32,
+    expected: Option<(&str, &str)>,
+    source: Option<&str>,
+    contribute: bool,
+) -> View {
     struct Page {
+        contribute: bool,
+        games: std::cell::RefCell<Vec<serde_json::Value>>,
         session: fuze_lcu::discovery::HistorySession,
         owner: Owner,
         start: u32,
@@ -268,8 +288,8 @@ pub fn refresh_page(
         fn rows(&self, owner: &Owner) -> Result<Vec<Match>> {
             let rows = match self.source.get() {
                 "lcu" => self.session.rows_page(owner, self.start)?,
-                "sgp" => self.session.sgp_rows(owner, self.start)?,
-                _ => match self.session.sgp_rows(owner, self.start) {
+                "sgp" => self.sgp(owner)?,
+                _ => match self.sgp(owner) {
                     Ok(rows) => {
                         self.source.set("sgp");
                         rows
@@ -291,6 +311,18 @@ pub fn refresh_page(
             Ok(rows)
         }
     }
+    impl Page {
+        fn sgp(&self, owner: &Owner) -> Result<Vec<Match>> {
+            let page = self.session.sgp_page(
+                owner,
+                self.start,
+                self.contribute
+                    .then_some(crate::data_contribution::TARGET_PATCH),
+            )?;
+            *self.games.borrow_mut() = page.games;
+            Ok(page.rows)
+        }
+    }
     let prepared = (|| {
         if start > 950 || start % 50 != 0 {
             return Err("history-page-limit");
@@ -303,6 +335,8 @@ pub fn refresh_page(
             }
         }
         Ok(Page {
+            contribute,
+            games: Default::default(),
             session,
             owner,
             start,
@@ -317,6 +351,36 @@ pub fn refresh_page(
     match prepared {
         Ok(page) => {
             let mut view = refresh_from(&page, path);
+            // refresh_from verifies the owner again after the read. Never stage on failure,
+            // a manual history read, or an incomplete LCU fallback.
+            if contribute {
+                view.contribution = path.parent().map(|dir| {
+                    if view.error.is_some() {
+                        crate::data_contribution::status(
+                            dir,
+                            Some("赛后读取未完成，本次未整理贡献样本。"),
+                        )
+                    } else if page.source.get() != "sgp" {
+                        crate::data_contribution::status(
+                            dir,
+                            Some("战绩可显示，但缺少完整对局，未加入贡献队列。"),
+                        )
+                    } else {
+                        crate::data_contribution::stage(dir, page.games.take()).unwrap_or_else(
+                            |e| {
+                                crate::data_contribution::status(
+                                    dir,
+                                    Some(if e == "contribution-queue-full" {
+                                        "本地贡献队列已满，暂停加入新样本；已有数据保留。"
+                                    } else {
+                                        "贡献样本未保存；原队列保留，可稍后重试。"
+                                    }),
+                                )
+                            },
+                        )
+                    }
+                });
+            }
             view.source = page.source.get().into();
             view.next_start = if view.error.is_some() {
                 Some(start)

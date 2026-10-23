@@ -163,7 +163,7 @@ impl Refresh {
             && self.job.is_none()
         {
             let _ = self.spawn(false, false, move || match crate::account_history::path() {
-                Ok(path) => crate::account_history::refresh(manual.as_deref(), &path),
+                Ok(path) => crate::account_history::refresh_after_game(manual.as_deref(), &path),
                 Err(error) => crate::account_history::View {
                     error: Some(error),
                     ..Default::default()

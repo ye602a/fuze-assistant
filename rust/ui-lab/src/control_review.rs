@@ -475,6 +475,11 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         }
     }
     a.click(ui, "数据与更新", None);
+    a.click(
+        ui,
+        "贡献自己的海克斯对局",
+        Some("pref:data_contribution:false"),
+    );
     for (label, command) in [
         ("检查新版", "check"),
         ("更新并重启", "install"),

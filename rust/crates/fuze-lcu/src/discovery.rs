@@ -78,10 +78,18 @@ impl HistorySession {
         owner: &crate::history::Owner,
         start: u32,
     ) -> crate::history::Result<Vec<crate::history::Match>> {
+        self.sgp_page(owner, start, None).map(|page| page.rows)
+    }
+    pub fn sgp_page(
+        &self,
+        owner: &crate::history::Owner,
+        start: u32,
+        patch: Option<&str>,
+    ) -> crate::history::Result<crate::contribution::Page> {
         if !self.process.alive() {
             return Err("history-client-unavailable");
         }
-        let result = self.client.history_sgp(self.pid, owner, start);
+        let result = self.client.history_sgp(self.pid, owner, start, patch);
         if !self.process.alive() {
             return Err("history-client-unavailable");
         }

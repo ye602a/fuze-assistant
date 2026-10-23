@@ -96,6 +96,7 @@ pub struct Status {
     pub available: Option<String>,
     pub notice: Option<&'static str>,
     pub update_error: Option<&'static str>,
+    pub contribution: crate::data_contribution::Summary,
     pub preferences: crate::preferences::Preferences,
     pub selection: Option<crate::champ_select::View>,
     pub playing: Option<crate::champ_select::View>,
@@ -119,6 +120,7 @@ impl Default for Status {
             available: None,
             notice: None,
             update_error: None,
+            contribution: Default::default(),
             preferences: Default::default(),
             selection: None,
             playing: None,
@@ -292,6 +294,15 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
         s.initialized = true;
         s.available = initial_available;
         s.preferences = preferences.clone();
+        if !fixture {
+            s.contribution = crate::preferences::path()
+                .ok()
+                .and_then(|p| {
+                    p.parent()
+                        .map(|d| crate::data_contribution::status(d, None))
+                })
+                .unwrap_or_default();
+        }
         s.ui_locale = match preferences.locale.as_str() {
             "auto" => "zh-CN",
             v => v,
@@ -365,9 +376,11 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             };
             let manual = (!preferences.manual_directory.is_empty())
                 .then(|| std::path::PathBuf::from(&preferences.manual_directory));
-            if let Some(completion) =
-                history_background.tick(phase, manual.clone(), preferences.local_records)
-            {
+            if let Some(completion) = history_background.tick(
+                phase,
+                manual.clone(),
+                preferences.local_records || preferences.data_contribution,
+            ) {
                 if let Some(mut view) = completion.view {
                     if !completion.explicit {
                         crate::history_detail::populate(
@@ -377,6 +390,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         );
                     }
                     if let Ok(mut s) = shared.status.lock() {
+                        if let Some(result) = view.contribution.take() {
+                            s.contribution = result;
+                        }
                         s.history = view;
                     }
                 }
