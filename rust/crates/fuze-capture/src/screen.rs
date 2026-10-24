@@ -78,6 +78,7 @@ pub struct ScreenCapture<D: ScreenDriver = NativeScreen> {
     generation: u64,
     sequence: u64,
     reason: Option<&'static str>,
+    failure_details: Option<serde_json::Value>,
 }
 impl Default for ScreenCapture {
     fn default() -> Self {
@@ -101,6 +102,7 @@ impl<D: ScreenDriver> ScreenCapture<D> {
             generation: 1,
             sequence: 0,
             reason: None,
+            failure_details: None,
         }
     }
     fn failed(&mut self, now: u64, reason: &'static str) {
@@ -109,7 +111,17 @@ impl<D: ScreenDriver> ScreenCapture<D> {
         self.bitmap = true;
         self.retry_at = now.saturating_add(60_000);
         self.reason = Some(reason);
+        self.failure_details = None;
         self.busy = 0;
+    }
+    fn failed_error(
+        &mut self,
+        now: u64,
+        reason: &'static str,
+        error: &(dyn std::error::Error + 'static),
+    ) {
+        self.failed(now, reason);
+        self.failure_details = Some(crate::native::failure_details(error));
     }
     fn accept(&mut self) -> Result<FrameStatus> {
         self.sequence = self
@@ -138,30 +150,58 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                         .checked_add(1)
                         .ok_or("capture-generation-overflow")?;
                 }
-                Err(_) => self.failed(now, "screen-start"),
+                Err(error) => self.failed_error(now, "screen-start", &*error),
             }
         }
         if self.running {
             match self.driver.stream(timeout) {
                 Ok(FrameStatus::Ready) => {
-                    let usable = self
-                        .driver
-                        .titles(false)
-                        .map(|a| {
-                            a.bytes()
-                                .chunks_exact(4)
-                                .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
-                        })
-                        .unwrap_or(false);
-                    if usable {
+                    let usable = self.driver.titles(false).map(|a| {
+                        a.bytes()
+                            .chunks_exact(4)
+                            .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
+                    });
+                    if matches!(usable, Ok(true)) {
                         self.bitmap = false;
                         self.reason = None;
+                        self.failure_details = None;
                         self.waiting_since = now;
                         self.seen = true;
                         self.busy = 0;
                         return self.accept();
                     }
-                    self.failed(now, "screen-black-frame");
+                    match usable {
+                        Err(error) => self.failed_error(now, "screen-title-read", &*error),
+                        Ok(false) => {
+                            // This tests three title ROIs, not the full screen. A dark game
+                            // scene is not evidence of a broken DXGI stream: compare GDI first.
+                            let bitmap_lit = self
+                                .driver
+                                .bitmap()
+                                .and_then(|_| self.driver.titles(true))
+                                .map(|a| {
+                                    a.bytes().chunks_exact(4).any(|p| {
+                                        u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24
+                                    })
+                                });
+                            if matches!(bitmap_lit, Ok(false)) {
+                                self.bitmap = false;
+                                self.reason = None;
+                                self.failure_details = None;
+                                self.waiting_since = now;
+                                self.seen = true;
+                                self.busy = 0;
+                                return self.accept();
+                            }
+                            self.failed(now, "screen-black-frame");
+                            self.failure_details = Some(serde_json::json!({
+                                "scope": "three-title-regions", "dxgiHasLitPixel": false,
+                                "bitmapHasLitPixel": bitmap_lit.as_ref().ok(),
+                                "bitmapError": bitmap_lit.as_ref().err().map(|e| crate::native::failure_details(&**e)),
+                            }));
+                        }
+                        Ok(true) => unreachable!(),
+                    }
                 }
                 Ok(FrameStatus::Resized) => {
                     self.waiting_since = now;
@@ -192,7 +232,8 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                         self.failed(now, "screen-timeout");
                     }
                 }
-                Ok(FrameStatus::Suspended) | Err(_) => self.failed(now, "screen-frame"),
+                Ok(FrameStatus::Suspended) => self.failed(now, "screen-frame"),
+                Err(error) => self.failed_error(now, "screen-frame", &*error),
             }
         }
         self.driver.bitmap().map_err(|_| "capture-bitmap")?;
@@ -247,7 +288,18 @@ impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
         }
     }
     fn fallback(&self) -> Option<&'static str> {
-        self.reason
+        if self.saving {
+            None
+        } else {
+            self.reason
+        }
+    }
+    fn fallback_details(&self) -> Option<&serde_json::Value> {
+        if self.saving {
+            None
+        } else {
+            self.failure_details.as_ref()
+        }
     }
 }
 
@@ -260,6 +312,8 @@ mod tests {
         starts: u32,
         bitmaps: u32,
         black: bool,
+        bitmap_black: bool,
+        title_error: bool,
     }
     impl ScreenDriver for Driver {
         fn start(&mut self) -> Result<()> {
@@ -278,9 +332,20 @@ mod tests {
             self.bitmaps += 1;
             Ok(())
         }
-        fn titles(&self, _: bool) -> Result<Atlas<'_>> {
+        fn titles(&self, bitmap: bool) -> Result<Atlas<'_>> {
+            if self.title_error && !bitmap {
+                return Err("fixture-title-error".into());
+            }
             Ok(Atlas::new(
-                if self.black { &[0; 12] } else { &[255; 12] },
+                if if bitmap {
+                    self.bitmap_black
+                } else {
+                    self.black
+                } {
+                    &[0; 12]
+                } else {
+                    &[255; 12]
+                },
                 1,
                 1,
             )?)
@@ -293,6 +358,8 @@ mod tests {
             starts: 0,
             bitmaps: 0,
             black: false,
+            bitmap_black: false,
+            title_error: false,
         })
     }
     #[test]
@@ -350,6 +417,30 @@ mod tests {
         c.driver.frame = FrameStatus::Timeout;
         c.next_at(8_000, Duration::ZERO).unwrap();
         assert_eq!(c.source(), "screen-bitmap");
+    }
+    #[test]
+    fn dark_scene_keeps_stream_but_title_read_errors_have_their_own_reason() {
+        let mut c = capture();
+        c.driver.black = true;
+        c.driver.bitmap_black = true;
+        c.next_at(0, Duration::ZERO).unwrap();
+        assert_eq!(c.source(), "screen-stream");
+        assert_eq!(c.fallback(), None);
+        c.driver.title_error = true;
+        c.next_at(1, Duration::ZERO).unwrap();
+        assert_eq!(c.fallback(), Some("screen-title-read"));
+        assert_eq!(
+            c.fallback_details().unwrap()["operation"],
+            "contract_validation"
+        );
+        c.saving(true);
+        c.next_at(2, Duration::ZERO).unwrap();
+        assert_eq!(c.fallback(), None);
+        assert_eq!(c.fallback_details(), None);
+        c.saving(false);
+        c.next_at(3, Duration::ZERO).unwrap();
+        assert_eq!(c.fallback(), Some("screen-title-read"));
+        assert_eq!(c.driver.starts, 1); // real failure cooldown is retained
     }
     #[test]
     fn recovering_stream_keeps_bitmap_available_until_first_frame() {

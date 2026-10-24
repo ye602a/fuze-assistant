@@ -129,6 +129,9 @@ fn lifecycle() -> Result<()> {
             return Err("recovery-not-once".into());
         }
         let next = supervisor.run(request(2), Duration::from_millis(250));
+        if supervisor.last_failure().is_none() {
+            return Err("recovery-cause-missing".into());
+        }
         if (mode == "crash") == next.is_ok() {
             return Err("recovery-result".into());
         }

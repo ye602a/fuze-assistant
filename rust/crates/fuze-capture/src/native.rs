@@ -53,6 +53,9 @@ pub trait CaptureFeed {
     fn fallback(&self) -> Option<&'static str> {
         None
     }
+    fn fallback_details(&self) -> Option<&serde_json::Value> {
+        None
+    }
 }
 
 #[derive(Debug)]

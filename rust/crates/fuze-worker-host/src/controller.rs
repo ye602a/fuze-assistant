@@ -473,6 +473,7 @@ pub struct PipelineStatus {
     pub backend: Option<fuze_contract::wire::ActiveBackend>,
     pub dataset: Option<String>,
     pub error: Option<&'static str>,
+    pub worker_cause: Option<&'static str>,
     pub frame_age: Option<u64>,
     pub level: Option<u8>,
 }
@@ -488,6 +489,7 @@ pub struct Controller {
     records: crate::local_records::Journal,
     last_frame: Option<Instant>,
     last_error: Option<&'static str>,
+    last_worker_cause: Option<&'static str>,
     config: Config,
     pipeline: Option<Pipeline>,
     revision: u64,
@@ -549,6 +551,7 @@ impl Controller {
             capture_fallback: self.pipeline.as_ref().and_then(|p| p.capture_fallback()),
             dataset: self.pipeline.as_ref().map(|p| p.dataset().to_owned()),
             error: self.last_error,
+            worker_cause: self.last_worker_cause,
             frame_age: self.last_frame.map(|t| t.elapsed().as_secs()),
             level: self
                 .level_reader
@@ -608,6 +611,7 @@ impl Controller {
             config,
             last_frame: None,
             last_error: None,
+            last_worker_cause: None,
             pipeline: None,
             revision: u64::MAX,
             retry: Retry::default(),
@@ -809,6 +813,7 @@ impl Controller {
                     .visible(delivery.display_visible && self.config.augment_overlay)?;
                 self.last_frame = Some(Instant::now());
                 self.last_error = None;
+                self.last_worker_cause = None;
                 self.retry.failures = 0;
             }
             Ok(())
@@ -817,6 +822,9 @@ impl Controller {
             Ok(()) => Ok(()),
             Err(error) => {
                 self.last_error = Some(error);
+                self.last_worker_cause = (error == "worker-recovered-use-next-frame")
+                    .then(|| self.pipeline.as_ref().and_then(|p| p.worker.last_failure()))
+                    .flatten();
                 let now = self.epoch.elapsed().as_millis() as u64;
                 if pending_game_window(error) {
                     self.retry.window_wait(now);

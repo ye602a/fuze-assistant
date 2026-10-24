@@ -17,6 +17,36 @@ use std::{
     time::Duration,
 };
 pub type Result<T> = std::result::Result<T, &'static str>;
+
+fn worker_receive_error(error: std::sync::mpsc::RecvTimeoutError) -> &'static str {
+    match error {
+        std::sync::mpsc::RecvTimeoutError::Timeout => "worker-timeout",
+        std::sync::mpsc::RecvTimeoutError::Disconnected => "worker-channel-closed",
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn disconnected_worker_is_not_reported_as_timeout() {
+    let (sender, receiver) = std::sync::mpsc::channel::<()>();
+    assert_eq!(
+        worker_receive_error(
+            receiver
+                .recv_timeout(std::time::Duration::ZERO)
+                .unwrap_err()
+        ),
+        "worker-timeout"
+    );
+    drop(sender);
+    assert_eq!(
+        worker_receive_error(
+            receiver
+                .recv_timeout(std::time::Duration::ZERO)
+                .unwrap_err()
+        ),
+        "worker-channel-closed"
+    );
+}
 #[cfg(windows)]
 pub mod account_history;
 #[cfg(windows)]
@@ -182,8 +212,14 @@ impl Worker {
                 while let Ok(job) = jobs.recv() {
                     let reply = job
                         .write(&mut input)
-                        .and_then(|_| wire::read_reply(&mut output))
-                        .map_err(|_| "worker-pipe-failed");
+                        .map_err(|_| "worker-pipe-write")
+                        .and_then(|_| {
+                            wire::read_reply(&mut output).map_err(|e| match e.kind() {
+                                std::io::ErrorKind::UnexpectedEof => "worker-pipe-eof",
+                                std::io::ErrorKind::InvalidData => "worker-pipe-invalid-data",
+                                _ => "worker-pipe-read",
+                            })
+                        });
                     let valid = reply.is_ok();
                     if results.send(reply).is_err() || !valid {
                         break;
@@ -233,11 +269,14 @@ impl Worker {
                 .as_ref()
                 .ok_or("worker-stopped")?
                 .try_send(request)
-                .map_err(|_| "worker-busy")?;
+                .map_err(|e| match e {
+                    mpsc::TrySendError::Full(_) => "worker-busy",
+                    mpsc::TrySendError::Disconnected(_) => "worker-channel-closed",
+                })?;
             let reply = self
                 .receive
                 .recv_timeout(timeout)
-                .map_err(|_| "worker-timeout")??;
+                .map_err(worker_receive_error)??;
             match &reply {
                 Reply::Result {
                     id: received,

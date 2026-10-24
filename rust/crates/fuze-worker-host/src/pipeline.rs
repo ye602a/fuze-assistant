@@ -352,6 +352,14 @@ impl Pipeline {
         let reply = match self.worker.run(request, Duration::from_secs(3)) {
             Ok(reply) => reply,
             Err(error) => {
+                if self.diagnostic_active {
+                    self.diagnostic_ocr = Some(serde_json::json!({
+                        "attempted": true, "error": error,
+                        "workerCause": self.worker.last_failure(),
+                        "recovered": self.worker.recovered(), "backend": self.worker.backend(),
+                        "elapsedMs": started.elapsed().as_millis(), "timeoutMs": 3000,
+                    }));
+                }
                 self.session.fail(ticket, self.now());
                 return Err(error);
             }
@@ -621,6 +629,7 @@ impl Pipeline {
         serde_json::json!({
             "stage": stage, "frame": [capture.key().0, capture.key().1],
             "source": capture.source(), "fallback": capture.fallback(),
+            "fallbackDetails": capture.fallback_details(),
             "dataset": self.dataset, "level": self.diagnostic_level,
             "schedule": format!("{:?}", self.scheduling().0), "nextLevel": self.scheduling().2,
             "evidence": capture.selection().map(|e| format!("{e:?}")),

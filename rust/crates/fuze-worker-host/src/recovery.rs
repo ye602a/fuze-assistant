@@ -15,6 +15,7 @@ pub struct Supervisor {
     timeout: Duration,
     launches: u8,
     catalog: Option<std::sync::Arc<Vec<u8>>>,
+    last_failure: Option<&'static str>,
 }
 impl Supervisor {
     #[cfg(windows)]
@@ -48,6 +49,7 @@ impl Supervisor {
             timeout,
             launches: 0,
             catalog,
+            last_failure: None,
         };
         if automatic {
             *s.args.last_mut().unwrap() = "dml".into();
@@ -55,6 +57,7 @@ impl Supervisor {
         match s.launch() {
             Ok(()) => Ok(s),
             Err(e) if automatic && e == "worker-not-ready" => {
+                s.last_failure = Some(e);
                 s.recover()?;
                 Ok(s)
             }
@@ -104,6 +107,7 @@ impl Supervisor {
         match result {
             Ok(reply) => Ok(reply),
             Err(e) => {
+                self.last_failure = Some(e);
                 if self.automatic
                     && !self.recovered
                     && self.worker.as_ref().is_some_and(Worker::stopped)
@@ -129,6 +133,9 @@ impl Supervisor {
     }
     pub fn recovered(&self) -> bool {
         self.recovered
+    }
+    pub fn last_failure(&self) -> Option<&'static str> {
+        self.last_failure
     }
     pub fn backend(&self) -> Option<ActiveBackend> {
         self.worker.as_ref().map(|w| w.backend)
