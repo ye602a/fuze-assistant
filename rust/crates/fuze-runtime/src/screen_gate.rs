@@ -44,12 +44,9 @@ impl ScreenGate {
     pub fn observe(&mut self, evidence: Evidence, now: u64) -> Decision {
         match evidence {
             Evidence::Visible | Evidence::TitlesOnly => {
-                let skill_only = evidence == Evidence::TitlesOnly;
-                if self.skill_only != skill_only {
-                    self.positive = 0;
-                    self.open = false;
-                }
-                self.skill_only = skill_only;
+                // Button changes/rerolls are still the same open selection screen.
+                // Keep its lifetime so a following disappearance can close it.
+                self.skill_only = evidence == Evidence::TitlesOnly;
                 self.positive = self.positive.saturating_add(1);
                 self.missing_since = None;
                 self.open |= self.positive >= 2;
@@ -115,9 +112,46 @@ mod tests {
         assert!(g.accept_titles(&skills, TitleKind::SkillChoice));
         skills[1] = Slot::Unreadable;
         assert!(g.accept_titles(&skills, TitleKind::SkillChoice));
-        assert!(!g.observe(Evidence::Visible, 500).recognize);
+        assert!(g.observe(Evidence::Visible, 500).recognize);
         assert!(g.observe(Evidence::Visible, 750).recognize);
         assert!(g.accept_titles(&ordinary, TitleKind::Candidate));
+    }
+    #[test]
+    fn changing_button_evidence_keeps_the_close_event_and_opening_gate() {
+        use crate::gate::{LevelGate, Selection};
+        for (first, next) in [
+            (Evidence::Visible, Evidence::TitlesOnly),
+            (Evidence::TitlesOnly, Evidence::Visible),
+        ] {
+            let mut screen = ScreenGate::default();
+            let mut level = LevelGate::default();
+            level.update_level(3, 0);
+            assert!(!screen.observe(first, 0).recognize);
+            assert!(screen.observe(first, 500).recognize);
+            level.observe(
+                if first == Evidence::Visible {
+                    Selection::Candidate
+                } else {
+                    Selection::SkillChoice
+                },
+                500,
+            );
+            // A reroll/animation changes button pixels just before the panel closes.
+            assert!(screen.observe(next, 1000).recognize);
+            if next == Evidence::Visible {
+                level.observe(Selection::Candidate, 1000);
+            }
+            assert!(!screen.observe(Evidence::Absent, 1500).closed);
+            let end = screen.observe(Evidence::Absent, 2000);
+            assert!(end.closed);
+            if end.closed {
+                level.screen_closed();
+            }
+            level.update_level(6, 3000);
+            assert!(!level.decision(3000).capture);
+            level.update_level(7, 4000);
+            assert!(level.decision(4000).capture);
+        }
     }
     #[test]
     fn isolated_shop_title_cannot_open_or_replace_a_confirmed_card() {

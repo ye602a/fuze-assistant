@@ -30,9 +30,9 @@ impl Art {
             return Err("overlay-icons-unavailable");
         }
         urls.extend(
-            crate::overlay_frame::skill_cards()
-                .into_iter()
-                .map(|card| (card.id, card.icon)),
+            fuze_contract::skill_choice::CHOICES
+                .iter()
+                .map(|choice| (choice.id, fuze_contract::skill_choice::ICON_URL.into())),
         );
         Ok(Self {
             service: Service::new(vec![], offline)?,

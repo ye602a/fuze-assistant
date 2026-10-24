@@ -120,7 +120,7 @@ impl LevelGate {
             // A shard/anvil chain cannot inherit a preceding candidate's closure.
             Selection::StatShard => self.candidate_seen = false,
             Selection::SkillChoice => {
-                self.candidate_seen = false;
+                // A skill offer neither consumes nor erases the ordinary opening.
                 self.skill_seen = true;
             }
             Selection::Unknown => {}
@@ -284,6 +284,18 @@ mod tests {
         ordinary.screen_closed();
         ordinary.update_level(18, 30000);
         assert_eq!(ordinary.decision(30000).interval_ms, 8000);
+    }
+    #[test]
+    fn a_skill_offer_after_ordinary_cards_does_not_reopen_level_six() {
+        let mut g = LevelGate::default();
+        g.update_level(3, 0);
+        g.observe(Selection::Candidate, 1);
+        g.observe(Selection::SkillChoice, 500);
+        g.screen_closed();
+        g.update_level(6, 1000);
+        assert!(!g.decision(1000).capture);
+        g.update_level(7, 2000);
+        assert!(g.decision(2000).capture);
     }
     #[test]
     fn off_threshold_saves_but_death_and_respawn_only_open_bounded_probe_windows() {
