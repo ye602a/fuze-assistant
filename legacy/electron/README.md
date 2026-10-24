@@ -8,5 +8,6 @@
 其历史脚本使用当时的仓库布局。旧工作流保存在 `.github/workflows/` 子目录中，GitHub 不会执行它。
 
 新版仍需要的图标、OCR 模型与测试样本保留在仓库根目录的 `public/`、`resources/` 和
-`tests/fixtures/`。新版数据下载脚本使用 `scripts/lib/client-data-security.ts`，不再引用旧应用源码。
-这次归档不删除历史 Releases，不改变现有程序、自动更新地址或版本号。
+`tests/fixtures/`。旧 JS 数据下载器及其接口说明也归档在本目录的 `scripts/`、`docs/` 下；
+下载器复用归档内的 `src/shared/client-data-security.ts`。当前构建通过 Rust 下载器准备数据。
+历史 Releases 和更新地址保留。

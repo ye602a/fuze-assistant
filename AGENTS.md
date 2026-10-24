@@ -6,7 +6,7 @@ FUZE is a Rust application. Read `docs/CODEX_HANDOFF.md` for release identity an
 - `rust/crates/`: services, capture, OCR, native overlay, update and rollback.
 - `rust/ui-lab/`: production Slint/Skia interface; the directory name is historical.
 - `scripts/`: active data, build, packaging and offline diagnostic tools.
-- `scripts/lib/client-data-security.ts`: data-download tooling shared with the archived application.
+- `scripts/prepare-rust-data.mjs`: build-time data preparation through the Rust downloader.
 - `public/`, `resources/`, `tests/fixtures/`: assets and fixtures still used by Rust.
 - `tests/unit/`: focused native-tooling tests (`npm test`).
 - `legacy/electron/`: archived v0.6.3 source, tests and build configuration.

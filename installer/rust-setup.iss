@@ -1,4 +1,7 @@
-﻿; Extract the original v0.7.0 files; do not run installers or FUZE.
+﻿; Extract the selected payload; do not run installers or FUZE.
+#ifndef AppRelease
+  #define AppRelease "0.7.1"
+#endif
 #ifndef Payload
   #error Payload is required
 #endif
@@ -8,13 +11,13 @@
 [Setup]
 AppId=FUZE.SimpleInstall
 AppName=符择 FUZE
-AppVersion=0.7.0
+AppVersion={#AppRelease}
 AppPublisher=FUZE Project
 AppPublisherURL=https://github.com/ye602a/fuze-assistant
 DefaultDirName={localappdata}\Programs\FUZE
 DisableProgramGroupPage=yes
 OutputDir={#Output}
-OutputBaseFilename=FUZE-Setup-0.7.0-windows-x64
+OutputBaseFilename=FUZE-Setup-{#AppRelease}-windows-x64
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
@@ -30,7 +33,7 @@ UninstallDisplayIcon={app}\fuze-ui-lab.exe
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Messages]
-FinishedLabel=FUZE v0.7.0 已解压到所选目录，所需 VC++ DLL 已随程序提供。请通过 FUZE 快捷方式启动。%n%n安装完成后不会自动启动程序。
+FinishedLabel=FUZE v{#AppRelease} 已解压到所选目录，所需 VC++ DLL 已随程序提供。请通过 FUZE 快捷方式启动。%n%n安装完成后不会自动启动程序。
 
 [Files]
 Source: "{#Payload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -456,6 +456,10 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         ui.set_page(2);
                         ui.set_settings_section(1);
                         ui.set_scroll_y(0.);
+                        control(&ui, "存储管理", || {
+                            ui.global::<crate::MaintenanceState>()
+                                .set_storage_open(true);
+                        })?;
                         control(&ui, "扫描本地占用", || {
                             ui.global::<crate::MaintenanceState>()
                                 .invoke_action("scan".into())

@@ -79,7 +79,7 @@
 - [`src/main/data-loader.ts`](../src/main/data-loader.ts) 的 `normalizeDataPath()` 只替换反斜杠并移除开头 `/`，没有拒绝 `.`、`..`、盘符和绝对路径。
 - `isRequiredBundledDataPath()` 接受所有以 `champion-shards/` 开头的路径。
 - `writeDataFileToDisk()` 将上述路径直接传入 `path.join(versionDir, dataPath)`。
-- [`scripts/fetch-client-data.mjs`](../scripts/fetch-client-data.mjs) 的 `normalizeDataPath()`、`isBundledDataPath()` 和 `downloadBundleFile()` 存在相同边界问题。
+- [`scripts/fetch-client-data.mjs`](../legacy/electron/scripts/fetch-client-data.mjs) 的 `normalizeDataPath()`、`isBundledDataPath()` 和 `downloadBundleFile()` 存在相同边界问题。
 
 例如，恶意 manifest 路径：
 

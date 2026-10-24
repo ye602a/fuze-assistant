@@ -475,6 +475,13 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         }
     }
     a.click(ui, "数据与更新", None);
+    a.check(
+        "维护默认收起",
+        target(ui, "扫描本地占用").is_err() && target(ui, "选择旧设置并预览").is_err(),
+        "secondary tools collapsed",
+    );
+    a.click(ui, "存储管理", None);
+    a.click(ui, "旧设置迁移", None);
     for (label, command) in [
         ("检查新版", "check"),
         ("更新并重启", "install"),
@@ -489,7 +496,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         "public channel has no credential entry or private toggle",
     );
     a.click(ui, "选择旧设置并预览", Some("record:import-settings:0"));
-    a.click(ui, "更新推荐数据与字典", Some("host:data-update"));
+    a.click(ui, "检查数据更新", Some("host:data-update"));
     a.click(ui, "常用设置", None);
     for (key, title) in prefs {
         a.click(ui, title, Some(&format!("pref:{key}:false")));
@@ -613,13 +620,13 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "数据与更新", None);
     a.click(ui, "检查新版", Some("maintenance:check"));
     a.disabled(ui, "扫描本地占用");
-    a.disabled(ui, "更新推荐数据与字典");
+    a.disabled(ui, "检查数据更新");
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
     s.set_running(false);
     for (mode, offline, busy) in [("服务忙", false, true), ("离线", true, false)] {
         s.set_offline(offline);
         s.set_busy(busy);
-        for label in ["更新推荐数据与字典", "选择旧设置并预览"] {
+        for label in ["检查数据更新", "选择旧设置并预览"] {
             a.disabled(ui, label);
         }
         a.check(

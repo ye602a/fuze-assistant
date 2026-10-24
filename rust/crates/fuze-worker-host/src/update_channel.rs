@@ -250,6 +250,7 @@ impl Session {
             return Err("update-asset-size");
         }
         Ok(Release {
+            version: release_version(assets, &manifest.revision),
             manifest,
             archive,
             map,
@@ -357,9 +358,26 @@ impl Manifest {
     }
 }
 pub struct Release {
+    pub version: Option<String>,
     pub manifest: Manifest,
     pub archive: String,
     pub map: String,
+}
+// Read the version only from a Setup asset tied to the selected manifest revision.
+// Do not extend the strict manifest: deployed v0.7.0 updaters reject unknown fields.
+fn release_version(assets: &[serde_json::Value], revision: &str) -> Option<String> {
+    let suffix = format!("-preview-{revision}-windows-x64.exe");
+    let versions: Vec<_> = assets
+        .iter()
+        .filter_map(|a| {
+            a["name"]
+                .as_str()?
+                .strip_prefix("FUZE-Setup-")?
+                .strip_suffix(&suffix)
+        })
+        .filter(|v| crate::build_identity::semantic_version(v))
+        .collect();
+    (versions.len() == 1).then(|| versions[0].to_owned())
 }
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Transfer {
@@ -536,6 +554,26 @@ pub fn bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn version_label_uses_only_matching_setup_asset() {
+        let assets = serde_json::json!([
+            {"name":"FUZE-Setup-0.7.0-preview-aaaaaaaaaaaa-windows-x64.exe"},
+            {"name":"FUZE-Setup-0.7.1-preview-bbbbbbbbbbbb-windows-x64.exe"}
+        ]);
+        assert_eq!(
+            super::release_version(assets.as_array().unwrap(), "bbbbbbbbbbbb"),
+            Some("0.7.1".into())
+        );
+        assert_eq!(
+            super::release_version(assets.as_array().unwrap(), "cccccccccccc"),
+            None
+        );
+        assert!(!crate::build_identity::semantic_version("bbbbbbbbbbbb"));
+        assert!(!crate::build_identity::semantic_version("0.7.01"));
+        assert!(crate::build_identity::semantic_version(
+            crate::build_identity::APP_VERSION.trim()
+        ));
+    }
     use super::*;
     use std::cell::Cell;
     #[test]

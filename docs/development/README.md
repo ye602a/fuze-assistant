@@ -6,7 +6,7 @@
 
 ## 当前代码与发布边界
 
-`master` 已通过 [集成 PR #95](https://github.com/ye602a/fuze-assistant/pull/95) 纳入 Rust 开发历史。当前程序为 Rust v0.7.0；v0.6.3 Electron 源码已归档，历史发布继续保留。合并源码、通过 CI 与发布安装包是三个不同步骤，不按每个 PR 自动打包。
+当前正式发布为 v0.7.0，下一小版本源码为 `rust/app-version.txt` 中的 **0.7.1**，尚未打包发布。v0.6.3 Electron 源码已归档，历史发布继续保留。应用版本不使用根目录 `package.json` 的工具包版本；普通 PR 不自动发布安装包。
 
 | 目录 | 用途 |
 | --- | --- |
@@ -17,6 +17,14 @@
 | `docs/development/rust/`、`rust/ui-lab/evidence/` | 迁移设计、阶段证据与历史检查记录 |
 
 Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust 工作区](../../rust/README.md)、[原生界面入口](../../rust/ui-lab/README.md)及当前 Actions 工作流中的命令为准。根目录 Node 工具使用 `npm ci --ignore-scripts` 安装、`npm test` 检查；复现 Electron 请在独立目录检出旧版标签。
+
+数据准备使用 `node scripts/prepare-rust-data.mjs`，`npm run prepare:client-data` 指向同一入口。
+先构建 `fuze-rust-host.exe`；脚本从 `rust/target/release` 或 `FUZE_RUST_BIN_DIR` 查找该工具，
+以 `--prepare-data` 写入仓库的 `resources/client-data`，不启动桌面或连接游戏。
+旧 JS 下载器归入 `legacy/electron/scripts/`，不再与 Rust 下载器并行维护。
+
+公开数据读取、程序更新和对局上传的地址及范围见[数据接口说明](../client-api-strategy.md)。
+对局贡献模拟仍在独立的 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127)，不包含在这次 0.7.1 数据更新改动中。
 
 ## 验证与发布
 

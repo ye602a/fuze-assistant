@@ -91,16 +91,19 @@ fn perform(
             reply.update = Some(if reply.installable {
                 format!(
                     "发现版本 {} · 完整包约 {} MB\n更新程序将优先差分下载，失败时回退全量。",
-                    release.manifest.revision,
+                    release.version.as_deref().unwrap_or("版本号未提供"),
                     release.manifest.size.div_ceil(1024 * 1024)
                 )
             } else if release.manifest.sequence < current.sequence {
                 format!(
                     "本机版本较新；线上测试频道仍为 {}，不会降级。",
-                    release.manifest.revision
+                    release.version.as_deref().unwrap_or("版本号未提供")
                 )
             } else {
-                format!("已是当前测试频道版本 {}。", release.manifest.revision)
+                format!(
+                    "已是当前测试频道版本 {}。",
+                    release.version.as_deref().unwrap_or("版本号未提供")
+                )
             });
             reply.notice = reply.update.clone().unwrap_or_default();
         }
@@ -285,8 +288,8 @@ pub fn attach(
             .ok()
             .and_then(|p| p.parent().map(ToOwned::to_owned))
         {
-            if let Ok(version) = fuze_worker_host::managed_install::bundled_version(&dir) {
-                state.set_current_version(version.revision.into());
+            if let Some(version) = fuze_worker_host::build_identity::package_version(&dir) {
+                state.set_current_version(version.into());
             }
         }
     }

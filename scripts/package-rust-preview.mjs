@@ -9,6 +9,8 @@ import {prepare,root,ort} from './rust-prototype-tools.mjs'
 import {previewPath} from './rust-bundle-policy.mjs'
 import {makeRuntimeContract,installCommand} from './rust-runtime-contract.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
+const version=(await readFile(path.join(root,'rust/app-version.txt'),'utf8')).trim()
+if(!/^0\.7\.(0|[1-9]\d*)$/.test(version))throw new Error('Invalid application version')
 if(!/^[a-f0-9]{12}$/.test(revision))throw new Error('Invalid revision')
 const frontend=process.env.FUZE_UI_FRONTEND || 'slint'
 if(!['win32','slint'].includes(frontend))throw new Error('Invalid UI frontend')
@@ -77,7 +79,7 @@ await text('Install-local.cmd',installCommand())
 await text('Update.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update\r\n')
 await text('Forget-private-token.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --forget-credentials\r\n')
 await text('Rollback.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --rollback\r\n')
-await text('README.txt',`FUZE Rust 中文开发测试包 ${revision}
+await text('README.txt',`FUZE ${version} 中文测试包（构建 ${revision}）
 
 这是独立预览，保留已安装的稳定版。不要让两套助手同时识别。
 启动、两局测试要点与脱敏反馈步骤统一见 TESTING-zh-CN.txt。
@@ -113,7 +115,7 @@ Rust 频道使用 rust-update.json、.fuz 和配套 .blockmap，不读取 Electr
 真实游戏、跨屏、独占全屏及最终安装更新仍需验收，本包不代表完整迁移或正式稳定发布。
 来源与致谢见 THANKS.md。
 `.replace(/\n/g,'\r\n'))
-await text('build.json',JSON.stringify({revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
+await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}

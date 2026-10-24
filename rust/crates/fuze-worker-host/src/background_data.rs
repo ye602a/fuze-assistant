@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -13,12 +13,14 @@ pub struct Outcome {
     pub supplemental_error: Option<&'static str>,
 }
 pub struct Refresh {
+    progress: Arc<Mutex<crate::data_update::Progress>>,
     due: Instant,
     job: Option<(Arc<AtomicBool>, mpsc::Receiver<crate::Result<Outcome>>)>,
 }
 impl Refresh {
     pub fn new() -> Self {
         Self {
+            progress: Default::default(),
             due: Instant::now() + Duration::from_secs(20),
             job: None,
         }
@@ -30,6 +32,9 @@ impl Refresh {
     }
     pub fn busy(&self) -> bool {
         self.job.is_some()
+    }
+    pub fn progress(&self) -> crate::data_update::Progress {
+        self.progress.lock().map(|p| p.clone()).unwrap_or_default()
     }
     pub fn tick(
         &mut self,
@@ -57,19 +62,45 @@ impl Refresh {
                 return None;
             };
             let roots = roots.to_vec();
+            let progress = self.progress.clone();
+            if let Ok(mut p) = progress.lock() {
+                *p = crate::data_update::Progress {
+                    message: "正在自动检查数据…".into(),
+                    ..Default::default()
+                };
+            }
             let cancel = Arc::new(AtomicBool::new(false));
             let flag = cancel.clone();
             let (tx, rx) = mpsc::sync_channel(1);
             if std::thread::Builder::new()
                 .name("fuze-idle-data".into())
                 .spawn(move || {
-                    let supplemental = crate::recognition_sources::refresh(&root, &|| {
-                        flag.load(Ordering::Acquire)
-                    });
-                    let result =
+                    let report = |p| {
+                        if let Ok(mut current) = progress.lock() {
+                            *current = p;
+                        }
+                    };
+                    let result = if locale == fuze_data::Locale::ZhCn {
+                        crate::data_update::refresh_chinese(
+                            &root,
+                            &roots,
+                            &|| flag.load(Ordering::Acquire),
+                            &report,
+                        )
+                    } else {
                         crate::data_update::refresh_current(&root, &roots, locale, &|| {
                             flag.load(Ordering::Acquire)
+                        })
+                    };
+                    let supplemental = if result.is_ok() {
+                        report(crate::data_update::Progress {
+                            message: "正在检查补充识别词库…".into(),
+                            ..Default::default()
                         });
+                        crate::recognition_sources::refresh(&root, &|| flag.load(Ordering::Acquire))
+                    } else {
+                        Ok(())
+                    };
                     let _ = tx.send(result.map(|changed| Outcome {
                         updated: changed,
                         supplemental_error: supplemental.err(),
@@ -98,6 +129,7 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::sync_channel(1);
         let mut updater = Refresh {
+            progress: Default::default(),
             due: Instant::now(),
             job: Some((flag.clone(), rx)),
         };

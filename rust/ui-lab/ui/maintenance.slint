@@ -2,7 +2,7 @@ import { HostState, MaintenanceState } from "host-state.slint";
 import { Theme, Label, Action, Panel, SectionTitle } from "components.slint";
 export component MaintenancePage inherits VerticalLayout {
     in property <float> entrance: 1;
-    spacing: 18px;
+    spacing: 12px;
     Panel { height: 210px; entrance: root.entrance;
         SectionTitle { x: 23px; y: 18px; height: 26px; text: "软件更新"; }
         Label { x: 160px; y: 18px; width: parent.width - 183px; height: 26px; text: "当前版本 · " + MaintenanceState.current-version; horizontal-alignment: right; color: Theme.muted; }
@@ -11,8 +11,9 @@ export component MaintenancePage inherits VerticalLayout {
         if MaintenanceState.installable: Action { x: 185px; y: 116px; width: parent.width - 208px; label: "更新并重启"; enabled: !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("install"); } }
         Label { x: 23px; y: 166px; width: parent.width - 46px; height: 28px; wrap: word-wrap; text: "检查不会下载或中断识别。安装更新前请先暂停识别。"; color: Theme.muted; font-size: 12px; }
     }
-    if MaintenanceState.notice != "": Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
-    Panel { height: 190px + MaintenanceState.storage-rows.length * 30px; entrance: root.entrance; entrance-group: 1;
+    if MaintenanceState.notice != "" && MaintenanceState.notice != MaintenanceState.update-status: Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
+    Action { label: MaintenanceState.storage-open ? "收起存储管理" : "存储管理"; clicked => { MaintenanceState.storage-open = !MaintenanceState.storage-open; } }
+    if MaintenanceState.storage-open: Panel { height: 190px + MaintenanceState.storage-rows.length * 30px; entrance: root.entrance; entrance-group: 1;
         SectionTitle { x: 23px; y: 18px; height: 26px; text: "存储管理"; }
         Label { x: 23px; y: 55px; width: parent.width - 46px; height: 48px; wrap: word-wrap; text: MaintenanceState.storage-summary; color: Theme.muted; }
         VerticalLayout { x: 23px; y: 112px; width: parent.width - 46px; height: MaintenanceState.storage-rows.length * 30px; spacing: 0px;

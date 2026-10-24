@@ -191,7 +191,10 @@ fn run() -> Result<(), &'static str> {
             &fuze_worker_host::update_progress::translated(
                 "发现版本 {}，完整包约 {} MB。更新并重启 FUZE？\n覆盖当前程序，保留个人数据。",
                 &[
-                    release.manifest.revision.clone(),
+                    release
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| "版本号未提供".into()),
                     (release.manifest.size / 1024 / 1024).to_string(),
                 ],
             ),

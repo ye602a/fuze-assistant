@@ -1,6 +1,32 @@
 //! Package metadata is an allowlisted diagnostic hint, never a path or build attestation.
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::OnceLock};
+pub const APP_VERSION: &str = include_str!("../../../app-version.txt");
+pub fn semantic_version(value: &str) -> bool {
+    let parts: Vec<_> = value.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 6
+                && (p.len() == 1 || !p.starts_with('0'))
+                && p.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+pub fn package_version(directory: &Path) -> Option<String> {
+    crate::managed_install::bundled_version(directory).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(
+        &crate::update_channel::bounded(&directory.join("build.json"), 16384).ok()?,
+    )
+    .ok()?;
+    // All published packages before the version field were v0.7.0.
+    match value.get("version") {
+        None => Some("0.7.0".into()),
+        Some(v) => v
+            .as_str()
+            .filter(|v| semantic_version(v))
+            .map(str::to_owned),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
