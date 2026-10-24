@@ -477,6 +477,7 @@ pub struct PipelineStatus {
     pub level: Option<u8>,
 }
 pub struct Controller {
+    pub(crate) screenshots: crate::recognition_log::Control,
     gate_context: Option<Context>,
     gate_resume: Option<(Context, fuze_runtime::gate::ClosedWindow)>,
     recent_tiers: [Option<u64>; 3],
@@ -564,7 +565,9 @@ impl Controller {
     pub(crate) fn reconfigure(&mut self, config: Config) {
         self.suspend();
         let resume = self.gate_resume.take();
+        let screenshots = self.screenshots.clone();
         *self = Self::new(config);
+        self.screenshots = screenshots;
         self.gate_resume = resume;
     }
     fn resume_window(&mut self, context: Context) -> Option<fuze_runtime::gate::ClosedWindow> {
@@ -593,6 +596,7 @@ impl Controller {
     }
     pub fn new(config: Config) -> Self {
         Self {
+            screenshots: Default::default(),
             gate_context: None,
             gate_resume: None,
             recent_tiers: [None; 3],
@@ -662,7 +666,7 @@ impl Controller {
         let active = context.filter(|c| {
             fresh && matches!(c.phase, Phase::Loading | Phase::InProgress) && c.supported
         });
-        let (Some(context), Some(_root)) = (active, root) else {
+        let (Some(context), Some(root)) = (active, root) else {
             self.clear();
             return Ok(());
         };
@@ -680,10 +684,15 @@ impl Controller {
         }
         let result: Result<()> = (|| {
             if self.pipeline.is_none() {
-                let pipeline = self.config.prepare(
+                let mut pipeline = self.config.prepare(
                     context.champion.unwrap_or(0),
                     locale.ok_or("locale-unavailable")?,
                 )?;
+                if review.is_none() {
+                    pipeline
+                        .diagnostics
+                        .configure(self.screenshots.clone(), root.clone());
+                }
                 let mut latest = monitor.latest.lock().map_err(|_| "lcu-observation")?;
                 // Loading model/data may overlap a phase or hero change; never attach that stale host.
                 if latest.revision != revision || latest.updated.elapsed() >= Duration::from_secs(8)

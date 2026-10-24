@@ -414,7 +414,7 @@ impl Record {
 pub fn root() -> Result<PathBuf> {
     Ok(crate::preferences::path()?.with_file_name("logs"))
 }
-fn directory(path: &Path) -> Result<()> {
+pub(crate) fn directory(path: &Path) -> Result<()> {
     if !path.is_absolute() || path.to_string_lossy().starts_with("\\\\") {
         return Err("log-path");
     }

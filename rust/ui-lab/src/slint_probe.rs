@@ -9,6 +9,38 @@ use slint::{
 use std::{path::Path, rc::Rc, time::Instant};
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
+#[test]
+fn recognition_log_settings_offscreen() {
+    // Actual Slint layout, in memory only: no HWND, engine, desktop pixels or network.
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
+    let ui = Workbench::new().unwrap();
+    ui.set_page(2);
+    ui.set_settings_section(2);
+    ui.global::<crate::HostState>().set_connected(true);
+    ui.global::<crate::HostState>().set_offline(false);
+    ui.show().unwrap();
+    window.set_size(slint::PhysicalSize::new(920, 760));
+    for (name, enabled, message) in [
+        ("disabled", false, "未开启；仅本次运行有效，已有文件保留。 已保存 0 条，队列繁忙跳过 0 条。"),
+        ("enabled", true, "已开启，等待前台主屏游戏画面；关闭或退出后停止采样。 已保存 12 条，队列繁忙跳过 0 条。"),
+        ("limit", false, "已到 120 条或 64 MiB 上限，请先移走目录内的旧记录，再重启后开启。 已保存 120 条，队列繁忙跳过 0 条。"),
+    ] {
+        let state = ui.global::<crate::DiagnosticState>();
+        state.set_screenshots_enabled(enabled);
+        state.set_screenshots_recent(enabled);
+        state.set_screenshots_status(message.into());
+        ui.set_scroll_y(-360.);
+        let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
+        window.request_redraw();
+        window.draw_if_needed(|r| { r.render(&mut pixels, 920); });
+        assert!(pixels.iter().filter(|p| p.g > 20).count() > 100_000);
+        if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+            image::save_buffer(std::path::Path::new(&output).join(format!("captures-{name}.png")),
+                &pixels.iter().flat_map(|p|[p.r,p.g,p.b]).collect::<Vec<_>>(), 920,760,image::ColorType::Rgb8).unwrap();
+        }
+    }
+}
 /// Initializes the real Windows backend without ever calling show/run on the component.
 /// Snapshot rendering is rasterized and MUST NOT be presented as GPU timing.
 pub fn native_review(

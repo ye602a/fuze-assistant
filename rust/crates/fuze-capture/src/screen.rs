@@ -12,6 +12,9 @@ pub trait ScreenDriver {
     fn stream(&mut self, timeout: Duration) -> Result<FrameStatus>;
     fn bitmap(&mut self) -> Result<()>;
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>>;
+    fn diagnostic_pixels(&self, _bitmap: bool) -> Option<crate::native::DiagnosticPixels<'_>> {
+        None
+    }
     fn selection(&self, _bitmap: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
         None
     }
@@ -23,6 +26,15 @@ pub struct NativeScreen {
     bitmap: bitmap::Reader,
 }
 impl ScreenDriver for NativeScreen {
+    fn diagnostic_pixels(&self, bitmap: bool) -> Option<crate::native::DiagnosticPixels<'_>> {
+        if bitmap {
+            self.bitmap.diagnostic_pixels()
+        } else {
+            self.stream
+                .as_ref()
+                .and_then(DesktopStream::diagnostic_pixels)
+        }
+    }
     fn selection(&self, bitmap: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
         if bitmap {
             self.bitmap.evidence
@@ -189,6 +201,11 @@ impl<D: ScreenDriver> ScreenCapture<D> {
     }
 }
 impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
+    fn diagnostic_pixels(&self) -> Option<crate::native::DiagnosticPixels<'_>> {
+        self.ready
+            .then(|| self.driver.diagnostic_pixels(self.bitmap))
+            .flatten()
+    }
     fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
         self.driver.selection(self.bitmap)
     }

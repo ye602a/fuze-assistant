@@ -24,6 +24,14 @@ impl Binding {
     pub fn poll(&mut self, ui: &Workbench, status: &Status, offline: bool) {
         self.upload.borrow_mut().poll(ui, status);
         let state = ui.global::<DiagnosticState>();
+        let (enabled, recent, message) = self.session.screenshot_status();
+        state.set_screenshots_enabled(enabled);
+        state.set_screenshots_recent(recent);
+        state.set_screenshots_status(if offline {
+            "隔离验证不采集画面，不写入个人目录。".into()
+        } else {
+            message.into()
+        });
         if let Some(journal) = &mut self.journal {
             journal.observe(status);
         }
@@ -161,9 +169,34 @@ pub fn attach(
             notice(&ui, Err("frontend-offline-operation"));
             return;
         }
-        if action == "open-logs" {
+        if action == "toggle-screenshots" || action == "mark-screenshot" {
+            let result = if action == "toggle-screenshots" {
+                session.screenshot_logging(!session.screenshot_status().0)
+            } else {
+                session.mark_screenshot()
+            };
+            let message = match result {
+                Ok(()) if action == "mark-screenshot" => {
+                    "已排队保存最近画面的问题标记；保留原始采样时间。"
+                }
+                Ok(()) => "截图设置已更新；仅本次运行有效，不会自动上传。",
+                Err("capture-log-no-recent") => {
+                    "最近 30 秒没有可标记的记录；请先开启截图并回到游戏。"
+                }
+                Err("capture-log-busy") => "截图正在写入，请稍后再标记。",
+                _ => "截图日志暂不可用，请检查本地目录权限。",
+            };
+            ui.global::<HostState>().set_notice(message.into());
+            return;
+        }
+        if action == "open-logs" || action == "open-screenshots" {
             let result = (|| {
-                let path = runtime_log::root().map_err(|_| "log-open")?;
+                let path = if action == "open-screenshots" {
+                    fuze_worker_host::recognition_log::root()
+                } else {
+                    runtime_log::root()
+                }
+                .map_err(|_| "log-open")?;
                 if !path.is_dir() {
                     return Err("log-open");
                 }
@@ -190,8 +223,14 @@ pub fn attach(
             if let Err(e) = result {
                 notice(&ui, Err(e));
             } else {
-                ui.global::<HostState>()
-                    .set_notice("已请求打开日志目录；反馈时请发送导出的脱敏 JSON。".into());
+                ui.global::<HostState>().set_notice(
+                    if action == "open-screenshots" {
+                        "已打开截图目录；请先检查 PNG，再选择同名 JSON 一起反馈。"
+                    } else {
+                        "已请求打开日志目录；反馈时请发送导出的脱敏 JSON。"
+                    }
+                    .into(),
+                );
             }
             return;
         }

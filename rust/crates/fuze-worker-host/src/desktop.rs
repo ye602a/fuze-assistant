@@ -128,6 +128,7 @@ impl Default for Status {
     }
 }
 struct Shared {
+    screenshots: crate::recognition_log::Control,
     external_overlays: bool,
     start_paused: bool,
     automatic_change: AtomicU8,
@@ -310,6 +311,9 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
         }
         c
     });
+    if !fixture {
+        controller.screenshots = shared.screenshots.clone();
+    }
     if preferences.local_records && !fixture {
         controller.enable_local_records();
     }
@@ -2755,6 +2759,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
     };
     let shared = Arc::new(Shared {
+        screenshots: Default::default(),
         external_overlays: false,
         start_paused: false,
         automatic_change: AtomicU8::new(0),

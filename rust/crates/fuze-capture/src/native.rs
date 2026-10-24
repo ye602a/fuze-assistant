@@ -30,12 +30,20 @@ use windows::{
 };
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// One production capture contract. Frames never leave memory or enter diagnostics.
+/// Optional local diagnostics borrow the same title/control pixels used by recognition.
+pub struct DiagnosticPixels<'a> {
+    pub buttons: fuze_contract::titles::Atlas<'a>,
+    pub screen: (u32, u32),
+}
+/// Capture itself never encodes or writes images. Diagnostic export is opt-in in the host.
 pub trait CaptureFeed {
     /// Release continuous capture during the level-one saving gate; probes still work.
     fn saving(&mut self, _saving: bool) {}
     fn next(&mut self, timeout: Duration) -> Result<FrameStatus>;
     fn titles(&self) -> Result<fuze_contract::titles::Atlas<'_>>;
+    fn diagnostic_pixels(&self) -> Option<DiagnosticPixels<'_>> {
+        None
+    }
     /// None is reserved for title-only offline fixtures/legacy feed implementations.
     fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
         None
