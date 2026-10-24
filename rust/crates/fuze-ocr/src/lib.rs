@@ -420,6 +420,9 @@ impl Recognizer {
             shards[i] = shard_name && confidence.is_finite() && confidence >= 0.9;
             if shard_name {
                 title_reads[i] = fuze_contract::wire::TitleRead::StatShard;
+            } else if let Some(choice) = fuze_contract::skill_choice::read(&name, confidence) {
+                *slot = choice;
+                title_reads[i] = fuze_contract::wire::TitleRead::Exact;
             } else {
                 (*slot, title_reads[i]) = self.catalog.read(&name, confidence);
             }
