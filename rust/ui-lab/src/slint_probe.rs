@@ -52,7 +52,7 @@ fn recognition_log_settings_offscreen() {
     ui.show().unwrap();
     window.set_size(slint::PhysicalSize::new(920, 760));
     for (name, enabled, message) in [
-        ("disabled", false, "未开启；仅本次运行有效，已有文件保留。 已保存 0 条，队列繁忙跳过 0 条。"),
+        ("disabled", false, "本次运行已关闭，已有文件保留；下次启动默认开启。 已保存 0 条，队列繁忙跳过 0 条。"),
         ("enabled", true, "已开启，等待前台主屏游戏画面；关闭或退出后停止采样。 已保存 12 条，队列繁忙跳过 0 条。"),
         ("limit", false, "已到 120 条或 64 MiB 上限，请先移走目录内的旧记录，再重启后开启。 已保存 120 条，队列繁忙跳过 0 条。"),
     ] {

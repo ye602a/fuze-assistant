@@ -1,4 +1,4 @@
-//! Opt-in, local-only recognition evidence. No network and no persistent enable preference.
+//! Local-only recognition evidence. Normal sessions enable it; offline sessions never do.
 use crate::Result;
 use fuze_capture::{native::CaptureFeed, target::GameWindow};
 use serde_json::{json, Value};
@@ -98,6 +98,15 @@ fn regions(regions: [fuze_contract::titles::Region; 3]) -> Value {
     json!(regions.map(|r| [r.x, r.y, r.width, r.height]))
 }
 impl Control {
+    pub(crate) fn start_session(&self, offline: bool, directory: impl FnOnce() -> Result<PathBuf>) {
+        if !offline {
+            if let Err(error) = directory().and_then(|path| self.enable_at(path)) {
+                if let Ok(mut s) = self.0.lock() {
+                    s.error = Some(error);
+                }
+            }
+        }
+    }
     pub fn enabled(&self) -> bool {
         self.0.lock().is_ok_and(|s| s.enabled)
     }
@@ -172,16 +181,20 @@ impl Control {
             sample.metadata["displayVisible"],
             sample.metadata["retained"],
             sample.metadata["error"],
+            sample.metadata["source"],
+            sample.metadata["fallback"],
+            sample.metadata["ocr"]["workerCause"],
             sample.metadata["ocr"]["slots"]
                 .as_array()
                 .map(|slots| slots.iter().map(|s| s.get("id")).collect::<Vec<_>>()),
         ])
         .to_string();
+        let failed = sample.metadata["error"].is_string();
         let sample = Arc::new(sample);
         // A capture failure replaces, rather than inherits, the previous image.
         s.latest = Some(sample.clone());
         let changed = s.signature.as_ref().is_none_or(|(old, at)| {
-            (old != &signature && at.elapsed() >= Duration::from_secs(2))
+            (old != &signature && (failed || at.elapsed() >= Duration::from_secs(2)))
                 || at.elapsed() >= Duration::from_secs(30)
         });
         if !changed {
@@ -226,7 +239,7 @@ impl Control {
             }
             Some(_) => "截图日志写入失败，请检查目录是否可写或被另一实例占用。",
             None if s.enabled => "已开启，等待前台主屏游戏画面；关闭或退出后停止采样。",
-            None => "未开启；仅本次运行有效，已有文件保留。",
+            None => "本次运行已关闭，已有文件保留；下次启动默认开启。",
         };
         (
             s.enabled,
@@ -256,7 +269,7 @@ impl Control {
     }
 }
 
-/// Foreground checks are metadata-only and occur only after explicit diagnostic opt-in.
+/// Foreground checks are metadata-only and occur only while local diagnostics are enabled.
 #[derive(Default)]
 pub struct Probe {
     pub control: Control,
@@ -479,6 +492,40 @@ mod tests {
         (control, rx)
     }
     #[test]
+    fn normal_session_starts_local_writer_but_offline_never_resolves_personal_directory() {
+        let offline = Control::default();
+        offline.start_session(true, || panic!("offline must not touch personal paths"));
+        assert!(!offline.enabled());
+        let directory = Directory::new();
+        let control = Control::default();
+        control.start_session(false, || Ok(directory.0.clone()));
+        assert!(control.enabled());
+        control.record(frame(&Feed::new()));
+        control.finish();
+        assert!(fs::read_dir(&directory.0).unwrap().any(|e| e
+            .unwrap()
+            .path()
+            .extension()
+            .is_some_and(|x| x == "json")));
+    }
+    #[test]
+    fn new_failure_is_saved_even_immediately_after_success() {
+        let (control, rx) = queued();
+        control.record(frame(&Feed::new()));
+        rx.recv().unwrap();
+        control.record(Sample::without_image(
+            json!({"stage":"ocr","error":"worker-timeout"}),
+        ));
+        assert_eq!(
+            rx.try_recv().unwrap().sample.metadata["error"],
+            "worker-timeout"
+        );
+        control.record(Sample::without_image(
+            json!({"stage":"ocr","error":"worker-timeout"}),
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
     fn same_frame_pixels_survive_png_and_manual_marker_keeps_capture_identity() {
         let directory = Directory::new();
         let mut writer = Writer::open(directory.0.clone()).unwrap();
@@ -529,6 +576,7 @@ mod tests {
         control.record(Sample::without_image(
             json!({"stage":"capture-no-frame","error":"capture-frame"}),
         ));
+        assert!(!rx.recv().unwrap().marked); // new failure bypasses the normal sample cooldown
         control.mark_recent().unwrap();
         let marked = rx.recv().unwrap();
         assert!(marked.marked);

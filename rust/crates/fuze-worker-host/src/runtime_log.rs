@@ -122,6 +122,47 @@ codes!(Stream {
     Retaining,
     Unknown
 });
+codes!(WorkerFailure {
+    Timeout,
+    ChannelClosed,
+    PipeWrite,
+    PipeEof,
+    PipeInvalidData,
+    PipeRead,
+    PipeFailed,
+    Busy,
+    InvalidFrame,
+    InvalidResult,
+    ResultExpired,
+    Result,
+    NotReady,
+    Stopped,
+    RecoveredUseNextFrame,
+    Other
+});
+impl WorkerFailure {
+    fn from_code(code: Option<&str>) -> Option<Self> {
+        Some(match code? {
+            "worker-timeout" => Self::Timeout,
+            "worker-channel-closed" => Self::ChannelClosed,
+            "worker-pipe-write" => Self::PipeWrite,
+            "worker-pipe-eof" => Self::PipeEof,
+            "worker-pipe-invalid-data" => Self::PipeInvalidData,
+            "worker-pipe-read" => Self::PipeRead,
+            "worker-pipe-failed" => Self::PipeFailed,
+            "worker-busy" => Self::Busy,
+            "worker-invalid-frame" => Self::InvalidFrame,
+            "worker-invalid-result" => Self::InvalidResult,
+            "worker-result-expired" => Self::ResultExpired,
+            "worker-result" => Self::Result,
+            "worker-not-ready" => Self::NotReady,
+            "worker-stopped" => Self::Stopped,
+            "worker-recovered-use-next-frame" => Self::RecoveredUseNextFrame,
+            e if e.starts_with("worker") => Self::Other,
+            _ => return None,
+        })
+    }
+}
 codes!(CaptureSource {
     ScreenStream,
     ScreenBitmap,
@@ -132,7 +173,8 @@ codes!(CaptureFallback {
     Timeout,
     BlackFrame,
     Readback,
-    Frame
+    Frame,
+    TitleRead
 });
 // Preparing is a historical on-disk value; the current scheduler no longer emits it.
 codes!(Gate {
@@ -158,6 +200,10 @@ pub struct Snapshot {
     pub ocr: Ocr,
     pub issue: Issue,
     pub failure: Failure,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_failure: Option<WorkerFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_cause: Option<WorkerFailure>,
     pub analyses: u64,
     pub skipped: u64,
     pub analysis_ms: Option<f64>,
@@ -304,6 +350,8 @@ impl Snapshot {
             ocr,
             issue,
             failure,
+            worker_failure: WorkerFailure::from_code(s.pipeline.error),
+            worker_cause: WorkerFailure::from_code(s.pipeline.worker_cause),
             stream,
             capture_source: match s.pipeline.capture_source {
                 "screen-stream" => Some(CaptureSource::ScreenStream),
@@ -317,6 +365,7 @@ impl Snapshot {
                 Some("screen-black-frame") => Some(CaptureFallback::BlackFrame),
                 Some("screen-readback") => Some(CaptureFallback::Readback),
                 Some("screen-frame") => Some(CaptureFallback::Frame),
+                Some("screen-title-read") => Some(CaptureFallback::TitleRead),
                 _ => None,
             },
             gate,
@@ -347,6 +396,8 @@ impl Snapshot {
             self.ocr,
             self.issue,
             self.failure,
+            self.worker_failure,
+            self.worker_cause,
             self.capture_source,
             self.capture_fallback,
         ) == (
@@ -356,6 +407,8 @@ impl Snapshot {
             other.ocr,
             other.issue,
             other.failure,
+            other.worker_failure,
+            other.worker_cause,
             other.capture_source,
             other.capture_fallback,
         ) && (
@@ -813,6 +866,28 @@ mod tests {
             state: Snapshot::from_status(&status),
             dropped: 0,
         }
+    }
+    #[test]
+    fn worker_causes_are_allowlisted_and_old_reports_still_load() {
+        let mut status = Status::default();
+        status.pipeline.error = Some("worker-recovered-use-next-frame");
+        status.pipeline.worker_cause = Some("worker-pipe-eof");
+        let snapshot = Snapshot::from_status(&status);
+        let mut json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["failure"], "worker");
+        assert_eq!(json["worker_failure"], "recovered-use-next-frame");
+        assert_eq!(json["worker_cause"], "pipe-eof");
+        status.pipeline.worker_cause = Some("worker-timeout");
+        assert!(!snapshot.same_state(&Snapshot::from_status(&status)));
+        json.as_object_mut().unwrap().remove("worker_failure");
+        json.as_object_mut().unwrap().remove("worker_cause");
+        let old: Snapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(old.worker_cause, None);
+        assert_eq!(old.worker_failure, None);
+        assert_eq!(
+            WorkerFailure::from_code(Some("worker-private-secret")),
+            Some(WorkerFailure::Other)
+        );
     }
     #[test]
     fn discovery_failures_export_distinct_fixed_codes_without_mislabeling_ocr() {

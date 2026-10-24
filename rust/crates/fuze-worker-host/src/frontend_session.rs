@@ -35,6 +35,9 @@ impl Session {
             import_selection: Mutex::new(None),
             export: Mutex::new(None),
         });
+        shared
+            .screenshots
+            .start_session(offline, crate::recognition_log::root);
         let owned = shared.clone();
         let worker = thread::Builder::new()
             .name("fuze-frontend-engine".into())
