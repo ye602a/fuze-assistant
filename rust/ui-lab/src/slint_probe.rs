@@ -12,7 +12,7 @@ struct Offscreen(Rc<MinimalSoftwareWindow>);
 #[test]
 fn recognition_log_settings_offscreen() {
     // Actual Slint layout, in memory only: no HWND, engine, desktop pixels or network.
-    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
     let ui = Workbench::new().unwrap();
     ui.set_page(2);
@@ -34,7 +34,7 @@ fn recognition_log_settings_offscreen() {
         let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
         window.request_redraw();
         window.draw_if_needed(|r| { r.render(&mut pixels, 920); });
-        assert!(pixels.iter().any(|p| p.r > 100));
+        assert!(pixels.iter().filter(|p| p.g > 20).count() > 100_000);
         if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
             image::save_buffer(std::path::Path::new(&output).join(format!("captures-{name}.png")),
                 &pixels.iter().flat_map(|p|[p.r,p.g,p.b]).collect::<Vec<_>>(), 920,760,image::ColorType::Rgb8).unwrap();
