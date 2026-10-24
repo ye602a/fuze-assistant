@@ -60,6 +60,9 @@ pub fn create_indexed(champion: u32, name: &str, builds: &[&Value]) -> Vec<(usiz
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (route, build) in builds.iter().take(6).enumerate() {
+        if build["queueId"].as_u64() != Some(2400) {
+            continue;
+        }
         let core = build
             .get("coreItems")
             .or_else(|| build.get("recommended"))
@@ -165,15 +168,15 @@ mod tests {
     use super::*;
     #[test]
     fn extensions_keep_full_sequence_core_step_and_route_provenance() {
-        let low = json!({"games":1});
-        let b = json!({"queueId":450,"patch":"16.20","tags":{"style":"AP"},"games":1000,"coreItems":[{"itemIds":[3001,3002],"games":40}],"itemExtensions":[{"coreItemIds":[3001,3002],"step":2,"itemIds":[3089,3135],"games":40}]});
+        let low = json!({"queueId":2400,"games":1});
+        let b = json!({"queueId":2400,"patch":"16.20","tags":{"style":"AP"},"games":1000,"coreItems":[{"itemIds":[3001,3002],"games":40}],"itemExtensions":[{"coreItemIds":[3001,3002],"step":2,"itemIds":[3089,3135],"games":40}]});
         let sets = create_indexed(21, "英雄", &[&low, &b]);
         assert_eq!(sets[0].0, 1);
         let set = &sets[0].1;
         assert!(set["title"]
             .as_str()
             .unwrap()
-            .contains("路线 2 AP · 普通大乱斗参考 · 16.20"));
+            .contains("路线 2 AP · 海克斯大乱斗 · 16.20"));
         assert_eq!(
             set["blocks"][1]["items"],
             json!([{"id":"3089","count":1},{"id":"3135","count":1}])
@@ -184,10 +187,17 @@ mod tests {
             .contains("3001/3002 · 第 2 步"));
     }
     #[test]
+    fn ordinary_and_unknown_modes_cannot_be_imported_even_with_large_samples() {
+        for queue in [serde_json::json!(450), serde_json::Value::Null] {
+            let build = json!({"queueId":queue,"games":100000,"coreItems":[{"itemIds":[3001],"games":10000,"pickRate":0.9}]});
+            assert!(create(21, "Test", &[&build]).is_empty());
+        }
+    }
+    #[test]
     fn no_low_sample_or_empty_sets_and_four_managed_only() {
-        let low = json!({"games":2,"coreItems":[{"itemIds":[3001,3002],"games":2}]});
+        let low = json!({"queueId":2400,"games":2,"coreItems":[{"itemIds":[3001,3002],"games":2}]});
         assert!(create(21, "测试", &[&low]).is_empty());
-        let valid = json!({"games":1000,"coreItems":[{"itemIds":[3001,3002],"games":40}],"situationalItems":[{"id":3001,"games":30},{"id":3003,"games":3}]});
+        let valid = json!({"queueId":2400,"games":1000,"coreItems":[{"itemIds":[3001,3002],"games":40}],"situationalItems":[{"id":3001,"games":30},{"id":3003,"games":3}]});
         let sets = create(21, "测试", &[&valid, &valid]);
         assert_eq!(sets.len(), 1);
         assert_eq!(

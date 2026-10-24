@@ -108,9 +108,9 @@ fn word(locale: Locale, key: &str) -> &str {
         ["来源", "來源", "Source"],
         ["补丁", "版本", "Patch"],
         [
-            "出装、加点与召唤师技能：数据源暂未提供",
-            "出裝、技能點法與召喚師技能：資料源尚未提供",
-            "Builds, skill order and spells: unavailable from source",
+            "暂无海克斯出装数据",
+            "暫無海克斯出裝資料",
+            "No ARAM Mayhem build data available",
         ],
         [
             "普通大乱斗参考（非海克斯统计）",
@@ -267,15 +267,18 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
         vec![],
     );
     let builds: Vec<_> = if row["builds"].as_array().is_some_and(|a| !a.is_empty()) {
-        rows(&row["builds"]).take(6).collect()
+        rows(&row["builds"])
+            .filter(|b| b["queueId"].as_u64() == Some(2400))
+            .take(6)
+            .collect()
     } else {
         row.get("build")
-            .filter(|v| v.is_object())
+            .filter(|v| v.is_object() && v["queueId"].as_u64() == Some(2400))
             .into_iter()
             .collect()
     };
     if builds.is_empty() {
-        add(t("出装、加点与召唤师技能：数据源暂未提供").into(), vec![]);
+        add(t("暂无海克斯出装数据").into(), vec![]);
     }
     for (i, b) in builds.iter().enumerate() {
         let mode: String = match b["queueId"].as_u64() {
@@ -563,15 +566,31 @@ mod tests {
         }
     }
     #[test]
+    fn hextech_routes_exclude_other_modes_before_display_limit_and_import() {
+        let standard = serde_json::json!({"queueId":450,"games":1000,"coreItems":[{"itemIds":[99],"games":40}]});
+        let hextech = serde_json::json!({"queueId":2400,"games":1000,"coreItems":[{"itemIds":[88],"games":40}]});
+        let mut routes = vec![standard.clone(); 7];
+        routes.push(hextech);
+        let items = serde_json::json!({"data":[]});
+        let mut row = serde_json::json!({"champion":{"id":21,"name":"Test"},"builds":routes});
+        let d = parse(&row, &items, Locale::ZhCn);
+        assert_eq!(d.item_routes, vec![0]);
+        assert_eq!(d.item_sets[0]["blocks"][0]["items"][0]["id"], "88");
+        assert!(!d.lines.iter().any(|l| l.text.contains("装备 99")));
+        row["builds"] =
+            serde_json::json!([standard, {"games":1000,"coreItems":[{"itemIds":[77],"games":40}]}]);
+        let d = parse(&row, &items, Locale::ZhCn);
+        assert!(d.item_sets.is_empty());
+        assert!(d.lines.iter().any(|l| l.text == "暂无海克斯出装数据"));
+        assert!(!d.lines.iter().any(|l| l.text.starts_with("路线 ")));
+    }
+    #[test]
     fn details_follow_locale_without_translating_data_names() {
-        let row = serde_json::json!({"champion":{"name":"fixture-name"},"build":{"queueId":450}});
+        let row = serde_json::json!({"champion":{"name":"fixture-name"},"build":{"queueId":2400}});
         let items = serde_json::json!({"data":[]});
         let en = parse(&row, &items, Locale::EnUs);
         assert!(en.title.starts_with("fixture-name"));
-        assert!(en
-            .lines
-            .iter()
-            .any(|l| l.text.contains("not Mayhem statistics")));
+        assert!(en.lines.iter().any(|l| l.text.contains("ARAM Mayhem")));
         assert!(en.lines.iter().all(|l| !l
             .text
             .chars()
@@ -587,11 +606,11 @@ mod tests {
         )
         .contains("55.0%（按胜场计算）"));
         let d = parse(
-            &serde_json::json!({"champion":{"name":"Test"},"build":{"queueId":450,"coreItems":[{"itemIds":[99],"games":2,"winRate":null}]} }),
+            &serde_json::json!({"champion":{"name":"Test"},"build":{"queueId":2400,"coreItems":[{"itemIds":[99],"games":2,"winRate":null}]} }),
             &serde_json::json!({"data":[]}),
             Locale::ZhCn,
         );
-        assert!(d.lines.iter().any(|l| l.text.contains("非海克斯统计")));
+        assert!(d.lines.iter().any(|l| l.text.contains("海克斯大乱斗")));
         assert!(d.lines.iter().any(|l| l.text.contains("装备 99")));
         assert!(d.lines.iter().any(|l| l.text.contains("胜 --")));
         assert!(d.lines.iter().any(|l| l.text.contains("未提供")));

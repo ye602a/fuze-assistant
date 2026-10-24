@@ -10,6 +10,36 @@ use std::{path::Path, rc::Rc, time::Instant};
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
 #[test]
+fn release_label_offscreen() {
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
+    let ui = Workbench::new().unwrap();
+    ui.window().set_size(slint::LogicalSize::new(920., 760.));
+    ui.global::<crate::HostState>().set_offline(false);
+    ui.global::<crate::MaintenanceState>()
+        .set_release_label("0.7.1 · 测试渠道".into());
+    let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
+    window.request_redraw();
+    window.draw_if_needed(|r| {
+        r.render(&mut pixels, 920);
+    });
+    assert!(pixels.iter().filter(|p| p.g > 20).count() > 100_000);
+    if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+        image::save_buffer(
+            std::path::Path::new(&output).join("release-label.png"),
+            &pixels
+                .iter()
+                .flat_map(|p| [p.r, p.g, p.b])
+                .collect::<Vec<_>>(),
+            920,
+            760,
+            image::ColorType::Rgb8,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn recognition_log_settings_offscreen() {
     // Actual Slint layout, in memory only: no HWND, engine, desktop pixels or network.
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);

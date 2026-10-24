@@ -288,6 +288,7 @@ pub fn attach(
             .ok()
             .and_then(|p| p.parent().map(ToOwned::to_owned))
         {
+            state.set_release_label(fuze_worker_host::build_identity::release_label(&dir).into());
             if let Some(version) = fuze_worker_host::build_identity::package_version(&dir) {
                 state.set_current_version(version.into());
             }

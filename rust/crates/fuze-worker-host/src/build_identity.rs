@@ -2,6 +2,33 @@
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::OnceLock};
 pub const APP_VERSION: &str = include_str!("../../../app-version.txt");
+/// Display the running package's metadata, never the online update channel.
+pub fn release_label(directory: &Path) -> String {
+    let path = directory.join("build.json");
+    if !path.exists() {
+        return format!("{} · 开发构建", APP_VERSION.trim());
+    }
+    crate::update_channel::bounded(&path, 16384)
+        .ok()
+        .and_then(|bytes| decode_release_label(&bytes))
+        .unwrap_or_else(|| "版本 / 渠道未确认".into())
+}
+fn decode_release_label(bytes: &[u8]) -> Option<String> {
+    if bytes.len() > 16384 {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    Revision::try_from(value["revision"].as_str()?.to_owned()).ok()?;
+    let version = match value.get("version") {
+        None => "0.7.0",
+        Some(v) => v.as_str().filter(|v| semantic_version(v))?,
+    };
+    let channel = match value["channel"].as_str() {
+        Some("rust-development-preview") => "测试渠道",
+        _ => "渠道未确认",
+    };
+    Some(format!("{version} · {channel}"))
+}
 pub fn semantic_version(value: &str) -> bool {
     let parts: Vec<_> = value.split('.').collect();
     parts.len() == 3
@@ -76,6 +103,27 @@ pub fn current() -> Option<Revision> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn release_label_uses_package_version_and_does_not_guess_unknown_channels() {
+        let mut v = serde_json::json!({"revision":"123456789abc","version":"0.7.1","channel":"rust-development-preview"});
+        assert_eq!(
+            decode_release_label(v.to_string().as_bytes()).as_deref(),
+            Some("0.7.1 · 测试渠道")
+        );
+        v["channel"] = serde_json::json!("unknown");
+        assert_eq!(
+            decode_release_label(v.to_string().as_bytes()).as_deref(),
+            Some("0.7.1 · 渠道未确认")
+        );
+        v.as_object_mut().unwrap().remove("version");
+        assert_eq!(
+            decode_release_label(v.to_string().as_bytes()).as_deref(),
+            Some("0.7.0 · 渠道未确认")
+        );
+        v["version"] = serde_json::json!("not-a-version");
+        assert!(decode_release_label(v.to_string().as_bytes()).is_none());
+        assert!(decode_release_label(b"{}").is_none());
+    }
 
     #[test]
     fn only_bounded_package_revision_is_retained() {
