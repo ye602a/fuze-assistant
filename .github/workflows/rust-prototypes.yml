@@ -1,237 +1,114 @@
-name: Rust isolated prototypes
+name: Build FUZE 0.7.2 preview
 on:
-  pull_request:
-    paths:
-      - 'rust/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'resources/paddleocr/**'
-      - 'resources/augments-*.json'
-      - 'tests/fixtures/augment-ocr/**'
-      - 'scripts/check-secrets.mjs'
-      - '.gitignore'
-      - 'scripts/package-rust-preview.mjs'
-      - 'scripts/package-rust-update.mjs'
-      - 'scripts/rust-bundle-policy.mjs'
-      - 'scripts/rust-runtime-contract.mjs'
-      - 'scripts/build-rust-with-evidence.ps1'
-      - 'scripts/install-rust-prerequisites.ps1'
-      - 'tests/unit/rust-runtime-contract.test.mjs'
-      - 'tests/unit/rust-runtime-bootstrap.ps1'
-      - 'tests/unit/rust-bundle-policy.test.mjs'
-      - 'scripts/check-rust-update.mjs'
-      - 'scripts/check-rust-desktop.mjs'
-      - 'scripts/prepare-rust-data.mjs'
-      - 'scripts/check-rust-prototypes.mjs'
-      - 'scripts/rust-prototype-tools.mjs'
-      - 'scripts/compare-rust-ocr.mjs'
-      - 'scripts/benchmark-rust-node.mjs'
-      - 'scripts/test-rust-host.mjs'
-      - 'scripts/check-rust-capture.mjs'
-      - 'scripts/check-rust-pipeline.mjs'
-      - 'scripts/check-rust-worker.mjs'
-      - 'scripts/compare-rust-shapes.mjs'
-      - 'scripts/actions-validation-summary.mjs'
-      - 'tests/unit/actions-validation-summary.test.mjs'
-      - '!rust/**/*.md'
-      - '.github/workflows/rust-prototypes.yml'
   workflow_dispatch:
-    inputs:
-      stage_acceptance:
-        description: '阶段版本验收：生成测试包和更新包，验证安装回滚与完整桌面'
-        type: boolean
-        default: false
-      artifacts:
-        description: '阶段验收附件：none 不保留，preview 测试 ZIP，full 含更新包和诊断工具'
-        type: choice
-        default: none
-        options: [none, preview, full]
-      ui_frontend:
-        description: '阶段测试界面：Slint 为当前中文版；Win32 仅保留旧实现对照'
-        type: choice
-        default: slint
-        options: [slint, win32]
 permissions:
-  contents: read
+  contents: write
 concurrency:
-  group: rust-prototypes-${{ github.ref }}
-  cancel-in-progress: true
+  group: fuze-preview-publication
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 0a90a35efa709480eba4cb2ffc5098d9508ef17d
+  FUZE_UI_FRONTEND: slint
 jobs:
-  prototypes:
-    runs-on: windows-latest
+  preview:
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Verify no private runtime data or secrets are tracked
-        id: secrets
-        run: node scripts/check-secrets.mjs
+      - name: Retain delivery helpers outside source checkout
+        shell: pwsh
+        run: Copy-Item release-helpers (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers') -Recurse
+      - uses: actions/checkout@v4
+        with:
+          ref: 0a90a35efa709480eba4cb2ffc5098d9508ef17d
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18.0'
           cache: npm
-      - name: Install existing runtime dependency for offline ONNX fixtures
+      - name: Install existing build dependencies
         run: npm ci --ignore-scripts
+      - name: Seed build data from the verified public package
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/seed-public-data.mjs')
       - name: Prepare Rust
-        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - name: Reuse Rust build dependencies
-        uses: actions/cache@v4
+        run: rustup toolchain install 1.90.0 --profile minimal
+      - uses: actions/cache@v4
         with:
           path: rust/target
-          key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-
-      - name: Format, contracts and build
-        id: build
-        working-directory: rust
+          key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
+          restore-keys: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
+      - name: Compile exact source with build receipt
+        shell: pwsh
         run: |
-          cargo +1.90.0 fmt --all -- --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Force artifacts | Out-Null
-          $env:FUZE_SHARE_FIXTURE = Join-Path (Get-Location) 'artifacts/share.png'
-          cargo +1.90.0 test --workspace --locked -j 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo +1.90.0 build --workspace --release --locked -j 2
-          exit $LASTEXITCODE
-      - name: Offline ONNX and hidden native window
-        id: ocr
-        run: node scripts/check-rust-prototypes.mjs
-      - name: Persistent worker, raw atlas IPC and bounded lifecycle
-        id: worker
-        env:
-          FUZE_RUST_CI_VISIBLE: '1'
-        run: node scripts/check-rust-worker.mjs
-      - name: Native capture boundary and generated GPU ROI readback
-        id: capture
-        run: node scripts/check-rust-capture.mjs
-      - name: Native atlas to OCR and own-window capture lifecycle
-        id: pipeline
-        env:
-          FUZE_RUST_CI_VISIBLE: '1'
-        run: node scripts/check-rust-pipeline.mjs
-      - name: Same-input CPU comparison and automatic fallback
-        id: fallback
-        run: |
-          node --test scripts/test-rust-host.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node scripts/compare-rust-ocr.mjs
-          exit $LASTEXITCODE
-      - name: Validate workflow policy and data preparation contracts
-        id: contracts
-        run: |
-          node --test tests/unit/actions-validation-summary.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-data-preparation.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-feedback-export.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-bundle-policy.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tests/unit/rust-runtime-contract.test.mjs
-          exit $LASTEXITCODE
-      - name: Build milestone binaries with toolchain and runtime evidence
-        id: frontend
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
-        env:
-          FUZE_UI_FRONTEND: ${{ inputs.ui_frontend }}
-        run: |
-          ./scripts/build-rust-with-evidence.ps1 -Frontend $env:FUZE_UI_FRONTEND
-          exit $LASTEXITCODE
-      - name: Assemble and self-check milestone Rust preview
-        id: package
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
-        env:
-          FUZE_UI_FRONTEND: ${{ inputs.ui_frontend }}
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'source-mismatch' }
+          $policy = Get-Content rust/vc-runtime-policy.json -Raw | ConvertFrom-Json
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installations = & $vswhere -all -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $compatible = @(
+            foreach ($installation in $installations) {
+              foreach ($tools in (Get-ChildItem -LiteralPath (Join-Path $installation 'VC/Tools/MSVC') -Directory)) {
+                $cl = Join-Path $tools.FullName 'bin/Hostx64/x64/cl.exe'
+                $link = Join-Path $tools.FullName 'bin/Hostx64/x64/link.exe'
+                if (!(Test-Path -LiteralPath $cl) -or !(Test-Path -LiteralPath $link)) { continue }
+                $cv = [Diagnostics.FileVersionInfo]::GetVersionInfo($cl).FileVersion
+                $lv = [Diagnostics.FileVersionInfo]::GetVersionInfo($link).FileVersion
+                if ($cv -match '^19\.\d+\.\d+\.\d+$' -and $lv -match '^14\.\d+\.\d+\.\d+$' -and
+                    [version]($cv -replace '^19\.', '14.') -le [version]$policy.minimumVersion -and
+                    [version]$lv -le [version]$policy.minimumVersion) {
+                  [pscustomobject]@{Path=$tools.FullName; Version=[version]$lv}
+                }
+              }
+            }
+          ) | Sort-Object Version -Descending
+          if (!$compatible.Count) { throw 'no-reviewed-compatible-toolchain' }
+          Write-Host "Selected MSVC $($compatible[0].Version)"
+          ./scripts/build-rust-with-evidence.ps1 -Frontend slint -VcToolsDir $compatible[0].Path
+      - name: Prepare public data and self-check preview
+        shell: pwsh
         run: |
           node scripts/prepare-rust-data.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-preview.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Include minimum app-local VC runtime and create update package
+        shell: pwsh
+        run: |
+          ./scripts/extract-rust-crt.ps1 -Output (Join-Path $env:RUNNER_TEMP 'fuze-crt')
+          $revision = $env:SOURCE_SHA.Substring(0,12)
+          node scripts/bundle-rust-crt.mjs "rust/artifacts/preview/fuze-rust-preview-$revision" (Join-Path $env:RUNNER_TEMP 'fuze-crt/dlls')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/finalize-preview.mjs')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-update.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-rust-update.mjs
-          exit $LASTEXITCODE
-      - name: Native desktop pause and exit (own window only)
-        id: desktop
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Wrap the same payload in unsigned Setup
+        shell: pwsh
+        run: |
+          $revision = $env:SOURCE_SHA.Substring(0,12)
+          $output = [IO.Path]::GetFullPath('rust/artifacts/preview')
+          $payload = Join-Path $output "fuze-rust-preview-$revision"
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DPayload=$payload" "/DOutput=$output" installer/rust-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $output 'FUZE-Setup-0.7.2-windows-x64.exe'
+          if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'NotSigned') { throw 'unexpected-signature-state' }
+          Rename-Item -LiteralPath $exe -NewName "FUZE-Setup-0.7.2-preview-$revision-windows-x64.exe"
+      - name: Publish verified files then switch preview manifest
         env:
-          FUZE_RUST_CI_TRAY: '1'
-        run: node scripts/check-rust-desktop.mjs
-      - name: Scan upload content
-        id: upload_scan
-        run: npm run security:check
-      - name: Upload requested preview ZIP (not a stable installer)
-        id: upload_preview
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts != 'none'
+          GH_TOKEN: ${{ github.token }}
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/publish-preview.mjs')
+      - name: Preserve build receipts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rust-development-preview
-          path: |
-            rust/artifacts/preview/*.zip
-            rust/artifacts/preview/*.sha256
-          retention-days: 3
-      - name: Upload requested native update bundle
-        id: upload_update
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-update-bundle
-          path: |
-            rust/artifacts/preview/*.fuz
-            rust/artifacts/preview/*.blockmap
-            rust/artifacts/preview/rust-update.json
-          retention-days: 3
-      - name: Upload sanitized prototype reports
-        id: upload_evidence
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-prototype-evidence
+          name: preview-build-evidence
           retention-days: 7
           path: |
-            rust/artifacts/desktop-validation.json
+            rust/target/release/fuze-rust-host.exe
+            rust/target/release/fuze-ocr-worker.exe
+            rust/target/release/fuze-update.exe
+            rust/target/release/fuze-ui-lab.exe
+            rust/target/release/fuze-build-evidence.json
             rust/artifacts/update-validation.json
-            rust/artifacts/desktop.png
-            rust/artifacts/champion-select.png
-            rust/artifacts/popup-review/interaction-checks.json
-            rust/artifacts/popup-review/champion-description.png
-            rust/artifacts/popup-review/champion-build.png
-            rust/artifacts/augment-reference.png
-            rust/artifacts/share.png
-            rust/artifacts/share-icons-zh-CN.png
-            rust/artifacts/share-icons-zh-TW.png
-            rust/artifacts/share-icons-en-US.png
-            rust/artifacts/desktop-en-US-augments.png
-            rust/artifacts/desktop-zh-TW-augments.png
-            rust/artifacts/stage-reference.png
-            rust/artifacts/desktop-en-US-stages.png
-            rust/artifacts/desktop-zh-TW-stages.png
-            rust/artifacts/settings.png
-            rust/artifacts/preview-validation.json
-            rust/artifacts/validation.json
-            rust/artifacts/native-overlay.png
-            rust/artifacts/native-overlay-retained.png
-            rust/artifacts/comparison.json
-            rust/artifacts/capture-validation.json
-            rust/artifacts/pipeline-validation.json
-            rust/artifacts/worker-validation.json
-          if-no-files-found: ignore
-      - name: Prepare isolated prototype executables
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        run: |
-          New-Item -ItemType Directory -Force rust/artifacts/tools | Out-Null
-          Copy-Item rust/target/release/fuze-ocr.exe,rust/target/release/fuze-ocr-worker.exe,rust/target/release/fuze-worker-host.exe,rust/target/release/fuze-rust-host.exe,rust/target/release/fuze-native-overlay.exe,rust/target/release/fuze-capture.exe rust/artifacts/tools/
-          Get-ChildItem rust/artifacts/tools/*.exe | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -Encoding ascii rust/artifacts/tools/SHA256SUMS.txt
-      - name: Upload isolated test tools (not a release installer)
-        id: upload_tools
-        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-prototype-tools
-          path: rust/artifacts/tools/
-          retention-days: 3
-      - name: Keep validation results in the job summary
-        if: always()
-        env:
-          FUZE_CI_KIND: rust
-          FUZE_CI_STATUS: ${{ job.status }}
-          FUZE_CI_STEPS: ${{ toJSON(steps) }}
-        run: node scripts/actions-validation-summary.mjs
+            rust/artifacts/preview/preview-validation.json
+            rust/artifacts/preview/build-evidence-*.json
