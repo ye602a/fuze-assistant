@@ -102,6 +102,16 @@ impl DesktopStream {
     pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
         self.reader.evidence
     }
+    pub fn diagnostic_pixels(&self) -> Option<DiagnosticPixels<'_>> {
+        if !self.ready {
+            return None;
+        }
+        let buttons = fuze_contract::selection_pixels::buttons(self.size.0, self.size.1).ok()?;
+        Some(DiagnosticPixels {
+            buttons: Atlas::new(&self.reader.controls, buttons[0].width, buttons[0].height).ok()?,
+            screen: self.size,
+        })
+    }
     pub fn titles(&self) -> Result<Atlas<'_>> {
         if !self.ready {
             return Err("no-current-frame".into());

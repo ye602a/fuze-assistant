@@ -93,6 +93,7 @@ pub(super) struct Reader {
     bytes: Vec<u8>,
     controls: Vec<u8>,
     pub evidence: Option<fuze_contract::selection_pixels::Evidence>,
+    screen: (u32, u32),
 }
 impl Reader {
     pub fn read(&mut self) -> Result<()> {
@@ -104,6 +105,10 @@ impl Reader {
                 return Err("capture-monitor".into());
             }
             let rect = info.rcMonitor;
+            self.screen = (
+                (rect.right - rect.left) as u32,
+                (rect.bottom - rect.top) as u32,
+            );
             let slots = regions(
                 (rect.right - rect.left) as u32,
                 (rect.bottom - rect.top) as u32,
@@ -186,5 +191,13 @@ impl Reader {
     }
     pub fn titles(&self) -> Result<Atlas<'_>> {
         Ok(Atlas::new(&self.bytes, self.size.0, self.size.1)?)
+    }
+    pub fn diagnostic_pixels(&self) -> Option<crate::native::DiagnosticPixels<'_>> {
+        let buttons =
+            fuze_contract::selection_pixels::buttons(self.screen.0, self.screen.1).ok()?;
+        Some(crate::native::DiagnosticPixels {
+            buttons: Atlas::new(&self.controls, buttons[0].width, buttons[0].height).ok()?,
+            screen: self.screen,
+        })
     }
 }

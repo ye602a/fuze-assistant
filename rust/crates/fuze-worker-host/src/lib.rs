@@ -75,6 +75,8 @@ pub mod preferences;
 #[cfg(windows)]
 pub mod private_update;
 #[cfg(windows)]
+pub mod recognition_log;
+#[cfg(windows)]
 pub mod record_export;
 pub mod recovery;
 mod retention;

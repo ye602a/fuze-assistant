@@ -12,6 +12,9 @@ export global ClaimState {
     callback action(string);
 }
 export global DiagnosticState {
+    in-out property <bool> screenshots-enabled: false;
+    in-out property <bool> screenshots-recent: false;
+    in-out property <string> screenshots-status: "未开启；仅本次运行有效。";
     in-out property <bool> upload-ready: false;
     in-out property <bool> upload-enabled: false;
     in-out property <bool> upload-busy: false;

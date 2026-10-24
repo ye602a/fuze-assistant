@@ -92,6 +92,16 @@ export component SettingsPage inherits VerticalLayout {
                 for row in DiagnosticState.rows: Label { height: 60px; text: row; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
             }
         }
+        Panel { height: 220px;
+            SectionTitle { x: 21px; y: 18px; width: parent.width - 105px; height: 28px; text: "本地识别截图"; }
+            Toggle { x: parent.width - 65px; y: 20px; label: "本次运行记录识别截图"; checked: DiagnosticState.screenshots-enabled; enabled: HostState.connected && !HostState.offline; toggled => { DiagnosticState.action("toggle-screenshots"); } }
+            Label { x: 21px; y: 54px; width: parent.width - 42px; height: 48px; text: "保存前台游戏的三卡标题、按钮和识别状态，不录全屏。最多 120 条 / 64 MiB，满后停止。图片请检查后再分享，不会自动上传。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            Label { x: 21px; y: 108px; width: parent.width - 42px; height: 48px; text: DiagnosticState.screenshots-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
+            HorizontalLayout { x: 21px; y: 170px; width: parent.width - 42px; height: 32px; spacing: 12px;
+                Action { label: "标记最近画面有问题"; enabled: DiagnosticState.screenshots-recent && !HostState.offline; clicked => { DiagnosticState.action("mark-screenshot"); } }
+                Action { label: "打开截图目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-screenshots"); } }
+            }
+        }
         Action { label: root.feedback-open ? "收起公开诊断反馈" : "展开公开诊断反馈"; clicked => { root.feedback-open = !root.feedback-open; } }
         if root.feedback-open: Panel { height: 540px + (DiagnosticState.upload-confirm ? 100px : 0px);
             SectionTitle { x: 21px; y: 18px; height: 28px; text: "GitHub 公开诊断反馈"; }

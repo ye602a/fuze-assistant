@@ -17,6 +17,7 @@ impl Session {
     /// A recovered UI must not resume capture before the player explicitly continues.
     pub fn start_with_recovery(config: Config, offline: bool, start_paused: bool) -> Result<Self> {
         let shared = Arc::new(Shared {
+            screenshots: Default::default(),
             external_overlays: true,
             start_paused,
             automatic_change: AtomicU8::new(0),
@@ -50,6 +51,23 @@ impl Session {
     /// Account keys never need to be logged or serialized by a frontend.
     pub fn snapshot(&self) -> Status {
         self.shared.status()
+    }
+    pub fn screenshot_status(&self) -> (bool, bool, String) {
+        self.shared.screenshots.status()
+    }
+    pub fn screenshot_logging(&self, enabled: bool) -> Result<()> {
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        self.shared.screenshots.enable(enabled)?;
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    pub fn mark_screenshot(&self) -> Result<()> {
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        self.shared.screenshots.mark_recent()
     }
     pub fn diagnostic_context(&self) -> (u64, bool) {
         self.shared
@@ -291,6 +309,7 @@ impl Drop for Session {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+        self.shared.screenshots.finish();
     }
 }
 #[cfg(test)]
@@ -300,6 +319,7 @@ mod locale_tests {
     fn history_reads_keep_recognition_mode_and_pause_exit_available() {
         // No engine, client discovery, disk access or worker: exercise the real command gate.
         let shared = Arc::new(Shared {
+            screenshots: Default::default(),
             external_overlays: true,
             start_paused: false,
             automatic_change: AtomicU8::new(0),
@@ -354,6 +374,12 @@ mod locale_tests {
         fixture.dataset("zh-CN", "1.0", true);
         fixture.dataset("en-US", "1.0", false);
         let session = Session::start(fixture.config(), true).unwrap();
+        assert_eq!(
+            session.screenshot_logging(true),
+            Err("frontend-offline-operation")
+        );
+        assert_eq!(session.mark_screenshot(), Err("frontend-offline-operation"));
+        assert!(!session.screenshot_status().0);
         let wait = |ready: &dyn Fn(&Status) -> bool| {
             let start = Instant::now();
             loop {

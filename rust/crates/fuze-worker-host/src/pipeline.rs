@@ -15,6 +15,10 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub(crate) diagnostics: crate::recognition_log::Probe,
+    diagnostic_level: Option<u8>,
+    diagnostic_ocr: Option<serde_json::Value>,
+    diagnostic_active: bool,
     pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub frames: crate::overlay_frame::Publisher,
     tiers: std::collections::HashMap<u32, u64>,
@@ -125,6 +129,10 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            diagnostics: Default::default(),
+            diagnostic_level: None,
+            diagnostic_ocr: None,
+            diagnostic_active: false,
             title_reads: Default::default(),
             frames,
             tiers,
@@ -182,6 +190,7 @@ impl Pipeline {
         }
     }
     pub fn clear_level(&mut self) {
+        self.diagnostic_level = None;
         self.session.clear_level();
     }
     pub(crate) fn closed_window(&self) -> Option<fuze_runtime::gate::ClosedWindow> {
@@ -194,10 +203,12 @@ impl Pipeline {
         self.session.level_gate(enabled);
     }
     pub fn level_sample(&mut self, level: u8, age: u64) {
+        self.diagnostic_level = (age <= 10_000).then_some(level);
         self.session
             .update_level(level, self.now().saturating_sub(age));
     }
     pub fn level(&mut self, level: u8) {
+        self.diagnostic_level = Some(level);
         self.session.update_level(level, self.now());
     }
     pub fn life_sample(&mut self, dead: Option<bool>) {
@@ -334,6 +345,9 @@ impl Pipeline {
             atlas,
         );
         let roi_bytes = request.pixels.len();
+        if self.diagnostic_active {
+            self.diagnostic_ocr = Some(serde_json::json!({"attempted":true}));
+        }
         let reply = match self.worker.run(request, Duration::from_secs(3)) {
             Ok(reply) => reply,
             Err(error) => {
@@ -356,7 +370,14 @@ impl Pipeline {
             self.session.fail(ticket, self.now());
             return Err("worker-result");
         };
-        if !self.screen_gate.accept_titles(&slots, title_kind) {
+        let accepted = self.screen_gate.accept_titles(&slots, title_kind);
+        if self.diagnostic_active {
+            self.diagnostic_ocr = Some(serde_json::json!({
+                "attempted": true, "slots": slots, "titleKind": title_kind, "titleReads": title_reads,
+                "accepted": accepted, "ocrMs": ocr_ms,
+            }));
+        }
+        if !accepted {
             slots = std::array::from_fn(|_| fuze_contract::Slot::Unreadable);
             title_kind = TitleKind::Unknown;
         }
@@ -422,14 +443,29 @@ impl Pipeline {
         if let Some(capture) = self.capture.as_mut() {
             capture.saving(saving);
         }
-        if self.now() < self.next_capture_at || !self.wake_at().is_some_and(|at| self.now() >= at) {
+        let recognition_due =
+            self.now() >= self.next_capture_at && self.wake_at().is_some_and(|at| self.now() >= at);
+        let diagnostic_due = self.diagnostics.begin();
+        if !recognition_due && !diagnostic_due {
             self.expire_retained()?;
             self.skipped_frames = self.skipped_frames.saturating_add(1);
+            return Ok(None);
+        }
+        // Separate GDI probes cannot drain the production DXGI stream, enter a gate or publish.
+        if !recognition_due {
+            if let Some(capture) = self.capture.as_ref() {
+                let metadata = self.diagnostic_metadata("level-or-schedule-gate", &**capture);
+                self.diagnostics.gated(metadata);
+            }
+            self.expire_retained()?;
             return Ok(None);
         }
         let Some(mut capture) = self.capture.take() else {
             return Err("capture-missing");
         };
+        self.diagnostic_active = diagnostic_due;
+        self.diagnostic_ocr = None;
+        let mut diagnostic_sample = None;
         let result = (|| match capture.next(Duration::from_millis(100)).map_err(|e| {
             if e.to_string() == "capture-bitmap" {
                 "capture-bitmap"
@@ -438,6 +474,12 @@ impl Pipeline {
             }
         })? {
             FrameStatus::Ready => {
+                if diagnostic_due && self.diagnostics.visible() {
+                    diagnostic_sample = Some(crate::recognition_log::Sample::frame(
+                        &*capture,
+                        self.diagnostic_metadata("frame-ready", &*capture),
+                    ));
+                }
                 self.last_capture = Some(Instant::now());
                 self.capture_state = "receiving";
                 self.busy_streak = 0;
@@ -453,6 +495,9 @@ impl Pipeline {
                     let now = self.now();
                     let decision = self.screen_gate.observe(evidence, now);
                     if !decision.recognize {
+                        if let Some(sample) = &mut diagnostic_sample {
+                            sample.metadata["stage"] = serde_json::json!("pixel-gate");
+                        }
                         self.session.screen_probe(
                             evidence == fuze_contract::selection_pixels::Evidence::Visible,
                             // Occlusion may hide cards without ending this level's window.
@@ -471,6 +516,9 @@ impl Pipeline {
                     }
                 }
                 let atlas = capture.titles().map_err(|_| "capture-atlas")?;
+                if let Some(sample) = &mut diagnostic_sample {
+                    sample.metadata["stage"] = serde_json::json!("ocr");
+                }
                 let delivery = self.recognize(key, &atlas)?;
                 if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible) {
                     self.session.screen_visible(self.now());
@@ -517,6 +565,22 @@ impl Pipeline {
                 Ok(None)
             }
         })();
+        if diagnostic_due && self.diagnostics.visible() {
+            let mut sample = diagnostic_sample.unwrap_or_else(|| {
+                crate::recognition_log::Sample::without_image(
+                    self.diagnostic_metadata("capture-no-frame", &*capture),
+                )
+            });
+            sample.metadata["ocr"] = serde_json::json!(self.diagnostic_ocr.take());
+            sample.metadata["error"] = serde_json::json!(result.as_ref().err());
+            if let Ok(Some(delivery)) = &result {
+                sample.metadata["displayVisible"] = serde_json::json!(delivery.display_visible);
+                sample.metadata["retained"] = serde_json::json!(delivery.retained);
+                sample.metadata["totalMs"] = serde_json::json!(delivery.total_ms);
+            }
+            self.diagnostics.control.record(sample);
+        }
+        self.diagnostic_active = false;
         // Returned inference failures retain the capture stream; a capture failure stops it.
         if self.closed {
             return result;
@@ -546,6 +610,15 @@ impl Pipeline {
             self.capture_state = "waiting-frame";
         }
         Ok(())
+    }
+    fn diagnostic_metadata(&self, stage: &str, capture: &dyn CaptureFeed) -> serde_json::Value {
+        serde_json::json!({
+            "stage": stage, "frame": [capture.key().0, capture.key().1],
+            "source": capture.source(), "fallback": capture.fallback(),
+            "dataset": self.dataset, "level": self.diagnostic_level,
+            "schedule": format!("{:?}", self.scheduling().0), "nextLevel": self.scheduling().2,
+            "evidence": capture.selection().map(|e| format!("{e:?}")),
+        })
     }
 }
 
