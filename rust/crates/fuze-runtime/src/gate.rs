@@ -3,6 +3,7 @@
 pub enum Selection {
     Candidate,
     StatShard,
+    SkillChoice,
     Unknown,
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -36,6 +37,8 @@ pub struct LevelGate {
     dead: Option<bool>,
     death_wake: Option<u64>,
     candidate_seen: bool,
+    skill_seen: bool,
+    skill_wake: Option<u64>,
     window_closed: bool,
     disabled: bool,
 }
@@ -101,6 +104,11 @@ impl LevelGate {
                 self.unreadable_since = None;
             }
         }
+        // A prior skill screen identifies the Pentakill mode, not ownership or a claim.
+        // One bounded level-18 probe burst; telemetry refreshes cannot keep it alive.
+        if level >= 18 && self.skill_seen && self.skill_wake.is_none() {
+            self.skill_wake = Some(now);
+        }
         self.level = Some((level, now));
     }
     pub fn observe(&mut self, selection: Selection, now: u64) {
@@ -111,6 +119,10 @@ impl LevelGate {
             Selection::Candidate => self.candidate_seen = true,
             // A shard/anvil chain cannot inherit a preceding candidate's closure.
             Selection::StatShard => self.candidate_seen = false,
+            Selection::SkillChoice => {
+                self.candidate_seen = false;
+                self.skill_seen = true;
+            }
             Selection::Unknown => {}
         }
         if selection != Selection::Unknown {
@@ -166,11 +178,14 @@ impl LevelGate {
         let death = self
             .death_wake
             .is_some_and(|at| now >= at && now - at < BURST_MS);
+        let skill = self
+            .skill_wake
+            .is_some_and(|at| now >= at && now - at < BURST_MS);
         let mode = if evidence {
             Mode::Selection
         } else if level.is_none() {
             Mode::Fallback
-        } else if death {
+        } else if death || skill {
             Mode::Pending
         } else if self.window_closed && !self.disabled {
             // After level 7, disappearance cannot distinguish an extra offer from
@@ -229,6 +244,47 @@ impl LevelGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn skill_choices_do_not_close_the_opening_or_create_a_fifth_normal_stage() {
+        let mut g = LevelGate::default();
+        g.update_level(3, 0);
+        g.observe(Selection::SkillChoice, 1);
+        g.screen_closed();
+        assert!(g.decision(1000).capture);
+        assert_eq!(g.next_level(), Some(7));
+        g.observe(Selection::Candidate, 1001);
+        g.screen_closed();
+        g.update_level(6, 2000);
+        g.update_dead(Some(true), 2001);
+        assert!(!g.decision(2002).capture);
+        g.update_level(7, 3000);
+        assert!(g.decision(3000).capture);
+        // HEARTSTEEL level jumps only schedule a probe, never a claimed reward.
+        g.update_level(12, 4000);
+        assert_eq!(g.next_level(), Some(15));
+        g.update_level(15, 5000);
+        g.observe(Selection::Candidate, 5001);
+        g.screen_closed();
+        g.update_level(18, 30000);
+        assert_eq!(g.next_level(), None);
+        assert!(g.decision(30000).capture);
+        assert_eq!(g.decision(30000).interval_ms, 250);
+        g.screen_visible(30001);
+        g.observe(Selection::SkillChoice, 30002);
+        g.screen_closed();
+        assert_eq!(g.next_level(), None);
+        g.update_level(18, 51000);
+        assert_eq!(g.decision(51000).interval_ms, 8000);
+        g.clear_level();
+        g.update_level(18, 52000);
+        assert_eq!(g.decision(52000).interval_ms, 8000);
+        let mut ordinary = LevelGate::default();
+        ordinary.update_level(15, 0);
+        ordinary.observe(Selection::Candidate, 1);
+        ordinary.screen_closed();
+        ordinary.update_level(18, 30000);
+        assert_eq!(ordinary.decision(30000).interval_ms, 8000);
+    }
     #[test]
     fn off_threshold_saves_but_death_and_respawn_only_open_bounded_probe_windows() {
         let mut g = LevelGate::default();

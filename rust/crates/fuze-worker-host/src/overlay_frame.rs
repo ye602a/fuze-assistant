@@ -2,6 +2,88 @@
 use fuze_contract::Snapshot;
 use fuze_data::champion_detail::Augment;
 use std::{collections::HashMap, sync::Arc, time::Instant};
+pub fn skill_cards() -> Vec<Augment> {
+    fuze_contract::skill_choice::CHOICES.iter().map(|choice| Augment {
+        id: choice.id,
+        name: format!("{} · {}", choice.key, choice.title),
+        icon: fuze_contract::skill_choice::ICON_URL.into(),
+        rarity: None,
+        tier: None,
+        win: None,
+        pick: None,
+        description: format!("五杀摇滚 · 强化 {} 技能\n该技能获得 20 技能急速、10% 额外伤害，以及 10% 治疗和护盾效果。\n开场强化基础技能；18 级可强化另一个技能，包括终极技能。\n暂无技能选择统计，请结合本局玩法选择。", choice.key),
+        provenance: String::new(),
+    }).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fuze_contract::{skill_choice, wire::TitleKind, ActualStage, Slot};
+    #[test]
+    fn skill_to_ordinary_and_reroll_frames_keep_slots_without_statistics_leaks() {
+        let mut polluted = skill_cards();
+        polluted[0].win = Some(0.99);
+        polluted[0].tier = Some(1);
+        let mut ordinary = polluted[0].clone();
+        ordinary.id = 3051;
+        ordinary.name = "蓝色屏障".into();
+        ordinary.rarity = Some(0);
+        ordinary.win = None;
+        ordinary.tier = None;
+        polluted.push(ordinary.clone());
+        ordinary.id = 3060;
+        ordinary.name = "巫妖之脑".into();
+        ordinary.rarity = Some(1);
+        polluted.push(ordinary);
+        let mut publisher = Publisher::new(polluted, HashMap::from([(3170, 1.)]));
+        let mut retention = crate::retention::Retention::default();
+        let skills = ["重型", "力量", "鞭挞"].map(|n| skill_choice::read(n, 1.).unwrap());
+        let snapshot = |slots, sequence| Snapshot {
+            schema_version: 1,
+            generation: 1,
+            sequence,
+            dataset_version: "zh-CN@16.20.4-augments16.21".into(),
+            selection_confirmed: false,
+            actual_stage: ActualStage::Unknown,
+            slots,
+        };
+        let display = retention.apply(&skills, TitleKind::SkillChoice, 0);
+        publisher.publish(
+            snapshot(display.slots, 1),
+            display.visible,
+            display.retained,
+            None,
+        );
+        let frame = publisher.current().unwrap();
+        assert!(frame.scores.iter().all(Option::is_none));
+        for card in frame.cards.iter().flatten() {
+            assert!(card.win.is_none() && card.pick.is_none() && card.tier.is_none());
+            assert!(card.description.contains("20 技能急速"));
+        }
+        let regular = |id| Slot::Known {
+            id,
+            name: "ordinary".into(),
+            confidence: 1.,
+        };
+        let cards = [regular(3051), regular(3060), Slot::Unreadable];
+        let display = retention.apply(&cards, TitleKind::Candidate, 250);
+        assert!(!display.retained);
+        publisher.publish(snapshot(display.slots, 2), display.visible, false, None);
+        let frame = publisher.current().unwrap();
+        assert_eq!(frame.cards[0].as_ref().unwrap().rarity, Some(0));
+        assert!(frame.cards[2].is_none());
+        // COMMAND LINE upgrade replaces the old card/rarity in the same slot immediately.
+        let rerolled = [regular(3060), regular(3051), Slot::Unreadable];
+        let display = retention.apply(&rerolled, TitleKind::Candidate, 500);
+        assert!(!display.retained);
+        publisher.publish(snapshot(display.slots, 3), display.visible, false, None);
+        let frame = publisher.current().unwrap();
+        assert_eq!(frame.cards[0].as_ref().unwrap().rarity, Some(1));
+        assert!(frame.cards[0].as_ref().unwrap().win.is_none());
+        assert_eq!(frame.snapshot.actual_stage, ActualStage::Unknown);
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     /// Process-local pipeline identity prevents a restarted game accepting an old generation.
@@ -37,7 +119,10 @@ impl Publisher {
         catalog.extend(augments);
         Self::new(catalog, scores)
     }
-    pub fn new(augments: Vec<Augment>, scores: HashMap<u32, f64>) -> Self {
+    pub fn new(mut augments: Vec<Augment>, mut scores: HashMap<u32, f64>) -> Self {
+        // Skill choices have no ordinary augment statistics, even if an upstream row reuses the ID.
+        augments.extend(skill_cards());
+        scores.retain(|id, _| fuze_contract::skill_choice::get(*id).is_none());
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
             context: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),

@@ -15,7 +15,7 @@ pub struct Art {
 }
 impl Art {
     pub fn new(data: &fuze_data::Prepared, offline: bool) -> Result<Self> {
-        let urls = data
+        let mut urls = data
             .document("augments.json")
             .and_then(|d| d["data"].as_array())
             .into_iter()
@@ -29,6 +29,11 @@ impl Art {
         if urls.is_empty() {
             return Err("overlay-icons-unavailable");
         }
+        urls.extend(
+            crate::overlay_frame::skill_cards()
+                .into_iter()
+                .map(|card| (card.id, card.icon)),
+        );
         Ok(Self {
             service: Service::new(vec![], offline)?,
             urls,

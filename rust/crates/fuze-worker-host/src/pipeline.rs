@@ -99,11 +99,12 @@ impl Pipeline {
             .collect();
         let mut session = Session::new(dataset.clone())?;
         session.update_phase(Phase::Loading)?;
-        let stats = if recognition_only {
+        let mut stats = if recognition_only {
             Default::default()
         } else {
             data.recommendations(champion)?
         };
+        stats.retain(|id, _| fuze_contract::skill_choice::get(*id).is_none());
         let frames = crate::overlay_frame::Publisher::with_catalog(
             detail.augments,
             data.recognition_cards(),
@@ -362,6 +363,7 @@ impl Pipeline {
         }
         let selection = match title_kind {
             TitleKind::StatShard => Selection::StatShard,
+            TitleKind::SkillChoice => Selection::SkillChoice,
             TitleKind::Candidate => Selection::Candidate,
             TitleKind::Unknown => Selection::Unknown,
         };
@@ -472,7 +474,11 @@ impl Pipeline {
                 }
                 let atlas = capture.titles().map_err(|_| "capture-atlas")?;
                 let delivery = self.recognize(key, &atlas)?;
-                if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible) {
+                if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible)
+                    || delivery
+                        .as_ref()
+                        .is_some_and(|d| d.title_kind == TitleKind::SkillChoice)
+                {
                     self.session.screen_visible(self.now());
                 }
                 Ok(delivery)

@@ -50,7 +50,18 @@ pub fn shard_title(text: &str, confidence: f32) -> bool {
 }
 
 pub fn classify(slots: &[Slot; 3], shards: [bool; 3]) -> TitleKind {
-    if shards.into_iter().all(|v| v) && slots.iter().all(|s| *s == Slot::Unreadable) {
+    if slots.iter().any(fuze_contract::skill_choice::is_slot) {
+        // Never merge a skill screen with an ordinary candidate or anvil result.
+        if !shards.into_iter().any(|v| v)
+            && slots
+                .iter()
+                .all(|s| *s == Slot::Unreadable || fuze_contract::skill_choice::is_slot(s))
+        {
+            TitleKind::SkillChoice
+        } else {
+            TitleKind::Unknown
+        }
+    } else if shards.into_iter().all(|v| v) && slots.iter().all(|s| *s == Slot::Unreadable) {
         TitleKind::StatShard
     } else if slots.iter().any(|s| matches!(s, Slot::Known { .. })) {
         TitleKind::Candidate
@@ -62,6 +73,23 @@ pub fn classify(slots: &[Slot; 3], shards: [bool; 3]) -> TitleKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pentakill_choices_never_mix_with_ordinary_augments_or_shards() {
+        let mut slots = ["重型", "力量", "鞭挞"]
+            .map(|name| fuze_contract::skill_choice::read(name, 0.95).unwrap());
+        assert_eq!(classify(&slots, [false; 3]), TitleKind::SkillChoice);
+        slots[0] = fuze_contract::skill_choice::read("厄运", 0.95).unwrap();
+        assert_eq!(classify(&slots, [false; 3]), TitleKind::SkillChoice);
+        slots[1] = Slot::Unreadable;
+        assert_eq!(classify(&slots, [false; 3]), TitleKind::SkillChoice);
+        assert_eq!(classify(&slots, [false, true, false]), TitleKind::Unknown);
+        slots[1] = Slot::Known {
+            id: 3051,
+            name: "蓝色屏障".into(),
+            confidence: 1.,
+        };
+        assert_eq!(classify(&slots, [false; 3]), TitleKind::Unknown);
+    }
     #[test]
     fn exact_three_shards_only_and_no_claim_inference() {
         for text in [

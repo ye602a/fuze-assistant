@@ -6,6 +6,7 @@ pub struct ScreenGate {
     open: bool,
     missing_since: Option<u64>,
     titles: [Option<u32>; 3],
+    skill_only: bool,
 }
 pub struct Decision {
     pub recognize: bool,
@@ -20,6 +21,9 @@ impl ScreenGate {
         kind: fuze_contract::wire::TitleKind,
     ) -> bool {
         use fuze_contract::{wire::TitleKind, Slot};
+        if (self.skill_only && kind != TitleKind::SkillChoice) || kind == TitleKind::Unknown {
+            return false;
+        }
         if kind == TitleKind::StatShard {
             self.titles = [None; 3];
             return true;
@@ -39,7 +43,13 @@ impl ScreenGate {
     }
     pub fn observe(&mut self, evidence: Evidence, now: u64) -> Decision {
         match evidence {
-            Evidence::Visible => {
+            Evidence::Visible | Evidence::TitlesOnly => {
+                let skill_only = evidence == Evidence::TitlesOnly;
+                if self.skill_only != skill_only {
+                    self.positive = 0;
+                    self.open = false;
+                }
+                self.skill_only = skill_only;
                 self.positive = self.positive.saturating_add(1);
                 self.missing_since = None;
                 self.open |= self.positive >= 2;
@@ -81,6 +91,34 @@ impl ScreenGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn no_button_probe_cannot_admit_shop_or_ordinary_titles() {
+        use fuze_contract::{skill_choice, wire::TitleKind, Slot};
+        let mut g = ScreenGate::default();
+        assert!(!g.observe(Evidence::TitlesOnly, 0).recognize);
+        assert!(g.observe(Evidence::TitlesOnly, 250).recognize);
+        let ordinary = [1, 2, 3].map(|id| Slot::Known {
+            id,
+            name: "ordinary".into(),
+            confidence: 1.,
+        });
+        assert!(!g.accept_titles(&ordinary, TitleKind::Candidate));
+        let mut skills = ["重型", "力量", "鞭挞"].map(|n| skill_choice::read(n, 1.).unwrap());
+        assert!(!g.accept_titles(
+            &[skills[0].clone(), Slot::Unreadable, Slot::Unreadable],
+            TitleKind::SkillChoice
+        ));
+        assert!(!g.accept_titles(
+            &[skills[0].clone(), skills[0].clone(), Slot::Unreadable],
+            TitleKind::SkillChoice
+        ));
+        assert!(g.accept_titles(&skills, TitleKind::SkillChoice));
+        skills[1] = Slot::Unreadable;
+        assert!(g.accept_titles(&skills, TitleKind::SkillChoice));
+        assert!(!g.observe(Evidence::Visible, 500).recognize);
+        assert!(g.observe(Evidence::Visible, 750).recognize);
+        assert!(g.accept_titles(&ordinary, TitleKind::Candidate));
+    }
     #[test]
     fn isolated_shop_title_cannot_open_or_replace_a_confirmed_card() {
         use fuze_contract::{wire::TitleKind, Slot};

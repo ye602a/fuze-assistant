@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 pub mod frame;
 pub mod selection_pixels;
+pub mod skill_choice;
 pub mod titles;
 pub mod wire;
 
