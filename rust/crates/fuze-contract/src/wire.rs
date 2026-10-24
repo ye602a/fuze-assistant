@@ -121,6 +121,7 @@ pub enum TitleKind {
     Unknown,
     Candidate,
     StatShard,
+    SkillChoice,
 }
 /// Fixed diagnostic categories; never contains OCR text or pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]

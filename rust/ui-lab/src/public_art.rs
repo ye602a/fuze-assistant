@@ -1,5 +1,8 @@
 // Public artwork reused from the existing v0.6.3 reference cache. No user data.
 pub fn bytes(url: &str) -> Option<&'static [u8]> {
+    if url == fuze_contract::skill_choice::ICON_URL {
+        return Some(include_bytes!("../ui/assets/pentakill_small.png"));
+    }
     if let Some(bytes) = crate::public_augment_art::bytes(url) {
         return Some(bytes);
     }

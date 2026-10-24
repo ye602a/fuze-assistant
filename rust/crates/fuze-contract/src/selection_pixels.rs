@@ -4,6 +4,8 @@ use crate::titles::{regions, Atlas, Region};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Evidence {
     Visible,
+    /// Three title-shaped regions without reroll evidence: only skill OCR may admit this.
+    TitlesOnly,
     Partial,
     Absent,
     Uncertain,
@@ -61,6 +63,8 @@ pub fn classify(titles: &Atlas<'_>, buttons: &Atlas<'_>) -> Evidence {
     }
     if button_slots >= 2 && title_slots >= 1 {
         Evidence::Visible
+    } else if title_slots == 3 && button_slots == 0 {
+        Evidence::TitlesOnly
     } else if button_slots >= 1 && title_slots >= 1 {
         Evidence::Partial
     } else if button_slots == 0 && title_slots == 0 {
@@ -73,6 +77,35 @@ pub fn classify(titles: &Atlas<'_>, buttons: &Atlas<'_>) -> Evidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn three_titles_without_buttons_only_admit_the_skill_probe() {
+        let (w, h) = (120, 48);
+        let mut t = vec![0u8; w * h * 12];
+        let mut b = vec![0u8; t.len()];
+        for slot in 0..3 {
+            for x in 20..60 {
+                let i = (24 * w * 3 + slot * w + x) * 4;
+                t[i..i + 3].fill(220);
+            }
+        }
+        let evidence = |b: &[u8]| {
+            classify(
+                &Atlas::new(&t, w as u32, h as u32).unwrap(),
+                &Atlas::new(b, w as u32, h as u32).unwrap(),
+            )
+        };
+        assert_eq!(evidence(&b), Evidence::TitlesOnly);
+        // One remaining reroll button retains the existing partial-screen path.
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w * 3 + x) * 4;
+                b[i..i + 3].fill(125);
+            }
+        }
+        assert_eq!(evidence(&b), Evidence::Partial);
+        b.fill(125);
+        assert_eq!(evidence(&b), Evidence::Visible);
+    }
     #[test]
     fn requires_titles_and_multiple_buttons_and_handles_dark_or_busy_scenes() {
         let mut t = vec![0u8; 120 * 48 * 12];
@@ -87,7 +120,7 @@ mod tests {
         for i in 0..300 {
             t[i * 4..i * 4 + 3].fill(220);
         }
-        assert_eq!(evidence(&t, &b), Evidence::Uncertain);
+        assert_eq!(evidence(&t, &b), Evidence::TitlesOnly);
         b.fill(125);
         assert_eq!(evidence(&t, &b), Evidence::Visible);
         t.fill(220);

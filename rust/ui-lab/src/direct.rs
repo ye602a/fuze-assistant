@@ -15,6 +15,30 @@ struct Card {
     icon: String,
     description: String,
 }
+fn frame_cards(frame: &Frame) -> [Card; 3] {
+    let rate = |v: Option<f64>| {
+        v.map(|n| format!("{:.1}%", n * 100.))
+            .unwrap_or_else(|| "—".into())
+    };
+    std::array::from_fn(|i| match &frame.snapshot.slots[i] {
+        Slot::Known { id, name, .. } => Card {
+            id: Some(*id),
+            title: name.clone(),
+            win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
+            pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
+            score: frame.scores[i],
+            icon: frame.cards[i]
+                .as_ref()
+                .map(|a| a.icon.clone())
+                .unwrap_or_default(),
+            description: frame.cards[i]
+                .as_ref()
+                .map(|a| a.description.clone())
+                .unwrap_or_default(),
+        },
+        _ => Card::default(),
+    })
+}
 use windows::{
     core::{w, Result},
     Win32::{
@@ -177,7 +201,13 @@ impl Scene {
         } else {
             &self.cards[index].description
         };
-        let reference = if self.reference.details[index].is_empty() {
+        let reference = if self.cards[index]
+            .id
+            .and_then(fuze_contract::skill_choice::get)
+            .is_some()
+        {
+            String::new()
+        } else if self.reference.details[index].is_empty() {
             format!("\n\n{}", self.reference.source)
         } else {
             self.reference.details[index].clone()
@@ -388,6 +418,33 @@ impl Surface {
                 rect(x + 74., 43., TITLE_WIDTH, TITLE_HEIGHT),
                 TEXT,
             );
+            if let Some(choice) = card.id.and_then(fuze_contract::skill_choice::get) {
+                self.text(
+                    scene,
+                    target,
+                    &format!("强化 {} 技能", choice.key),
+                    2,
+                    rect(x + 14., 116., 214., 28.),
+                    TEXT,
+                );
+                self.text(
+                    scene,
+                    target,
+                    "+20 技能急速\n+10% 伤害、治疗及护盾",
+                    0,
+                    rect(x + 14., 151., 214., 40.),
+                    MUTED,
+                );
+                self.text(
+                    scene,
+                    target,
+                    "暂无统计 · 点击查看效果",
+                    0,
+                    rect(x + 14., 200., 214., 22.),
+                    MUTED,
+                );
+                continue;
+            }
             for (j, label) in ["整体胜率", "选取率"].iter().enumerate() {
                 let sx = x + 14. + j as f32 * 116.;
                 self.text(scene, target, label, 0, rect(sx, 118., 98., 20.), MUTED);
@@ -439,7 +496,15 @@ impl Surface {
         self.text(
             scene,
             target,
-            "点击卡片查看效果与分阶段统计 · 推荐度用于比较，不代表胜率",
+            if scene
+                .cards
+                .iter()
+                .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
+            {
+                "点击卡片查看技能强化效果 · 暂无技能选择统计"
+            } else {
+                "点击卡片查看效果与分阶段统计 · 推荐度用于比较，不代表胜率"
+            },
             0,
             rect(12., 236., 736., 20.),
             MUTED,
@@ -1036,28 +1101,7 @@ impl HostOverlay {
             self.window.state.dismissed = false;
         }
         if !same || self.frame.is_none() {
-            let rate = |v: Option<f64>| {
-                v.map(|n| format!("{:.1}%", n * 100.))
-                    .unwrap_or_else(|| "—".into())
-            };
-            let cards = std::array::from_fn(|i| match &frame.snapshot.slots[i] {
-                Slot::Known { id, name, .. } => Card {
-                    id: Some(*id),
-                    title: name.clone(),
-                    win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
-                    pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
-                    score: frame.scores[i],
-                    icon: frame.cards[i]
-                        .as_ref()
-                        .map(|a| a.icon.clone())
-                        .unwrap_or_default(),
-                    description: frame.cards[i]
-                        .as_ref()
-                        .map(|a| a.description.clone())
-                        .unwrap_or_default(),
-                },
-                _ => Card::default(),
-            });
+            let cards = frame_cards(&frame);
             let ids = cards.each_ref().map(|c| c.id);
             if ids != self.ids {
                 // A reroll or partial OCR result is still the same selection window.
@@ -1068,7 +1112,16 @@ impl HostOverlay {
                     size_to_content(self.window.hwnd, false);
                 }
             }
-            let caption = if self.preview_mode {
+            let skill_choice = frame
+                .snapshot
+                .slots
+                .iter()
+                .any(fuze_contract::skill_choice::is_slot);
+            let caption = if skill_choice && frame.retained {
+                "五杀摇滚 · 技能强化 · 暂留上次结果"
+            } else if skill_choice {
+                "五杀摇滚 · 技能强化"
+            } else if self.preview_mode {
                 "整体胜率 · 公开数据样例"
             } else if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
@@ -1454,6 +1507,82 @@ impl HostOverlay {
         Ok(())
     }
 }
+#[cfg(test)]
+mod skill_tests {
+    use super::*;
+    #[test]
+    fn skill_cards_render_offscreen_without_statistics_or_stage_reference(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let _com = Com::new()?;
+        let mut publisher =
+            fuze_worker_host::overlay_frame::Publisher::new(vec![], Default::default());
+        publisher.publish(
+            fuze_contract::Snapshot {
+                schema_version: 1,
+                generation: 1,
+                sequence: 1,
+                dataset_version: "zh-CN@16.20.4-augments16.21".into(),
+                selection_confirmed: false,
+                actual_stage: fuze_contract::ActualStage::Unknown,
+                slots: ["重型", "力量", "厄运"]
+                    .map(|n| fuze_contract::skill_choice::read(n, 1.).unwrap()),
+            },
+            true,
+            false,
+            None,
+        );
+        let mut scene = Scene::new()?;
+        scene.cards = frame_cards(&publisher.current().unwrap());
+        scene.caption = "五杀摇滚 · 技能强化".into();
+        scene.icons = scene
+            .cards
+            .iter()
+            .map(|card| {
+                image::load_from_memory(crate::public_art::bytes(&card.icon).unwrap())
+                    .unwrap()
+                    .into_rgba8()
+            })
+            .collect();
+        assert!(scene
+            .cards
+            .iter()
+            .all(|c| c.score.is_none() && c.win == "—" && c.pick == "—"));
+        scene.select(Some(2))?;
+        assert!(scene.detail.is_some());
+        // WIC render target only: no HWND, application startup, input or game access.
+        unsafe {
+            let imaging: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let height = HEIGHT + DETAIL_HEIGHT;
+            let bitmap = imaging.CreateBitmap(
+                WIDTH,
+                height,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )?;
+            let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
+            props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+            let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
+            Surface::new(&scene, &target)?.draw(&scene, &target, false)?;
+            if let Some(path) = std::env::var_os("FUZE_SKILL_REVIEW") {
+                let mut pixels = vec![0u8; (WIDTH * height * 4) as usize];
+                bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+                for pixel in pixels.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                image::save_buffer(
+                    Path::new(&path),
+                    &pixels,
+                    WIDTH,
+                    height,
+                    image::ColorType::Rgba8,
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference::Snapshot {
     use fuze_worker_host::stage_reference::{Row, Snapshot};
     let mut rows: [Vec<Row>; 5] = Default::default();
