@@ -219,7 +219,7 @@ export component ChampionWindow inherits Window {
     }
     Rectangle { x: 0px; y: root.height - 64px; height: 64px; background: #101e2a;
         if root.can-configure-items: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "导入路线 " + (root.build-route + 1) + " 到游戏商店"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
-        if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "该英雄暂无可用装备方案。"; color: Theme.muted; font-size: 12px; }
+        if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "暂无可导入的海克斯出装数据。"; color: Theme.muted; font-size: 12px; }
     }
     }
     Rectangle { visible: root.item-confirm; x: 0px; y: 0px; background: #000000b8;

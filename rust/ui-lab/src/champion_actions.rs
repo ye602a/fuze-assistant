@@ -211,7 +211,7 @@ pub fn attach(ui: &ChampionWindow) -> Binding {
             let Some(ui) = weak.upgrade() else { return };
             ui.set_action_busy(false);
             let Ok((epoch, result)) = reply else {
-                ui.set_action_notice("配置任务未完成，请重试。".into());
+                ui.set_action_notice("导入结果未确认：任务中断，请重试。".into());
                 return;
             };
             if !shared
@@ -225,16 +225,17 @@ pub fn attach(ui: &ChampionWindow) -> Binding {
             ui.set_action_notice(
                 match result {
                     Ok(()) => {
-                        "客户端装备方案已保存并回读核对。进入游戏后在商店装备方案中选择 FUZE 路线。"
+                        "导入成功：客户端已保存并核对。进入游戏后在商店的装备方案中选择 FUZE 路线（不替换默认推荐页）。"
                     }
                     Err("item-sets-selection-changed") => "选人已变化，未提交装备方案。",
                     Err("item-sets-account-changed") => "账号已变化，未提交装备方案。",
                     Err("item-sets-readback-failed" | "item-sets-readback-mismatch") => {
-                        "写入请求已提交，但保存结果未核实。请重试导入，暂不视为成功。"
+                        "导入结果未确认：已提交写入，但无法核对保存结果。请重新导入，暂不视为成功。"
                     }
+                    Err("item-sets-write-failed") => "导入失败：客户端未确认写入，请重试。",
                     Err("item-sets-read-failed") => "无法读取客户端原装备方案，未提交修改。",
                     Err("item-sets-auto-disabled") => "自动导入已关闭，未提交装备方案。",
-                    Err(_) => "装备方案配置未成功，请确认客户端连接后重试。",
+                    Err(_) => "导入失败：请确认客户端仍在选人阶段，再重试。",
                 }
                 .into(),
             );
