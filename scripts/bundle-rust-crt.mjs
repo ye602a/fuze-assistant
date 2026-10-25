@@ -4,7 +4,8 @@ import path from 'node:path'
 import {inspectPe, nativeFiles} from './rust-release-readiness.mjs'
 import {crtNames, sha256} from './rust-runtime-contract.mjs'
 const [bundle, source] = process.argv.slice(2)
-const queue = [...nativeFiles], seen = new Set(), hashes = {}
+const build = JSON.parse(await readFile(path.join(bundle, 'build.json'), 'utf8'))
+const queue = nativeFiles.map(name => name === 'fuze-ui-lab.exe' && build.desktopExecutable === 'FUZE.exe' ? 'FUZE.exe' : name), seen = new Set(), hashes = {}
 while (queue.length) {
   const name = queue.shift()
   if (seen.has(name)) continue
