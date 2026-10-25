@@ -19,10 +19,6 @@ jobs:
         shell: pwsh
         run: Copy-Item .release-helpers (Join-Path $env:RUNNER_TEMP "fuze-release-helpers") -Recurse
       - uses: actions/checkout@v4
-      - name: Retain delivery helpers outside source checkout
-        shell: pwsh
-        run: Copy-Item release-helpers (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers') -Recurse
-      - uses: actions/checkout@v4
         with:
           ref: 33bb6176e46af8f13a517ee224ffac13f6c787c3
       - uses: actions/setup-node@v4
