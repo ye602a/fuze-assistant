@@ -2,6 +2,7 @@
 import {createHash} from 'node:crypto';
 const api='https://api.github.com/repos/ye602a/fuze-assistant';
 const source=process.env.SOURCE_SHA, revision=source.slice(0,12);
+const releaseSource=process.env.PACKAGING_SHA||source;
 const tag='rust-v0.7.5', version='0.7.5';
 const hash=b=>createHash('sha256').update(b).digest('hex');
 async function request(url,method='GET',body,raw=false,missing=false){
@@ -35,8 +36,8 @@ body=body.replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download
  .replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`,base+setupName)
  .replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/build-evidence-${revision}.json`,base+`build-evidence-${revision}.json`);
 let release=await request(`${api}/releases/tags/${tag}`,'GET',undefined,false,true);
-if(!release)release=await request(`${api}/releases`,'POST',{tag_name:tag,target_commitish:source,name:'FUZE v0.7.5',body,draft:true,prerelease:false});
-if(release.target_commitish!==source)throw Error('Unexpected existing release source');
+if(!release)release=await request(`${api}/releases`,'POST',{tag_name:tag,target_commitish:releaseSource,name:'FUZE v0.7.5',body,draft:true,prerelease:false});
+if(release.target_commitish!==releaseSource)throw Error('Unexpected existing release source');
 for(const [name,bytes] of [[zipName,zip],[setupName,setup],[zipName+'.sha256',Buffer.from(`${hash(zip)}  ${zipName}\n`)],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)],[`build-evidence-${revision}.json`,receiptBytes]]){
  let asset=release.assets.find(a=>a.name===name);
  if(asset?.digest!==`sha256:${hash(bytes)}`){
@@ -49,7 +50,7 @@ for(const [name,bytes] of [[zipName,zip],[setupName,setup],[zipName+'.sha256',Bu
  console.log('Verified '+name);
 }
 
-await request(`${api}/releases/${release.id}`,'PATCH',{target_commitish:source,name:'FUZE v0.7.5',body,draft:false,prerelease:false,make_latest:'true'});
+await request(`${api}/releases/${release.id}`,'PATCH',{target_commitish:releaseSource,name:'FUZE v0.7.5',body,draft:false,prerelease:false,make_latest:'true'});
 const latest=await request(`${api}/releases/latest`);
 const kept=await request(`${api}/releases/tags/rust-preview`);
 if(latest.id!==release.id||latest.draft||latest.prerelease||!kept.prerelease||JSON.stringify(kept.assets.map(a=>[a.id,a.digest]))!==JSON.stringify(preview.assets.map(a=>[a.id,a.digest])))throw Error('Final release or update endpoint verification failed');

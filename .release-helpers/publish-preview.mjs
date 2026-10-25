@@ -13,7 +13,7 @@ async function request(url,method='GET',body,raw=false){
  return response.json();
 }
 for(const number of [154]){const pr=await request(`${api}/pulls/${number}`);if(!pr.merged_at)throw Error(`PR ${number} not merged`);}
-const master=await request(`${api}/git/ref/heads/master`);if(master.object.sha!==source)throw Error('Master moved since build');
+const master=await request(`${api}/git/ref/heads/master`);if(master.object.sha!==(process.env.PACKAGING_SHA||source))throw Error('Master moved since build');
 const name=`fuze-rust-preview-${revision}.zip`,zipBytes=await readFile(path.join(directory,name)),zip=new AdmZip(zipBytes),build=JSON.parse(zip.readAsText('build.json'));
 if(build.revision!==revision||build.version!=='0.7.5'||build.uiFrontend!=='slint')throw Error('Wrong ZIP identity');
 if(!zip.getEntry('FUZE.exe')||zip.getEntry('fuze-ui-lab.exe')||zip.getEntries().some(e=>/\.(cmd|bat|ps1)$/i.test(e.entryName)))throw Error('Unexpected player layout');
@@ -32,7 +32,7 @@ async function upload(name,bytes){
  console.log(`Uploaded and verified: ${name}`);
 }
 const setupName=`FUZE-Setup-0.7.5-preview-${revision}-windows-x64.exe`,setup=await readFile(path.join(directory,setupName));
-const evidence={source,revision,version:'0.7.5',sequence:manifest.sequence,zipSha256:hash(zipBytes),setupSha256:hash(setup),signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
+const evidence={source,packagingSource:process.env.PACKAGING_SHA||source,reusedBuildRun:40199537921,revision,version:'0.7.5',sequence:manifest.sequence,zipSha256:hash(zipBytes),setupSha256:hash(setup),signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
 await writeFile(path.join(directory,`build-evidence-${revision}.json`),JSON.stringify(evidence,null,2));
 for(const [file,bytes]of [[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)],[manifest.archive,fuz],[manifest.archive+'.blockmap',map],[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)],[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
 const old=preview.assets.find(a=>a.name==='rust-update.json');if(!old)throw Error('Missing current update manifest');

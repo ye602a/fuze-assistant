@@ -3,12 +3,14 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: fuze-preview-publication
   cancel-in-progress: false
 env:
   SOURCE_SHA: 33bb6176e46af8f13a517ee224ffac13f6c787c3
   FUZE_UI_FRONTEND: slint
+  PACKAGING_SHA: 370953ca21a065cc25370fb31a97df7a7edc3b65
 jobs:
   preview:
     runs-on: windows-2022
@@ -36,32 +38,26 @@ jobs:
           path: rust/target
           key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
           restore-keys: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
-      - name: Compile exact source with build receipt
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-build-evidence
+          run-id: 40199537921
+          github-token: ${{ github.token }}
+          path: rust
+      - name: Verify original binaries and apply packaging-only correction
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'source-mismatch' }
-          $policy = Get-Content rust/vc-runtime-policy.json -Raw | ConvertFrom-Json
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $installations = & $vswhere -all -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $compatible = @(
-            foreach ($installation in $installations) {
-              foreach ($tools in (Get-ChildItem -LiteralPath (Join-Path $installation 'VC/Tools/MSVC') -Directory)) {
-                $cl = Join-Path $tools.FullName 'bin/Hostx64/x64/cl.exe'
-                $link = Join-Path $tools.FullName 'bin/Hostx64/x64/link.exe'
-                if (!(Test-Path -LiteralPath $cl) -or !(Test-Path -LiteralPath $link)) { continue }
-                $cv = [Diagnostics.FileVersionInfo]::GetVersionInfo($cl).FileVersion
-                $lv = [Diagnostics.FileVersionInfo]::GetVersionInfo($link).FileVersion
-                if ($cv -match '^19\.\d+\.\d+\.\d+$' -and $lv -match '^14\.\d+\.\d+\.\d+$' -and
-                    [version]($cv -replace '^19\.', '14.') -le [version]$policy.minimumVersion -and
-                    [version]$lv -le [version]$policy.minimumVersion) {
-                  [pscustomobject]@{Path=$tools.FullName; Version=[version]$lv}
-                }
-              }
-            }
-          ) | Sort-Object Version -Descending
-          if (!$compatible.Count) { throw 'no-reviewed-compatible-toolchain' }
-          Write-Host "Selected MSVC $($compatible[0].Version)"
-          ./scripts/build-rust-with-evidence.ps1 -Frontend slint -VcToolsDir $compatible[0].Path
+          git fetch origin $env:PACKAGING_SHA --depth=2
+          $changed = @(git diff --name-only $env:SOURCE_SHA $env:PACKAGING_SHA)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'scripts/bundle-rust-crt.mjs') { throw 'not-packaging-only' }
+          git show "$($env:PACKAGING_SHA):scripts/bundle-rust-crt.mjs" | Set-Content scripts/bundle-rust-crt.mjs -Encoding utf8
+          $receipt = Get-Content rust/target/release/fuze-build-evidence.json -Raw | ConvertFrom-Json
+          if (!$receipt.completed -or !$receipt.sourceClean -or $receipt.revision -ne $env:SOURCE_SHA.Substring(0,12)) { throw 'original-build-receipt-mismatch' }
+          foreach ($file in $receipt.binaries.PSObject.Properties) {
+            if ((Get-FileHash (Join-Path 'rust/target/release' $file.Name)).Hash.ToLowerInvariant() -ne $file.Value) { throw 'original-binary-mismatch' }
+          }
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --release --locked -p fuze-worker-host --bin fuze-update-verify -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare public data and self-check preview
         shell: pwsh
         run: |
@@ -103,6 +99,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/publish-preview.mjs')
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: rust/target
+          key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}-resume
       - name: Preserve build receipts
         if: always()
         uses: actions/upload-artifact@v4
