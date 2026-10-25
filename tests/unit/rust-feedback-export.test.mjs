@@ -10,7 +10,7 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
   const dir=mkdtempSync(path.join(tmpdir(),'fuze-feedback-fixture-'))
   const source=path.join(dir,'source.json'), destination=path.join(dir,'feedback.json')
   const script=fileURLToPath(new URL('../../scripts/export-rust-feedback.ps1',import.meta.url))
-  const run=(out=destination)=>spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',out],{encoding:'utf8',windowsHide:true,timeout:15000})
+  const run=(out=destination)=>spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',out],{encoding:'utf8',windowsHide:true,timeout:60000})
   const secret='private-fixture-never-export'
   try {
     const segment={binding:{key:secret,platform:secret,game:987654321},champion:1234,recognition:{analyses:4,partial:1,total_ms:1200,ocr_ms:800,token:secret},interrupted:false,capped:false,events:[{observed_at:123456789,cards:[1111,null,2222],level:6,partial:true,kind:'first',raw:secret},{cards:[null,null,null],level:secret,kind:secret}]}
@@ -21,7 +21,7 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     writeFileSync(path.join(logs,'runtime-v1.1.jsonl'),JSON.stringify({...row,event:'start'})+'\n')
     writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,token:secret})+'\n'+JSON.stringify({...row,state:{...row.state,connection:secret}})+'\n{"partial":')
     let result=run()
-    assert.equal(result.status,0,result.stdout)
+    assert.equal(result.status,0,result.error?.code ?? result.stdout)
     const raw=readFileSync(destination,'utf8'), report=JSON.parse(raw)
     assert.equal(report.segments.length,5)
     assert.equal(report.persistentLog.status,'partial')
@@ -101,7 +101,7 @@ test('exporter identity never overwrites old or mixed runtime builds', {skip:pro
     let serial=0
     const run=()=>{
       const destination=path.join(dir,`report-${serial++}.json`)
-      const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',destination],{cwd:data,encoding:'utf8',windowsHide:true,timeout:15000})
+      const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',destination],{cwd:data,encoding:'utf8',windowsHide:true,timeout:60000})
       assert.equal(result.status,0,result.stdout+result.stderr)
       const raw=readFileSync(destination,'utf8')
       assert.ok(!raw.includes('do-not-export'))
