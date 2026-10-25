@@ -429,7 +429,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         step.set(9);
                     }
                     9 if !champion.get_stage_busy() => {
-                        if !champion.get_stage_status().contains("离线模式") {
+                        if !champion.get_stage_status().contains("离线验证") {
                             return Err("stage-offline-isolation".into());
                         }
                         crate::overlay_review::stage(&champion, &destination)?;
@@ -610,7 +610,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         ui.set_scroll_y(-1010.);
                         save("records-share")?;
                         record.invoke_action("copy".into(), 0);
-                        if !record.get_notice().contains("离线模式") {
+                        if !record.get_notice().contains("离线验证") {
                             return Err("clipboard-offline-boundary".into());
                         }
                         record.invoke_action("select".into(), 1);
