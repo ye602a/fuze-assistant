@@ -235,7 +235,18 @@ impl ReadOnlyClient {
             let (_, mut player) = self.request(current_pid, endpoint)?;
             let result = crate::context::parse(phase, &flow, &player);
             wipe(&mut player);
-            result
+            let mut context = result?;
+            if let Some(selection) = context.selection.as_mut().filter(|s| s.choices.is_some()) {
+                if let Ok((code, mut body)) = self.request(current_pid, Endpoint::SubsetChampions) {
+                    selection.choices = Some(if code == 200 {
+                        crate::context::subset(&body).unwrap_or([0; 3])
+                    } else {
+                        [0; 3]
+                    });
+                    wipe(&mut body);
+                }
+            }
+            Ok(context)
         })();
         wipe(&mut flow);
         result

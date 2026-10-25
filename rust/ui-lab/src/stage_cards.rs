@@ -274,6 +274,7 @@ mod tests {
             }],
             local_slot: Some(0),
             bench: Vec::new(),
+            choices: None,
             version: "zh-CN@16.20.1".into(),
         };
         let mut state = Status::default();

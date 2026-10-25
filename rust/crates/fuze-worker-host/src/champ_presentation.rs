@@ -994,6 +994,7 @@ mod tests {
         let v = View {
             team: (1..=5).map(hero).collect(),
             bench: (6..=25).map(hero).collect(),
+            choices: None,
             local_slot: Some(0),
             version: "zh-CN@1".into(),
         };

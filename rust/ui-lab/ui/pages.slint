@@ -95,7 +95,7 @@ export component SettingsPage inherits VerticalLayout {
         Panel { height: 220px;
             SectionTitle { x: 21px; y: 18px; width: parent.width - 105px; height: 28px; text: "本地识别截图"; }
             Toggle { x: parent.width - 65px; y: 20px; label: "本次运行记录识别截图"; checked: DiagnosticState.screenshots-enabled; enabled: HostState.connected && !HostState.offline; toggled => { DiagnosticState.action("toggle-screenshots"); } }
-            Label { x: 21px; y: 54px; width: parent.width - 42px; height: 48px; text: "默认开启，仅本地保存三卡标题、按钮和识别状态，不录全屏、不自动上传。最多 120 条 / 64 MiB，满后停止。分享前请检查图片。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            Label { x: 21px; y: 54px; width: parent.width - 42px; height: 48px; text: "默认开启，仅本地保存三卡标题、按钮和识别状态，不录全屏、不自动上传。最多 1200 条 / 256 MiB，满后停止。分享前请检查图片。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
             Label { x: 21px; y: 108px; width: parent.width - 42px; height: 48px; text: DiagnosticState.screenshots-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
             HorizontalLayout { x: 21px; y: 170px; width: parent.width - 42px; height: 32px; spacing: 12px;
                 Action { label: "标记最近画面有问题"; enabled: DiagnosticState.screenshots-recent && !HostState.offline; clicked => { DiagnosticState.action("mark-screenshot"); } }

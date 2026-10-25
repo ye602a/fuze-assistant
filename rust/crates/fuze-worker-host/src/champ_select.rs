@@ -31,6 +31,7 @@ pub struct View {
     pub team: Vec<Hero>,
     pub local_slot: Option<usize>,
     pub bench: Vec<Hero>,
+    pub choices: Option<Vec<Hero>>,
     pub version: String,
 }
 pub struct Catalog {
@@ -44,6 +45,7 @@ impl Catalog {
             local_slot: Some(0),
             bench: [0; 20],
             count: 0,
+            choices: None,
         })
     }
     pub fn identity(&self) -> &str {
@@ -133,6 +135,9 @@ impl Catalog {
             team: selection.team.into_iter().map(hero).collect(),
             local_slot: selection.local_slot,
             bench,
+            choices: selection
+                .choices
+                .map(|ids| ids.into_iter().filter(|id| *id > 0).map(hero).collect()),
             version: self.version.clone(),
         }
     }
@@ -1029,9 +1034,18 @@ mod tests {
             local_slot: Some(0),
             bench: [0; 20],
             count: 3,
+            choices: None,
         };
         s.bench[..3].copy_from_slice(&[1, 3, 2]);
+        s.choices = Some([3, 2, 999]);
         let v = c.view(s);
+        let choices = v.choices.as_ref().unwrap();
+        assert_eq!(
+            choices.iter().map(|h| h.id).collect::<Vec<_>>(),
+            vec![3, 2, 999]
+        );
+        assert_eq!(choices[2].win, None);
+        assert_eq!(choices[2].name, "英雄 999");
         assert_eq!(v.team[0].id, 1);
         assert_eq!(
             v.bench.iter().map(|h| h.id).collect::<Vec<_>>(),

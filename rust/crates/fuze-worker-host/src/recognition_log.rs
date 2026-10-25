@@ -14,8 +14,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const MAX_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_RECORDS: usize = 120;
+const MAX_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_RECORDS: usize = 1200;
 pub fn root() -> Result<PathBuf> {
     Ok(crate::preferences::path()?.with_file_name("recognition-captures"))
 }
@@ -189,13 +189,22 @@ impl Control {
                 .map(|slots| slots.iter().map(|s| s.get("id")).collect::<Vec<_>>()),
         ])
         .to_string();
-        let failed = sample.metadata["error"].is_string();
+        let failed =
+            sample.metadata["error"].is_string()
+                || (sample.metadata["ocr"]["attempted"] == true
+                    && (sample.metadata["ocr"]["accepted"] == false
+                        || (matches!(
+                            sample.metadata["ocr"]["titleKind"].as_str(),
+                            Some("candidate" | "skill_choice")
+                        ) && sample.metadata["ocr"]["slots"].as_array().is_some_and(
+                            |slots| slots.iter().any(|slot| slot["state"] == "unreadable"),
+                        ))));
         let sample = Arc::new(sample);
         // A capture failure replaces, rather than inherits, the previous image.
         s.latest = Some(sample.clone());
         let changed = s.signature.as_ref().is_none_or(|(old, at)| {
             (old != &signature && (failed || at.elapsed() >= Duration::from_secs(2)))
-                || at.elapsed() >= Duration::from_secs(30)
+                || at.elapsed() >= Duration::from_secs(if failed { 2 } else { 30 })
         });
         if !changed {
             return;
@@ -235,7 +244,7 @@ impl Control {
         };
         let hint = match s.error {
             Some("capture-log-limit") => {
-                "已到 120 条或 64 MiB 上限，请先移走目录内的旧记录，再重启后开启。"
+                "已到 1200 条或 256 MiB 上限，请先移走目录内的旧记录，再重启后开启。"
             }
             Some(_) => "截图日志写入失败，请检查目录是否可写或被另一实例占用。",
             None if s.enabled => "已开启，等待前台主屏游戏画面；关闭或退出后停止采样。",
@@ -609,6 +618,30 @@ mod tests {
             json!({"stage":"pixel-gate","level":7}),
         ));
         assert!(rx.try_recv().is_ok());
+    }
+    #[test]
+    fn repeated_failures_capture_every_two_seconds_without_speeding_up_healthy_samples() {
+        for metadata in [
+            json!({"error":"worker-timeout"}),
+            json!({"ocr":{"attempted":true,"accepted":false}}),
+            json!({"ocr":{"attempted":true,"accepted":true,"titleKind":"candidate","slots":[{"state":"unreadable"}]}}),
+        ] {
+            let (control, rx) = queued();
+            control.record(Sample::without_image(metadata.clone()));
+            rx.recv().unwrap();
+            control.record(Sample::without_image(metadata.clone()));
+            assert!(rx.try_recv().is_err());
+            control.0.lock().unwrap().signature.as_mut().unwrap().1 -= Duration::from_secs(3);
+            control.record(Sample::without_image(metadata));
+            assert!(rx.try_recv().is_ok());
+        }
+        let (control, rx) = queued();
+        let healthy = json!({"ocr":{"attempted":true,"accepted":true,"titleKind":"stat_shard","slots":[{"state":"unreadable"}]}});
+        control.record(Sample::without_image(healthy.clone()));
+        rx.recv().unwrap();
+        control.0.lock().unwrap().signature.as_mut().unwrap().1 -= Duration::from_secs(3);
+        control.record(Sample::without_image(healthy));
+        assert!(rx.try_recv().is_err());
     }
     #[test]
     fn writer_limits_lock_and_missing_image_preserve_existing_files() {

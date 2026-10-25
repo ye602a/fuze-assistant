@@ -47,6 +47,7 @@ pub fn run(
         local_slot: Some(0),
         bench: std::array::from_fn(|i| ids.get(i + 5).copied().unwrap_or(0)),
         count: ids.len() - 5,
+        choices: None,
     };
     let before = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     slint::BackendSelector::new()

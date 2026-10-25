@@ -809,6 +809,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 local_slot: Some(1),
                 bench: [0; 20],
                 count: 12,
+                choices: None,
             };
             selection.bench[..12].copy_from_slice(&[2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
             champions.refresh(
