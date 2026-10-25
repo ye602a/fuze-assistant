@@ -30,7 +30,8 @@ fn trusted(v: &Value) -> Vec<&Value> {
 }
 fn ids(v: &Value) -> Vec<String> {
     let values: Vec<_> = v
-        .get("itemIds")
+        .get("importItemIds")
+        .or_else(|| v.get("itemIds"))
         .or_else(|| v.get("items"))
         .and_then(Value::as_array)
         .map(|a| a.iter().take(12).collect())
@@ -86,6 +87,7 @@ pub fn create_indexed(champion: u32, name: &str, builds: &[&Value]) -> Vec<(usiz
         let mut blocked = std::collections::HashSet::new();
         for (values, label, limit) in [
             (&build["startingItems"], "出门装备", 3),
+            (&build["boots"], "鞋子", 3),
             (core, "核心装备", 5),
             (&build["fullItems"], "完整出装", 3),
         ] {
@@ -150,13 +152,18 @@ pub fn create_indexed(champion: u32, name: &str, builds: &[&Value]) -> Vec<(usiz
                     .join("/")
             })
             .unwrap_or_default();
-        let patch = build["patch"].as_str().unwrap_or("补丁未知");
+        let patch = build["patch"].as_str().unwrap_or("补丁未提供");
         let title: String = format!("FUZE {name} · 路线 {} {tags} · {mode} · {patch}", route + 1)
             .chars()
             .filter(|c| !c.is_control())
             .take(160)
             .collect();
-        result.push((route,json!({"uid":if i==0{"aramgg-aram-current".into()}else{format!("aramgg-aram-current-{}",i+1)},"title":title,"associatedMaps":[11,12],"associatedChampions":[champion],"blocks":blocks,"map":"any","mode":"any","preferredItemSlots":[],"sortrank":0,"sortRank":0,"startedFrom":"blank","type":"custom"})));
+        let maps = if build["source"] == crate::tencent::SOURCE {
+            json!([12])
+        } else {
+            json!([11, 12])
+        };
+        result.push((route,json!({"uid":if i==0{"aramgg-aram-current".into()}else{format!("aramgg-aram-current-{}",i+1)},"title":title,"associatedMaps":maps,"associatedChampions":[champion],"blocks":blocks,"map":"any","mode":"any","preferredItemSlots":[],"sortrank":0,"sortRank":0,"startedFrom":"blank","type":"custom"})));
         if result.len() == 4 {
             break;
         }

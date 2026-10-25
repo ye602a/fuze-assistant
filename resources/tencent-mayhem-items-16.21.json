@@ -1,0 +1,1710 @@
+{
+  "patch": "16.21",
+  "sources": [
+    {
+      "url": "https://game.gtimg.cn/images/lol/act/img/js/items/items.js",
+      "sha256": "d4a522f106dc46858f31cf5ea8567461bfe69e4461b92b82d4e6dadb50a30391"
+    },
+    {
+      "url": "https://raw.communitydragon.org/16.21/plugins/rcp-be-lol-game-data/global/zh_cn/v1/items.json",
+      "sha256": "a8655107f214ccc865a2f59211e48fb5cb6977dd7c374f181f9da83786fcf3c3",
+      "note": "Saved 2026-10-22 client export; current anonymous fetch returned 403."
+    }
+  ],
+  "data": [
+    {
+      "id": 1001,
+      "name": "鞋子",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1001.png",
+      "purchaseId": 1001,
+      "reason": ""
+    },
+    {
+      "id": 1004,
+      "name": "仙女护符",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1004.png",
+      "purchaseId": 1004,
+      "reason": ""
+    },
+    {
+      "id": 1006,
+      "name": "治疗宝珠",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1006.png",
+      "purchaseId": 1006,
+      "reason": ""
+    },
+    {
+      "id": 1011,
+      "name": "巨人腰带",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1011.png",
+      "purchaseId": 1011,
+      "reason": ""
+    },
+    {
+      "id": 1018,
+      "name": "灵巧披风",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1018.png",
+      "purchaseId": 1018,
+      "reason": ""
+    },
+    {
+      "id": 1026,
+      "name": "爆裂魔杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1026.png",
+      "purchaseId": 1026,
+      "reason": ""
+    },
+    {
+      "id": 1027,
+      "name": "蓝水晶",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1027.png",
+      "purchaseId": 1027,
+      "reason": ""
+    },
+    {
+      "id": 1028,
+      "name": "红水晶",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1028.png",
+      "purchaseId": 1028,
+      "reason": ""
+    },
+    {
+      "id": 1029,
+      "name": "布甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1029.png",
+      "purchaseId": 1029,
+      "reason": ""
+    },
+    {
+      "id": 1031,
+      "name": "锁子甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1031.png",
+      "purchaseId": 1031,
+      "reason": ""
+    },
+    {
+      "id": 1033,
+      "name": "抗魔斗篷",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1033.png",
+      "purchaseId": 1033,
+      "reason": ""
+    },
+    {
+      "id": 1036,
+      "name": "长剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1036.png",
+      "purchaseId": 1036,
+      "reason": ""
+    },
+    {
+      "id": 1037,
+      "name": "十字镐",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1037.png",
+      "purchaseId": 1037,
+      "reason": ""
+    },
+    {
+      "id": 1038,
+      "name": "暴风之剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1038.png",
+      "purchaseId": 1038,
+      "reason": ""
+    },
+    {
+      "id": 1040,
+      "name": "黑曜石锋刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1040.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 1042,
+      "name": "短剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1042.png",
+      "purchaseId": 1042,
+      "reason": ""
+    },
+    {
+      "id": 1043,
+      "name": "反曲之弓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1043.png",
+      "purchaseId": 1043,
+      "reason": ""
+    },
+    {
+      "id": 1052,
+      "name": "增幅典籍",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1052.png",
+      "purchaseId": 1052,
+      "reason": ""
+    },
+    {
+      "id": 1053,
+      "name": "吸血鬼节杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1053.png",
+      "purchaseId": 1053,
+      "reason": ""
+    },
+    {
+      "id": 1054,
+      "name": "多兰之盾",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1054.png",
+      "purchaseId": 1054,
+      "reason": ""
+    },
+    {
+      "id": 1055,
+      "name": "多兰之刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1055.png",
+      "purchaseId": 1055,
+      "reason": ""
+    },
+    {
+      "id": 1056,
+      "name": "多兰之戒",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1056.png",
+      "purchaseId": 1056,
+      "reason": ""
+    },
+    {
+      "id": 1057,
+      "name": "负极斗篷",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1057.png",
+      "purchaseId": 1057,
+      "reason": ""
+    },
+    {
+      "id": 1058,
+      "name": "无用大棒",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1058.png",
+      "purchaseId": 1058,
+      "reason": ""
+    },
+    {
+      "id": 1082,
+      "name": "黑暗封印",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/1082.png",
+      "purchaseId": 1082,
+      "reason": ""
+    },
+    {
+      "id": 2003,
+      "name": "生命药水",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2003.png",
+      "purchaseId": 2003,
+      "reason": ""
+    },
+    {
+      "id": 2019,
+      "name": "钢铁印章",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2019.png",
+      "purchaseId": 2019,
+      "reason": ""
+    },
+    {
+      "id": 2020,
+      "name": "残暴之力",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2020.png",
+      "purchaseId": 2020,
+      "reason": ""
+    },
+    {
+      "id": 2021,
+      "name": "掘道钻头",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2021.png",
+      "purchaseId": 2021,
+      "reason": ""
+    },
+    {
+      "id": 2022,
+      "name": "荧尘",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2022.png",
+      "purchaseId": 2022,
+      "reason": ""
+    },
+    {
+      "id": 2031,
+      "name": "复用型药水",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2031.png",
+      "purchaseId": 2031,
+      "reason": ""
+    },
+    {
+      "id": 2051,
+      "name": "守护者号角",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2051.png",
+      "purchaseId": 2051,
+      "reason": ""
+    },
+    {
+      "id": 2055,
+      "name": "控制守卫",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2055.png",
+      "purchaseId": 2055,
+      "reason": ""
+    },
+    {
+      "id": 2065,
+      "name": "舒瑞娅的战歌",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2065.png",
+      "purchaseId": 2065,
+      "reason": ""
+    },
+    {
+      "id": 2138,
+      "name": "钢铁合剂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2138.png",
+      "purchaseId": 2138,
+      "reason": ""
+    },
+    {
+      "id": 2139,
+      "name": "巫术合剂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2139.png",
+      "purchaseId": 2139,
+      "reason": ""
+    },
+    {
+      "id": 2140,
+      "name": "愤怒合剂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2140.png",
+      "purchaseId": 2140,
+      "reason": ""
+    },
+    {
+      "id": 2141,
+      "name": "帽子饮品",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2141.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 2420,
+      "name": "探索者的护臂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2420.png",
+      "purchaseId": 2420,
+      "reason": ""
+    },
+    {
+      "id": 2421,
+      "name": "碎裂的护臂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2421.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 2501,
+      "name": "霸王血铠",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2501.png",
+      "purchaseId": 2501,
+      "reason": ""
+    },
+    {
+      "id": 2502,
+      "name": "无终恨意",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2502.png",
+      "purchaseId": 2502,
+      "reason": ""
+    },
+    {
+      "id": 2503,
+      "name": "黯炎火炬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2503.png",
+      "purchaseId": 2503,
+      "reason": ""
+    },
+    {
+      "id": 2504,
+      "name": "败魔",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2504.png",
+      "purchaseId": 2504,
+      "reason": ""
+    },
+    {
+      "id": 2508,
+      "name": "命定灰烬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2508.png",
+      "purchaseId": 2508,
+      "reason": ""
+    },
+    {
+      "id": 2510,
+      "name": "黄昏与黎明",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2510.png",
+      "purchaseId": 2510,
+      "reason": ""
+    },
+    {
+      "id": 2512,
+      "name": "猎魔人弩箭",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2512.png",
+      "purchaseId": 2512,
+      "reason": ""
+    },
+    {
+      "id": 2517,
+      "name": "无穷饥渴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2517.png",
+      "purchaseId": 2517,
+      "reason": ""
+    },
+    {
+      "id": 2520,
+      "name": "破垒者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2520.png",
+      "purchaseId": 2520,
+      "reason": ""
+    },
+    {
+      "id": 2522,
+      "name": "实现器",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2522.png",
+      "purchaseId": 2522,
+      "reason": ""
+    },
+    {
+      "id": 2523,
+      "name": "海克斯镜片 C44",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2523.png",
+      "purchaseId": 2523,
+      "reason": ""
+    },
+    {
+      "id": 2524,
+      "name": "班德尔音管",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2524.png",
+      "purchaseId": 2524,
+      "reason": ""
+    },
+    {
+      "id": 2525,
+      "name": "原生质护带",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2525.png",
+      "purchaseId": 2525,
+      "reason": ""
+    },
+    {
+      "id": 2526,
+      "name": "耳语头环",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2526.png",
+      "purchaseId": 2526,
+      "reason": ""
+    },
+    {
+      "id": 2530,
+      "name": "歌之权冠",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/2526.png",
+      "purchaseId": 2526,
+      "reason": ""
+    },
+    {
+      "id": 3003,
+      "name": "大天使之杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3003.png",
+      "purchaseId": 3003,
+      "reason": ""
+    },
+    {
+      "id": 3004,
+      "name": "魔宗",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3004.png",
+      "purchaseId": 3004,
+      "reason": ""
+    },
+    {
+      "id": 3005,
+      "name": "鬼蟹",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3005.png",
+      "purchaseId": 3005,
+      "reason": ""
+    },
+    {
+      "id": 3006,
+      "name": "狂战士胫甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3006.png",
+      "purchaseId": 3006,
+      "reason": ""
+    },
+    {
+      "id": 3008,
+      "name": "暴食胫甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3008.png",
+      "purchaseId": 3008,
+      "reason": ""
+    },
+    {
+      "id": 3009,
+      "name": "轻灵之靴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3009.png",
+      "purchaseId": 3009,
+      "reason": ""
+    },
+    {
+      "id": 3020,
+      "name": "法师之靴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3020.png",
+      "purchaseId": 3020,
+      "reason": ""
+    },
+    {
+      "id": 3024,
+      "name": "冰川圆盾",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3024.png",
+      "purchaseId": 3024,
+      "reason": ""
+    },
+    {
+      "id": 3031,
+      "name": "无尽之刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3031.png",
+      "purchaseId": 3031,
+      "reason": ""
+    },
+    {
+      "id": 3032,
+      "name": "育恩塔尔荒野箭",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3032.png",
+      "purchaseId": 3032,
+      "reason": ""
+    },
+    {
+      "id": 3033,
+      "name": "凡性的提醒",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3033.png",
+      "purchaseId": 3033,
+      "reason": ""
+    },
+    {
+      "id": 3035,
+      "name": "最后的轻语",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3035.png",
+      "purchaseId": 3035,
+      "reason": ""
+    },
+    {
+      "id": 3036,
+      "name": "多米尼克领主的致意",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3036.png",
+      "purchaseId": 3036,
+      "reason": ""
+    },
+    {
+      "id": 3039,
+      "name": "阿塔玛的清算",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3039.png",
+      "purchaseId": 3039,
+      "reason": ""
+    },
+    {
+      "id": 3040,
+      "name": "炽天使之拥",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3003.png",
+      "purchaseId": 3003,
+      "reason": ""
+    },
+    {
+      "id": 3042,
+      "name": "魔切",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3004.png",
+      "purchaseId": 3004,
+      "reason": ""
+    },
+    {
+      "id": 3044,
+      "name": "净蚀",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3044.png",
+      "purchaseId": 3044,
+      "reason": ""
+    },
+    {
+      "id": 3046,
+      "name": "幻影之舞",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3046.png",
+      "purchaseId": 3046,
+      "reason": ""
+    },
+    {
+      "id": 3047,
+      "name": "铁板靴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3047.png",
+      "purchaseId": 3047,
+      "reason": ""
+    },
+    {
+      "id": 3050,
+      "name": "基克的聚合",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3050.png",
+      "purchaseId": 3050,
+      "reason": ""
+    },
+    {
+      "id": 3051,
+      "name": "缚炉之斧",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3051.png",
+      "purchaseId": 3051,
+      "reason": ""
+    },
+    {
+      "id": 3053,
+      "name": "斯特拉克的挑战护手",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3053.png",
+      "purchaseId": 3053,
+      "reason": ""
+    },
+    {
+      "id": 3057,
+      "name": "耀光",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3057.png",
+      "purchaseId": 3057,
+      "reason": ""
+    },
+    {
+      "id": 3065,
+      "name": "振奋盔甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3065.png",
+      "purchaseId": 3065,
+      "reason": ""
+    },
+    {
+      "id": 3066,
+      "name": "带翼的月板甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3066.png",
+      "purchaseId": 3066,
+      "reason": ""
+    },
+    {
+      "id": 3067,
+      "name": "燃烧宝石",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3067.png",
+      "purchaseId": 3067,
+      "reason": ""
+    },
+    {
+      "id": 3068,
+      "name": "日炎圣盾",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3068.png",
+      "purchaseId": 3068,
+      "reason": ""
+    },
+    {
+      "id": 3070,
+      "name": "女神之泪",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3070.png",
+      "purchaseId": 3070,
+      "reason": ""
+    },
+    {
+      "id": 3071,
+      "name": "黑色切割者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3071.png",
+      "purchaseId": 3071,
+      "reason": ""
+    },
+    {
+      "id": 3072,
+      "name": "饮血剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3072.png",
+      "purchaseId": 3072,
+      "reason": ""
+    },
+    {
+      "id": 3073,
+      "name": "海克斯注力刚壁",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3073.png",
+      "purchaseId": 3073,
+      "reason": ""
+    },
+    {
+      "id": 3074,
+      "name": "贪欲九头蛇",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3074.png",
+      "purchaseId": 3074,
+      "reason": ""
+    },
+    {
+      "id": 3075,
+      "name": "荆棘之甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3075.png",
+      "purchaseId": 3075,
+      "reason": ""
+    },
+    {
+      "id": 3076,
+      "name": "棘刺背心",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3076.png",
+      "purchaseId": 3076,
+      "reason": ""
+    },
+    {
+      "id": 3077,
+      "name": "提亚马特",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3077.png",
+      "purchaseId": 3077,
+      "reason": ""
+    },
+    {
+      "id": 3078,
+      "name": "三相之力",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3078.png",
+      "purchaseId": 3078,
+      "reason": ""
+    },
+    {
+      "id": 3082,
+      "name": "守望者铠甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3082.png",
+      "purchaseId": 3082,
+      "reason": ""
+    },
+    {
+      "id": 3083,
+      "name": "狂徒铠甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3083.png",
+      "purchaseId": 3083,
+      "reason": ""
+    },
+    {
+      "id": 3084,
+      "name": "心之钢",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3084.png",
+      "purchaseId": 3084,
+      "reason": ""
+    },
+    {
+      "id": 3085,
+      "name": "卢安娜的飓风",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3085.png",
+      "purchaseId": 3085,
+      "reason": ""
+    },
+    {
+      "id": 3086,
+      "name": "狂热",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3086.png",
+      "purchaseId": 3086,
+      "reason": ""
+    },
+    {
+      "id": 3087,
+      "name": "斯塔缇克电刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3087.png",
+      "purchaseId": 3087,
+      "reason": ""
+    },
+    {
+      "id": 3089,
+      "name": "灭世者的死亡之帽",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3089.png",
+      "purchaseId": 3089,
+      "reason": ""
+    },
+    {
+      "id": 3091,
+      "name": "智慧末刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3091.png",
+      "purchaseId": 3091,
+      "reason": ""
+    },
+    {
+      "id": 3094,
+      "name": "疾射火炮",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3094.png",
+      "purchaseId": 3094,
+      "reason": ""
+    },
+    {
+      "id": 3095,
+      "name": "岚切",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3095.png",
+      "purchaseId": 3095,
+      "reason": ""
+    },
+    {
+      "id": 3100,
+      "name": "巫妖之祸",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3100.png",
+      "purchaseId": 3100,
+      "reason": ""
+    },
+    {
+      "id": 3102,
+      "name": "女妖面纱",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3102.png",
+      "purchaseId": 3102,
+      "reason": ""
+    },
+    {
+      "id": 3107,
+      "name": "救赎",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3107.png",
+      "purchaseId": 3107,
+      "reason": ""
+    },
+    {
+      "id": 3108,
+      "name": "恶魔法典",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3108.png",
+      "purchaseId": 3108,
+      "reason": ""
+    },
+    {
+      "id": 3109,
+      "name": "骑士之誓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3109.png",
+      "purchaseId": 3109,
+      "reason": ""
+    },
+    {
+      "id": 3110,
+      "name": "冰霜之心",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3110.png",
+      "purchaseId": 3110,
+      "reason": ""
+    },
+    {
+      "id": 3111,
+      "name": "水银之靴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3111.png",
+      "purchaseId": 3111,
+      "reason": ""
+    },
+    {
+      "id": 3112,
+      "name": "守护者法球",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3112.png",
+      "purchaseId": 3112,
+      "reason": ""
+    },
+    {
+      "id": 3113,
+      "name": "以太精魂",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3113.png",
+      "purchaseId": 3113,
+      "reason": ""
+    },
+    {
+      "id": 3114,
+      "name": "禁忌雕像",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3114.png",
+      "purchaseId": 3114,
+      "reason": ""
+    },
+    {
+      "id": 3115,
+      "name": "纳什之牙",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3115.png",
+      "purchaseId": 3115,
+      "reason": ""
+    },
+    {
+      "id": 3116,
+      "name": "瑞莱的冰晶节杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3116.png",
+      "purchaseId": 3116,
+      "reason": ""
+    },
+    {
+      "id": 3118,
+      "name": "残疫",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3118.png",
+      "purchaseId": 3118,
+      "reason": ""
+    },
+    {
+      "id": 3119,
+      "name": "凛冬之临",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3119.png",
+      "purchaseId": 3119,
+      "reason": ""
+    },
+    {
+      "id": 3121,
+      "name": "末日寒冬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3119.png",
+      "purchaseId": 3119,
+      "reason": ""
+    },
+    {
+      "id": 3123,
+      "name": "死刑宣告",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3123.png",
+      "purchaseId": 3123,
+      "reason": ""
+    },
+    {
+      "id": 3124,
+      "name": "鬼索的狂暴之刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3124.png",
+      "purchaseId": 3124,
+      "reason": ""
+    },
+    {
+      "id": 3128,
+      "name": "冥火之拥",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3128.png",
+      "purchaseId": 3128,
+      "reason": ""
+    },
+    {
+      "id": 3131,
+      "name": "神圣之剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3131.png",
+      "purchaseId": 3131,
+      "reason": ""
+    },
+    {
+      "id": 3133,
+      "name": "考尔菲德的战锤",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3133.png",
+      "purchaseId": 3133,
+      "reason": ""
+    },
+    {
+      "id": 3134,
+      "name": "锯齿短匕",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3134.png",
+      "purchaseId": 3134,
+      "reason": ""
+    },
+    {
+      "id": 3135,
+      "name": "虚空之杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3135.png",
+      "purchaseId": 3135,
+      "reason": ""
+    },
+    {
+      "id": 3137,
+      "name": "蜕生",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3137.png",
+      "purchaseId": 3137,
+      "reason": ""
+    },
+    {
+      "id": 3139,
+      "name": "水银弯刀",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3139.png",
+      "purchaseId": 3139,
+      "reason": ""
+    },
+    {
+      "id": 3140,
+      "name": "水银饰带",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3140.png",
+      "purchaseId": 3140,
+      "reason": ""
+    },
+    {
+      "id": 3142,
+      "name": "幽梦之灵",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3142.png",
+      "purchaseId": 3142,
+      "reason": ""
+    },
+    {
+      "id": 3143,
+      "name": "兰顿之兆",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3143.png",
+      "purchaseId": 3143,
+      "reason": ""
+    },
+    {
+      "id": 3144,
+      "name": "斥候弹弓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3144.png",
+      "purchaseId": 3144,
+      "reason": ""
+    },
+    {
+      "id": 3145,
+      "name": "海克斯科技发电机",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3145.png",
+      "purchaseId": 3145,
+      "reason": ""
+    },
+    {
+      "id": 3146,
+      "name": "海克斯科技枪刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3146.png",
+      "purchaseId": 3146,
+      "reason": ""
+    },
+    {
+      "id": 3147,
+      "name": "幽魂面具",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3147.png",
+      "purchaseId": 3147,
+      "reason": ""
+    },
+    {
+      "id": 3152,
+      "name": "海克斯科技火箭腰带",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3152.png",
+      "purchaseId": 3152,
+      "reason": ""
+    },
+    {
+      "id": 3153,
+      "name": "破败王者之刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3153.png",
+      "purchaseId": 3153,
+      "reason": ""
+    },
+    {
+      "id": 3155,
+      "name": "海克斯饮魔刀",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3155.png",
+      "purchaseId": 3155,
+      "reason": ""
+    },
+    {
+      "id": 3156,
+      "name": "玛莫提乌斯之噬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3156.png",
+      "purchaseId": 3156,
+      "reason": ""
+    },
+    {
+      "id": 3157,
+      "name": "中娅沙漏",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3157.png",
+      "purchaseId": 3157,
+      "reason": ""
+    },
+    {
+      "id": 3158,
+      "name": "明朗之靴",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3158.png",
+      "purchaseId": 3158,
+      "reason": ""
+    },
+    {
+      "id": 3161,
+      "name": "朔极之矛",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3161.png",
+      "purchaseId": 3161,
+      "reason": ""
+    },
+    {
+      "id": 3165,
+      "name": "莫雷洛秘典",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3165.png",
+      "purchaseId": 3165,
+      "reason": ""
+    },
+    {
+      "id": 3172,
+      "name": "炮铜胫甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3172.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 3177,
+      "name": "守护者之刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3177.png",
+      "purchaseId": 3177,
+      "reason": ""
+    },
+    {
+      "id": 3179,
+      "name": "黯影阔剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3179.png",
+      "purchaseId": 3179,
+      "reason": ""
+    },
+    {
+      "id": 3181,
+      "name": "破舰者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3181.png",
+      "purchaseId": 3181,
+      "reason": ""
+    },
+    {
+      "id": 3184,
+      "name": "守护者战锤",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3184.png",
+      "purchaseId": 3184,
+      "reason": ""
+    },
+    {
+      "id": 3190,
+      "name": "钢铁烈阳之匣",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3190.png",
+      "purchaseId": 3190,
+      "reason": ""
+    },
+    {
+      "id": 3211,
+      "name": "幽魂斗篷",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3211.png",
+      "purchaseId": 3211,
+      "reason": ""
+    },
+    {
+      "id": 3222,
+      "name": "米凯尔的祝福",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3222.png",
+      "purchaseId": 3222,
+      "reason": ""
+    },
+    {
+      "id": 3302,
+      "name": "界弓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3302.png",
+      "purchaseId": 3302,
+      "reason": ""
+    },
+    {
+      "id": 3330,
+      "name": "草间人",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3330.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 3504,
+      "name": "炽热香炉",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3504.png",
+      "purchaseId": 3504,
+      "reason": ""
+    },
+    {
+      "id": 3508,
+      "name": "夺萃之镰",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3508.png",
+      "purchaseId": 3508,
+      "reason": ""
+    },
+    {
+      "id": 3599,
+      "name": "卡莉丝塔的黑色长矛",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3599.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 3600,
+      "name": "卡莉丝塔的黑色长矛",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3600.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 3742,
+      "name": "亡者的板甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3742.png",
+      "purchaseId": 3742,
+      "reason": ""
+    },
+    {
+      "id": 3748,
+      "name": "巨型九头蛇",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3748.png",
+      "purchaseId": 3748,
+      "reason": ""
+    },
+    {
+      "id": 3801,
+      "name": "晶体护腕",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3801.png",
+      "purchaseId": 3801,
+      "reason": ""
+    },
+    {
+      "id": 3802,
+      "name": "遗失的章节",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3802.png",
+      "purchaseId": 3802,
+      "reason": ""
+    },
+    {
+      "id": 3803,
+      "name": "万世催化石",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3803.png",
+      "purchaseId": 3803,
+      "reason": ""
+    },
+    {
+      "id": 3814,
+      "name": "夜之锋刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3814.png",
+      "purchaseId": 3814,
+      "reason": ""
+    },
+    {
+      "id": 3916,
+      "name": "湮灭宝珠",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3916.png",
+      "purchaseId": 3916,
+      "reason": ""
+    },
+    {
+      "id": 4003,
+      "name": "救生索",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4003.png",
+      "purchaseId": 4003,
+      "reason": ""
+    },
+    {
+      "id": 4004,
+      "name": "幽魂弯刀",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4004.png",
+      "purchaseId": 4004,
+      "reason": ""
+    },
+    {
+      "id": 4005,
+      "name": "帝国指令",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4005.png",
+      "purchaseId": 4005,
+      "reason": ""
+    },
+    {
+      "id": 4011,
+      "name": "花晓之剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4011.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 4012,
+      "name": "食罪者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4012.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 4013,
+      "name": "闪电穗带",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4013.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 4401,
+      "name": "自然之力",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4401.png",
+      "purchaseId": 4401,
+      "reason": ""
+    },
+    {
+      "id": 4402,
+      "name": "激发之匣",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4402.png",
+      "purchaseId": 4402,
+      "reason": ""
+    },
+    {
+      "id": 4403,
+      "name": "金铲铲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4403.png",
+      "purchaseId": 4403,
+      "reason": ""
+    },
+    {
+      "id": 4628,
+      "name": "视界专注",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4628.png",
+      "purchaseId": 4628,
+      "reason": ""
+    },
+    {
+      "id": 4629,
+      "name": "星界驱驰",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4629.png",
+      "purchaseId": 4629,
+      "reason": ""
+    },
+    {
+      "id": 4630,
+      "name": "枯萎珠宝",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4630.png",
+      "purchaseId": 4630,
+      "reason": ""
+    },
+    {
+      "id": 4632,
+      "name": "翠绿屏障",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4632.png",
+      "purchaseId": 4632,
+      "reason": ""
+    },
+    {
+      "id": 4633,
+      "name": "裂隙制造者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4633.png",
+      "purchaseId": 4633,
+      "reason": ""
+    },
+    {
+      "id": 4642,
+      "name": "班德尔玻璃镜",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4642.png",
+      "purchaseId": 4642,
+      "reason": ""
+    },
+    {
+      "id": 4645,
+      "name": "影焰",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4645.png",
+      "purchaseId": 4645,
+      "reason": ""
+    },
+    {
+      "id": 4646,
+      "name": "风暴狂涌",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/4646.png",
+      "purchaseId": 4646,
+      "reason": ""
+    },
+    {
+      "id": 6032,
+      "name": "属性加成",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6032.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 6333,
+      "name": "死亡之舞",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6333.png",
+      "purchaseId": 6333,
+      "reason": ""
+    },
+    {
+      "id": 6609,
+      "name": "炼金朋克链锯剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6609.png",
+      "purchaseId": 6609,
+      "reason": ""
+    },
+    {
+      "id": 6610,
+      "name": "焚天",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6610.png",
+      "purchaseId": 6610,
+      "reason": ""
+    },
+    {
+      "id": 6616,
+      "name": "流水法杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6616.png",
+      "purchaseId": 6616,
+      "reason": ""
+    },
+    {
+      "id": 6617,
+      "name": "月石再生器",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6617.png",
+      "purchaseId": 6617,
+      "reason": ""
+    },
+    {
+      "id": 6620,
+      "name": "海力亚的回响",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6620.png",
+      "purchaseId": 6620,
+      "reason": ""
+    },
+    {
+      "id": 6621,
+      "name": "黎明核心",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6621.png",
+      "purchaseId": 6621,
+      "reason": ""
+    },
+    {
+      "id": 6631,
+      "name": "挺进破坏者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6631.png",
+      "purchaseId": 6631,
+      "reason": ""
+    },
+    {
+      "id": 6653,
+      "name": "兰德里的折磨",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6653.png",
+      "purchaseId": 6653,
+      "reason": ""
+    },
+    {
+      "id": 6655,
+      "name": "卢登的回声",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6655.png",
+      "purchaseId": 6655,
+      "reason": ""
+    },
+    {
+      "id": 6657,
+      "name": "时光之杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6657.png",
+      "purchaseId": 6657,
+      "reason": ""
+    },
+    {
+      "id": 6660,
+      "name": "斑比的熔渣",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6660.png",
+      "purchaseId": 6660,
+      "reason": ""
+    },
+    {
+      "id": 6662,
+      "name": "冰脉护手",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6662.png",
+      "purchaseId": 6662,
+      "reason": ""
+    },
+    {
+      "id": 6664,
+      "name": "璀璨回响",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6664.png",
+      "purchaseId": 6664,
+      "reason": ""
+    },
+    {
+      "id": 6665,
+      "name": "千变者贾修",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6665.png",
+      "purchaseId": 6665,
+      "reason": ""
+    },
+    {
+      "id": 6670,
+      "name": "正午箭袋",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6670.png",
+      "purchaseId": 6670,
+      "reason": ""
+    },
+    {
+      "id": 6672,
+      "name": "海妖杀手",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6672.png",
+      "purchaseId": 6672,
+      "reason": ""
+    },
+    {
+      "id": 6673,
+      "name": "不朽盾弓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6673.png",
+      "purchaseId": 6673,
+      "reason": ""
+    },
+    {
+      "id": 6675,
+      "name": "纳沃利烁刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6675.png",
+      "purchaseId": 6675,
+      "reason": ""
+    },
+    {
+      "id": 6676,
+      "name": "收集者",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6676.png",
+      "purchaseId": 6676,
+      "reason": ""
+    },
+    {
+      "id": 6690,
+      "name": "剑翎",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6690.png",
+      "purchaseId": 6690,
+      "reason": ""
+    },
+    {
+      "id": 6692,
+      "name": "星蚀",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6692.png",
+      "purchaseId": 6692,
+      "reason": ""
+    },
+    {
+      "id": 6694,
+      "name": "赛瑞尔达的怨恨",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6694.png",
+      "purchaseId": 6694,
+      "reason": ""
+    },
+    {
+      "id": 6695,
+      "name": "巨蛇之牙",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6695.png",
+      "purchaseId": 6695,
+      "reason": ""
+    },
+    {
+      "id": 6696,
+      "name": "公理圆弧",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6696.png",
+      "purchaseId": 6696,
+      "reason": ""
+    },
+    {
+      "id": 6697,
+      "name": "狂妄",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6697.png",
+      "purchaseId": 6697,
+      "reason": ""
+    },
+    {
+      "id": 6698,
+      "name": "亵渎九头蛇",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6698.png",
+      "purchaseId": 6698,
+      "reason": ""
+    },
+    {
+      "id": 6699,
+      "name": "电震涡流剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/6699.png",
+      "purchaseId": 6699,
+      "reason": ""
+    },
+    {
+      "id": 8010,
+      "name": "放血者的诅咒",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/8010.png",
+      "purchaseId": 8010,
+      "reason": ""
+    },
+    {
+      "id": 8020,
+      "name": "深渊面具",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/8020.png",
+      "purchaseId": 8020,
+      "reason": ""
+    },
+    {
+      "id": 123430,
+      "name": "毁坏仪式",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/123430.png",
+      "purchaseId": 123430,
+      "reason": ""
+    },
+    {
+      "id": 124011,
+      "name": "花晓之剑",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/124011.png",
+      "purchaseId": 124011,
+      "reason": ""
+    },
+    {
+      "id": 126697,
+      "name": "狂妄",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/126697.png",
+      "purchaseId": 126697,
+      "reason": ""
+    },
+    {
+      "id": 223121,
+      "name": "末日寒冬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/3119.png",
+      "purchaseId": 3119,
+      "reason": ""
+    },
+    {
+      "id": 226668,
+      "name": "终极九头蛇",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/226668.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 226693,
+      "name": "暗行者之爪",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/226693.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 228002,
+      "name": "沃格勒特的巫师帽",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/228002.png",
+      "purchaseId": null,
+      "reason": "需要强化符文：任务：沃格勒特的巫师帽"
+    },
+    {
+      "id": 322065,
+      "name": "舒瑞娅的战歌",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/322065.png",
+      "purchaseId": 322065,
+      "reason": ""
+    },
+    {
+      "id": 323003,
+      "name": "大天使之杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323003.png",
+      "purchaseId": 323003,
+      "reason": ""
+    },
+    {
+      "id": 323004,
+      "name": "魔宗",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323004.png",
+      "purchaseId": 323004,
+      "reason": ""
+    },
+    {
+      "id": 323040,
+      "name": "炽天使之拥",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323003.png",
+      "purchaseId": 323003,
+      "reason": ""
+    },
+    {
+      "id": 323042,
+      "name": "魔切",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323004.png",
+      "purchaseId": 323004,
+      "reason": ""
+    },
+    {
+      "id": 323050,
+      "name": "基克的聚合",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323050.png",
+      "purchaseId": 323050,
+      "reason": ""
+    },
+    {
+      "id": 323070,
+      "name": "女神之泪",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323070.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 323075,
+      "name": "荆棘之甲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323075.png",
+      "purchaseId": 323075,
+      "reason": ""
+    },
+    {
+      "id": 323107,
+      "name": "救赎",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323107.png",
+      "purchaseId": 323107,
+      "reason": ""
+    },
+    {
+      "id": 323109,
+      "name": "骑士之誓",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323109.png",
+      "purchaseId": 323109,
+      "reason": ""
+    },
+    {
+      "id": 323110,
+      "name": "冰霜之心",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323110.png",
+      "purchaseId": 323110,
+      "reason": ""
+    },
+    {
+      "id": 323119,
+      "name": "凛冬之临",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323119.png",
+      "purchaseId": 323119,
+      "reason": ""
+    },
+    {
+      "id": 323121,
+      "name": "末日寒冬",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323119.png",
+      "purchaseId": 323119,
+      "reason": ""
+    },
+    {
+      "id": 323190,
+      "name": "钢铁烈阳之匣",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323190.png",
+      "purchaseId": 323190,
+      "reason": ""
+    },
+    {
+      "id": 323222,
+      "name": "米凯尔的祝福",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323222.png",
+      "purchaseId": 323222,
+      "reason": ""
+    },
+    {
+      "id": 323504,
+      "name": "炽热香炉",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/323504.png",
+      "purchaseId": 323504,
+      "reason": ""
+    },
+    {
+      "id": 324005,
+      "name": "帝国指令",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/324005.png",
+      "purchaseId": 324005,
+      "reason": ""
+    },
+    {
+      "id": 326616,
+      "name": "流水法杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/326616.png",
+      "purchaseId": 326616,
+      "reason": ""
+    },
+    {
+      "id": 326617,
+      "name": "月石再生器",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/326617.png",
+      "purchaseId": 326617,
+      "reason": ""
+    },
+    {
+      "id": 326620,
+      "name": "海力亚的回响",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/326620.png",
+      "purchaseId": 326620,
+      "reason": ""
+    },
+    {
+      "id": 326621,
+      "name": "黎明核心",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/326621.png",
+      "purchaseId": 326621,
+      "reason": ""
+    },
+    {
+      "id": 326657,
+      "name": "时光之杖",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/326657.png",
+      "purchaseId": 326657,
+      "reason": ""
+    },
+    {
+      "id": 328020,
+      "name": "深渊面具",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/328020.png",
+      "purchaseId": 328020,
+      "reason": ""
+    },
+    {
+      "id": 663146,
+      "name": "海克斯科技枪刃",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/663146.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 663172,
+      "name": "灵风",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/663172.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    },
+    {
+      "id": 994403,
+      "name": "金铲铲",
+      "iconUrl": "https://game.gtimg.cn/images/lol/act/img/item/994403.png",
+      "purchaseId": null,
+      "reason": "特殊或条件装备，不自动导入"
+    }
+  ]
+}

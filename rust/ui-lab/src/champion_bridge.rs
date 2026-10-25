@@ -18,14 +18,14 @@ struct Work {
     stop: bool,
     invalidate: bool,
     reload: bool,
-    reply: Option<(u64, Result<Arc<Loaded>, &'static str>)>,
+    reply: Option<(u64, Result<Arc<Loaded>, &'static str>, bool)>,
 }
 struct Worker {
     shared: Arc<(Mutex<Work>, Condvar)>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Worker {
-    fn new(roots: Vec<fuze_data::Root>) -> Result<Self, &'static str> {
+    fn new(roots: Vec<fuze_data::Root>, offline: bool) -> Result<Self, &'static str> {
         let shared = Arc::new((
             Mutex::new(Work {
                 invalidate: true,
@@ -39,16 +39,52 @@ impl Worker {
             .spawn(move || {
                 let mut cache: Option<Cache> = None;
                 let mut failure = "detail-data-not-ready";
-                loop {
+                let mut remote: Option<(
+                    u64,
+                    Arc<Loaded>,
+                    fuze_worker_host::tencent_data::Pending,
+                )> = None;
+                'work: loop {
                     let mut s = match task.0.lock() {
                         Ok(s) => s,
                         Err(_) => return,
                     };
+                    if remote
+                        .as_ref()
+                        .is_some_and(|(generation, _, _)| *generation != s.generation)
+                    {
+                        remote = None;
+                    }
+                    if let Some((generation, local, pending)) = &remote {
+                        if let Some(extra) = pending.poll() {
+                            s.reply = Some((
+                                *generation,
+                                Ok(extra
+                                    .map(|v| {
+                                        Arc::new(Loaded {
+                                            id: local.id,
+                                            version: local.version.clone(),
+                                            detail: v.detail,
+                                        })
+                                    })
+                                    .unwrap_or_else(|_| local.clone())),
+                                true,
+                            ));
+                            remote = None;
+                        }
+                    }
                     while !s.stop
                         && s.wanted.is_none()
                         && !s.invalidate
                         && !cache.as_ref().is_some_and(Cache::warming)
                     {
+                        if remote.is_some() {
+                            match task.1.wait_timeout(s, Duration::from_millis(50)) {
+                                Ok((guard, _)) => drop(guard),
+                                Err(_) => return,
+                            };
+                            continue 'work;
+                        }
                         s = match task.1.wait(s) {
                             Ok(s) => s,
                             Err(_) => return,
@@ -112,7 +148,19 @@ impl Worker {
                     if s.generation != generation {
                         continue;
                     }
-                    s.reply = Some((generation, result));
+                    remote = if offline {
+                        None
+                    } else {
+                        result.as_ref().ok().and_then(|local| {
+                            fuze_worker_host::tencent_data::Pending::start(
+                                roots.clone(),
+                                id,
+                                local.version.clone(),
+                            )
+                            .map(|p| (generation, local.clone(), p))
+                        })
+                    };
+                    s.reply = Some((generation, result, remote.is_none()));
                 }
             })
             .map_err(|_| "details-thread")?;
@@ -491,7 +539,7 @@ pub fn attach_shared(
     roots: Vec<fuze_data::Root>,
     store: std::sync::Arc<fuze_worker_host::stage_reference::Store>,
 ) -> Result<Binding, &'static str> {
-    let worker = Rc::new(Worker::new(roots.clone())?);
+    let worker = Rc::new(Worker::new(roots.clone(), ui.get_offline())?);
     let actions = Rc::new(crate::champion_actions::attach(ui));
     let state = Rc::new(RefCell::new(Presentation {
         loaded: None,
@@ -667,11 +715,13 @@ pub fn attach_shared(
                 .lock()
                 .ok()
                 .and_then(|mut s| s.reply.take());
-            let Some((_, reply)) = reply else {
+            let Some((_, reply, finished)) = reply else {
                 return;
             };
-            if let Some(timer) = tick.upgrade() {
-                timer.stop();
+            if finished {
+                if let Some(timer) = tick.upgrade() {
+                    timer.stop();
+                }
             }
             let Some(ui) = weak.upgrade() else {
                 return;
@@ -683,8 +733,20 @@ pub fn attach_shared(
                     ui.set_detail_champion(loaded.id as i32);
                     ui.set_detail_status(
                         format!(
-                            "{} · 整体胜率参考\n实际领取轮次未确认，不自动使用阶段排序。",
-                            loaded.version
+                            "{} · {}\n实际领取轮次未确认，不自动使用阶段排序。",
+                            loaded.version,
+                            if !finished {
+                                "正在获取腾讯海斗推荐；本地数据已显示"
+                            } else if loaded
+                                .detail
+                                .augments
+                                .iter()
+                                .any(|a| a.provenance.contains("腾讯101推荐"))
+                            {
+                                "腾讯101推荐排名 · 胜率保留原样本来源"
+                            } else {
+                                "整体胜率参考"
+                            }
                         )
                         .into(),
                     );

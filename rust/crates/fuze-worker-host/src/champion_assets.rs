@@ -251,6 +251,14 @@ fn load(roots: &[Root], r: &Request) -> Result<Detail> {
     data.champion_detail(r.id)
 }
 pub(crate) fn icon_path(url: &str) -> Result<&str> {
+    if let Some(p) = url.strip_prefix("https://game.gtimg.cn/images/lol/act/img/item/") {
+        if p.strip_suffix(".png").is_some_and(|id| {
+            !id.is_empty() && id.len() <= 6 && id.bytes().all(|b| b.is_ascii_digit())
+        }) {
+            return Ok(&url["https://game.gtimg.cn".len()..]);
+        }
+        return Err("icon-path");
+    }
     if let Some(p) = url.strip_prefix("https://raw.communitydragon.org") {
         if p == "/16.21/plugins/rcp-be-lol-game-data/global/default/assets/maps/particles/kiwi/magicmissile_small.png" {
             return Ok(p);
@@ -328,7 +336,9 @@ fn icon_endpoint(url: &str) -> Result<(&str, &str)> {
         return Ok(("game.gtimg.cn", "/images/lol/act/img/item/4004.png"));
     }
     Ok((
-        if url.starts_with("https://raw.communitydragon.org/") {
+        if url.starts_with("https://game.gtimg.cn/") {
+            "game.gtimg.cn"
+        } else if url.starts_with("https://raw.communitydragon.org/") {
             "raw.communitydragon.org"
         } else {
             "cdn.dtodo.cn"

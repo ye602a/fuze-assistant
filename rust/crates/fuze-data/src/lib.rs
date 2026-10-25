@@ -13,6 +13,7 @@ pub mod detail_cache;
 pub mod item_sets;
 pub mod recognition;
 pub mod recommendations;
+pub mod tencent;
 #[cfg(test)]
 mod history_scope_tests {
     #[test]

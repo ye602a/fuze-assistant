@@ -7,6 +7,8 @@ on:
       - 'package-lock.json'
       - 'resources/paddleocr/**'
       - 'resources/augments-*.json'
+      - 'resources/tencent-mayhem-items-*.json'
+      - 'tests/fixtures/tencent101/**'
       - 'tests/fixtures/augment-ocr/**'
       - 'scripts/check-rust-screen.mjs'
       - 'tests/unit/actions-validation-summary.test.mjs'
