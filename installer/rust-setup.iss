@@ -37,8 +37,8 @@ Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 FinishedLabel=FUZE v{#AppRelease} 已解压到所选目录，所需 VC++ DLL 已随程序提供。请通过 FUZE 快捷方式启动。%n%n安装完成后不会自动启动程序。
 
 [Files]
-Source: "{#Payload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Payload}\*"; DestDir: "{app}"; Excludes: "*.cmd,*.bat,*.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\FUZE"; Filename: "{app}\fuze-update.exe"; Parameters: "--launch"; WorkingDir: "{app}"; IconFilename: "{app}\fuze-ui-lab.exe"
-Name: "{userdesktop}\FUZE"; Filename: "{app}\fuze-update.exe"; Parameters: "--launch"; WorkingDir: "{app}"; IconFilename: "{app}\fuze-ui-lab.exe"
+Name: "{userprograms}\FUZE"; Filename: "{app}\fuze-ui-lab.exe"; WorkingDir: "{app}"; IconFilename: "{app}\fuze-ui-lab.exe"
+Name: "{userdesktop}\FUZE"; Filename: "{app}\fuze-ui-lab.exe"; WorkingDir: "{app}"; IconFilename: "{app}\fuze-ui-lab.exe"
