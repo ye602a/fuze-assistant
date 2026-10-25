@@ -4,6 +4,7 @@ use fuze_runtime::session::Phase;
 use fuze_worker_host::desktop::Status;
 pub struct View {
     pub health: i32,
+    pub busy: bool,
     pub title: &'static str,
     pub hint: &'static str,
     pub connection: &'static str,
@@ -33,6 +34,7 @@ pub fn present(s: &Status, offline: bool) -> View {
     let fresh = s.pipeline.frame_age.is_some_and(|age| age <= 5);
     let mut v = View {
         health: 0,
+        busy: false,
         title: "等待英雄联盟客户端",
         hint: "登录后自动连接，通信成功后显示游戏阶段。",
         connection: "尚未验证",
@@ -96,6 +98,16 @@ pub fn present(s: &Status, offline: bool) -> View {
         v.hint = "使用固定样例，不访问游戏或个人数据。";
         return v;
     }
+    v.busy = !matches!(s.connection, Some(State::Connected(_)))
+        || phase == Phase::Loading
+        || active
+            && !waiting_window
+            && !failed
+            && s.pipeline
+                .schedule
+                .is_some_and(|(mode, _, _)| mode != fuze_runtime::gate::Mode::Saving)
+            && s.pipeline.capture != "waiting-selection"
+            && s.pipeline.recent.is_none();
     match phase {
         Phase::ClientReady => {
             v.title = "已连接 · 等待对局";
@@ -246,6 +258,27 @@ fn connection_error(error: Error) -> (&'static str, &'static str, &'static str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn busy_motion_follows_work_not_idle_or_pause() {
+        let mut s = Status::default();
+        s.mode = 1;
+        assert!(present(&s, false).busy);
+        s.connection = Some(State::Connected(Phase::ClientReady));
+        assert!(!present(&s, false).busy);
+        s.connection = Some(State::Connected(Phase::Loading));
+        assert!(present(&s, false).busy);
+        s.connection = Some(State::Connected(Phase::InProgress));
+        s.pipeline.schedule = Some((fuze_runtime::gate::Mode::Saving, 1000, Some(6)));
+        assert!(!present(&s, false).busy);
+        s.pipeline.schedule = Some((fuze_runtime::gate::Mode::Pending, 100, Some(7)));
+        assert!(present(&s, false).busy);
+        s.pipeline.error = Some("capture-timeout");
+        assert!(!present(&s, false).busy);
+        s.mode = 0;
+        assert!(!present(&s, false).busy);
+        s.mode = 1;
+        assert!(!present(&s, true).busy);
+    }
     #[test]
     fn connection_failures_have_safe_distinct_visible_reasons() {
         let mut s = Status::default();

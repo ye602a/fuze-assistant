@@ -102,7 +102,7 @@ export component Workbench inherits Window {
                 if root.page == 0: VerticalLayout {
                     spacing: 16px;
                     StatusSurface {
-                        height: 156px; accent: root.tone; fill: root.tone-background;
+                        height: 156px; active: HostState.status-active; accent: root.tone; fill: root.tone-background;
                         Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 1px; border-color: #091724; background: transparent; }
                         Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
                         Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }

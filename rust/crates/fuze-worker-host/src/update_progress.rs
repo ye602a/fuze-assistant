@@ -9,6 +9,8 @@ use std::{
 use windows_sys::Win32::{
     Foundation::*, System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*,
 };
+#[cfg(test)]
+pub(crate) static TEST_STATE: Mutex<()> = Mutex::new(());
 pub static CANCEL: AtomicBool = AtomicBool::new(false);
 pub static STAGE: AtomicU8 = AtomicU8::new(0);
 pub static OWNER: AtomicIsize = AtomicIsize::new(0);
@@ -122,7 +124,7 @@ fn status_text(view: View) -> String {
             3 => "正在校验并准备安装文件 · FUZE 继续运行",
             4 => "正在替换当前程序文件 · 请稍候",
             5 => "正在停止识别并关闭 FUZE…",
-            6 => "文件替换完成 · 正在清理并启动新版…",
+            6 => "文件替换完成 · 正在启动新版…",
             _ => "正在准备更新 · 下载期间可以取消",
         })
         .into();
@@ -167,8 +169,91 @@ pub fn cancelled() -> bool {
 fn wide(s: &str) -> Vec<u16> {
     crate::i18n::text(s).encode_utf16().chain(Some(0)).collect()
 }
+const PRESENT_FOR_HANDOFF: u32 = WM_APP + 41;
+/// Run on the UI thread and acknowledge an actual foreground window before closing FUZE.
+pub fn present_for_handoff() -> crate::Result<()> {
+    let hwnd = OWNER.load(Ordering::Acquire) as HWND;
+    if hwnd.is_null() {
+        return Err("update-window-not-ready");
+    }
+    let mut reply = 0usize;
+    let sent = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            PRESENT_FOR_HANDOFF,
+            0,
+            0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            3000,
+            &mut reply,
+        )
+    };
+    if sent == 0 || reply != 1 {
+        return Err("update-window-not-ready");
+    }
+    Ok(())
+}
+const QUERY_PROGRESS: u32 = WM_APP + 42;
+static PERMILLE: AtomicU64 = AtomicU64::new(0);
+/// Returns stage and real per-mille progress from this updater's window only.
+pub fn process_progress(pid: u32) -> Option<(u8, u32)> {
+    struct Query {
+        pid: u32,
+        result: Option<(u8, u32)>,
+    }
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
+        let q = &mut *(data as *mut Query);
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != q.pid {
+            return 1;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        if String::from_utf16_lossy(&class[..n.max(0) as usize]) != "FuzeRustUpdateProgress" {
+            return 1;
+        }
+        let mut reply = 0;
+        if SendMessageTimeoutW(hwnd, QUERY_PROGRESS, 0, 0, SMTO_ABORTIFHUNG, 30, &mut reply) != 0
+            && reply > 0
+        {
+            q.result = Some(((reply >> 16) as u8, ((reply & 0xffff) - 1) as u32));
+        }
+        0
+    }
+    let mut q = Query { pid, result: None };
+    unsafe {
+        EnumWindows(Some(visit), &mut q as *mut Query as LPARAM);
+    }
+    q.result
+}
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
+        QUERY_PROGRESS => {
+            ((if ERROR_SHOWN.load(Ordering::Acquire) {
+                255
+            } else {
+                STAGE.load(Ordering::Acquire)
+            } as usize)
+                << 16
+                | (PERMILLE.load(Ordering::Relaxed) as usize + 1)) as LRESULT
+        }
+        PRESENT_FOR_HANDOFF => {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
+            SetWindowTextW(
+                GetDlgItem(hwnd, 1),
+                wide("下载已完成 · 正在关闭 FUZE，随后替换文件").as_ptr(),
+            );
+            windows_sys::Win32::Graphics::Gdi::RedrawWindow(
+                hwnd,
+                null(),
+                null_mut(),
+                0x0100 | 0x0001 | 0x0080,
+            );
+            (IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 && GetForegroundWindow() == hwnd)
+                as LRESULT
+        }
         WM_CLOSE | WM_COMMAND if msg == WM_CLOSE || w & 0xffff == 2 => {
             // Once copying starts, finish this short operation instead of leaving mixed files.
             if STAGE.load(Ordering::Acquire) >= 4 && !ERROR_SHOWN.load(Ordering::Acquire) {
@@ -335,8 +420,11 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                                     _ => "",
                                 },
                                 match error {
+                                    "install-close-preview-first" if STAGE.load(Ordering::Acquire) == 6 => "文件已更新，但仍有 FUZE 进程，暂时无法启动新版。请退出托盘中的 FUZE，再从原快捷方式启动。",
                                     "update-file-in-use" | "install-close-preview-first" => "文件仍被占用，尚未替换。请关闭占用该安装目录的程序后重试。",
                                     "update-parent-timeout" => "等待 FUZE 退出超时，尚未替换文件。请稍后重试。",
+                                    "update-window-not-ready" => "更新窗口未能显示到前台，FUZE 保持运行。请重新点击更新。",
+                                    "install-launch" | "install-launch-readiness" | "install-launch-cancelled" => "文件已更新，但新版未能启动。请从原快捷方式启动 FUZE。",
                                     "update-release-changed" => "线上版本已变化，请在 FUZE 中重新检查更新。",
                                     _ if STAGE.load(Ordering::Acquire) < 4 => "程序文件未替换，可以关闭窗口后重试。",
                                     _ => "请重新下载安装包覆盖修复，不要启动未完成的程序。",
@@ -387,6 +475,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             } else {
                 0.
             };
+            PERMILLE.store((fraction * 1000.) as u64, Ordering::Relaxed);
             SendMessageW(bar, PBM_SETPOS, (fraction * 1000.) as usize, 0);
             let detail = if view.stage == 4 || view.stage == 6 {
                 format!(
@@ -449,14 +538,61 @@ pub fn translated(template: &str, values: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn restart_failure_keeps_progress_visible_until_closed() {
+        let _state = super::TEST_STATE.lock().unwrap();
+        use super::*;
+        CANCEL.store(false, Ordering::Release);
+        ERROR_SHOWN.store(false, Ordering::Release);
+        STAGE.store(6, Ordering::Release);
+        fn blocked_restart() -> crate::Result<()> {
+            Err("install-close-preview-first")
+        }
+        let observer = std::thread::spawn(|| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ERROR_SHOWN.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let hwnd = OWNER.load(Ordering::Acquire) as HWND;
+            let visible = !hwnd.is_null() && unsafe { IsWindowVisible(hwnd) != 0 };
+            let mut text = [0u16; 512];
+            let count = if visible {
+                unsafe { GetWindowTextW(GetDlgItem(hwnd, 1), text.as_mut_ptr(), text.len() as i32) }
+            } else {
+                0
+            };
+            let message = String::from_utf16_lossy(&text[..count as usize]);
+            CANCEL.store(true, Ordering::Release);
+            (visible, message)
+        });
+        assert_eq!(run(blocked_restart), Err("install-close-preview-first"));
+        let (visible, message) = observer.join().unwrap();
+        assert!(visible);
+        assert!(message.contains("文件已更新"), "{message}");
+        assert!(!message.contains("尚未替换"));
+        OWNER.store(0, Ordering::Release);
+        assert_eq!(present_for_handoff(), Err("update-window-not-ready"));
+        CANCEL.store(false, Ordering::Release);
+        ERROR_SHOWN.store(false, Ordering::Release);
+        STAGE.store(0, Ordering::Release);
+    }
+    #[test]
     fn native_update_window_is_visible_and_finishes_without_system_input() {
+        let _state = super::TEST_STATE.lock().unwrap();
         use super::*;
         static VISIBLE: AtomicBool = AtomicBool::new(false);
+        static PROGRESS: AtomicBool = AtomicBool::new(false);
         fn fixture() -> crate::Result<()> {
             let hwnd = OWNER.load(Ordering::Acquire) as HWND;
             VISIBLE.store(unsafe { IsWindowVisible(hwnd) != 0 }, Ordering::Release);
             STAGE.store(2, Ordering::Release);
             std::thread::sleep(std::time::Duration::from_millis(150));
+            for _ in 0..20 {
+                if process_progress(std::process::id()).map(|p| p.0) == Some(2) {
+                    PROGRESS.store(true, Ordering::Release);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             begin_files(1);
             STAGE.store(4, Ordering::Release);
             file_started(std::path::Path::new("fixture.txt"));
@@ -468,6 +604,7 @@ mod tests {
         STAGE.store(0, Ordering::Release);
         run(fixture).unwrap();
         assert!(VISIBLE.load(Ordering::Acquire));
+        assert!(PROGRESS.load(Ordering::Acquire));
         STAGE.store(0, Ordering::Release);
     }
     #[test]
@@ -538,6 +675,7 @@ mod tests {
     }
     #[test]
     fn transfer_status_counts_partial_writes_and_keeps_failed_attempts() {
+        let _state = super::TEST_STATE.lock().unwrap();
         use super::*;
         use std::io::Write;
         reset_transfer();

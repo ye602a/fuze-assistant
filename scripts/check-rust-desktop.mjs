@@ -1,3 +1,4 @@
+import {existsSync} from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import {readFile,writeFile} from 'node:fs/promises'
 import path from 'node:path'
@@ -10,7 +11,7 @@ const frontend=Object.hasOwn(build,'uiFrontend')?build.uiFrontend:'win32'
 if(!['win32','slint'].includes(frontend))throw new Error('Invalid UI frontend')
 if(frontend==='slint') {
  // Use the selected packaged entry. Never substitute Win32 locale coverage for Slint.
- const child=spawnSync(path.join(folder,'fuze-ui-lab.exe'),['--managed-desktop-smoke',path.join(folder,'preview.json')],{
+ const child=spawnSync(path.join(folder,existsSync(path.join(folder,'FUZE.exe'))?'FUZE.exe':'fuze-ui-lab.exe'),['--managed-desktop-smoke',path.join(folder,'preview.json')],{
   cwd:root,windowsHide:true,timeout:50000,encoding:'utf8',maxBuffer:65536
  })
  const lines=child.stdout?.trim().split(/\r?\n/)

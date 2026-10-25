@@ -6,7 +6,7 @@ import {execFileSync} from 'node:child_process'
 import path from 'node:path'
 import AdmZip from 'adm-zip'
 import {root} from './rust-prototype-tools.mjs'
-import {updateEntries} from './rust-bundle-policy.mjs'
+import {updateEntries,updatePath} from './rust-bundle-policy.mjs'
 const git=(args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 const revision=git(['rev-parse','--short=12','HEAD'])
 const sequence=Number(git(['show','-s','--format=%ct','HEAD']))
@@ -20,7 +20,7 @@ for(const e of entries){
  if(data.length!==e.header.size)throw new Error('Invalid update file size')
  const packed=deflateRawSync(data,{level:6})
  if(packed.length>128*1024*1024)throw new Error('Invalid compressed update size')
- files.push({path:e.entryName,size:data.length,compressed:packed.length,packed})
+ files.push({path:updatePath(e.entryName),size:data.length,compressed:packed.length,packed})
 }
 const index=Buffer.from(JSON.stringify({schema:1,revision,files:files.map(({packed,...f})=>f)}))
 if(index.length>512*1024)throw new Error('Invalid update index size')

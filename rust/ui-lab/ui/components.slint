@@ -24,10 +24,34 @@ export global UiMotion {
     }
 }
 
+// Busy-only sweep: no timer work while idle, hidden or reduced-motion.
+export component ActivityFill inherits Rectangle {
+    in property <bool> active: false;
+    in property <float> fraction: -1;
+    in-out property <float> phase: 0;
+    clip: true;
+    background: transparent;
+    changed active => { root.phase = 0; }
+    Timer { interval: 24ms; running: root.active && UiMotion.enabled;
+        triggered => { root.phase = root.phase >= 1 ? 0 : root.phase + 0.03; }
+    }
+    if root.active && root.fraction >= 0: Rectangle {
+        x: 0px; y: 0px;
+        width: parent.width * clamp(root.fraction, 0, 1); height: parent.height;
+        background: @linear-gradient(90deg, #16313c, #1d4654);
+    }
+    if root.active && UiMotion.enabled: Rectangle {
+        x: (root.width + self.width) * root.phase - self.width; y: 0px;
+        width: root.width * 0.38; height: root.height;
+        background: @linear-gradient(90deg, #69bce600, #69bce632, #69bce600);
+    }
+}
+
 // A finite repaint of the status surface only. Text/buttons above it update immediately.
 export component StatusSurface inherits Rectangle {
     in property <color> fill;
     in property <color> accent;
+    in property <bool> active: false;
     private property <color> previous: root.fill;
     private property <color> target: root.fill;
     private property <bool> reset: true;
@@ -64,6 +88,7 @@ export component StatusSurface inherits Rectangle {
         // Keep the gradient at full size while revealing it, rather than stretching it.
         Rectangle { x: 0px; y: 0px; width: root.width; height: root.height; background: @linear-gradient(110deg, root.target, #0d1b28); }
     }
+    ActivityFill { width: root.width; height: root.height; active: root.active; }
     Rectangle { background: transparent; border-width: 1px; border-color: root.accent; }
     @children
 }

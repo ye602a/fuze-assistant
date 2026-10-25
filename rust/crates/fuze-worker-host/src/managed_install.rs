@@ -492,6 +492,7 @@ pub fn launch_current(bundled: &Path) -> Result<()> {
     }
     let directory = application_directory(bundled)?;
     let _lock = lock(&directory)?;
+    finalize_player_layout(&directory)?;
     start(&directory)
 }
 fn prune_versions(root: &Path, bundled: &Path) {
@@ -578,6 +579,32 @@ fn start(directory: &Path) -> Result<()> {
 pub(crate) fn start_smoke(directory: &Path) -> Result<()> {
     start_mode(directory, true)
 }
+pub fn finalize_player_layout(directory: &Path) -> Result<()> {
+    let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
+        &directory.join("build.json"),
+        16384,
+    )?)
+    .map_err(|_| "install-build")?;
+    if build.get("desktopExecutable").and_then(|v| v.as_str()) != Some("FUZE.exe") {
+        return Ok(());
+    }
+    let legacy = directory.join("fuze-ui-lab.exe");
+    if legacy.exists() {
+        crate::local_setup::regular(&legacy)?;
+        let formal = directory.join("FUZE.exe");
+        if formal.exists() {
+            crate::local_setup::regular(&formal)?;
+        }
+        fs::rename(legacy, formal).map_err(|_| "update-file-in-use")?;
+    }
+    for name in include_str!("../../../obsolete-player-files.txt").lines() {
+        let path = directory.join(name);
+        if path.exists() && crate::local_setup::regular(&path).is_ok() {
+            let _ = fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
 pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
     let build: serde_json::Value = serde_json::from_slice(&update_channel::bounded(
         &directory.join("build.json"),
@@ -587,6 +614,12 @@ pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
     let name = match build.get("uiFrontend").and_then(|v| v.as_str()) {
         None if build.get("uiFrontend").is_none() => "fuze-rust-host.exe",
         Some("win32") => "fuze-rust-host.exe",
+        Some("slint")
+            if build.get("desktopExecutable").and_then(|v| v.as_str()) == Some("FUZE.exe")
+                && directory.join("FUZE.exe").is_file() =>
+        {
+            "FUZE.exe"
+        }
         Some("slint") => "fuze-ui-lab.exe",
         _ => return Err("install-frontend"),
     };
@@ -601,12 +634,15 @@ fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
     crate::runtime_prerequisites::check(directory)?;
     let program = desktop_program(directory)?;
     // Slint can perform one bounded graphics recovery before committing readiness.
-    let readiness_seconds =
-        if program.file_name().and_then(|s| s.to_str()) == Some("fuze-ui-lab.exe") {
-            45
-        } else {
-            15
-        };
+    let readiness_seconds = if program
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|name| ["fuze-ui-lab.exe", "FUZE.exe"].contains(&name))
+    {
+        45
+    } else {
+        15
+    };
     let mut child = Command::new(program)
         .arg(if smoke {
             "--desktop-smoke"
@@ -690,6 +726,28 @@ mod contract_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn formal_layout_migrates_transport_name_and_only_known_obsolete_files() {
+        let root = std::env::temp_dir().join(format!("fuze-formal-layout-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("build.json"),
+            br#"{"uiFrontend":"slint","desktopExecutable":"FUZE.exe"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("fuze-ui-lab.exe"), b"new-main").unwrap();
+        fs::write(root.join("FUZE.exe"), b"previous-main").unwrap();
+        fs::write(root.join("Update.cmd"), b"obsolete").unwrap();
+        fs::write(root.join("personal.txt"), b"keep").unwrap();
+        finalize_player_layout(&root).unwrap();
+        assert_eq!(fs::read(root.join("FUZE.exe")).unwrap(), b"new-main");
+        assert!(!root.join("fuze-ui-lab.exe").exists());
+        assert!(!root.join("Update.cmd").exists());
+        assert_eq!(fs::read(root.join("personal.txt")).unwrap(), b"keep");
+        assert_eq!(desktop_program(&root).unwrap(), root.join("FUZE.exe"));
+        finalize_player_layout(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn frontend_selection_preserves_legacy_and_rejects_unknown_or_missing() {
         let root =

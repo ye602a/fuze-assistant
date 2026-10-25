@@ -81,13 +81,13 @@ fn launch_helper(
 }
 
 /// The newly installed EXE waits for the temporary GUI to exit, removes that exact helper,
-/// then starts the new client once. This avoids deleting a running Windows image.
+/// after the new client is healthy. This avoids deleting a running Windows image.
 pub fn finish_update(directory: &Path) -> Result<()> {
     let helper = std::env::current_exe().map_err(|_| "update-location")?;
     let temporary = helper.parent().ok_or("update-location")?;
     checked_helper_directory(temporary)?;
     Command::new(directory.join("fuze-update.exe"))
-        .arg("--finish-update")
+        .arg("--cleanup-update")
         .arg(temporary)
         .arg(std::process::id().to_string())
         .env_remove("FUZE_UPDATE_READY")
@@ -167,7 +167,13 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
     collect(payload, payload, &mut files)?;
     files.sort_by_key(|p| p == Path::new("build.json"));
     for relative in &files {
-        let target = directory.join(relative);
+        let target = directory.join(
+            if relative == Path::new("fuze-ui-lab.exe") && directory.join("FUZE.exe").exists() {
+                Path::new("FUZE.exe")
+            } else {
+                relative
+            },
+        );
         install::safe_dir(target.parent().ok_or("install-path")?)?;
         if target.exists() {
             crate::local_setup::regular(&target)?;
@@ -185,6 +191,7 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
             .map_err(|_| "update-replace-file")?;
         crate::update_progress::file_finished(&relative);
     }
+    install::finalize_player_layout(directory)?;
     Ok(())
 }
 

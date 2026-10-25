@@ -30,3 +30,19 @@ test('oversized expanded payloads are rejected before decompression',()=>{
  const large=Array.from({length:5},(_,i)=>({...entry(`resources/client-data/${i}.json`),header:{size:128*1024*1024}}))
  assert.throws(()=>updateEntries(large),/expanded size/)
 })
+
+ test('new player payloads reject shell entries while old update packages remain readable', async () => {
+ const {playerPath, previewPath}=await import('../../scripts/rust-bundle-policy.mjs')
+ for(const name of ['Start-preview.cmd','Export-feedback.ps1','Install-local.ps1','Update.cmd','Rollback.cmd']) {
+  assert.equal(previewPath(name),true)
+  assert.equal(playerPath(name),false)
+ }
+ for(const name of ['fuze-ui-lab.exe','fuze-update.exe','preview.json','build.json','resources/client-data/current.json']) assert.equal(playerPath(name),true)
+})
+
+test('formal player executable keeps the legacy online transport path', async () => {
+ const {updatePath,playerPath}=await import('../../scripts/rust-bundle-policy.mjs')
+ assert.equal(playerPath('FUZE.exe'),true)
+ assert.equal(updatePath('FUZE.exe'),'fuze-ui-lab.exe')
+ assert.equal(updatePath('fuze-update.exe'),'fuze-update.exe')
+})

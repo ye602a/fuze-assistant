@@ -6,8 +6,8 @@ import {createHash} from 'node:crypto'
 import AdmZip from 'adm-zip'
 import {inspectUpload} from './check-secrets.mjs'
 import {prepare,root,ort} from './rust-prototype-tools.mjs'
-import {previewPath} from './rust-bundle-policy.mjs'
-import {makeRuntimeContract,installCommand} from './rust-runtime-contract.mjs'
+import {playerPath as previewPath} from './rust-bundle-policy.mjs'
+import {makeRuntimeContract} from './rust-runtime-contract.mjs'
 const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()
 const version=(await readFile(path.join(root,'rust/app-version.txt'),'utf8')).trim()
 if(!/^0\.7\.(0|[1-9]\d*)$/.test(version))throw new Error('Invalid application version')
@@ -32,12 +32,11 @@ async function copy(source,destination){
 }
 async function text(name,body){if(!previewPath(name))throw new Error('Invalid package path');await writeFile(path.join(dir,name),body);files.push(name)}
 for(const file of ['fuze-rust-host.exe','fuze-ocr-worker.exe','fuze-update.exe'])await copy(path.join(bin,file),file)
-if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'fuze-ui-lab.exe')
+if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'FUZE.exe')
 for(const file of ['onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll'])await copy(path.join(path.dirname(ort),file),file)
 // Inspect the copied bytes, not mutable source paths. Missing/stale build receipts block new packages.
-for(const file of files)runtimeBinaries[file]=await readFile(path.join(dir,file))
+for(const file of files)runtimeBinaries[file==='FUZE.exe'?'fuze-ui-lab.exe':file]=await readFile(path.join(dir,file))
 const vcRuntime=makeRuntimeContract({policyBytes:runtimePolicyBytes,evidence:runtimeEvidence,revision,frontend,onnxVersion,binaries:runtimeBinaries})
-await copy(path.join(root,'scripts/install-rust-prerequisites.ps1'),'Install-local.ps1')
 const args=await prepare()
 await copy(args[1],'resources/inference.onnx')
 await copy(args[2],'resources/dictionary.json')
@@ -60,68 +59,27 @@ for(const locale of ['zh-CN','zh-TW','en-US']) {
  versions[locale]=current.dataVersion
 }
 await copy(path.join(root,'THANKS.md'),'THANKS.md')
-await copy(path.join(root,'scripts/export-rust-feedback.ps1'),'Export-feedback.ps1')
-await copy(path.join(root,'docs/RUST_PLAYER_TEST_GUIDE.txt'),'TESTING-zh-CN.txt')
-await text('Export-feedback.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Export-feedback.ps1"\r\npause\r\n')
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
-await text('Start-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --launch\r\n')
-// A targeted test must not silently route through a previously installed revision.
-await text('Start-this-build.cmd','@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -File "%~dp0Start-this-build.ps1"\r\nexit /b %errorlevel%\r\n')
-await text('Start-this-build.ps1',[
- "$ErrorActionPreference = 'Stop'",
- "& (Join-Path $PSScriptRoot 'Install-local.ps1') -LaunchThisBuild",
- 'exit $LASTEXITCODE',
- ''
-].join('\r\n'))
-await text('Check-preview.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart /wait "" fuze-rust-host.exe --check-bundle preview.json\r\nif errorlevel 1 (echo Offline check failed.) else (echo Offline check passed.)\r\npause\r\n')
-await text('Uninstall-local.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --uninstall-local\r\n')
-await text('Install-local.cmd',installCommand())
-await text('Update.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --update\r\n')
-await text('Forget-private-token.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --forget-credentials\r\n')
-await text('Rollback.cmd','@echo off\r\ncd /d "%~dp0"\r\nstart "" fuze-update.exe --rollback\r\n')
-await text('README.txt',`FUZE ${version} 中文测试包（构建 ${revision}）
+await text('README.txt',`FUZE ${version}（构建 ${revision}）
 
-这是独立预览，保留已安装的稳定版。不要让两套助手同时识别。
-启动、两局测试要点与脱敏反馈步骤统一见 TESTING-zh-CN.txt。
-便携 ZIP 验证请运行 Start-this-build.cmd，先检查依赖，再启动当前解压版本；受管安装不包含此专用入口。
-Start-preview.cmd 启动所在目录的版本；Setup 快捷方式启动对应安装目录，不再被历史版本记录重定向。
+启动：双击 ${frontend === 'slint' ? 'FUZE.exe' : 'fuze-update.exe'}，或使用安装后的 FUZE 快捷方式。
+安装：运行 Setup.exe，选择安装目录。安装不会自动启动程序。
+便携使用：将 ZIP 完整解压到一个目录后启动，不要只复制 EXE。
+所需 VC++ DLL 随程序提供。
 
-安装与卸载
-Install-local.cmd 先检查本构建记录的 x64 VC++ 依赖，再安装到独立用户目录，不自动启动。
-缺少依赖时显示微软下载地址；仅明确确认后才运行已验证的运行库安装程序，不自动重启。
-需要重启时请自行安排，之后再次运行原始 ZIP 中的 Install-local.cmd。
-安装后可使用开始菜单 Fuze Rust Preview；目录为 %LOCALAPPDATA%/FuzeRustPreview/releases。
-Uninstall-local.cmd 只删除受管程序与快捷方式，保留设置、记录、缓存、凭据及未知文件。
-删除私有频道授权请单独运行 Forget-private-token.cmd。
-当前载荷需要 Windows x64 和 Visual C++ x64 运行库，不会自动安装系统依赖。
-
-数据与程序更新
-暂停后可在设置中更新推荐数据，校验完成才启用；数据保存在独立缓存，不修改稳定版。
-程序更新使用设置页的检查入口，或 Update.cmd；公开频道无需令牌，旧私有设置自动停用。
-应用内确认一次后下载并覆盖当前程序目录，完成后自动打开新版；差分下载失败转全量。
-个人文件保留，不备份旧程序或自动回滚。取消或失败不会自动启动程序。
-仅保留当前压缩包供下次差分复用。历史 Rollback.cmd 只处理旧受管安装，不适用于新的覆盖更新。
-反馈报告公开在 GitHub Issues，写入仍需独立 Issues 读写令牌，仅保存在 Windows 凭据管理器。
-设置页可获取、配置、验证反馈授权；仓库访问验证不等于写入验证，报告编号代表实际上传成功。
-开启后每局自动反馈；开启前的记录可在暂停后选择“补传最近对局”，确认公开后补传有限日志摘要。
-Rust 频道使用 rust-update.json、.fuz 和配套 .blockmap，不读取 Electron 的 latest.yml。
-
-功能边界
-界面为简体中文；自动推荐继续整体胜率，实际领取轮次仍未确认。
-点击三卡展开效果与第 1–4 次胜率参考，少样本或缺失会明确标注，不自动判断当前轮次。
-阶段数据在选人/加载时准备，局内只读缓存；英雄详情也保留手动参考。
-连接、截图和 OCR 状态会自动脱敏保存；退出后可运行 Export-feedback.cmd 导出反馈。
-记录和分享均在本地处理。可在设置中配置独立凭据并开启每局 GitHub 脱敏反馈，默认关闭；不要发送整个数据目录、原始日志或账号信息。
-真实游戏、跨屏、独占全屏及最终安装更新仍需验收，本包不代表完整迁移或正式稳定发布。
+更新：在设置中检查新版。下载期间可以继续使用，准备完成后退出、覆盖并重启。
+卸载：使用 Windows“已安装的应用”中的 FUZE 卸载入口；便携版退出后删除其解压目录。
+反馈：在设置的“帮助与反馈”中导出脱敏报告；截图保存在本地，不自动上传。
+用户设置和记录独立保存，更新不清空用户文件。
 来源与致谢见 THANKS.md。
 `.replace(/\n/g,'\r\n'))
-await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
+await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,desktopExecutable:frontend==='slint'?'FUZE.exe':undefined,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}
 if(child.status!==0||!result?.bundle_ready||result.game_access!==false||!result.worker_reaped)throw new Error('Isolated bundle self-check failed')
 if(frontend==='slint') {
- const smoke=spawnSync(path.join(dir,'fuze-ui-lab.exe'),['--desktop-smoke',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
+ const smoke=spawnSync(path.join(dir,'FUZE.exe'),['--desktop-smoke',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
  if(smoke.status!==0)throw new Error('Relocated Slint smoke failed')
 }
 const report={...result,revision,versions,frontend,slint_smoke:frontend==='slint',files:files.length}

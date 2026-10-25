@@ -657,3 +657,72 @@ fn update_and_champion_layout_offscreen() {
         }
     }
 }
+
+#[test]
+fn data_panel_sweep_offscreen() {
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
+    let ui = Workbench::new().unwrap();
+    ui.set_page(2);
+    ui.set_settings_section(1);
+    let host = ui.global::<crate::HostState>();
+    host.set_connected(true);
+    host.set_offline(false);
+    host.set_busy(true);
+    host.set_pending_action("data-update".into());
+    let maintenance = ui.global::<crate::MaintenanceState>();
+    maintenance.set_updating(true);
+    maintenance.set_update_fraction(0.6);
+    maintenance.set_update_status("正在下载更新 · 60%".into());
+    host.set_data_total(100);
+    host.set_data_completed(35);
+    host.set_data_compatibility("资料 16.21 · 统计 16.21.2\n版本匹配".into());
+    host.set_data_progress("正在下载简中英雄资料 · 已完成 35 / 100".into());
+    ui.global::<crate::UiMotion>().set_enabled(true);
+    ui.show().unwrap();
+    window.set_size(slint::PhysicalSize::new(920, 760));
+    let render = || {
+        let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(&mut pixels, 920);
+        });
+        pixels
+            .iter()
+            .flat_map(|p| [p.r, p.g, p.b])
+            .collect::<Vec<_>>()
+    };
+    let mut frames = Vec::new();
+    for index in 0..3 {
+        for _ in 0..12 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            slint::platform::update_timers_and_animations();
+        }
+        let pixels = render();
+        if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+            image::save_buffer(
+                Path::new(&output).join(format!("data-sweep-{index}.png")),
+                &pixels,
+                920,
+                760,
+                image::ColorType::Rgb8,
+            )
+            .unwrap();
+        }
+        frames.push(pixels);
+    }
+    assert_ne!(frames[1], frames[2]);
+    ui.global::<crate::UiMotion>().set_enabled(false);
+    let settled = render();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(settled, render());
+    host.set_pending_action("".into());
+    host.set_busy(false);
+    maintenance.set_updating(false);
+    let idle = render();
+    ui.global::<crate::UiMotion>().set_enabled(true);
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(idle, render());
+}
