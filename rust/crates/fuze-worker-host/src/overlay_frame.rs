@@ -21,6 +21,51 @@ mod tests {
     use super::*;
     use fuze_contract::{skill_choice, wire::TitleKind, ActualStage, Slot};
     #[test]
+    fn background_rank_refresh_keeps_slots_claim_stage_and_retention_deadline() {
+        let mut card = skill_cards()[0].clone();
+        card.id = 3051;
+        card.win = Some(0.55);
+        card.pick = Some(0.1);
+        let mut publisher = Publisher::new(vec![card.clone()], HashMap::new());
+        let deadline = Some(Instant::now() + std::time::Duration::from_secs(2));
+        publisher.publish(
+            Snapshot {
+                schema_version: 1,
+                generation: 1,
+                sequence: 7,
+                dataset_version: "test".into(),
+                selection_confirmed: false,
+                actual_stage: ActualStage::Unknown,
+                slots: [
+                    Slot::Known {
+                        id: 3051,
+                        name: "蓝色屏障".into(),
+                        confidence: 1.,
+                    },
+                    Slot::Unreadable,
+                    Slot::Unreadable,
+                ],
+            },
+            true,
+            true,
+            deadline,
+        );
+        let before = publisher.current().unwrap();
+        card.pick = Some(0.2);
+        publisher.supplement(vec![card], HashMap::from([(3051, 0.8), (3170, 1.)]));
+        let after = publisher.current().unwrap();
+        assert_eq!(before.snapshot, after.snapshot);
+        assert_eq!(after.deadline, deadline);
+        assert!(after.retained);
+        assert_eq!(after.cards[0].as_ref().unwrap().win, Some(0.55));
+        assert_eq!(after.scores, [Some(0.8), None, None]);
+        assert_eq!(after.context, before.context);
+        assert_eq!(after.selection_cycle, before.selection_cycle);
+        publisher.clear();
+        publisher.supplement(vec![], HashMap::new());
+        assert!(publisher.current().is_none());
+    }
+    #[test]
     fn skill_to_ordinary_and_reroll_frames_keep_slots_without_statistics_leaks() {
         let mut polluted = skill_cards();
         polluted[0].win = Some(0.99);
@@ -134,6 +179,21 @@ impl Publisher {
     }
     pub fn clear(&mut self) {
         self.current = None;
+    }
+    pub fn supplement(&mut self, augments: Vec<Augment>, scores: HashMap<u32, f64>) {
+        self.augments.extend(
+            augments
+                .into_iter()
+                .filter(|a| fuze_contract::skill_choice::get(a.id).is_none())
+                .map(|a| (a.id, Arc::new(a))),
+        );
+        self.scores = scores
+            .into_iter()
+            .filter(|(id, _)| fuze_contract::skill_choice::get(*id).is_none())
+            .collect();
+        if let Some(frame) = self.current.clone() {
+            self.publish(frame.snapshot.clone(), true, frame.retained, frame.deadline);
+        }
     }
     pub fn end_selection(&mut self) {
         self.clear();

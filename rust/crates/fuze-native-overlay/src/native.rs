@@ -676,6 +676,10 @@ pub struct HiddenOverlay {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 enum OverlayCommand {
+    Statistics(
+        std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
+        std::sync::mpsc::SyncSender<bool>,
+    ),
     Locale(u8, std::sync::mpsc::SyncSender<bool>),
     Visible(bool, std::sync::mpsc::SyncSender<bool>),
     Update(
@@ -913,6 +917,10 @@ impl HiddenOverlay {
                                 }
                                 (accepted, ack)
                             }
+                            OverlayCommand::Statistics(stats, ack) => {
+                                STATS.with(|s| *s.borrow_mut() = stats);
+                                (true, ack)
+                            }
                             OverlayCommand::Update(snapshot, retained, ack) => {
                                 let accepted = !ui_flag.load(Ordering::Acquire)
                                     && !snapshot.selection_confirmed
@@ -1012,6 +1020,16 @@ impl HiddenOverlay {
         };
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.send(OverlayCommand::Locale(value, tx), rx)
+    }
+    pub fn statistics(
+        &self,
+        stats: std::collections::HashMap<u32, fuze_data::recommendations::Recommendation>,
+    ) -> std::result::Result<bool, &'static str> {
+        if self.headless.is_some() {
+            return Ok(true);
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(OverlayCommand::Statistics(stats, tx), rx)
     }
     pub fn update_retained(
         &self,

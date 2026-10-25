@@ -298,6 +298,30 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
             vec![],
         );
         add(stats(&b["stats"]), vec![]);
+        if b["source"] == crate::tencent::SOURCE {
+            add(
+                format!(
+                    "腾讯101 · 统计日 {} · 统计补丁及样本数未提供",
+                    clean(&b["date"])
+                ),
+                vec![],
+            );
+            add(
+                "装备组合按选取率排列；成装组合不代表购买顺序。成长装备导入其可购买前置装备。"
+                    .into(),
+                vec![],
+            );
+            for r in rows(&b["conditionalItems"]) {
+                let name = rows(&items["data"])
+                    .find(|i| i["id"] == r["id"])
+                    .map(|i| clean(&i["name"]))
+                    .unwrap_or_default();
+                add(format!("未导入：{name} · {}", clean(&r["reason"])), vec![]);
+            }
+            if b["excludedRows"].as_u64().unwrap_or(0) > 0 {
+                add("已跳过包含条件装备或未确认装备的组合。".into(), vec![]);
+            }
+        }
         for r in rows(&b["summonerSpells"]).take(3) {
             let names = rows(&r["summonerSpellIds"])
                 .filter_map(Value::as_u64)
@@ -333,12 +357,24 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
         for (field, label) in [
             ("startingItems", "出门"),
             ("coreItems", "核心"),
+            ("boots", "鞋子"),
             ("fullItems", "成装"),
             ("itemExtensions", "后续装备"),
             ("situationalItems", "备选装备"),
         ] {
             let mut entries: Vec<_> = rows(&b[field]).collect();
-            entries.sort_by_key(|r| std::cmp::Reverse(r["games"].as_u64().unwrap_or(0)));
+            entries.sort_by(|a, b| {
+                b["games"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .cmp(&a["games"].as_u64().unwrap_or(0))
+                    .then_with(|| {
+                        b["pickRate"]
+                            .as_f64()
+                            .unwrap_or(0.)
+                            .total_cmp(&a["pickRate"].as_f64().unwrap_or(0.))
+                    })
+            });
             for r in entries.into_iter().take(match field {
                 "startingItems" => 2,
                 "coreItems" => 4,
@@ -394,7 +430,18 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                     }
                 }
                 if !names.is_empty() {
-                    add(format!("{} · {}", t(label), names.join(" → ")), icons);
+                    add(
+                        format!(
+                            "{} · {}",
+                            t(label),
+                            names.join(if b["source"] == crate::tencent::SOURCE {
+                                " / "
+                            } else {
+                                " → "
+                            })
+                        ),
+                        icons,
+                    );
                     add(stats(r), vec![]);
                 }
             }
@@ -411,12 +458,18 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
     let mut augments: Vec<_> = rows(&row["augments"]).collect();
     let rank = |v: &Value| v["stats"]["rank"].as_u64().filter(|v| *v > 0);
     let tier = |v: &Value| v["stats"]["tier"].as_u64().filter(|v| *v > 0);
-    let authoritative = !augments.is_empty() && augments.iter().all(|v| rank(v).is_some());
+    let authoritative = !augments.is_empty()
+        && (augments.iter().all(|v| rank(v).is_some())
+            || augments
+                .iter()
+                .any(|v| v["stats"]["rankSource"] == crate::tencent::SOURCE));
     let tier_priority = !authoritative && augments.iter().any(|v| tier(v).is_some());
     augments.sort_by(|a, b| {
         // Same full-pool precedence as 0.6.3 augment-ranking.ts; filtering never reranks.
         if authoritative {
-            return rank(a).cmp(&rank(b));
+            return rank(a)
+                .unwrap_or(u64::MAX)
+                .cmp(&rank(b).unwrap_or(u64::MAX));
         }
         let primary = if tier_priority {
             tier(a)
@@ -465,7 +518,15 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                     clean(s.get("winRateRegion").unwrap_or(&s["region"])),
                     t("补丁"),
                     clean(s.get("winRateGamePatch").unwrap_or(&s["gamePatch"]))
-                ),
+                ) + &if s["rankSource"] == crate::tencent::SOURCE {
+                    format!(
+                        " · 腾讯101推荐 #{} / {}（选取率，非胜率）",
+                        s["rank"],
+                        clean(&s["rankDate"])
+                    )
+                } else {
+                    String::new()
+                },
             });
         }
         add(

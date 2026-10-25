@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub(crate) tencent: Option<crate::tencent_data::Pending>,
     pub(crate) diagnostics: crate::recognition_log::Probe,
     diagnostic_level: Option<u8>,
     diagnostic_ocr: Option<serde_json::Value>,
@@ -130,6 +131,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            tencent: None,
             diagnostics: Default::default(),
             diagnostic_level: None,
             diagnostic_ocr: None,
@@ -448,6 +450,26 @@ impl Pipeline {
     pub fn tick_wgc(&mut self) -> Result<Option<Delivery>> {
         if self.cancel_if_requested()? {
             return Ok(None);
+        }
+        if let Some(result) = self.tencent.as_ref().and_then(|p| p.poll()) {
+            self.tencent = None;
+            if let Ok(extra) = result {
+                self.tiers = extra
+                    .detail
+                    .augments
+                    .iter()
+                    .filter_map(|a| a.tier.map(|t| (a.id, t)))
+                    .collect();
+                self.frames.supplement(
+                    extra.detail.augments,
+                    extra
+                        .statistics
+                        .iter()
+                        .filter_map(|(id, r)| r.score.map(|s| (*id, s)))
+                        .collect(),
+                );
+                let _ = self.overlay.statistics(extra.statistics);
+            }
         }
         let saving = self.scheduling().0 == fuze_runtime::gate::Mode::Saving;
         if let Some(capture) = self.capture.as_mut() {

@@ -1125,6 +1125,13 @@ impl HostOverlay {
                 "整体胜率 · 公开数据样例"
             } else if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果 · 整体胜率"
+            } else if frame
+                .cards
+                .iter()
+                .flatten()
+                .any(|a| a.provenance.contains("腾讯101推荐"))
+            {
+                "腾讯101推荐 · 整体胜率参考"
             } else {
                 "整体胜率 · 候选强化"
             }
