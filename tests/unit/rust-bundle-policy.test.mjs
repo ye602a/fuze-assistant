@@ -39,3 +39,10 @@ test('oversized expanded payloads are rejected before decompression',()=>{
  }
  for(const name of ['fuze-ui-lab.exe','fuze-update.exe','preview.json','build.json','resources/client-data/current.json']) assert.equal(playerPath(name),true)
 })
+
+test('formal player executable keeps the legacy online transport path', async () => {
+ const {updatePath,playerPath}=await import('../../scripts/rust-bundle-policy.mjs')
+ assert.equal(playerPath('FUZE.exe'),true)
+ assert.equal(updatePath('FUZE.exe'),'fuze-ui-lab.exe')
+ assert.equal(updatePath('fuze-update.exe'),'fuze-update.exe')
+})

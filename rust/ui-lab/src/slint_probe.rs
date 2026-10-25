@@ -670,6 +670,10 @@ fn data_panel_sweep_offscreen() {
     host.set_offline(false);
     host.set_busy(true);
     host.set_pending_action("data-update".into());
+    let maintenance = ui.global::<crate::MaintenanceState>();
+    maintenance.set_updating(true);
+    maintenance.set_update_fraction(0.6);
+    maintenance.set_update_status("正在下载更新 · 60%".into());
     host.set_data_total(100);
     host.set_data_completed(35);
     host.set_data_compatibility("资料 16.21 · 统计 16.21.2\n版本匹配".into());
@@ -715,6 +719,7 @@ fn data_panel_sweep_offscreen() {
     assert_eq!(settled, render());
     host.set_pending_action("".into());
     host.set_busy(false);
+    maintenance.set_updating(false);
     let idle = render();
     ui.global::<crate::UiMotion>().set_enabled(true);
     std::thread::sleep(std::time::Duration::from_millis(80));

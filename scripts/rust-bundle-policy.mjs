@@ -34,4 +34,5 @@ export function updateEntries(entries) {
 }
 
 // Old packages remain readable; new player bundles contain no shell entry points.
+export function updatePath(name) { return name === 'FUZE.exe' ? 'fuze-ui-lab.exe' : name }
 export function playerPath(name) { return previewPath(name) && !/\.(cmd|bat|ps1)$/i.test(name) }

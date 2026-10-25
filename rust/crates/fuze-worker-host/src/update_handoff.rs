@@ -60,7 +60,7 @@ impl Parent {
             return Err("update-signal");
         }
         let ready = Signal(event);
-        let executable = directory.join("fuze-ui-lab.exe");
+        let executable = crate::managed_install::desktop_program(directory)?;
         let process = owned_process(pid, &executable)?;
         let supervisor = std::env::var("FUZE_DESKTOP_SUPERVISOR")
             .ok()

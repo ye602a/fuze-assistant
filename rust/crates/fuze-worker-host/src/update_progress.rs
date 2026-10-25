@@ -193,8 +193,51 @@ pub fn present_for_handoff() -> crate::Result<()> {
     }
     Ok(())
 }
+const QUERY_PROGRESS: u32 = WM_APP + 42;
+static PERMILLE: AtomicU64 = AtomicU64::new(0);
+/// Returns stage and real per-mille progress from this updater's window only.
+pub fn process_progress(pid: u32) -> Option<(u8, u32)> {
+    struct Query {
+        pid: u32,
+        result: Option<(u8, u32)>,
+    }
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
+        let q = &mut *(data as *mut Query);
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != q.pid {
+            return 1;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        if String::from_utf16_lossy(&class[..n.max(0) as usize]) != "FuzeRustUpdateProgress" {
+            return 1;
+        }
+        let mut reply = 0;
+        if SendMessageTimeoutW(hwnd, QUERY_PROGRESS, 0, 0, SMTO_ABORTIFHUNG, 30, &mut reply) != 0
+            && reply > 0
+        {
+            q.result = Some(((reply >> 16) as u8, ((reply & 0xffff) - 1) as u32));
+        }
+        0
+    }
+    let mut q = Query { pid, result: None };
+    unsafe {
+        EnumWindows(Some(visit), &mut q as *mut Query as LPARAM);
+    }
+    q.result
+}
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
+        QUERY_PROGRESS => {
+            ((if ERROR_SHOWN.load(Ordering::Acquire) {
+                255
+            } else {
+                STAGE.load(Ordering::Acquire)
+            } as usize)
+                << 16
+                | (PERMILLE.load(Ordering::Relaxed) as usize + 1)) as LRESULT
+        }
         PRESENT_FOR_HANDOFF => {
             ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
@@ -432,6 +475,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             } else {
                 0.
             };
+            PERMILLE.store((fraction * 1000.) as u64, Ordering::Relaxed);
             SendMessageW(bar, PBM_SETPOS, (fraction * 1000.) as usize, 0);
             let detail = if view.stage == 4 || view.stage == 6 {
                 format!(
@@ -536,11 +580,19 @@ mod tests {
         let _state = super::TEST_STATE.lock().unwrap();
         use super::*;
         static VISIBLE: AtomicBool = AtomicBool::new(false);
+        static PROGRESS: AtomicBool = AtomicBool::new(false);
         fn fixture() -> crate::Result<()> {
             let hwnd = OWNER.load(Ordering::Acquire) as HWND;
             VISIBLE.store(unsafe { IsWindowVisible(hwnd) != 0 }, Ordering::Release);
             STAGE.store(2, Ordering::Release);
             std::thread::sleep(std::time::Duration::from_millis(150));
+            for _ in 0..20 {
+                if process_progress(std::process::id()).map(|p| p.0) == Some(2) {
+                    PROGRESS.store(true, Ordering::Release);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             begin_files(1);
             STAGE.store(4, Ordering::Release);
             file_started(std::path::Path::new("fixture.txt"));
@@ -552,6 +604,7 @@ mod tests {
         STAGE.store(0, Ordering::Release);
         run(fixture).unwrap();
         assert!(VISIBLE.load(Ordering::Acquire));
+        assert!(PROGRESS.load(Ordering::Acquire));
         STAGE.store(0, Ordering::Release);
     }
     #[test]

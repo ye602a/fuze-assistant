@@ -167,7 +167,13 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
     collect(payload, payload, &mut files)?;
     files.sort_by_key(|p| p == Path::new("build.json"));
     for relative in &files {
-        let target = directory.join(relative);
+        let target = directory.join(
+            if relative == Path::new("fuze-ui-lab.exe") && directory.join("FUZE.exe").exists() {
+                Path::new("FUZE.exe")
+            } else {
+                relative
+            },
+        );
         install::safe_dir(target.parent().ok_or("install-path")?)?;
         if target.exists() {
             crate::local_setup::regular(&target)?;
@@ -185,6 +191,7 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
             .map_err(|_| "update-replace-file")?;
         crate::update_progress::file_finished(&relative);
     }
+    install::finalize_player_layout(directory)?;
     Ok(())
 }
 

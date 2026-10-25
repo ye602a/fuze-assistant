@@ -1,5 +1,11 @@
 # FUZE 当前开发状态与新会话交接
 
+## 0.7.5 正式文件布局与软件更新进度
+
+玩家 ZIP / Setup 主入口为 FUZE.exe；源码 crate 和构建回执中的 fuze-ui-lab 名称保留。在线 .fuz 使用旧客户端允许的 fuze-ui-lab.exe 传输名，新更新器启动新版前按 build.json 的 desktopExecutable 标记重命名为 FUZE.exe；旧 --launch/--finish-update 入口保持兼容。preview.json 是仍在使用的运行配置，不是废弃测试产物。
+软件更新卡片通过本次更新器窗口的有界原生消息读取实际下载进度，整卡填充并扫光；失败停止动画。已知过时脚本与 TESTING-zh-CN.txt 由明确名单清理，其他文件保留。
+
+
 ## 2026-10-25：正常启动与测试脚本分离（随 0.7.5 源码）
 
 Setup 快捷方式改为直接启动 fuze-ui-lab.exe，无参数进入原生启动检查和受监督的正式桌面，更新器不再兼任新快捷方式的启动入口。

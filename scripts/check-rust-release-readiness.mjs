@@ -25,7 +25,7 @@ async function main() {
   const build = JSON.parse(await bounded('build.json', 16384))
   const binaries = []
   for (const name of nativeFiles) {
-    const bytes = await bounded(name, 128 * 1024 * 1024)
+    const bytes = await bounded(name === 'fuze-ui-lab.exe' && build.desktopExecutable === 'FUZE.exe' ? 'FUZE.exe' : name, 128 * 1024 * 1024)
     binaries.push({ name, sha256: createHash('sha256').update(bytes).digest('hex'), ...inspectPe(bytes) })
   }
   const script = fileURLToPath(new URL('./inspect-rust-release-windows.ps1', import.meta.url))
@@ -34,7 +34,7 @@ async function main() {
   const env = { ...process.env }
   delete env.PSModulePath
   const child = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-File', script], {
-    input: JSON.stringify({ bundle }), env, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 262144,
+    input: JSON.stringify({ bundle, desktopExecutable: build.desktopExecutable }), env, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 262144,
   })
   if (child.status !== 0) throw new Error('release-windows-inspection-failed')
   const report = assessReadiness(build, binaries, JSON.parse(child.stdout), {

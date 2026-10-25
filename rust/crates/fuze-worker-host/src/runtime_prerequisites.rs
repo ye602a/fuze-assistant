@@ -211,7 +211,16 @@ fn check_with(directory: &Path, inventory: &dyn Fn(&str) -> Option<Version>) -> 
     };
     // Reject changed native bytes before trusting their recorded dependency list.
     for (name, hash) in contract.binaries {
-        let path = directory.join(name);
+        let path = directory.join(
+            if name == "fuze-ui-lab.exe"
+                && !directory.join(&name).exists()
+                && build.get("desktopExecutable").and_then(|v| v.as_str()) == Some("FUZE.exe")
+            {
+                "FUZE.exe"
+            } else {
+                &name
+            },
+        );
         let meta = fs::symlink_metadata(&path).map_err(|_| "runtime-artifact-changed")?;
         if !meta.is_file()
             || meta.file_attributes() & 0x400 != 0

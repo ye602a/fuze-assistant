@@ -32,10 +32,10 @@ async function copy(source,destination){
 }
 async function text(name,body){if(!previewPath(name))throw new Error('Invalid package path');await writeFile(path.join(dir,name),body);files.push(name)}
 for(const file of ['fuze-rust-host.exe','fuze-ocr-worker.exe','fuze-update.exe'])await copy(path.join(bin,file),file)
-if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'fuze-ui-lab.exe')
+if(frontend==='slint')await copy(path.join(bin,'fuze-ui-lab.exe'),'FUZE.exe')
 for(const file of ['onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll'])await copy(path.join(path.dirname(ort),file),file)
 // Inspect the copied bytes, not mutable source paths. Missing/stale build receipts block new packages.
-for(const file of files)runtimeBinaries[file]=await readFile(path.join(dir,file))
+for(const file of files)runtimeBinaries[file==='FUZE.exe'?'fuze-ui-lab.exe':file]=await readFile(path.join(dir,file))
 const vcRuntime=makeRuntimeContract({policyBytes:runtimePolicyBytes,evidence:runtimeEvidence,revision,frontend,onnxVersion,binaries:runtimeBinaries})
 const args=await prepare()
 await copy(args[1],'resources/inference.onnx')
@@ -62,7 +62,7 @@ await copy(path.join(root,'THANKS.md'),'THANKS.md')
 await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('README.txt',`FUZE ${version}（构建 ${revision}）
 
-启动：双击 ${frontend === 'slint' ? 'fuze-ui-lab.exe' : 'fuze-update.exe'}，或使用安装后的 FUZE 快捷方式。
+启动：双击 ${frontend === 'slint' ? 'FUZE.exe' : 'fuze-update.exe'}，或使用安装后的 FUZE 快捷方式。
 安装：运行 Setup.exe，选择安装目录。安装不会自动启动程序。
 便携使用：将 ZIP 完整解压到一个目录后启动，不要只复制 EXE。
 所需 VC++ DLL 随程序提供。
@@ -73,13 +73,13 @@ await text('README.txt',`FUZE ${version}（构建 ${revision}）
 用户设置和记录独立保存，更新不清空用户文件。
 来源与致谢见 THANKS.md。
 `.replace(/\n/g,'\r\n'))
-await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
+await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,desktopExecutable:frontend==='slint'?'FUZE.exe':undefined,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}
 if(child.status!==0||!result?.bundle_ready||result.game_access!==false||!result.worker_reaped)throw new Error('Isolated bundle self-check failed')
 if(frontend==='slint') {
- const smoke=spawnSync(path.join(dir,'fuze-ui-lab.exe'),['--desktop-smoke',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
+ const smoke=spawnSync(path.join(dir,'FUZE.exe'),['--desktop-smoke',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
  if(smoke.status!==0)throw new Error('Relocated Slint smoke failed')
 }
 const report={...result,revision,versions,frontend,slint_smoke:frontend==='slint',files:files.length}

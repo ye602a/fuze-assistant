@@ -34,6 +34,8 @@ export global DiagnosticState {
     callback action(string);
 }
 export global MaintenanceState {
+    in-out property <bool> updating: false;
+    in-out property <float> update-fraction: -1;
     in-out property <bool> storage-open: false;
     in-out property <bool> attached: false;
     in-out property <bool> offline: true;
