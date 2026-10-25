@@ -36,6 +36,19 @@ fn run() -> Result<(), &'static str> {
         println!("{{\"package_verified\":true,\"native_extracted\":true,\"worker_reaped\":true,\"game_access\":false}}");
         return Ok(());
     }
+    if args.len() == 3 && args[0] == "--finish-update" {
+        let pid = args[2].parse().map_err(|_| "update-parent")?;
+        match fuze_worker_host::in_place_update::cleanup_after_update(
+            std::path::Path::new(&args[1]),
+            pid,
+        ) {
+            // A leftover temporary file must not prevent the updated client starting.
+            Ok(()) | Err("update-helper-cleanup") => {}
+            Err(error) => return Err(error),
+        }
+        let executable = std::env::current_exe().map_err(|_| "update-location")?;
+        return install::launch_current(executable.parent().ok_or("update-location")?);
+    }
     let confirmed = args.last().is_some_and(|arg| arg == "--confirmed");
     if confirmed {
         args.pop();
@@ -165,7 +178,7 @@ fn run() -> Result<(), &'static str> {
     if !update_worker {
         return Err("update-arguments");
     }
-    let parent = fuze_worker_host::update_handoff::Parent::from_environment()?;
+    let parent = fuze_worker_host::update_handoff::Parent::from_environment(&root)?;
     let _lock = install::lock(&root)?;
     let session = if action == "--update-directory-private" {
         match Session::private() {
@@ -344,7 +357,7 @@ fn run() -> Result<(), &'static str> {
         }
         fuze_worker_host::in_place_update::replace(&root, &extracted)?;
         fuze_worker_host::update_progress::STAGE.store(6, std::sync::atomic::Ordering::Release);
-        Ok(())
+        fuze_worker_host::in_place_update::finish_update(&root)
     })();
     // Delete only the exact freshly created staging directory under this isolated root.
     if fs::canonicalize(&stage).ok().as_ref() == Some(&stage)
