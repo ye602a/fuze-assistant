@@ -9,7 +9,7 @@ use std::{
 };
 
 /// The updater must run outside the application so its own EXE/DLLs can be replaced.
-/// A temporary PowerShell runner waits for this EXE to exit, then runs and removes the helper.
+/// Launch the GUI executable directly; no shell participates in the update lifecycle.
 pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
     let executable = std::env::current_exe().map_err(|_| "update-location")?;
     launch_helper(&executable, private, confirmed, None).map(|_| ())
@@ -48,25 +48,17 @@ fn launch_helper(
         let helper = temporary.join("fuze-update.exe");
         fs::copy(&executable, &helper).map_err(|_| "update-helper-copy")?;
         crate::runtime_prerequisites::supply_app_local(&temporary, &directory)?;
-        let runner = temporary.join("run.ps1");
-        let script = runner_script(
-            &directory,
-            &temporary,
-            private,
-            confirmed,
-            if background.is_some() {
-                0
+        let mut command = Command::new(&helper);
+        command
+            .arg(if private {
+                "--update-directory-private"
             } else {
-                std::process::id()
-            },
-        );
-        // Windows PowerShell needs a BOM to preserve non-ASCII installation paths.
-        let bytes: Vec<u8> = std::iter::once(0xfeffu16)
-            .chain(script.encode_utf16())
-            .flat_map(u16::to_le_bytes)
-            .collect();
-        fs::write(&runner, bytes).map_err(|_| "update-helper-copy")?;
-        let mut command = Command::new("powershell.exe");
+                "--update-directory"
+            })
+            .arg(&directory);
+        if confirmed {
+            command.arg("--confirmed");
+        }
         if let Some((signal, revision)) = background {
             command
                 .env("FUZE_UPDATE_READY", signal)
@@ -74,14 +66,7 @@ fn launch_helper(
                 .env("FUZE_UPDATE_REVISION", revision);
         }
         command
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(&runner)
+            .current_dir(&temporary)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -95,43 +80,79 @@ fn launch_helper(
     result
 }
 
-fn runner_script(
-    directory: &Path,
-    temporary: &Path,
-    private: bool,
-    confirmed: bool,
-    parent: u32,
-) -> String {
-    let target = directory.to_string_lossy().replace('\'', "''");
-    let helper = temporary.to_string_lossy().replace('\'', "''");
-    let action = if private {
-        "--update-directory-private"
-    } else {
-        "--update-directory"
-    };
-    let confirmation = if confirmed { " --confirmed" } else { "" };
-    format!(
-        r#"$ErrorActionPreference = 'Stop'
-$helperDirectory = '{helper}'
-try {{
-    if ({parent} -ne 0) {{ Wait-Process -Id {parent} -ErrorAction SilentlyContinue }}
-    $worker = Start-Process -FilePath (Join-Path $helperDirectory 'fuze-update.exe') -ArgumentList '"{action}" "{target}"{confirmation}' -WindowStyle Hidden -Wait -PassThru
-}} finally {{
-    # This exact fresh helper directory was created by the updater, under the system temp folder.
-    $resolved = [IO.Path]::GetFullPath($helperDirectory)
-    # Use the exact Rust-created directory: .NET and Rust may resolve TEMP aliases differently.
-    $expected = [IO.Path]::GetFullPath('{helper}')
-    if ($resolved.Equals($expected, [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved).StartsWith('fuze-update-helper-')) {{
-        Remove-Item -LiteralPath $resolved -Recurse -Force
-    }}
-}}
-if ($worker.ExitCode -eq 0) {{
-    # Launch only after successful replacement and helper cleanup. Do not wait on the new UI.
-    Remove-Item Env:FUZE_UPDATE_READY,Env:FUZE_UPDATE_PARENT,Env:FUZE_UPDATE_REVISION,Env:FUZE_DESKTOP_SUPERVISOR -ErrorAction SilentlyContinue
-    Start-Process -FilePath (Join-Path '{target}' 'fuze-update.exe') -ArgumentList '--launch' -WindowStyle Hidden
-}}
-"#
-    )
+/// The newly installed EXE waits for the temporary GUI to exit, removes that exact helper,
+/// then starts the new client once. This avoids deleting a running Windows image.
+pub fn finish_update(directory: &Path) -> Result<()> {
+    let helper = std::env::current_exe().map_err(|_| "update-location")?;
+    let temporary = helper.parent().ok_or("update-location")?;
+    checked_helper_directory(temporary)?;
+    Command::new(directory.join("fuze-update.exe"))
+        .arg("--finish-update")
+        .arg(temporary)
+        .arg(std::process::id().to_string())
+        .env_remove("FUZE_UPDATE_READY")
+        .env_remove("FUZE_UPDATE_PARENT")
+        .env_remove("FUZE_UPDATE_REVISION")
+        .env_remove("FUZE_DESKTOP_SUPERVISOR")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|_| "update-helper-start")?;
+    Ok(())
+}
+fn checked_helper_directory(path: &Path) -> Result<std::path::PathBuf> {
+    let root = fs::canonicalize(std::env::temp_dir()).map_err(|_| "update-helper-directory")?;
+    let resolved = fs::canonicalize(path).map_err(|_| "update-helper-directory")?;
+    if resolved.parent() != Some(root.as_path())
+        || !resolved
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("fuze-update-helper-"))
+    {
+        return Err("update-helper-directory");
+    }
+    install::safe_dir(&resolved)?;
+    Ok(resolved)
+}
+pub fn cleanup_after_update(temporary: &Path, pid: u32) -> Result<()> {
+    use windows_sys::Win32::{Foundation::*, System::Threading::*};
+    let temporary = checked_helper_directory(temporary)?;
+    if pid == 0 || pid == std::process::id() {
+        return Err("update-parent");
+    }
+    let expected = fs::canonicalize(temporary.join("fuze-update.exe"))
+        .map_err(|_| "update-helper-directory")?;
+    unsafe {
+        let process = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        );
+        if !process.is_null() {
+            let mut image = [0u16; 32768];
+            let mut size = image.len() as u32;
+            let matches = QueryFullProcessImageNameW(process, 0, image.as_mut_ptr(), &mut size)
+                != 0
+                && fs::canonicalize(std::path::PathBuf::from(String::from_utf16_lossy(
+                    &image[..size as usize],
+                )))
+                .ok()
+                    == Some(expected);
+            // An exited process may no longer expose its image name. No process action is
+            // needed in that case; cleanup still targets the validated helper directory.
+            let exited = WaitForSingleObject(process, 0) == WAIT_OBJECT_0
+                || (matches && WaitForSingleObject(process, 30000) == WAIT_OBJECT_0);
+            CloseHandle(process);
+            if !exited {
+                return Err("update-parent-timeout");
+            }
+        } else if GetLastError() != ERROR_INVALID_PARAMETER {
+            return Err("update-parent");
+        }
+    }
+    fs::remove_dir_all(temporary).map_err(|_| "update-helper-cleanup")
 }
 
 /// A payload checked by the downloader is copied directly over the current files.
@@ -280,122 +301,48 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn helper_runner_cleans_up_after_worker_failure_in_a_unicode_path() {
-        let temporary = std::env::temp_dir().join(format!(
-            "fuze-update-helper-符择's-$-{}",
-            std::process::id()
-        ));
-        fs::create_dir(&temporary).unwrap();
-        // This helper is the inert Rust test harness, never FUZE. It rejects the worker
-        // flags without running tests, exercising cleanup after a non-zero worker exit.
-        fs::copy(
-            std::env::current_exe().unwrap(),
-            temporary.join("fuze-update.exe"),
+    fn native_helper_receives_unicode_arguments_without_a_shell() {
+        let directory =
+            std::env::temp_dir().join(format!("fuze-native-符择's-$-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        fs::write(
+            directory.join("build.json"),
+            r#"{"revision":"0123456789ab","sequence":1,"channel":"rust-development-preview"}"#,
         )
         .unwrap();
-        let directory = temporary.join("符择 user's $folder");
-        fs::write(temporary.with_extension("keep"), "outside helper").unwrap();
-        let script = runner_script(&directory, &temporary, false, true, i32::MAX as u32);
-        let bytes: Vec<u8> = std::iter::once(0xfeffu16)
-            .chain(script.encode_utf16())
-            .flat_map(u16::to_le_bytes)
-            .collect();
-        fs::write(temporary.join("run.ps1"), bytes).unwrap();
-        let result = Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(temporary.join("run.ps1"))
+        let source = directory.join("stub.rs");
+        fs::write(&source, r#"fn main() {
+            let args: Vec<_> = std::env::args().skip(1).collect();
+            assert_eq!(args.len(),3); assert_eq!(args[0],"--update-directory"); assert_eq!(args[2],"--confirmed");
+            let root = std::path::PathBuf::from(&args[1]);
+            std::fs::write(root.join("helper-path"), std::env::current_exe().unwrap().to_string_lossy().as_bytes()).unwrap();
+        }"#).unwrap();
+        assert!(Command::new("rustc")
+            .arg(&source)
+            .args(["--crate-name", "fuze_stub", "-o"])
+            .arg(directory.join("fuze-update.exe"))
             .creation_flags(0x08000000)
             .status()
-            .unwrap();
-        assert!(result.success());
-        assert!(!temporary.exists());
-        assert_eq!(
-            fs::read_to_string(temporary.with_extension("keep")).unwrap(),
-            "outside helper"
-        );
-        fs::remove_file(temporary.with_extension("keep")).unwrap();
+            .unwrap()
+            .success());
+        let mut child = launch_background(&directory, "fixture-signal", "0123456789ab").unwrap();
+        assert!(child.wait().unwrap().success());
+        let helper =
+            std::path::PathBuf::from(fs::read_to_string(directory.join("helper-path")).unwrap());
+        assert_ne!(helper.parent(), Some(directory.as_path()));
+        assert!(!helper.with_file_name("run.ps1").exists());
+        cleanup_after_update(helper.parent().unwrap(), child.id()).unwrap();
+        assert!(!helper.exists());
+        assert!(directory.join("fuze-update.exe").exists());
+        fs::remove_dir_all(directory).unwrap();
     }
     #[test]
-    fn successful_worker_cleans_helper_then_relaunches_the_target_once() {
-        let temporary =
-            std::env::temp_dir().join(format!("fuze-update-helper-success-{}", std::process::id()));
-        let application = temporary.with_extension("application");
-        fs::create_dir(&temporary).unwrap();
-        fs::create_dir(&application).unwrap();
-        // A tiny inert executable exercises the real process handoff. It never loads FUZE.
-        let source = r#"using System; using System.IO; using System.Reflection;
-public class Stub {
-  public static int Main(string[] args) {
-    string root = Environment.GetEnvironmentVariable("FUZE_TEST_HANDOFF_ROOT");
-    if (args.Length == 3 && args[0] == "--update-directory" && args[1] == root && args[2] == "--confirmed") {
-      File.WriteAllText(Path.Combine(root, "worker-ok"), "yes"); return 0;
-    }
-    if (args.Length == 1 && args[0] == "--launch") {
-      string helper = Environment.GetEnvironmentVariable("FUZE_TEST_HELPER_ROOT");
-      string actual = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-      // The marker belongs only to the target; avoid string equality of Windows path aliases.
-      File.AppendAllText(Path.Combine(root, "launches"), Directory.Exists(helper) ? "helper-not-removed\n" : File.Exists(Path.Combine(actual, "worker-ok")) ? "ready\n" : "wrong-target: " + actual + "\n");
-      return 0;
-    }
-    return 1;
-  }
-}"#;
-        fs::write(application.join("stub.cs"), source).unwrap();
-        let compile = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "Add-Type -Path (Join-Path $env:FUZE_TEST_HANDOFF_ROOT 'stub.cs') -OutputAssembly (Join-Path $env:FUZE_TEST_HANDOFF_ROOT 'fuze-update.exe') -OutputType ConsoleApplication"])
-            .env("FUZE_TEST_HANDOFF_ROOT", &application)
-            .creation_flags(0x08000000).status().unwrap();
-        assert!(compile.success());
-        fs::copy(
-            application.join("fuze-update.exe"),
-            temporary.join("fuze-update.exe"),
-        )
-        .unwrap();
-        let script = runner_script(&application, &temporary, false, true, i32::MAX as u32);
-        let bytes: Vec<u8> = std::iter::once(0xfeffu16)
-            .chain(script.encode_utf16())
-            .flat_map(u16::to_le_bytes)
-            .collect();
-        fs::write(temporary.join("run.ps1"), bytes).unwrap();
-        let result = Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(temporary.join("run.ps1"))
-            .env("FUZE_TEST_HANDOFF_ROOT", &application)
-            .env("FUZE_TEST_HELPER_ROOT", &temporary)
-            .creation_flags(0x08000000)
-            .status()
-            .unwrap();
-        assert!(result.success());
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !application.join("launches").exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert_eq!(
-            fs::read_to_string(application.join("worker-ok")).unwrap(),
-            "yes"
-        );
-        assert_eq!(
-            fs::read_to_string(application.join("launches")).unwrap(),
-            "ready\n"
-        );
-        // The synthetic startup helper exits immediately; wait for its image handle to close.
-        while fs::remove_file(application.join("fuze-update.exe")).is_err()
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        fs::remove_dir_all(application).unwrap();
+    fn native_cleanup_rejects_non_helper_directories() {
+        let path = std::env::temp_dir().join(format!("fuze-keep-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("keep"), "untouched").unwrap();
+        assert!(cleanup_after_update(&path, u32::MAX).is_err());
+        assert!(path.join("keep").exists());
+        fs::remove_dir_all(path).unwrap();
     }
 }

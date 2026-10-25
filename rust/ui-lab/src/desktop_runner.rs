@@ -125,6 +125,9 @@ fn attempt(
                     state.graphics = true;
                     terminal_at = Some(Instant::now());
                 }
+                "FUZE_RENDER_STOPPING" => {
+                    terminal_at = Some(Instant::now());
+                }
                 "FUZE_RENDER_DONE" => {
                     state.complete = true;
                     terminal_at = Some(Instant::now());

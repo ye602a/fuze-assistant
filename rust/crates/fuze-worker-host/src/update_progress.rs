@@ -220,6 +220,13 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
         if hwnd.is_null() {
             return Err("update-window");
         }
+        // Override even a legacy launcher that supplied SW_HIDE at process creation.
+        ShowWindow(hwnd, SW_SHOWNORMAL);
+        ShowWindow(hwnd, SW_SHOW);
+        if IsWindowVisible(hwnd) == 0 {
+            DestroyWindow(hwnd);
+            return Err("update-window");
+        }
         OWNER.store(hwnd as isize, Ordering::Release);
         CreateWindowExW(
             0,
@@ -441,6 +448,28 @@ pub fn translated(template: &str, values: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_update_window_is_visible_and_finishes_without_system_input() {
+        use super::*;
+        static VISIBLE: AtomicBool = AtomicBool::new(false);
+        fn fixture() -> crate::Result<()> {
+            let hwnd = OWNER.load(Ordering::Acquire) as HWND;
+            VISIBLE.store(unsafe { IsWindowVisible(hwnd) != 0 }, Ordering::Release);
+            STAGE.store(2, Ordering::Release);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            begin_files(1);
+            STAGE.store(4, Ordering::Release);
+            file_started(std::path::Path::new("fixture.txt"));
+            file_finished(std::path::Path::new("fixture.txt"));
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Ok(())
+        }
+        CANCEL.store(false, Ordering::Release);
+        STAGE.store(0, Ordering::Release);
+        run(fixture).unwrap();
+        assert!(VISIBLE.load(Ordering::Acquire));
+        STAGE.store(0, Ordering::Release);
+    }
     #[test]
     fn hidden_native_progress_text_fits_without_input() {
         use super::*;
