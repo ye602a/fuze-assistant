@@ -457,6 +457,10 @@ pub fn attach(
                 if let Some((signal, child)) = slot.as_mut() {
                     if signal.ready() {
                         // Normal shutdown already joins capture/OCR and releases the instance lock.
+                        // Arm the supervisor's bounded shutdown before dropping UI services.
+                        use std::io::Write;
+                        println!("FUZE_RENDER_STOPPING");
+                        let _ = std::io::stdout().flush();
                         engine.stop();
                         let _ = slint::quit_event_loop();
                         return;

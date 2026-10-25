@@ -1,6 +1,6 @@
 ﻿; Extract the selected payload; do not run installers or FUZE.
 #ifndef AppRelease
-  #define AppRelease "0.7.3"
+  #define AppRelease "0.7.4"
 #endif
 #ifndef Payload
   #error Payload is required
@@ -21,7 +21,8 @@ OutputBaseFilename=FUZE-Setup-{#AppRelease}-windows-x64
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
-CloseApplications=no
+CloseApplications=yes
+CloseApplicationsFilter=*.exe,*.dll
 RestartApplications=no
 Compression=lzma2/normal
 SolidCompression=no
