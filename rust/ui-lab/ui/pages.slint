@@ -2,7 +2,7 @@ import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
 import { HostState, ShellState, RecordState, DiagnosticState } from "host-state.slint";
 import { RecordDetails } from "records.slint";
-import { Theme, Label, Action, Panel, SectionTitle, Toggle, Tabs } from "components.slint";
+import { Theme, ActivityFill, Label, Action, Panel, SectionTitle, Toggle, Tabs } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
     in property <float> entrance: 1;
@@ -58,12 +58,13 @@ export component SettingsPage inherits VerticalLayout {
             Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
         }
         Panel { height: 206px;
+            ActivityFill { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+                active: HostState.pending-action == "data-update";
+                fraction: HostState.data-total > 0 ? 1.0 * HostState.data-completed / HostState.data-total : -1;
+            }
             SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据"; }
             Label { x: 21px; y: 50px; width: parent.width - 42px; height: 46px; text: HostState.data-compatibility; wrap: word-wrap; color: HostState.data-mismatch ? Theme.gold : Theme.blue; font-size: 12px; }
             Label { x: 21px; y: 103px; width: parent.width - 42px; height: 42px; text: HostState.data-progress; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            if HostState.data-total > 0: Rectangle { x: 21px; y: 150px; width: parent.width - 42px; height: 4px; background: Theme.stroke;
-                Rectangle { width: parent.width * HostState.data-completed / max(1, HostState.data-total); height: parent.height; background: Theme.blue; }
-            }
             Action { x: 21px; y: 163px; width: 180px; height: 30px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
         }
         MaintenancePage { entrance: root.entrance; }
