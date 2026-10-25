@@ -552,3 +552,107 @@ pub fn review(output: &Path) -> Result<serde_json::Value, Box<dyn std::error::Er
         serde_json::json!({"renderer":"software_offscreen","startup_ms":startup_ms,"cases":cases,"motion_frames":motion_frames,"duplicate_updates_settle":true,"reduced_motion_immediate":true,"chinese_model_roundtrip":true,"real_ime_verified":false,"native_window_verified":false,"hardware_dpi_verified":false}),
     )
 }
+
+#[test]
+fn update_and_champion_layout_offscreen() {
+    use slint::VecModel;
+    // In-memory Slint only: no native window, application host, game or personal data.
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
+    let ui = crate::ChampionWindow::new().unwrap();
+    ui.set_build_lines(Rc::new(VecModel::from(vec![crate::BuildRow {
+        text: "核心装备组合\n这是一条较长的装备说明，用于验证窄窗口下文字会完整换行，不与下方装备图标重叠。".into(),
+        icons: Rc::new(VecModel::from(vec![ui.get_inspected_icon(); 6])).into(),
+        skills: Default::default(),
+    }])).into());
+    ui.set_guides(Rc::new(VecModel::from(vec!["英雄玩法攻略".into()])).into());
+    ui.set_augment_total(30);
+    ui.set_augments(
+        Rc::new(VecModel::from(
+            (0..12)
+                .map(|i| crate::DetailRow {
+                    title: format!("海克斯参考 {}", i + 1).into(),
+                    description: "测试说明".into(),
+                    win: "—".into(),
+                    pick: "—".into(),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.show().unwrap();
+    for width in [380u32, 420] {
+        window.set_size(slint::PhysicalSize::new(width, 640));
+        for tab in 0..3 {
+            ui.set_detail_tab(tab);
+            ui.set_scroll_y(-ui.get_detail_offset());
+            let mut pixels = vec![Rgb8Pixel::default(); width as usize * 640];
+            window.request_redraw();
+            window.draw_if_needed(|r| {
+                r.render(&mut pixels, width as usize);
+            });
+            assert!(ui.get_scroll_y() <= 0.);
+            slint::platform::update_timers_and_animations();
+            window.request_redraw();
+            window.draw_if_needed(|r| {
+                r.render(&mut pixels, width as usize);
+            });
+            assert!(
+                ui.get_scroll_y() >= -ui.get_scroll_limit() - 1.,
+                "width={width},tab={tab},offset={},limit={}",
+                ui.get_scroll_y(),
+                ui.get_scroll_limit()
+            );
+            assert!(ui.get_content_bottom() <= ui.get_feedback_top());
+            if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+                image::save_buffer(
+                    Path::new(&output).join(format!("champion-layout-{width}-{tab}.png")),
+                    &pixels
+                        .iter()
+                        .flat_map(|p| [p.r, p.g, p.b])
+                        .collect::<Vec<_>>(),
+                    width,
+                    640,
+                    image::ColorType::Rgb8,
+                )
+                .unwrap();
+            }
+        }
+    }
+    ui.hide().unwrap();
+    drop(ui);
+    let ui = Workbench::new().unwrap();
+    ui.set_page(2);
+    ui.set_settings_section(1);
+    let state = ui.global::<crate::MaintenanceState>();
+    state.set_current_version("0.7.2".into());
+    state.set_update_status("发现版本 0.7.X · 完整包约 70 MB".into());
+    state.set_update_notes("- 优化更新体验\n- 整理选人资料".into());
+    state.set_installable(true);
+    state.set_attached(true);
+    ui.global::<crate::HostState>().set_running(true);
+    ui.show().unwrap();
+    window.set_size(slint::PhysicalSize::new(920, 760));
+    for dialog in [false, true] {
+        state.set_confirmation(if dialog { "available" } else { "" }.into());
+        let mut pixels = vec![Rgb8Pixel::default(); 920 * 760];
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(&mut pixels, 920);
+        });
+        if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+            image::save_buffer(
+                Path::new(&output).join(format!("update-layout-{dialog}.png")),
+                &pixels
+                    .iter()
+                    .flat_map(|p| [p.r, p.g, p.b])
+                    .collect::<Vec<_>>(),
+                920,
+                760,
+                image::ColorType::Rgb8,
+            )
+            .unwrap();
+        }
+    }
+}

@@ -12,6 +12,28 @@ use std::{
 /// A temporary PowerShell runner waits for this EXE to exit, then runs and removes the helper.
 pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
     let executable = std::env::current_exe().map_err(|_| "update-location")?;
+    launch_helper(&executable, private, confirmed, None).map(|_| ())
+}
+
+/// Run the existing updater outside the install directory while the desktop keeps running.
+pub fn launch_background(
+    directory: &Path,
+    signal: &str,
+    revision: &str,
+) -> Result<std::process::Child> {
+    launch_helper(
+        &directory.join("fuze-update.exe"),
+        false,
+        true,
+        Some((signal, revision)),
+    )
+}
+fn launch_helper(
+    executable: &Path,
+    private: bool,
+    confirmed: bool,
+    background: Option<(&str, &str)>,
+) -> Result<std::process::Child> {
     let directory = install::application_directory(executable.parent().ok_or("update-location")?)?;
     let temporary = std::env::temp_dir().join(format!(
         "fuze-update-helper-{}-{}",
@@ -32,7 +54,11 @@ pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
             &temporary,
             private,
             confirmed,
-            std::process::id(),
+            if background.is_some() {
+                0
+            } else {
+                std::process::id()
+            },
         );
         // Windows PowerShell needs a BOM to preserve non-ASCII installation paths.
         let bytes: Vec<u8> = std::iter::once(0xfeffu16)
@@ -40,7 +66,14 @@ pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
             .flat_map(u16::to_le_bytes)
             .collect();
         fs::write(&runner, bytes).map_err(|_| "update-helper-copy")?;
-        Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        if let Some((signal, revision)) = background {
+            command
+                .env("FUZE_UPDATE_READY", signal)
+                .env("FUZE_UPDATE_PARENT", std::process::id().to_string())
+                .env("FUZE_UPDATE_REVISION", revision);
+        }
+        command
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -49,10 +82,12 @@ pub fn handoff(private: bool, confirmed: bool) -> Result<()> {
                 "-File",
             ])
             .arg(&runner)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .creation_flags(0x08000000)
             .spawn()
-            .map_err(|_| "update-helper-start")?;
-        Ok(())
+            .map_err(|_| "update-helper-start")
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&temporary);
@@ -79,7 +114,7 @@ fn runner_script(
         r#"$ErrorActionPreference = 'Stop'
 $helperDirectory = '{helper}'
 try {{
-    Wait-Process -Id {parent} -ErrorAction SilentlyContinue
+    if ({parent} -ne 0) {{ Wait-Process -Id {parent} -ErrorAction SilentlyContinue }}
     $worker = Start-Process -FilePath (Join-Path $helperDirectory 'fuze-update.exe') -ArgumentList '"{action}" "{target}"{confirmation}' -WindowStyle Hidden -Wait -PassThru
 }} finally {{
     # This exact fresh helper directory was created by the updater, under the system temp folder.
@@ -92,6 +127,7 @@ try {{
 }}
 if ($worker.ExitCode -eq 0) {{
     # Launch only after successful replacement and helper cleanup. Do not wait on the new UI.
+    Remove-Item Env:FUZE_UPDATE_READY,Env:FUZE_UPDATE_PARENT,Env:FUZE_UPDATE_REVISION,Env:FUZE_DESKTOP_SUPERVISOR -ErrorAction SilentlyContinue
     Start-Process -FilePath (Join-Path '{target}' 'fuze-update.exe') -ArgumentList '--launch' -WindowStyle Hidden
 }}
 "#
@@ -121,9 +157,12 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
                 .map_err(|_| "update-file-in-use")?;
         }
     }
+    crate::update_progress::begin_files(files.len());
     for relative in files {
+        crate::update_progress::file_started(&relative);
         fs::copy(payload.join(&relative), directory.join(&relative))
             .map_err(|_| "update-replace-file")?;
+        crate::update_progress::file_finished(&relative);
     }
     Ok(())
 }
@@ -158,6 +197,31 @@ mod tests {
         fs::write(path.join("build.json"), serde_json::json!({"revision":revision,"sequence":sequence,"channel":"rust-development-preview"}).to_string()).unwrap();
         fs::write(path.join("fuze-update.exe"), revision).unwrap();
         fs::write(path.join("fuze-ui-lab.exe"), revision).unwrap();
+    }
+    #[test]
+    fn occupied_program_aborts_before_changing_any_files() {
+        let root =
+            std::env::temp_dir().join(format!("fuze-occupied-update-{}", std::process::id()));
+        let current = root.join("current");
+        let payload = root.join("payload");
+        bundle(&current, "111111111111", 1);
+        bundle(&payload, "222222222222", 2);
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(current.join("fuze-ui-lab.exe"))
+            .unwrap();
+        assert_eq!(replace(&current, &payload), Err("update-file-in-use"));
+        assert_eq!(
+            install::bundled_version(&current).unwrap().revision,
+            "111111111111"
+        );
+        drop(held);
+        assert_eq!(
+            fs::read_to_string(current.join("fuze-ui-lab.exe")).unwrap(),
+            "111111111111"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn replacement_keeps_the_launch_directory_without_backups_or_user_file_changes() {

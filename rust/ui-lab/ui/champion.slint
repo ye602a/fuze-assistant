@@ -15,9 +15,11 @@ export component ChampionWindow inherits Window {
     background: Theme.background;
     default-font-family: "Microsoft YaHei UI"; default-font-size: 12px;
     in-out property <length> scroll-y <=> scroll.viewport-y;
+    changed scroll-y => { if root.scroll-y < -root.scroll-limit || root.scroll-y > 0px { root.scroll-y = clamp(root.scroll-y, -root.scroll-limit, 0px); } }
     out property <length> scroll-limit: max(0px, scroll.viewport-height - scroll.height);
     out property <length> detail-offset: hero-summary.y + 13px;
     in-out property <int> detail-tab: 0;
+    changed detail-tab => { root.expanded-augment = -1; root.scroll-y = -min(root.detail-offset, root.scroll-limit); }
     in-out property <bool> side-mode:false;
     in-out property <bool> offline:true;
     callback drag-window;
@@ -52,6 +54,8 @@ export component ChampionWindow inherits Window {
     callback inspect(int);
     callback filter(string, int);
     in-out property <int> augment-offset: 0;
+    in-out property <int> augment-total: 0;
+    callback augment-page(int);
     callback artwork-refresh;
     in-out property <int> inspected-id: 4;
     in-out property <string> inspected-name: "崔斯特";
@@ -92,6 +96,7 @@ export component ChampionWindow inherits Window {
     scroll := Flickable {
         x: 0px; y: 42px; width: root.width; height: root.footer-top - self.y;
         viewport-width: self.width; viewport-height: body.height + 26px;
+        changed viewport-height => { self.viewport-y = clamp(self.viewport-y, -max(0px, self.viewport-height - self.height), 0px); }
         body := VerticalLayout {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
             if !root.side-mode: Panel { height: 181px + root.subset-height + ceil(root.bench.length / 3) * 64px;
@@ -164,21 +169,25 @@ export component ChampionWindow inherits Window {
                     Label { x: 8px; y: 24px; height: 24px; text: metric.value; font-size: 19px; }
                 }
             }
-            Tabs { labels: ["海克斯", "出装与技能"]; current <=> root.detail-tab; }
-            if root.guides.length > 0: VerticalLayout { spacing: 6px;
+            Tabs { labels: ["海克斯", "出装", "资料"]; current <=> root.detail-tab; }
+            if root.detail-tab == 2 && root.guides.length > 0: VerticalLayout { spacing: 6px;
                 SectionTitle { height: 25px; text: "相关攻略"; font-size: 13px; }
                 for title[index] in root.guides: Action { label: title; description: "在默认浏览器打开攻略：" + title; enabled: !root.offline && !root.action-busy; clicked => { root.player-action("guide", index); } }
             }
 
-            Label { height: 42px; wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 12px; }
+            Label { height: max(24px, self.preferred-height); wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 12px; }
             if root.detail-failed: Action { label: "重新读取本地详情"; clicked => { root.inspect(root.inspected-id); } }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
                 LineEdit { accessible-label: "搜索强化符文"; text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
                 HorizontalLayout { height: 32px; spacing: 5px;
                     for title[index] in ["全部", "白银", "黄金", "棱彩"]: Action { min-width: 0px; height: 32px; label: title; primary: root.rarity == index - 1; clicked => { root.rarity = index - 1; root.filter(root.augment-query, root.rarity); } }
                 }
-                if root.augments.length > 0: ListView { height: 400px;
-                    changed viewport-y => { root.augment-offset = max(0, floor(-self.viewport-y / 82px)); root.artwork-refresh(); }
+                if root.augment-total > 12: HorizontalLayout { height: 32px; spacing: 8px;
+                    Action { label: "上一页"; enabled: root.augment-offset > 0; clicked => { root.augment-page(-1); } }
+                    Label { text: (floor(root.augment-offset / 12) + 1) + " / " + ceil(root.augment-total / 12); horizontal-alignment: center; }
+                    Action { label: "下一页"; enabled: root.augment-offset + 12 < root.augment-total; clicked => { root.augment-page(1); } }
+                }
+                if root.augments.length > 0: VerticalLayout { spacing: 6px;
                     for a[index] in root.augments: Panel {
                         height: 82px;
                         Image { x: 10px; y: 14px; width: 45px; height: 45px; source: a.icon; }
@@ -192,31 +201,33 @@ export component ChampionWindow inherits Window {
                         if card-focus.has-focus: Rectangle { background: transparent; border-width: 1px; border-color: Theme.blue; }
                     }
                 }
-                if root.augments.length == 0: Label { height: 40px; text: "没有符合条件的强化符文"; color: Theme.muted; }
+                if root.augments.length == 0: Label { accessible-role: text; accessible-label: "没有符合条件的强化符文"; height: 40px; text: "没有符合条件的强化符文"; color: Theme.muted; }
             }
             if root.detail-tab == 1: VerticalLayout {
                 spacing: 10px;
+                SectionTitle { height: 26px; text: "海克斯大乱斗出装"; font-size: 14px; }
+                if root.build-lines.length == 0: Label { height: 42px; text: "暂无该英雄的海克斯出装数据"; color: Theme.muted; }
                 for route[index] in root.build-routes: Action { label: route; primary: root.build-route == index; clicked => { root.build-route = index; root.route-changed(index); } }
-                for line in root.build-lines: Panel { height: line.skills.length > 0 ? 170px : line.icons.length > 0 ? 145px : 98px;
-                    Label { x: 12px; y: 8px; width: parent.width - 24px; height: line.skills.length > 0 ? 30px : 82px; text: line.skills.length > 0 ? "1–18 级加点" : line.text; wrap: word-wrap; font-size: 12px; }
+                for line in root.build-lines: Panel { height: line.skills.length > 0 ? 170px : build-text.preferred-height + (line.icons.length > 0 ? 65px : 24px);
+                    build-text := Label { x: 12px; y: 8px; width: parent.width - 24px; height: line.skills.length > 0 ? 30px : self.preferred-height; text: line.skills.length > 0 ? "1–18 级加点" : line.text; wrap: word-wrap; font-size: 12px; }
                     if line.skills.length > 0: Rectangle { x: 12px; y: 43px; width: parent.width - 24px; height: 119px;
                         for key[index] in line.skills: Rectangle { x: mod(index, 6) * (self.width + 4px); y: floor(index / 6) * 39px; width: (parent.width - 20px) / 6; height: 34px; background: #0a1925; border-width: 1px; border-color: Theme.stroke;
                             Label { x: 4px; y: 0px; width: 15px; height: 34px; text: index + 1; color: Theme.muted; font-size: 12px; }
                             Label { x: 17px; y: 0px; width: parent.width - 19px; height: 34px; text: key; color: key == "R" ? Theme.gold : Theme.ivory; horizontal-alignment: center; font-weight: 700; }
                         }
                     }
-                    HorizontalLayout { x: 12px; y: 98px; height: 35px; width: min(parent.width - 24px, line.icons.length * 42px); spacing: 7px; for icon in line.icons: Image { source: icon; width: 35px; height: 35px; image-fit: contain; } }
+                    HorizontalLayout { x: 12px; y: build-text.y + build-text.height + 10px; height: 35px; width: min(parent.width - 24px, line.icons.length * 42px); spacing: 7px; for icon in line.icons: Image { source: icon; width: 35px; height: 35px; image-fit: contain; } }
                 }
             }
-            Action { label: root.stage-open ? "收起分阶段胜率参考" : "查看分阶段胜率参考"; clicked => { if root.stage-open { root.stage-reset(); } else { root.stage-open = true; root.stage-request(false); } } }
-            if root.stage-open: VerticalLayout { spacing: 9px;
+            if root.detail-tab == 2: Action { label: root.stage-open ? "收起分阶段胜率参考" : "查看分阶段胜率参考"; clicked => { if root.stage-open { root.stage-reset(); } else { root.stage-open = true; root.stage-request(false); } } }
+            if root.detail-tab == 2 && root.stage-open: VerticalLayout { spacing: 9px;
                 Label { height: 42px; wrap: word-wrap; text: "手动参考 · 不自动判断领取轮次\n三卡推荐仍使用整体胜率。"; color: Theme.gold; font-size: 12px; }
                 HorizontalLayout { height: 32px; spacing: 4px;
                     for title[index] in ["整体", "第 1 次", "第 2 次", "第 3 次", "第 4 次"]: Action { min-width: 0px; label: title; primary: root.stage-index == index; clicked => { root.stage-select(index); } }
                 }
                 Label { height: 85px; wrap: word-wrap; text: root.stage-status; color: Theme.muted; font-size: 12px; }
                 Action { busy: root.stage-busy; label: root.stage-busy ? "正在读取…" : root.side-mode ? "对局中仅读取缓存" : "刷新公开统计"; enabled: !root.stage-busy && !root.side-mode; clicked => { root.stage-request(true); } }
-                ListView { height: 280px;
+                VerticalLayout { spacing: 6px;
                     for row in root.stage-rows: Panel { height: 66px;
                         Label { x: 10px; y: 6px; width: parent.width - 92px; height: 24px; text: row.name; }
                         Label { x: 10px; y: 34px; width: parent.width - 20px; height: 20px; text: "选 " + row.pick + " · 样本 " + row.samples; color: Theme.muted; font-size: 12px; }
@@ -226,7 +237,7 @@ export component ChampionWindow inherits Window {
             }
         }
     }
-    if root.expanded-augment >= 0 && root.detail-tab == 0: Panel {
+    if root.expanded-augment >= 0 && root.expanded-augment < root.augments.length && root.detail-tab == 0: Panel {
         x: 12px; y: root.description-top; width: root.width - 24px; height: root.description-height;
         TouchArea { }
         SectionTitle { x: 14px; y: 10px; width: parent.width - 62px; height: 28px; text: root.augments[root.expanded-augment].title; }
@@ -235,13 +246,13 @@ export component ChampionWindow inherits Window {
             description-text := Text { width: desc-scroll.width; height: self.preferred-height; text: root.augments[root.expanded-augment].description; color: Theme.ivory; font-size: 12px; wrap: word-wrap; }
         }
     }
-    Scrollbar { x: root.width - 13px; y: 48px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
+    Scrollbar { x: root.width - 13px; y: scroll.y; height: scroll.height; content-height: scroll.viewport-height; offset <=> scroll.viewport-y; }
     if root.action-notice != "": NoticeBar { x: 10px; y: root.footer-top; width: root.width - 20px;
         message: root.action-notice; dismissed => { root.action-notice = ""; }
     }
     Rectangle { x: 0px; y: root.height - 64px; height: 64px; background: #101e2a;
-        if root.can-configure-items: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "导入路线 " + (root.build-route + 1) + " 到游戏商店"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
-        if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.local-id == 0 ? "选定英雄后可查看对应出装。" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "暂无可导入的海克斯出装数据。"; color: Theme.muted; font-size: 12px; }
+        if root.can-configure-items && root.detail-tab == 1: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "导入路线 " + (root.build-route + 1) + " 到游戏商店"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
+        if !root.can-configure-items || root.detail-tab != 1: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.can-configure-items && root.detail-tab != 1 ? "在「出装」中选择方案并导入游戏商店。" : root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.local-id == 0 ? "选定英雄后可查看对应出装。" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "暂无可导入的海克斯出装数据。"; color: Theme.muted; font-size: 12px; }
     }
     }
     Rectangle { visible: root.item-confirm; x: 0px; y: 0px; background: #000000b8;

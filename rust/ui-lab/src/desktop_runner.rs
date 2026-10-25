@@ -62,6 +62,7 @@ fn attempt(
         .arg(if paused { "paused" } else { "normal" })
         .arg(fault)
         .env("FUZE_MANAGED_HEALTH_PROTOCOL", "2")
+        .env("FUZE_DESKTOP_SUPERVISOR", std::process::id().to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

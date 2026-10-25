@@ -165,6 +165,7 @@ fn run() -> Result<(), &'static str> {
     if !update_worker {
         return Err("update-arguments");
     }
+    let parent = fuze_worker_host::update_handoff::Parent::from_environment()?;
     let _lock = install::lock(&root)?;
     let session = if action == "--update-directory-private" {
         match Session::private() {
@@ -180,6 +181,12 @@ fn run() -> Result<(), &'static str> {
     };
     fuze_worker_host::update_progress::STAGE.store(1, std::sync::atomic::Ordering::Release);
     let release = session.check(&fuze_worker_host::update_progress::cancelled)?;
+    if std::env::var("FUZE_UPDATE_REVISION")
+        .ok()
+        .is_some_and(|v| v != release.manifest.revision)
+    {
+        return Err("update-release-changed");
+    }
     let current = install::bundled_version(&bundled)?;
     if current.sequence >= release.manifest.sequence
         || current.revision == release.manifest.revision
@@ -314,14 +321,14 @@ fn run() -> Result<(), &'static str> {
         if fuze_worker_host::update_progress::cancelled() {
             return Err("update-cancelled");
         }
-        if install::desktop_running() {
-            return Err("install-close-preview-first");
-        }
         fs::rename(destination, extracted.join("package.fuz")).map_err(|_| "install-cache")?;
         if !map.is_empty() {
             let mut f = fs::File::create(extracted.join("package.blockmap"))
                 .map_err(|_| "install-cache")?;
             f.write_all(&map).map_err(|_| "install-cache")?;
+        }
+        if let Some(parent) = parent {
+            parent.release()?;
         }
         fuze_worker_host::update_progress::STAGE.store(4, std::sync::atomic::Ordering::Release);
         if fuze_worker_host::update_progress::cancelled() {
@@ -331,6 +338,7 @@ fn run() -> Result<(), &'static str> {
             return Err("install-close-preview-first");
         }
         fuze_worker_host::in_place_update::replace(&root, &extracted)?;
+        fuze_worker_host::update_progress::STAGE.store(6, std::sync::atomic::Ordering::Release);
         Ok(())
     })();
     // Delete only the exact freshly created staging directory under this isolated root.
@@ -382,7 +390,11 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         }
-        if error != "update-cancelled" && !fuze_worker_host::update_progress::cancelled() {
+        if error != "update-cancelled"
+            && !fuze_worker_host::update_progress::cancelled()
+            && !fuze_worker_host::update_progress::ERROR_SHOWN
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
             if let Some(guidance) = fuze_worker_host::runtime_prerequisites::guidance(error) {
                 message(guidance, false);
             } else {

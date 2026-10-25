@@ -384,18 +384,27 @@ fn apply(ui: &ChampionWindow, p: &Presentation) {
     };
     let query = ui.get_augment_query().to_lowercase();
     let rarity = ui.get_rarity();
+    let filtered: Vec<_> = loaded
+        .detail
+        .augments
+        .iter()
+        .filter(|a| {
+            (rarity < 0 || a.rarity.map(i32::from) == Some(rarity))
+                && (query.is_empty()
+                    || a.name.to_lowercase().contains(&query)
+                    || a.description.to_lowercase().contains(&query))
+        })
+        .collect();
+    ui.set_augment_total(filtered.len() as i32);
+    let offset =
+        (ui.get_augment_offset().max(0) as usize).min(filtered.len().saturating_sub(1) / 12 * 12);
+    ui.set_augment_offset(offset as i32);
     ui.set_augments(
         Rc::new(VecModel::from(
-            loaded
-                .detail
-                .augments
-                .iter()
-                .filter(|a| {
-                    (rarity < 0 || a.rarity.map(i32::from) == Some(rarity))
-                        && (query.is_empty()
-                            || a.name.to_lowercase().contains(&query)
-                            || a.description.to_lowercase().contains(&query))
-                })
+            filtered
+                .into_iter()
+                .skip(offset)
+                .take(12)
                 .map(|a| DetailRow {
                     title: a.name.clone().into(),
                     icon_url: a.icon.clone().into(),
@@ -442,6 +451,7 @@ fn builds(ui: &ChampionWindow, p: &Presentation) {
                 route = Some(route.map_or(0, |n: usize| n + 1));
             }
             !augments
+                && !l.text.starts_with("路线 ")
                 && (route.is_none() || route == Some(chosen.min(routes.len().saturating_sub(1))))
         })
         .map(|l| BuildRow {
@@ -592,6 +602,7 @@ pub fn attach_shared(
                 current.borrow_mut().loaded = None;
                 art_reset.cancel();
                 ui.set_inspected_id(id);
+                ui.set_augment_offset(0);
                 ui.set_build_route(0);
                 ui.set_build_routes(Default::default());
                 ui.set_detail_champion(0);
@@ -605,7 +616,7 @@ pub fn attach_shared(
                 ui.set_build_lines(Default::default());
                 ui.set_detail_failed(false);
                 ui.set_detail_status("正在读取本地英雄数据…".into());
-                ui.set_scroll_y(-ui.get_detail_offset());
+                ui.set_scroll_y(-ui.get_detail_offset().min(ui.get_scroll_limit()));
                 service.request(id as u32, retry);
                 reload.restart();
             }
@@ -633,6 +644,18 @@ pub fn attach_shared(
         if let Some(ui) = route_weak.upgrade() {
             ui.set_build_route(route);
             builds(&ui, &route_state.borrow());
+        }
+    });
+    let page_state = state.clone();
+    let page_art = art.clone();
+    let page_ui = ui.as_weak();
+    ui.on_augment_page(move |direction| {
+        if let Some(ui) = page_ui.upgrade() {
+            ui.set_augment_offset((ui.get_augment_offset() + direction.signum() * 12).max(0));
+            ui.set_expanded_augment(-1);
+            apply(&ui, &page_state.borrow());
+            request_art(&ui, &page_state.borrow(), &page_art);
+            ui.set_scroll_y(-ui.get_detail_offset().min(ui.get_scroll_limit()));
         }
     });
     let art_request = art.clone();

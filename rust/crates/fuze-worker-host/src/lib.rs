@@ -119,6 +119,8 @@ pub mod update_channel;
 #[cfg(windows)]
 pub mod update_credential;
 #[cfg(windows)]
+pub mod update_handoff;
+#[cfg(windows)]
 pub mod update_io;
 #[cfg(windows)]
 pub mod update_progress;

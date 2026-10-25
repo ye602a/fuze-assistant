@@ -593,17 +593,21 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     s.set_running(false);
     a.click(ui, "收起公开诊断反馈", None);
     a.click(ui, "数据与更新", None);
-    for kind in ["clean", "install"] {
+    for kind in ["clean", "available"] {
         m.set_confirmation(kind.into());
         a.click(ui, "取消", Some("maintenance:cancel"));
         a.click(
             ui,
-            if kind == "install" {
-                "确认更新"
+            if kind == "available" {
+                "安装此更新并重启"
             } else {
                 "确认"
             },
-            Some("maintenance:confirm"),
+            Some(if kind == "available" {
+                "maintenance:install"
+            } else {
+                "maintenance:confirm"
+            }),
         );
         a.events.borrow_mut().clear();
         key(ui, slint::platform::Key::Escape.into());
@@ -880,7 +884,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
             Some(&format!("inspect:{}", hero.id)),
         );
     }
-    a.click(ui, "出装与技能", None);
+    a.click(ui, "出装", None);
     a.check("出装页签", ui.get_detail_tab() == 1, "tab changed");
     for i in 0..4 {
         a.click(
@@ -991,7 +995,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
             .map(point)
     };
     let compact_empty = position("棱彩")
-        .zip(position("查看分阶段胜率参考"))
+        .zip(position("没有符合条件的强化符文"))
         .is_some_and(|(filter, next)| next.1 - filter.1 < 160. && next.1 > filter.1);
     a.check(
         "空符文结果不留空白列表",
@@ -1007,6 +1011,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         image::ColorType::Rgba8,
     )?;
     ui.set_augments(augment_fixture);
+    a.click(ui, "资料", None);
     for i in 0..2 {
         a.click(
             ui,
@@ -1043,6 +1048,7 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         closed,
         "keyboard cancel and clear route",
     );
+    a.click(ui, "出装", None);
     let import_label = "导入路线 4 到游戏商店";
     a.click(ui, import_label, Some("player:prepare-items:0"));
     ui.set_action_busy(true);
