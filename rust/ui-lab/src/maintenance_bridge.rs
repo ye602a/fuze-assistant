@@ -1,4 +1,4 @@
-//! Explicit maintenance only. IO stays off the UI thread; tokens never enter Slint models.
+//! Startup check and explicit maintenance. Network work stays off the UI thread.
 use crate::{HostState, MaintenanceState, Workbench};
 use fuze_worker_host::{desktop::frontend::Session, storage, update_channel};
 use slint::{ComponentHandle, VecModel};
@@ -27,6 +27,8 @@ struct Reply {
     storage: Option<storage::Preview>,
     update: Option<String>,
     installable: bool,
+    revision: String,
+    notes: String,
     error: Option<&'static str>,
 }
 #[derive(Default)]
@@ -86,6 +88,8 @@ fn perform(
                 .to_owned();
             // Compare the running bundle, not a different installation's old pointer.
             let current = fuze_worker_host::managed_install::bundled_version(&dir)?;
+            reply.revision = release.manifest.revision.clone();
+            reply.notes = release.notes;
             reply.installable = release.manifest.sequence > current.sequence
                 && release.manifest.revision != current.revision;
             reply.update = Some(if reply.installable {
@@ -280,6 +284,14 @@ pub fn attach(
     let worker = Rc::new(Worker::new(offline, fixture_root)?);
     let timer = Rc::new(slint::Timer::default());
     let handoff = Rc::new(RefCell::new(None));
+    let active = Rc::new(RefCell::new(
+        None::<(
+            fuze_worker_host::update_handoff::Signal,
+            std::process::Child,
+        )>,
+    ));
+    let target = Rc::new(RefCell::new(String::new()));
+    let startup_check = Rc::new(std::cell::Cell::new(!offline));
     let state = ui.global::<MaintenanceState>();
     state.set_attached(true);
     state.set_offline(offline);
@@ -298,7 +310,8 @@ pub fn attach(
     let service = worker.clone();
     let engine = session.clone();
     let poll = timer.clone();
-    let pending = handoff.clone();
+    let active_start = active.clone();
+    let target_start = target.clone();
     state.on_action(move |name| {
         let Some(ui) = weak.upgrade() else { return };
         let state = ui.global::<MaintenanceState>();
@@ -310,7 +323,7 @@ pub fn attach(
         if state.get_busy() {
             return;
         }
-        if matches!(name.as_str(), "clean" | "install" | "forget") {
+        if matches!(name.as_str(), "clean" | "forget") {
             if engine.snapshot().mode != 0 {
                 state.set_notice(message("frontend-pause-required").into());
                 return;
@@ -334,7 +347,7 @@ pub fn attach(
         if operation.is_empty() {
             return;
         }
-        let read_only = operation == "check";
+        let read_only = operation == "check" || operation == "install";
         if !read_only {
             if let Err(e) = engine.begin_maintenance() {
                 state.set_notice(message(e).into());
@@ -347,16 +360,28 @@ pub fn attach(
                 state.set_notice(message("maintenance-offline").into());
                 return;
             }
-            match Handoff::prepare(false) {
-                Ok(next) => {
-                    *pending.borrow_mut() = Some(next);
-                    engine.stop();
-                    let _ = slint::quit_event_loop();
+            if !state.get_installable() || active_start.borrow().is_some() {
+                return;
+            }
+            let result = (|| {
+                let helper = Handoff::prepare(false)?;
+                let (signal, name) = fuze_worker_host::update_handoff::Signal::create()?;
+                let child = fuze_worker_host::in_place_update::launch_background(
+                    helper.helper.parent().ok_or("update-location")?,
+                    &name,
+                    &target_start.borrow(),
+                )?;
+                Ok::<_, &'static str>((signal, child))
+            })();
+            match result {
+                Ok(update) => {
+                    *active_start.borrow_mut() = Some(update);
+                    state.set_busy(true);
+                    state.set_confirmation("".into());
+                    state.set_notice("正在后台下载，完成后自动更新并重启；识别继续运行。".into());
+                    poll.restart();
                 }
-                Err(e) => {
-                    engine.end_maintenance();
-                    state.set_notice(message(e).into());
-                }
+                Err(e) => state.set_notice(message(e).into()),
             }
             return;
         }
@@ -408,6 +433,30 @@ pub fn attach(
         slint::TimerMode::Repeated,
         Duration::from_millis(100),
         move || {
+            {
+                let mut slot = active.borrow_mut();
+                if let Some((signal, child)) = slot.as_mut() {
+                    if signal.ready() {
+                        // Normal shutdown already joins capture/OCR and releases the instance lock.
+                        engine.stop();
+                        let _ = slint::quit_event_loop();
+                        return;
+                    }
+                    if child.try_wait().ok().flatten().is_some() {
+                        *slot = None;
+                        if let Some(ui) = weak.upgrade() {
+                            ui.global::<MaintenanceState>().set_busy(false);
+                            ui.global::<MaintenanceState>().set_notice(
+                                "更新已结束，当前 FUZE 继续运行；可重新检查更新。".into(),
+                            );
+                        }
+                        if let Some(timer) = tick.upgrade() {
+                            timer.stop();
+                        }
+                    }
+                    return;
+                }
+            }
             let reply = service.work.0.lock().ok().and_then(|mut s| s.reply.take());
             let Some(reply) = reply else { return };
             if !reply.read_only {
@@ -456,12 +505,22 @@ pub fn attach(
                 state.set_can_clean(preview.removable > 0);
             }
             if let Some(update) = reply.update {
+                *target.borrow_mut() = reply.revision;
+                state.set_update_notes(reply.notes.into());
+                if startup_check.replace(false) && reply.installable {
+                    state.set_confirmation("available".into());
+                }
                 state.set_update_status(update.into());
                 state.set_installable(reply.installable);
             }
         },
     );
-    timer.stop();
+    if offline {
+        timer.stop();
+    } else {
+        state.set_busy(true);
+        worker.request(Action::Check(false));
+    }
     Ok(Binding {
         _worker: worker,
         _timer: timer,

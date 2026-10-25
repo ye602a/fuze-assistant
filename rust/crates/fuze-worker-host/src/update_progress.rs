@@ -14,12 +14,33 @@ pub static STAGE: AtomicU8 = AtomicU8::new(0);
 pub static OWNER: AtomicIsize = AtomicIsize::new(0);
 // Only the separate updater uses these counters. No timer or IO in the game loop.
 static BYTES: AtomicU64 = AtomicU64::new(0);
+static PHASE_START: AtomicU64 = AtomicU64::new(0);
+pub static ERROR_SHOWN: AtomicBool = AtomicBool::new(false);
+static FILES: Mutex<(usize, usize, String, Vec<String>)> =
+    Mutex::new((0, 0, String::new(), Vec::new()));
+pub fn begin_files(total: usize) {
+    if let Ok(mut f) = FILES.lock() {
+        *f = (0, total, String::new(), Vec::new());
+    }
+}
+pub fn file_started(path: &std::path::Path) {
+    if let Ok(mut f) = FILES.lock() {
+        f.2 = path.to_string_lossy().into_owned();
+    }
+}
+pub fn file_finished(path: &std::path::Path) {
+    if let Ok(mut f) = FILES.lock() {
+        f.0 += 1;
+        f.3.push(format!("已完成 {}", path.display()));
+    }
+}
 static SIZE: AtomicU64 = AtomicU64::new(0);
 static REUSE: AtomicU64 = AtomicU64::new(0);
 static MODE: AtomicU8 = AtomicU8::new(0);
 static FULL_MODE: AtomicU8 = AtomicU8::new(2);
 pub fn reset_transfer() {
     BYTES.store(0, Ordering::Relaxed);
+    PHASE_START.store(0, Ordering::Relaxed);
     SIZE.store(0, Ordering::Relaxed);
     REUSE.store(0, Ordering::Relaxed);
     FULL_MODE.store(2, Ordering::Relaxed);
@@ -34,6 +55,7 @@ pub fn transfer_event(event: crate::update_channel::TransferEvent) {
             MODE.store(1, Ordering::Release);
         }
         Full { size, fallback } => {
+            PHASE_START.store(BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
             SIZE.store(size, Ordering::Relaxed);
             REUSE.store(0, Ordering::Relaxed);
             FULL_MODE.store(if fallback { 3 } else { 2 }, Ordering::Relaxed);
@@ -83,7 +105,9 @@ fn snapshot() -> View {
     View {
         stage: STAGE.load(Ordering::Acquire),
         mode,
-        received: BYTES.load(Ordering::Relaxed),
+        received: BYTES
+            .load(Ordering::Relaxed)
+            .saturating_sub(PHASE_START.load(Ordering::Relaxed)),
         size: SIZE.load(Ordering::Relaxed),
         reuse: REUSE.load(Ordering::Relaxed),
     }
@@ -94,10 +118,12 @@ fn mib(bytes: u64) -> String {
 fn status_text(view: View) -> String {
     if view.stage != 2 {
         return crate::i18n::text(match view.stage {
-            1 => "正在检查固定 Rust 频道",
-            3 => "正在解包并验证 OCR · 不连接游戏",
+            1 => "正在检查更新",
+            3 => "正在校验并准备安装文件 · FUZE 继续运行",
             4 => "正在替换当前程序文件 · 请稍候",
-            _ => "等待确认 · 下载期间可以取消",
+            5 => "正在停止识别并关闭 FUZE…",
+            6 => "文件替换完成 · 正在清理并启动新版…",
+            _ => "正在准备更新 · 下载期间可以取消",
         })
         .into();
     }
@@ -113,7 +139,7 @@ fn status_text(view: View) -> String {
         "{}\n{}",
         title,
         translated(
-            "完整包 {} MiB · 预计复用 {} MiB\n已接收包数据 {} MiB（含失败尝试，不含协议开销）",
+            "完整包 {} MiB · 已复用 {} MiB\n本次已下载 {} MiB",
             &[mib(view.size), mib(view.reuse), mib(view.received)]
         )
     )
@@ -143,9 +169,9 @@ fn wide(s: &str) -> Vec<u16> {
 }
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
-        WM_CLOSE | WM_COMMAND => {
+        WM_CLOSE | WM_COMMAND if msg == WM_CLOSE || w & 0xffff == 2 => {
             // Once copying starts, finish this short operation instead of leaving mixed files.
-            if STAGE.load(Ordering::Acquire) == 4 {
+            if STAGE.load(Ordering::Acquire) >= 4 && !ERROR_SHOWN.load(Ordering::Acquire) {
                 return 0;
             }
             CANCEL.store(true, Ordering::Release);
@@ -180,12 +206,12 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
         let hwnd = CreateWindowExW(
             0,
             class.as_ptr(),
-            wide("符择 · Rust 更新").as_ptr(),
+            wide("FUZE · 软件更新").as_ptr(),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             720,
-            270,
+            480,
             null_mut(),
             null_mut(),
             instance,
@@ -198,7 +224,7 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
         CreateWindowExW(
             0,
             wide("STATIC").as_ptr(),
-            wide("等待确认 · 随时可以取消，旧版本保留").as_ptr(),
+            wide("正在准备更新 · 下载完成后自动更新并重启").as_ptr(),
             WS_CHILD | WS_VISIBLE,
             20,
             20,
@@ -215,11 +241,50 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             wide("取消").as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             560,
-            170,
+            390,
             110,
             30,
             hwnd,
             2usize as HMENU,
+            instance,
+            null(),
+        );
+        use windows_sys::Win32::UI::Controls::*;
+        InitCommonControlsEx(&INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_PROGRESS_CLASS,
+        });
+        let bar = CreateWindowExW(
+            0,
+            wide("msctls_progress32").as_ptr(),
+            null(),
+            WS_CHILD | WS_VISIBLE,
+            20,
+            145,
+            660,
+            18,
+            hwnd,
+            3usize as HMENU,
+            instance,
+            null(),
+        );
+        SendMessageW(bar, PBM_SETRANGE32, 0, 1000);
+        CreateWindowExW(
+            0,
+            wide("EDIT").as_ptr(),
+            null(),
+            WS_CHILD
+                | WS_VISIBLE
+                | WS_VSCROLL
+                | ES_MULTILINE as u32
+                | ES_READONLY as u32
+                | ES_AUTOVSCROLL as u32,
+            20,
+            180,
+            660,
+            200,
+            hwnd,
+            4usize as HMENU,
             instance,
             null(),
         );
@@ -233,6 +298,11 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
             }
         });
         let mut previous = None;
+        let mut failed = None;
+        let mut speed_at = std::time::Instant::now();
+        let mut speed_bytes = 0;
+        let mut speed = 0.;
+        let mut last_detail = String::new();
         loop {
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
@@ -240,12 +310,94 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                 DispatchMessageW(&msg);
             }
             if let Some(value) = result.lock().map_err(|_| "update-worker-failed")?.take() {
-                OWNER.store(0, Ordering::Release);
-                DestroyWindow(hwnd);
-                UnregisterClassW(class.as_ptr(), instance);
-                return value;
+                if let Err(error) = value {
+                    failed = Some(error);
+                    if !cancelled() {
+                        ERROR_SHOWN.store(true, Ordering::Release);
+                        SetWindowTextW(
+                            GetDlgItem(hwnd, 1),
+                            wide(&format!(
+                                "更新未完成：{}\n{}",
+                                error,
+                                match error {
+                                    "update-file-in-use" | "install-close-preview-first" => "文件仍被占用，尚未替换。请关闭占用该安装目录的程序后重试。",
+                                    "update-parent-timeout" => "等待 FUZE 退出超时，尚未替换文件。请稍后重试。",
+                                    "update-release-changed" => "线上版本已变化，请在 FUZE 中重新检查更新。",
+                                    _ if STAGE.load(Ordering::Acquire) < 4 => "程序文件未替换，可以关闭窗口后重试。",
+                                    _ => "请重新下载安装包覆盖修复，不要启动未完成的程序。",
+                                }
+                            ))
+                            .as_ptr(),
+                        );
+                        SetWindowTextW(GetDlgItem(hwnd, 2), wide("关闭").as_ptr());
+                        windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+                            GetDlgItem(hwnd, 2),
+                            1,
+                        );
+                    }
+                } else {
+                    OWNER.store(0, Ordering::Release);
+                    DestroyWindow(hwnd);
+                    UnregisterClassW(class.as_ptr(), instance);
+                    return value;
+                }
+            }
+            if let Some(error) = failed {
+                if cancelled() {
+                    OWNER.store(0, Ordering::Release);
+                    DestroyWindow(hwnd);
+                    UnregisterClassW(class.as_ptr(), instance);
+                    return Err(error);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
             }
             let view = snapshot();
+            if speed_at.elapsed().as_millis() >= 500 {
+                let bytes = received_bytes();
+                speed = bytes.saturating_sub(speed_bytes) as f64 / speed_at.elapsed().as_secs_f64();
+                speed_bytes = bytes;
+                speed_at = std::time::Instant::now();
+            }
+            let (done, total, current, recent) =
+                FILES.lock().map(|f| f.clone()).unwrap_or_default();
+            let fraction = if view.stage == 4 || view.stage == 6 {
+                if total == 0 {
+                    0.
+                } else {
+                    done as f64 / total as f64
+                }
+            } else if view.stage == 2 && view.size > 0 {
+                (view.received.saturating_add(view.reuse) as f64 / view.size as f64).min(1.)
+            } else {
+                0.
+            };
+            SendMessageW(bar, PBM_SETPOS, (fraction * 1000.) as usize, 0);
+            let detail = if view.stage == 4 || view.stage == 6 {
+                format!(
+                    "已替换 {done} / {total} 个文件\n{current}\n{}",
+                    recent.join("\n")
+                )
+            } else if view.stage == 2 {
+                format!(
+                    "{:.1}% · {:.1} MB/s\n下载完成后将自动停止识别、覆盖并重启 FUZE。",
+                    fraction * 100.,
+                    speed / 1048576.
+                )
+            } else {
+                "下载 → 校验 → 替换文件 → 启动新版".into()
+            };
+            if detail != last_detail {
+                SetWindowTextW(
+                    GetDlgItem(hwnd, 4),
+                    wide(&detail.replace("\n", "\r\n")).as_ptr(),
+                );
+                last_detail = detail;
+            }
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+                GetDlgItem(hwnd, 2),
+                if view.stage >= 4 { 0 } else { 1 },
+            );
             if previous != Some(view) && !cancelled() {
                 SetWindowTextW(GetDlgItem(hwnd, 1), wide(&status_text(view)).as_ptr());
                 previous = Some(view);
@@ -362,6 +514,11 @@ mod tests {
         });
         assert_eq!(received_bytes(), 4);
         assert_eq!(snapshot().reuse, 0);
+        assert_eq!(
+            snapshot().received,
+            0,
+            "failed delta traffic must not inflate full-download progress"
+        );
         resume_prefix(1048576);
         assert_eq!(snapshot().mode, 5);
         assert_eq!(snapshot().reuse, 1048576);
@@ -370,6 +527,7 @@ mod tests {
         assert_eq!(snapshot().mode, 3);
         Counted(&mut output).write_all(b"AAAACCCC").unwrap();
         assert_eq!(received_bytes(), 12);
+        assert_eq!(snapshot().received, 8);
         struct Partial;
         impl Write for Partial {
             fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {

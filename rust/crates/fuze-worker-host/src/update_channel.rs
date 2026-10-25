@@ -250,6 +250,7 @@ impl Session {
             return Err("update-asset-size");
         }
         Ok(Release {
+            notes: release_notes(raw["body"].as_str().unwrap_or_default()),
             version: release_version(assets, &manifest.revision),
             manifest,
             archive,
@@ -358,6 +359,7 @@ impl Manifest {
     }
 }
 pub struct Release {
+    pub notes: String,
     pub version: Option<String>,
     pub manifest: Manifest,
     pub archive: String,
@@ -957,5 +959,40 @@ mod tests {
             std::fs::remove_file(p).unwrap();
         }
         let _ = std::fs::remove_dir(dir);
+    }
+}
+
+/// Plain, bounded release summary; never render remote HTML or execute links.
+pub fn release_notes(body: &str) -> String {
+    let lines: Vec<_> = body
+        .lines()
+        .map(str::trim)
+        .filter(|s| s.starts_with("- ") || s.starts_with("* "))
+        .filter(|s| !s.contains("http") && !s.contains("sha256") && !s.contains("SHA256"))
+        .take(5)
+        .map(|s| s.chars().take(120).collect::<String>())
+        .collect();
+    if lines.is_empty() {
+        "本次发布暂未提供简短更新说明。".into()
+    } else {
+        lines.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    #[test]
+    fn summary_is_bounded_and_does_not_render_remote_html() {
+        assert_eq!(
+            super::release_notes("# Release\n- 修复识别\n- https://example.org/file\n- 改进更新"),
+            "- 修复识别\n- 改进更新"
+        );
+        assert!(
+            super::release_notes(&"- 长文本".repeat(1000))
+                .chars()
+                .count()
+                <= 120
+        );
+        assert!(!super::release_notes("").is_empty());
     }
 }
