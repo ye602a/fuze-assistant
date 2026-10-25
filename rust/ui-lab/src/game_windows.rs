@@ -165,6 +165,7 @@ impl Panel {
         if self.initial {
             // Host entry sets with_active(false) for initial creation. Later shows use Win32
             // SW_SHOWNOACTIVATE directly: Winit repeat set_visible(true) can steal focus.
+            self.ui.set_scroll_y(0.);
             self.ui.show().map_err(|_| "champion-window")?;
             if let Some(h) = hwnd(self.ui.window()) {
                 unsafe {
@@ -192,6 +193,7 @@ impl Panel {
                     self.topmost = Some(topmost);
                 }
                 if IsWindowVisible(h) == 0 {
+                    self.ui.set_scroll_y(0.);
                     ShowWindow(h, SW_SHOWNOACTIVATE);
                 }
             }
