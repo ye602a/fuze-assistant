@@ -30,11 +30,14 @@ struct Reply {
     revision: String,
     notes: String,
     error: Option<&'static str>,
+    description: Option<update_channel::Release>,
 }
 #[derive(Default)]
 struct Work {
     next: Option<Action>,
     reply: Option<Reply>,
+    details: Option<update_channel::Release>,
+    details_pending: bool,
 }
 fn perform(
     action: Action,
@@ -89,26 +92,23 @@ fn perform(
             // Compare the running bundle, not a different installation's old pointer.
             let current = fuze_worker_host::managed_install::bundled_version(&dir)?;
             reply.revision = release.manifest.revision.clone();
-            reply.notes = release.notes;
+            reply.notes = release.notes.clone();
             reply.installable = release.manifest.sequence > current.sequence
                 && release.manifest.revision != current.revision;
             reply.update = Some(if reply.installable {
                 format!(
-                    "发现版本 {} · 完整包约 {} MB\n更新程序将优先差分下载，失败时回退全量。",
-                    release.version.as_deref().unwrap_or("版本号未提供"),
+                    "发现新版本 · 下载大小约 {} MB",
                     release.manifest.size.div_ceil(1024 * 1024)
                 )
             } else if release.manifest.sequence < current.sequence {
-                format!(
-                    "本机版本较新；线上测试频道仍为 {}，不会降级。",
-                    release.version.as_deref().unwrap_or("版本号未提供")
-                )
+                "当前版本比已发布版本更新。".into()
             } else {
-                format!(
-                    "已是当前测试频道版本 {}。",
-                    release.version.as_deref().unwrap_or("版本号未提供")
-                )
+                "已是最新版本。".into()
             });
+            if reply.installable {
+                reply.notes = "正在获取更新说明…".into();
+                reply.description = Some(release);
+            }
             reply.notice = reply.update.clone().unwrap_or_default();
         }
         Action::Credentials => {
@@ -156,6 +156,7 @@ impl Worker {
                     let action = s.next.take().unwrap();
                     drop(s);
                     let result = perform(action, offline, &fixture_root, &mut preview, &cancel);
+                    let mut description = None;
                     if let Ok(mut s) = task.0.lock() {
                         let mut reply = result.unwrap_or_else(|e| Reply {
                             error: Some(e),
@@ -167,7 +168,17 @@ impl Worker {
                             ..Default::default()
                         });
                         reply.read_only = matches!(action, Action::Check(_));
+                        description = reply.description.take();
+                        s.details_pending = description.is_some();
                         s.reply = Some(reply);
+                    }
+                    if let Some(mut release) = description {
+                        update_channel::Session::public()
+                            .describe(&mut release, &|| cancel.load(Ordering::Acquire));
+                        if let Ok(mut s) = task.0.lock() {
+                            s.details = Some(release);
+                            s.details_pending = false;
+                        }
                     }
                 }
             })
@@ -181,6 +192,7 @@ impl Worker {
     fn request(&self, action: Action) {
         if let Ok(mut s) = self.work.0.lock() {
             s.reply = None;
+            s.details = None;
             s.next = Some(action);
             self.work.1.notify_one();
         }
@@ -254,25 +266,32 @@ fn message(error: &str) -> &'static str {
     match error {
         "frontend-pause-required" => "请先暂停识别，再执行维护操作。",
         "frontend-busy" => "当前操作尚未结束，请稍候。",
-        "maintenance-offline" => "离线验证不会访问网络、令牌或个人目录。",
+        "maintenance-offline" => "离线模式下无法执行此操作。",
         "credential-unavailable" => "尚未保存私有频道令牌，请先设置授权。",
         "credential-cancelled" => "已取消授权输入，原授权保持不变。",
         "credential-format" => "授权格式无效，未保存。请使用 GitHub 访问令牌。",
         "credential-save" | "credential-delete" => "Windows 安全存储操作未完成，请稍后重试。",
-        "update-access-or-release" => "无法读取公开测试频道，请稍后重试；下载更新不需要上传令牌。",
-        "update-cancelled-or-timeout" | "update-http-status" => {
-            "更新检查未完成，请检查网络后重试；当前版本仍可使用。"
-        }
-        "update-release-assets" | "update-release-channel" | "update-manifest-policy" => {
-            "频道尚未提供适用的完整 Rust 更新包，当前版本继续保留。"
-        }
+        "update-access-or-release" => "无法访问更新文件，请稍后重试。",
+        "update-cancelled-or-timeout" => "更新请求超时，请稍后重试。",
+        "update-cancelled" => "已取消更新。",
+        "update-network" => "无法连接更新服务器，请检查网络后重试。",
+        "update-unauthorized" | "update-forbidden" => "更新服务器拒绝访问，请稍后重试。",
+        "update-not-found" => "更新文件暂时不可用，请稍后重试。",
+        "update-proxy-auth" => "网络代理要求身份验证，请检查代理设置。",
+        "update-rate-limited" => "检查更新暂时受限，请稍后重试。",
+        "update-http-status" => "更新服务器响应异常，请稍后重试。",
+        "update-release-assets"
+        | "update-release-channel"
+        | "update-manifest-policy"
+        | "update-manifest-format"
+        | "update-digest-format" => "更新文件不完整或格式不正确，请稍后重试。",
         "storage-preview-required" | "storage-preview-expired" | "storage-changed" => {
             "清理预览已失效，请重新扫描后确认。"
         }
         "storage-reparse" => "目录包含链接，已停止清理；请重新扫描确认结果。",
-        "update-helper-missing" => "缺少配套更新程序；当前程序保持运行，请使用完整阶段测试包。",
-        "install-build" => "当前为未打包开发构建，不能判定可安装版本。",
-        _ => "操作未完成。请稍后重试；更新未安装，清理结果请重新扫描确认。",
+        "update-helper-missing" => "缺少更新程序，请重新下载完整安装包。",
+        "install-build" => "无法读取当前版本信息，请重新安装 FUZE。",
+        _ => "操作未完成，请稍后重试。",
     }
 }
 pub fn attach(
@@ -401,13 +420,13 @@ pub fn attach(
             ui.global::<HostState>().set_busy(true);
         }
         if read_only {
-            state.set_update_status("正在检查公开测试频道，识别继续运行…".into());
+            state.set_update_status("正在检查更新…".into());
         }
         state.set_notice(
             match action {
                 Action::Scan => "正在扫描本地占用，不会删除文件…",
                 Action::Clean => "正在清理已确认的可回收文件…",
-                Action::Check(_) => "正在检查更新频道，不会下载或安装…",
+                Action::Check(_) => "正在检查更新…",
                 Action::Credentials => "请在 Windows 授权窗口填写令牌；取消会保留原授权。",
                 Action::Forget => "正在从 Windows 安全存储移除授权…",
             }
@@ -458,12 +477,55 @@ pub fn attach(
                 }
             }
             let reply = service.work.0.lock().ok().and_then(|mut s| s.reply.take());
-            let Some(reply) = reply else { return };
+            let Some(reply) = reply else {
+                let (details, pending) = service
+                    .work
+                    .0
+                    .lock()
+                    .map(|mut s| (s.details.take(), s.details_pending))
+                    .unwrap_or_default();
+                let completed = details.is_some();
+                if let Some(details) = details {
+                    if *target.borrow() == details.manifest.revision {
+                        if let Some(ui) = weak.upgrade() {
+                            let state = ui.global::<MaintenanceState>();
+                            state.set_update_notes(if details.notes.is_empty() {
+                                "更新说明暂时不可用，可直接更新。".into()
+                            } else {
+                                details.notes.into()
+                            });
+                            if let Some(version) = details.version {
+                                let status = format!(
+                                    "发现版本 {version} · 下载大小约 {} MB",
+                                    details.manifest.size.div_ceil(1024 * 1024)
+                                );
+                                if state.get_notice() == state.get_update_status() {
+                                    state.set_notice(status.clone().into());
+                                }
+                                state.set_update_status(status.into());
+                            }
+                        }
+                    }
+                }
+                if completed
+                    && !pending
+                    && weak
+                        .upgrade()
+                        .is_some_and(|ui| !ui.global::<MaintenanceState>().get_busy())
+                {
+                    if let Some(timer) = tick.upgrade() {
+                        timer.stop();
+                    }
+                }
+                return;
+            };
             if !reply.read_only {
                 engine.end_maintenance();
             }
-            if let Some(timer) = tick.upgrade() {
-                timer.stop();
+            if !reply.installable {
+                if let Some(timer) = tick.upgrade() {
+                    timer.stop();
+                }
             }
             let Some(ui) = weak.upgrade() else { return };
             let state = ui.global::<MaintenanceState>();

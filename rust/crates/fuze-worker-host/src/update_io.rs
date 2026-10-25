@@ -47,6 +47,7 @@ fn access_type(host: &str) -> u32 {
     // Other data requests retain their existing direct policy; LCU uses a separate client.
     match host {
         "api.github.com"
+        | "github.com"
         | "release-assets.githubusercontent.com"
         | "objects.githubusercontent.com" => WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         _ => WINHTTP_ACCESS_TYPE_NO_PROXY,
@@ -70,6 +71,27 @@ fn network_error(stage: &str) -> &'static str {
     } else {
         "update-network"
     }
+}
+fn status_error(code: u32, quota_exhausted: bool) -> Option<&'static str> {
+    match code {
+        403 if quota_exhausted => Some("update-rate-limited"),
+        401 => Some("update-unauthorized"),
+        403 => Some("update-forbidden"),
+        404 => Some("update-not-found"),
+        407 => Some("update-proxy-auth"),
+        429 => Some("update-rate-limited"),
+        _ => None,
+    }
+}
+#[cfg(test)]
+#[test]
+fn status_errors_do_not_invent_rate_limit_or_network_causes() {
+    assert_eq!(status_error(403, true), Some("update-rate-limited"));
+    assert_eq!(status_error(403, false), Some("update-forbidden"));
+    assert_eq!(status_error(404, false), Some("update-not-found"));
+    assert_eq!(status_error(407, false), Some("update-proxy-auth"));
+    assert_eq!(status_error(429, false), Some("update-rate-limited"));
+    assert_eq!(status_error(200, false), None);
 }
 pub fn digest(bytes: &[u8], sha512: bool) -> Result<Vec<u8>> {
     let mut result = vec![0; if sha512 { 64 } else { 32 }];
@@ -289,8 +311,21 @@ pub(crate) fn transfer(
                     .to_owned(),
             ));
         }
-        if matches!(code, 401 | 403 | 404 | 407) {
-            return Err("update-access-or-release");
+        let mut remaining = [0u16; 16];
+        let mut remaining_len = (remaining.len() * 2) as u32;
+        let exhausted = code == 403
+            && WinHttpQueryHeaders(
+                request.0,
+                WINHTTP_QUERY_CUSTOM,
+                wide("X-RateLimit-Remaining").as_ptr(),
+                remaining.as_mut_ptr().cast(),
+                &mut remaining_len,
+                null_mut(),
+            ) != 0
+            && remaining_len == 2
+            && remaining[0] == b'0' as u16;
+        if let Some(error) = status_error(code, exhausted) {
+            return Err(error);
         }
         if code != if range.is_some() { 206 } else { 200 } {
             return Err("update-http-status");

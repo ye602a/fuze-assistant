@@ -12,6 +12,8 @@ use std::{
 };
 pub const RELEASE: &str =
     "https://api.github.com/repos/ye602a/fuze-assistant/releases/tags/rust-preview";
+pub const PUBLIC_DOWNLOAD: &str =
+    "https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/";
 pub struct Session {
     secret: Option<Secret>,
 }
@@ -212,6 +214,17 @@ impl Session {
         transfer_chunks(offset + first, size, out, &fetch, &cancelled)
     }
     pub fn check(&self, cancel: &dyn Fn() -> bool) -> Result<Release> {
+        if self.secret.is_none() {
+            return check_public(&|url, limit| self.bytes(url, limit, cancel));
+        }
+        self.check_private(cancel)
+    }
+    /// Optional display information never determines whether an update exists or can install.
+    pub fn describe(&self, release: &mut Release, cancel: &dyn Fn() -> bool) {
+        let details = self.bytes(RELEASE, 2 * 1024 * 1024, cancel);
+        apply_description(release, details);
+    }
+    fn check_private(&self, cancel: &dyn Fn() -> bool) -> Result<Release> {
         let raw: serde_json::Value =
             serde_json::from_slice(&self.bytes(RELEASE, 2 * 1024 * 1024, cancel)?)
                 .map_err(|_| "update-release-format")?;
@@ -257,6 +270,48 @@ impl Session {
             map,
         })
     }
+}
+fn check_public(fetch: &dyn Fn(&str, usize) -> Result<Vec<u8>>) -> Result<Release> {
+    public_release(&fetch(
+        &format!("{PUBLIC_DOWNLOAD}rust-update.json"),
+        16384,
+    )?)
+}
+fn public_release(bytes: &[u8]) -> Result<Release> {
+    let manifest: Manifest = serde_json::from_slice(bytes).map_err(|_| "update-manifest-format")?;
+    manifest.validate()?;
+    Ok(Release {
+        archive: format!("{PUBLIC_DOWNLOAD}{}", manifest.archive),
+        map: format!("{PUBLIC_DOWNLOAD}{}.blockmap", manifest.archive),
+        manifest,
+        notes: String::new(),
+        version: None,
+    })
+}
+fn apply_description(release: &mut Release, details: Result<Vec<u8>>) {
+    let Ok(bytes) = details else { return };
+    let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    if raw["tag_name"] != "rust-preview" || raw["draft"] != false || raw["prerelease"] != true {
+        return;
+    }
+    let Some(assets) = raw["assets"].as_array() else {
+        return;
+    };
+    // A moving channel must not attach another build's release notes to this manifest.
+    let Some(version) = release_version(assets, &release.manifest.revision) else {
+        return;
+    };
+    if !raw["body"]
+        .as_str()
+        .unwrap_or_default()
+        .contains(&release.manifest.revision)
+    {
+        return;
+    }
+    release.version = Some(version);
+    release.notes = release_notes(raw["body"].as_str().unwrap_or_default());
 }
 /// Ordered writes, at most four 1 MiB buffers and four scoped IO workers; never a game-loop task.
 fn transfer_chunks(
@@ -556,6 +611,68 @@ pub fn bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
 }
 #[cfg(test)]
 mod tests {
+    fn public_manifest_fixture() -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schema":1,"channel":"rust-preview","revision":"0123456789ab","sequence":2,
+            "archive":"Fuze-Rust-0123456789ab.fuz","size":8,
+            "sha512":"a".repeat(128),"blockmap_sha256":"b".repeat(64)
+        }))
+        .unwrap()
+    }
+    #[test]
+    fn public_check_uses_only_public_manifest_and_validated_asset_names() {
+        let calls = Cell::new(0);
+        let release = check_public(&|url, limit| {
+            calls.set(calls.get() + 1);
+            assert_eq!(url, format!("{PUBLIC_DOWNLOAD}rust-update.json"));
+            assert_eq!(limit, 16384);
+            Ok(public_manifest_fixture())
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        for url in [&release.archive, &release.map] {
+            assert!(matches!(
+                private_update::target(url),
+                Ok(Target::Cdn {
+                    host: "github.com",
+                    ..
+                })
+            ));
+        }
+        let mut bad: serde_json::Value =
+            serde_json::from_slice(&public_manifest_fixture()).unwrap();
+        bad["archive"] = "../another.fuz".into();
+        assert!(public_release(&serde_json::to_vec(&bad).unwrap()).is_err());
+        assert!(private_update::target(
+            "https://github.com/another/repo/releases/download/rust-preview/rust-update.json"
+        )
+        .is_err());
+    }
+    #[test]
+    fn unavailable_or_stale_notes_do_not_invalidate_public_update() {
+        let mut release = public_release(&public_manifest_fixture()).unwrap();
+        for details in [
+            Err("update-forbidden"),
+            Err("update-cancelled-or-timeout"),
+            Ok(b"bad json".to_vec()),
+        ] {
+            apply_description(&mut release, details);
+            assert_eq!(release.manifest.revision, "0123456789ab");
+            assert!(release.notes.is_empty());
+            assert!(release.version.is_none());
+        }
+        let raw = serde_json::json!({"tag_name":"rust-preview","draft":false,"prerelease":true,
+            "assets":[{"name":"FUZE-Setup-0.7.3-preview-0123456789ab-windows-x64.exe"}],
+            "body":"### 本次更新\n- 修复更新检测\n\n构建 0123456789ab"});
+        let mut stale = raw.clone();
+        stale["body"] = "### 本次更新\n- 不属于这个构建\n构建 aaaaaaaaaaaa".into();
+        apply_description(&mut release, Ok(serde_json::to_vec(&stale).unwrap()));
+        assert!(release.notes.is_empty());
+        assert!(release.version.is_none());
+        apply_description(&mut release, Ok(serde_json::to_vec(&raw).unwrap()));
+        assert_eq!(release.version.as_deref(), Some("0.7.3"));
+        assert!(release.notes.contains("修复更新检测"));
+    }
     #[test]
     fn version_label_uses_only_matching_setup_asset() {
         let assets = serde_json::json!([
