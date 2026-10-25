@@ -79,11 +79,7 @@ jobs:
           node scripts/check-rust-update.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify 0.7.4 updater can read the new online package
-        shell: pwsh
-        run: |
-          $manifest = Get-Content rust/artifacts/preview/rust-update.json -Raw | ConvertFrom-Json
-          & (Join-Path $env:RUNNER_TEMP 'fuze-previous-updater/fuze-update.exe') --verify-package rust/artifacts/preview/rust-update.json (Join-Path 'rust/artifacts/preview' $manifest.archive) (Join-Path $env:RUNNER_TEMP 'fuze-previous-updater/verified-new-payload')
-          if ($LASTEXITCODE -ne 0) { throw 'previous-updater-compatibility-failed' }
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/verify-previous.mjs')
       - name: Wrap the same payload in unsigned Setup
         shell: pwsh
         run: |
