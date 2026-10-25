@@ -161,6 +161,7 @@ mod tests {
     }
     #[test]
     fn ready_handoff_waits_for_both_owned_processes() {
+        let _state = crate::update_progress::TEST_STATE.lock().unwrap();
         use std::{
             io::Write,
             os::windows::process::CommandExt,

@@ -390,6 +390,12 @@ pub fn attach(
                     &name,
                     &target_start.borrow(),
                 )?;
+                // The user explicitly requested this updater window.
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        child.id(),
+                    );
+                }
                 Ok::<_, &'static str>((signal, child))
             })();
             match result {

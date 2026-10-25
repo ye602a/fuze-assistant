@@ -81,13 +81,13 @@ fn launch_helper(
 }
 
 /// The newly installed EXE waits for the temporary GUI to exit, removes that exact helper,
-/// then starts the new client once. This avoids deleting a running Windows image.
+/// after the new client is healthy. This avoids deleting a running Windows image.
 pub fn finish_update(directory: &Path) -> Result<()> {
     let helper = std::env::current_exe().map_err(|_| "update-location")?;
     let temporary = helper.parent().ok_or("update-location")?;
     checked_helper_directory(temporary)?;
     Command::new(directory.join("fuze-update.exe"))
-        .arg("--finish-update")
+        .arg("--cleanup-update")
         .arg(temporary)
         .arg(std::process::id().to_string())
         .env_remove("FUZE_UPDATE_READY")

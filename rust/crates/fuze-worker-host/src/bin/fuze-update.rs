@@ -36,7 +36,7 @@ fn run() -> Result<(), &'static str> {
         println!("{{\"package_verified\":true,\"native_extracted\":true,\"worker_reaped\":true,\"game_access\":false}}");
         return Ok(());
     }
-    if args.len() == 3 && args[0] == "--finish-update" {
+    if args.len() == 3 && matches!(args[0].as_str(), "--finish-update" | "--cleanup-update") {
         let pid = args[2].parse().map_err(|_| "update-parent")?;
         match fuze_worker_host::in_place_update::cleanup_after_update(
             std::path::Path::new(&args[1]),
@@ -45,6 +45,9 @@ fn run() -> Result<(), &'static str> {
             // A leftover temporary file must not prevent the updated client starting.
             Ok(()) | Err("update-helper-cleanup") => {}
             Err(error) => return Err(error),
+        }
+        if args[0] == "--cleanup-update" {
+            return Ok(());
         }
         let executable = std::env::current_exe().map_err(|_| "update-location")?;
         return install::launch_current(executable.parent().ok_or("update-location")?);
@@ -346,6 +349,7 @@ fn run() -> Result<(), &'static str> {
             f.write_all(&map).map_err(|_| "install-cache")?;
         }
         if let Some(parent) = parent {
+            fuze_worker_host::update_progress::present_for_handoff()?;
             parent.release()?;
         }
         fuze_worker_host::update_progress::STAGE.store(4, std::sync::atomic::Ordering::Release);
@@ -357,7 +361,7 @@ fn run() -> Result<(), &'static str> {
         }
         fuze_worker_host::in_place_update::replace(&root, &extracted)?;
         fuze_worker_host::update_progress::STAGE.store(6, std::sync::atomic::Ordering::Release);
-        fuze_worker_host::in_place_update::finish_update(&root)
+        Ok(())
     })();
     // Delete only the exact freshly created staging directory under this isolated root.
     if fs::canonicalize(&stage).ok().as_ref() == Some(&stage)
@@ -365,7 +369,14 @@ fn run() -> Result<(), &'static str> {
     {
         let _ = fs::remove_dir_all(&stage);
     }
-    result
+    result?;
+    // Keep the progress window alive until the new desktop reports healthy startup.
+    // Release the install lock before launch_current acquires it.
+    drop(_lock);
+    install::launch_current(&root)?;
+    // Cleanup is secondary to a successful restart; never hide startup errors in a child.
+    let _ = fuze_worker_host::in_place_update::finish_update(&root);
+    Ok(())
 }
 #[cfg(windows)]
 fn message(text: &str, question: bool) -> bool {
@@ -415,6 +426,11 @@ fn main() {
         {
             if let Some(guidance) = fuze_worker_host::runtime_prerequisites::guidance(error) {
                 message(guidance, false);
+            } else if error == "install-close-preview-first" {
+                message(
+                    "FUZE 仍有进程正在运行，未能继续更新或启动。请退出托盘中的 FUZE 后重试。",
+                    false,
+                );
             } else {
                 message(&fuze_worker_host::update_progress::translated("操作未完成：{}\n请关闭 FUZE 后重试。若程序文件不完整，可重新下载安装包覆盖。", &[error.to_string()]),false);
             }
