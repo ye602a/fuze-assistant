@@ -109,7 +109,11 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
     assert.ok(workflow.on.pull_request)
     assert.equal(workflow.on.pull_request.branches, undefined)
     assert.equal(workflow.on.pull_request['branches-ignore'], undefined)
-    assert.ok(workflow.on.pull_request.paths.includes('rust/**'))
+    assert.ok(workflow.on.pull_request.paths.includes(name === 'rust-prototypes' ? 'rust/crates/**' : 'rust/**'))
+    if (name === 'rust-prototypes') {
+      assert.ok(!workflow.on.pull_request.paths.includes('rust/**'))
+      for (const path of ['rust/Cargo.toml', 'rust/Cargo.lock', 'rust/app-version.txt', 'rust/vc-runtime-policy.json']) assert.ok(workflow.on.pull_request.paths.includes(path))
+    }
     assert.ok(workflow.on.pull_request.paths.includes('package-lock.json'))
     for (const job of Object.values(workflow.jobs)) assert.equal(job.if, undefined)
   }
@@ -136,4 +140,18 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
     assert.equal(focused.on.pull_request, undefined)
     assert.ok(Object.hasOwn(focused.on, 'workflow_dispatch'))
   }
+})
+
+ test('numbered release stays manual on master and rejects duplicate version before compilation', () => {
+ const workflow=yaml.load(readFileSync(new URL('../../.github/workflows/publish-rust.yml', import.meta.url), 'utf8'))
+ assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch'])
+ assert.equal(workflow.jobs.preview.if, "github.ref == 'refs/heads/master'")
+ assert.equal(workflow.env.SOURCE_SHA, '${{ github.sha }}')
+ const steps=workflow.jobs.preview.steps
+ const guard=steps.findIndex(x=>x.name?.startsWith('Require a new'))
+ const build=steps.findIndex(x=>x.run?.includes('./scripts/build-rust-with-evidence.ps1'))
+ assert.ok(guard>=0 && guard<build)
+ assert.match(steps[guard].run, /StatusCode -eq 200.*throw/)
+ assert.ok(steps.some(x=>x.uses==='actions/cache@v4' && x.with.path==='rust/target' && x.with['restore-keys'].startsWith('rust-preview-1.90-')))
+ assert.ok(!JSON.stringify(workflow).includes('0.7.4'))
 })

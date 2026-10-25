@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'rust/**'
+      - '!rust/**/*.md'
       - 'package.json'
       - 'package-lock.json'
       - 'resources/paddleocr/**'

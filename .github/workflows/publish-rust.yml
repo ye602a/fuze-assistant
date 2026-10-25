@@ -1,0 +1,131 @@
+name: Publish numbered Rust release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: fuze-preview-publication
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  FUZE_UI_FRONTEND: slint
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/master'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retain delivery helpers outside source checkout
+        shell: pwsh
+        run: Copy-Item scripts/release (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers') -Recurse
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Require a new application version before building Setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = (Get-Content rust/app-version.txt -Raw).Trim()
+          if ($version -notmatch '^0\.7\.\d+$') { throw 'invalid-release-version' }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          $response = Invoke-WebRequest -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/rust-v$version" -Headers $headers -SkipHttpErrorCheck
+          if ($response.StatusCode -eq 200) { throw 'Version already published; no rebuild of Setup. Bump app version for a numbered release.' }
+          if ($response.StatusCode -ne 404) { throw "Release lookup failed: $($response.StatusCode)" }
+          "FUZE_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Install existing build dependencies
+        run: npm ci --ignore-scripts
+      - name: Seed build data from the verified public package
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/seed-public-data.mjs')
+      - name: Prepare Rust
+        run: rustup toolchain install 1.90.0 --profile minimal
+      - uses: actions/cache@v4
+        with:
+          path: rust/target
+          key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
+          restore-keys: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
+      - name: Compile exact source with build receipt
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'source-mismatch' }
+          $policy = Get-Content rust/vc-runtime-policy.json -Raw | ConvertFrom-Json
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installations = & $vswhere -all -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $compatible = @(
+            foreach ($installation in $installations) {
+              foreach ($tools in (Get-ChildItem -LiteralPath (Join-Path $installation 'VC/Tools/MSVC') -Directory)) {
+                $cl = Join-Path $tools.FullName 'bin/Hostx64/x64/cl.exe'
+                $link = Join-Path $tools.FullName 'bin/Hostx64/x64/link.exe'
+                if (!(Test-Path -LiteralPath $cl) -or !(Test-Path -LiteralPath $link)) { continue }
+                $cv = [Diagnostics.FileVersionInfo]::GetVersionInfo($cl).FileVersion
+                $lv = [Diagnostics.FileVersionInfo]::GetVersionInfo($link).FileVersion
+                if ($cv -match '^19\.\d+\.\d+\.\d+$' -and $lv -match '^14\.\d+\.\d+\.\d+$' -and
+                    [version]($cv -replace '^19\.', '14.') -le [version]$policy.minimumVersion -and
+                    [version]$lv -le [version]$policy.minimumVersion) {
+                  [pscustomobject]@{Path=$tools.FullName; Version=[version]$lv}
+                }
+              }
+            }
+          ) | Sort-Object Version -Descending
+          if (!$compatible.Count) { throw 'no-reviewed-compatible-toolchain' }
+          Write-Host "Selected MSVC $($compatible[0].Version)"
+          ./scripts/build-rust-with-evidence.ps1 -Frontend slint -VcToolsDir $compatible[0].Path
+      - name: Prepare public data and self-check preview
+        shell: pwsh
+        run: |
+          node scripts/prepare-rust-data.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/package-rust-preview.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Include minimum app-local VC runtime and create update package
+        shell: pwsh
+        run: |
+          ./scripts/extract-rust-crt.ps1 -Output (Join-Path $env:RUNNER_TEMP 'fuze-crt')
+          $revision = $env:SOURCE_SHA.Substring(0,12)
+          node scripts/bundle-rust-crt.mjs "rust/artifacts/preview/fuze-rust-preview-$revision" (Join-Path $env:RUNNER_TEMP 'fuze-crt/dlls')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/finalize-preview.mjs')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/package-rust-update.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-rust-update.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Wrap the same payload in unsigned Setup
+        shell: pwsh
+        run: |
+          $revision = $env:SOURCE_SHA.Substring(0,12)
+          $output = [IO.Path]::GetFullPath('rust/artifacts/preview')
+          $payload = Join-Path $output "fuze-rust-preview-$revision"
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DPayload=$payload" "/DOutput=$output" installer/rust-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $output "FUZE-Setup-$env:FUZE_RELEASE_VERSION-windows-x64.exe"
+          if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'NotSigned') { throw 'unexpected-signature-state' }
+          Rename-Item -LiteralPath $exe -NewName "FUZE-Setup-$env:FUZE_RELEASE_VERSION-preview-$revision-windows-x64.exe"
+      - name: Publish verified files then switch preview manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/publish-preview.mjs')
+      - name: Preserve build receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-build-evidence
+          retention-days: 7
+          path: |
+            rust/target/release/fuze-rust-host.exe
+            rust/target/release/fuze-ocr-worker.exe
+            rust/target/release/fuze-update.exe
+            rust/target/release/fuze-ui-lab.exe
+            rust/target/release/fuze-build-evidence.json
+            rust/artifacts/update-validation.json
+            rust/artifacts/preview/preview-validation.json
+            rust/artifacts/preview/build-evidence-*.json
+      - name: Update latest stable Release with the same verified payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/promote-stable.mjs')

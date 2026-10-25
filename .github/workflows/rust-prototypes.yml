@@ -2,7 +2,13 @@ name: Rust isolated prototypes
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/crates/**'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
+      - 'rust/.cargo/**'
+      - 'rust/app-version.txt'
+      - 'rust/vc-runtime-policy.json'
+      - 'rust/bundle-files.txt'
       - 'package.json'
       - 'package-lock.json'
       - 'resources/paddleocr/**'
