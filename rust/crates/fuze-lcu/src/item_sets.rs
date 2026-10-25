@@ -37,7 +37,7 @@ pub fn merge(
             .ok_or("item-sets-invalid")?;
         if !seen.insert(uid)
             || s["associatedChampions"] != json!([champion])
-            || s["associatedMaps"] != json!([11, 12])
+            || (s["associatedMaps"] != json!([11, 12]) && s["associatedMaps"] != json!([12]))
         {
             return Err("item-sets-invalid");
         }

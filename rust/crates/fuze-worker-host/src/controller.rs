@@ -693,6 +693,11 @@ impl Controller {
                     locale.ok_or("locale-unavailable")?,
                 )?;
                 if review.is_none() {
+                    pipeline.tencent = crate::tencent_data::Pending::start(
+                        self.config.roots.clone(),
+                        context.champion.unwrap_or(0),
+                        pipeline.dataset().into(),
+                    );
                     pipeline
                         .diagnostics
                         .configure(self.screenshots.clone(), root.clone());

@@ -33,6 +33,7 @@ impl Prepared {
         let mut result = HashMap::new();
         let mut found = false;
         let mut ordering = Vec::new();
+        let mut official = std::collections::HashSet::new();
         for (path, document) in &self.documents {
             if !path.starts_with("champion-shards/") || path.ends_with("/index.json") {
                 continue;
@@ -73,6 +74,9 @@ impl Prepared {
                     .get("winRateSource")
                     .and_then(Value::as_str)
                     .is_some_and(|s| !s.is_empty());
+                if s["rankSource"] == crate::tencent::SOURCE && rank.is_some() {
+                    official.insert(id);
+                }
                 ordering.push((
                     id,
                     rank,
@@ -102,6 +106,19 @@ impl Prepared {
         }
         if !found {
             return Err("data-champion-missing");
+        }
+        if !official.is_empty() {
+            for row in &ordering {
+                let total = row.2.unwrap_or(ordering.len() as f64);
+                result.get_mut(&row.0).unwrap().score = official.contains(&row.0).then(|| {
+                    if total <= 1. {
+                        1.
+                    } else {
+                        ((total - row.1.unwrap()) / (total - 1.)).clamp(0., 1.)
+                    }
+                });
+            }
+            return Ok(result);
         }
         if !ordering.is_empty() && ordering.iter().all(|r| r.1.is_some()) {
             let count = ordering.len() as f64;
