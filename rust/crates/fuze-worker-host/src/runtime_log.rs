@@ -411,19 +411,20 @@ impl Snapshot {
             other.worker_cause,
             other.capture_source,
             other.capture_fallback,
-        ) && (
-            self.stream,
-            self.gate,
-            self.readable_slots,
-            self.overlay_prepared,
-            self.title_reads,
-        ) == (
-            other.stream,
-            other.gate,
-            other.readable_slots,
-            other.overlay_prepared,
-            other.title_reads,
-        )
+        ) && self.level == other.level
+            && (
+                self.stream,
+                self.gate,
+                self.readable_slots,
+                self.overlay_prepared,
+                self.title_reads,
+            ) == (
+                other.stream,
+                other.gate,
+                other.readable_slots,
+                other.overlay_prepared,
+                other.title_reads,
+            )
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -700,7 +701,10 @@ impl Journal {
             .previous
             .as_ref()
             .is_none_or(|old| !old.same_state(&next));
-        let metrics = self.previous.as_ref() != Some(&next)
+        let metrics = matches!(
+            next.phase,
+            Phase::Selection | Phase::Loading | Phase::Playing
+        ) && self.previous.as_ref() != Some(&next)
             && self.sample.elapsed() >= Duration::from_secs(10);
         if !changed && !metrics {
             return;
@@ -977,10 +981,51 @@ mod tests {
         assert_eq!(fs::read_to_string(sentinel).unwrap(), "keep");
     }
     #[test]
+    fn idle_metrics_do_not_evict_game_events_but_transitions_and_errors_are_kept() {
+        let fixture = Fixture::new();
+        let mut journal = Journal::start(fixture.0.clone());
+        let mut status = Status::default();
+        journal.observe(&status);
+        for i in 1..100 {
+            journal.sample = Instant::now() - Duration::from_secs(11);
+            status.pipeline.analyses = i;
+            journal.observe(&status);
+        }
+        let report = journal
+            .export()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(report["records"].as_array().unwrap().len(), 2);
+        status.connection = Some(fuze_lcu::reconnect::State::Connected(
+            fuze_runtime::session::Phase::InProgress,
+        ));
+        journal.observe(&status);
+        status.pipeline.level = Some(7);
+        journal.observe(&status);
+        status.pipeline.error = Some("worker-timeout");
+        journal.observe(&status);
+        let report = journal
+            .export()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        let records = report["records"].as_array().unwrap();
+        assert_eq!(records.len(), 5);
+        assert_eq!(records[3]["state"]["level"], 7);
+        assert_eq!(records[4]["state"]["issue"], "ocr");
+        journal.stop();
+    }
+    #[test]
     fn background_writer_deduplicates_flushes_exports_and_preserves_across_runs() {
         let fixture = Fixture::new();
         let mut journal = Journal::start(fixture.0.clone());
         let mut status = Status::default();
+        status.connection = Some(fuze_lcu::reconnect::State::Connected(
+            fuze_runtime::session::Phase::InProgress,
+        ));
         journal.observe(&status);
         for _ in 0..100 {
             journal.observe(&status);

@@ -74,6 +74,7 @@ mod tests {
             local_slot: Some(0),
             bench: [0; 20],
             count: 0,
+            choices: None,
         };
         let mut state = Session::new();
         state.refresh(&roots, Some(Locale::ZhCn), Some(selection));

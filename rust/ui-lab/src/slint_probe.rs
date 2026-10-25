@@ -10,6 +10,60 @@ use std::{path::Path, rc::Rc, time::Instant};
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
 #[test]
+fn champion_subset_offscreen() {
+    use slint::{Model, VecModel};
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
+    let ui = crate::ChampionWindow::new().unwrap();
+    ui.set_offline(false);
+    let mut team = ui.get_team().iter().collect::<Vec<_>>();
+    for index in [1, 3, 4] {
+        team[index].id = 0;
+        team[index].name = "等待选择".into();
+        team[index].icon = Default::default();
+        team[index].win = "—".into();
+    }
+    let cards = ui.get_bench().iter().take(3).collect::<Vec<_>>();
+    ui.set_team(Rc::new(VecModel::from(team)).into());
+    ui.set_local_slot(3);
+    ui.set_local_id(0);
+    ui.set_inspected_id(0);
+    ui.set_inspected_name("等待选择英雄".into());
+    ui.set_inspected_icon(Default::default());
+    ui.set_subset_active(true);
+    ui.show().unwrap();
+    window.set_size(slint::PhysicalSize::new(420, 640));
+    for (name, count, active) in [
+        ("three", 3, true),
+        ("two", 2, true),
+        ("unavailable", 0, true),
+        ("ordinary", 0, false),
+    ] {
+        ui.set_choices(Rc::new(VecModel::from(cards[..count].to_vec())).into());
+        ui.set_subset_active(active);
+        let mut pixels = vec![Rgb8Pixel::default(); 420 * 640];
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(&mut pixels, 420);
+        });
+        assert!(pixels.iter().filter(|p| p.g > 20).count() > 50_000);
+        if let Some(output) = std::env::var_os("FUZE_CAPTURE_REVIEW") {
+            image::save_buffer(
+                Path::new(&output).join(format!("champion-{name}.png")),
+                &pixels
+                    .iter()
+                    .flat_map(|p| [p.r, p.g, p.b])
+                    .collect::<Vec<_>>(),
+                420,
+                640,
+                image::ColorType::Rgb8,
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
 fn release_label_offscreen() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
@@ -54,7 +108,7 @@ fn recognition_log_settings_offscreen() {
     for (name, enabled, message) in [
         ("disabled", false, "本次运行已关闭，已有文件保留；下次启动默认开启。 已保存 0 条，队列繁忙跳过 0 条。"),
         ("enabled", true, "已开启，等待前台主屏游戏画面；关闭或退出后停止采样。 已保存 12 条，队列繁忙跳过 0 条。"),
-        ("limit", false, "已到 120 条或 64 MiB 上限，请先移走目录内的旧记录，再重启后开启。 已保存 120 条，队列繁忙跳过 0 条。"),
+        ("limit", false, "已到 1200 条或 256 MiB 上限，请先移走目录内的旧记录，再重启后开启。 已保存 1200 条，队列繁忙跳过 0 条。"),
     ] {
         let state = ui.global::<crate::DiagnosticState>();
         state.set_screenshots_enabled(enabled);

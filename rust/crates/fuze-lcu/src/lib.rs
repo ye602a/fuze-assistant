@@ -133,6 +133,7 @@ pub(crate) enum Endpoint {
     SummonerIdentity,
     Gameflow,
     ChampSelect,
+    SubsetChampions,
     Locale,
     History,
     Authorization,
@@ -146,6 +147,7 @@ impl Endpoint {
             Self::SummonerStatus | Self::SummonerIdentity => "/lol-summoner/v1/current-summoner",
             Self::Gameflow => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
+            Self::SubsetChampions => "/lol-lobby-team-builder/champ-select/v1/subset-champion-list",
             Self::Locale => "/riotclient/region-locale",
             Self::History => {
                 "/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=49"

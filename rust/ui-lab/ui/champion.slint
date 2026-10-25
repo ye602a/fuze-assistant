@@ -33,6 +33,10 @@ export component ChampionWindow inherits Window {
     in-out property <[ChampionChoice]> team: ChampionFixture.team;
     in-out property <[ChampionChoice]> bench: ChampionFixture.bench;
     in-out property <int> local-id: 4;
+    in-out property <int> local-slot: 1;
+    in-out property <[ChampionChoice]> choices;
+    in-out property <bool> subset-active: false;
+    private property <length> subset-height: root.subset-active ? (root.choices.length > 0 ? 90px : 26px) : 0px;
     in-out property <[DetailRow]> augments;
     in-out property <[BuildRow]> build-lines;
     in-out property <[string]> build-routes;
@@ -90,18 +94,18 @@ export component ChampionWindow inherits Window {
         viewport-width: self.width; viewport-height: body.height + 26px;
         body := VerticalLayout {
             x: 13px; y: 13px; width: scroll.width - 33px; height: self.preferred-height; spacing: 13px;
-            if !root.side-mode: Panel { height: 181px + ceil(root.bench.length / 3) * 64px;
+            if !root.side-mode: Panel { height: 181px + root.subset-height + ceil(root.bench.length / 3) * 64px;
                 SectionTitle { x: 12px; y: 10px; height: 24px; text: "选人参考"; font-size: 13px; }
                 if root.portraits-missing: Action { x: parent.width - 104px; y: 8px; width: 92px; height: 26px; label: "重试头像"; clicked => { root.retry-portraits(); } }
                 Label { x: 12px; y: 36px; height: 20px; text: "我方阵容 · 五人选择"; color: Theme.gold; font-size: 12px; }
                 HorizontalLayout { x: 12px; y: 60px; width: parent.width - 24px; height: 84px; spacing: 5px;
-                    for hero in root.team: Rectangle {
+                    for hero[index] in root.team: Rectangle {
                         Image { x: (parent.width - 43px)/2; y: 0px; width: 43px; height: 43px; source: hero.icon; image-fit: cover; }
-                        Rectangle { x: (parent.width - 47px)/2; y: -2px; width: 47px; height: 47px; background: transparent; border-width: 1px; border-color: hero.id == root.inspected-id ? Theme.blue : hero.id == root.local-id ? Theme.gold : transparent;
+                        Rectangle { x: (parent.width - 47px)/2; y: -2px; width: 47px; height: 47px; background: transparent; border-width: 1px; border-color: hero.id > 0 && hero.id == root.inspected-id ? Theme.blue : index == root.local-slot ? Theme.gold : transparent;
                             animate border-color { duration: UiMotion.quick; easing: ease-out; }
                         }
-                        if hero.id == root.local-id: Rectangle { x: (parent.width - 43px)/2; y: 29px; width: 43px; height: 14px; background: #172732e8;
-                            Label { width: parent.width; height: parent.height; text: "当前"; horizontal-alignment: center; font-size: 12px; color: Theme.gold; }
+                        if index == root.local-slot: Rectangle { x: (parent.width - 43px)/2; y: 25px; width: 43px; height: 18px; background: #172732e8;
+                            Label { width: parent.width; height: parent.height; text: hero.id > 0 ? "当前" : "本人"; horizontal-alignment: center; font-size: 12px; color: Theme.gold; }
                         }
                         Label { x: 0px; y: 46px; width: parent.width; height: 20px; text: hero.name; horizontal-alignment: center; font-size: 12px; }
                         Label { x: 0px; y: 66px; width: parent.width; height: 18px; text: hero.win; horizontal-alignment: center; color: #a8c9d5; font-size: 12px; }
@@ -111,9 +115,27 @@ export component ChampionWindow inherits Window {
                         if ally-focus.has-focus: Rectangle { border-width: 1px; border-color: Theme.ivory; background: transparent; }
                     }
                 }
-                Label { x: 12px; y: 143px; height: 20px; text: "可选英雄 · 胜率排序"; color: Theme.gold; font-size: 12px; }
-                Label { x: parent.width - 112px; y: 143px; width: 100px; height: 20px; text: "蓝框 · 正在查看"; horizontal-alignment: right; color: Theme.blue; font-size: 12px; }
-                Rectangle { x: 12px; y: 169px; width: parent.width - 24px; height: ceil(root.bench.length / 3) * 64px;
+                Label { x: 12px; y: 143px + root.subset-height; height: 20px; text: "公共候选池 · 胜率排序"; color: Theme.gold; font-size: 12px; }
+                Label { x: parent.width - 112px; y: 143px + root.subset-height; width: 100px; height: 20px; text: "蓝框 · 正在查看"; horizontal-alignment: right; color: Theme.blue; font-size: 12px; }
+                if root.subset-active: Label { x: 12px; y: 143px; height: 20px; text: root.choices.length == 2 ? "本次二选一 · 只读参考" : root.choices.length == 3 ? "本次三选一 · 只读参考" : "本次选择 · 暂未读取到卡片"; color: Theme.gold; font-size: 12px; }
+                Rectangle { x: 12px; y: 169px; width: parent.width - 24px; height: ceil(root.choices.length / 3) * 64px;
+                    for hero[index] in root.choices: Rectangle {
+                        x: mod(index, 3) * (self.width + 6px); y: floor(index / 3) * 64px;
+                        width: (parent.width - 12px)/3; height: 58px;
+                        background: hero.id == root.inspected-id ? #183340 : choice-touch.has-hover ? #152a37 : #0a1925;
+                        border-width: 1px; border-color: hero.id == root.inspected-id ? Theme.blue : #2b414e;
+                        animate background, border-color { duration: UiMotion.quick; easing: ease-out; }
+                        Image { x: 6px; y: 7px; width: 26px; height: 26px; source: hero.icon; }
+                        Label { x: 38px; y: 7px; width: parent.width - 42px; height: 26px; text: hero.name; font-size: 12px; }
+                        Label { x: 6px; y: 33px; width: 44px; height: 21px; text: hero.win; font-weight: 600; font-size: 14px; color: Theme.ivory; }
+                        Label { x: 50px; y: 34px; width: parent.width - 55px; height: 20px; horizontal-alignment: right; text: "选" + hero.pick; font-size: 12px; color: Theme.muted; }
+                        accessible-role: button; accessible-label: hero.name + "，胜率 " + hero.win; forward-focus: choice-focus;
+                        choice-focus := FocusScope { focus-on-click: false; key-pressed(event) => { if event.text == " " || event.text == "\n" { root.inspect(hero.id); return accept; } return reject; } }
+                        choice-touch := TouchArea { x: 0px; y: 0px; clicked => { choice-focus.focus(); root.inspect(hero.id); } }
+                        if choice-focus.has-focus: Rectangle { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; border-width: 1px; border-color: Theme.ivory; background: transparent; }
+                    }
+                }
+                Rectangle { x: 12px; y: 169px + root.subset-height; width: parent.width - 24px; height: ceil(root.bench.length / 3) * 64px;
                     for hero[index] in root.bench: Rectangle {
                         x: mod(index, 3) * (self.width + 6px); y: floor(index / 3) * 64px;
                         width: (parent.width - 12px)/3; height: 58px;
@@ -134,7 +156,7 @@ export component ChampionWindow inherits Window {
             hero-summary := Panel { height: 86px;
                 Image { x: 16px; y: 16px; width: 54px; height: 54px; source: root.inspected-icon; }
                 Label { x: 84px; y: 18px; height: 32px; text: root.inspected-name; font-size: 23px; color: #79d6ce; }
-                Label { x: 84px; y: 55px; height: 18px; text: root.offline ? "公开数据预览 · 非当前选人" : root.inspected-id == root.local-id ? "当前英雄 · 整体胜率参考" : "候选英雄 · 只读查看"; color: Theme.muted; font-size: 12px; }
+                Label { x: 84px; y: 55px; height: 18px; text: root.offline ? "公开数据预览 · 非当前选人" : root.inspected-id == 0 ? "等待选择英雄" : root.inspected-id == root.local-id ? "当前英雄 · 整体胜率参考" : "候选英雄 · 只读查看"; color: Theme.muted; font-size: 12px; }
             }
             HorizontalLayout { height: 55px; spacing: 8px;
                 for metric in [{label:"胜率",value:root.inspected-win},{label:"选取率",value:root.inspected-pick},{label:"场次",value:root.inspected-games == "" ? "—" : root.inspected-games}]: Panel {
@@ -219,7 +241,7 @@ export component ChampionWindow inherits Window {
     }
     Rectangle { x: 0px; y: root.height - 64px; height: 64px; background: #101e2a;
         if root.can-configure-items: Action { x: 10px; y: 13px; width: parent.width - 20px; busy: root.action-busy; label: root.action-busy ? "正在配置装备方案…" : "导入路线 " + (root.build-route + 1) + " 到游戏商店"; enabled: !root.action-busy; clicked => { root.player-action("prepare-items",0); } }
-        if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "暂无可导入的海克斯出装数据。"; color: Theme.muted; font-size: 12px; }
+        if !root.can-configure-items: Label { x: 14px; y: 10px; width: parent.width - 28px; height: 44px; wrap: word-wrap; text: root.offline ? "公开样例 · 仅供预览" : root.side-mode ? "局内资料 · 只读参考" : root.local-id == 0 ? "选定英雄后可查看对应出装。" : root.inspected-id != root.local-id ? "当前查看候选英雄，切回本人英雄可配置装备。" : root.detail-champion != root.local-id ? "正在准备本人英雄的装备资料…" : "暂无可导入的海克斯出装数据。"; color: Theme.muted; font-size: 12px; }
     }
     }
     Rectangle { visible: root.item-confirm; x: 0px; y: 0px; background: #000000b8;

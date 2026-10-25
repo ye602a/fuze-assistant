@@ -47,6 +47,29 @@ pub struct Selection {
     pub local_slot: Option<usize>,
     pub bench: [u32; 20],
     pub count: usize,
+    /// None: ordinary selection; Some(empty): subset requested but unavailable.
+    pub choices: Option<[u32; 3]>,
+}
+/// Only the dedicated subset endpoint proves the player's two/three cards.
+/// Invalid/empty responses clear previous cards without discarding team/bench data.
+pub(crate) fn subset(body: &[u8]) -> Option<[u32; 3]> {
+    if body.len() > 128 {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let rows = value.as_array()?;
+    if !(2..=3).contains(&rows.len()) {
+        return None;
+    }
+    let mut result = [0; 3];
+    for (i, row) in rows.iter().enumerate() {
+        let id = champion(row)?;
+        if result.contains(&id) {
+            return None;
+        }
+        result[i] = id;
+    }
+    Some(result)
 }
 fn selection(v: &Value) -> Result<Selection> {
     let rows = v["myTeam"].as_array().ok_or(Error::InvalidPhase)?;
@@ -60,6 +83,7 @@ fn selection(v: &Value) -> Result<Selection> {
         local_slot: None,
         bench: [0; 20],
         count: 0,
+        choices: (v["allowSubsetChampionPicks"] == true).then_some([0; 3]),
     };
     let mut cells = std::collections::HashSet::new();
     for (slot, row) in rows.iter().enumerate() {
@@ -169,6 +193,38 @@ pub fn parse(phase: Phase, gameflow: &[u8], player: &[u8]) -> Result<Context> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn subset_two_three_unavailable_and_new_session_do_not_reuse_cards() {
+        use super::*;
+        assert_eq!(subset(b"[875,103]"), Some([875, 103, 0]));
+        assert_eq!(subset(b"[875,103,893]"), Some([875, 103, 893]));
+        for body in [
+            "[]",
+            "[0,103]",
+            "[103,103]",
+            "[1,2,3,4]",
+            "[1]",
+            "[1,-2]",
+            "[1,2.5]",
+            "{}",
+            "[1,4294967296]",
+        ] {
+            assert_eq!(subset(body.as_bytes()), None, "{body}");
+        }
+        assert_eq!(subset(&[b' '; 129]), None);
+        let mut session = serde_json::json!({"myTeam":[{"cellId":2,"championId":0},{"cellId":0,"championId":0}],"localPlayerCellId":2,"allowSubsetChampionPicks":true,"benchChampions":[{"championId":67}]});
+        let mut first = selection(&session).unwrap();
+        assert_eq!(first.local_slot, Some(1));
+        assert_eq!(first.choices, Some([0; 3]));
+        first.choices = subset(b"[875,103]");
+        assert_eq!(first.choices, Some([875, 103, 0]));
+        let second = selection(&session).unwrap();
+        assert_eq!(second.choices, Some([0; 3]));
+        assert_eq!(second.bench[0], 67);
+        session["allowSubsetChampionPicks"] = false.into();
+        assert_eq!(selection(&session).unwrap().choices, None);
+    }
+
     use super::*;
     #[test]
     fn bench_refresh_is_independent_of_local_pick_and_clears_disabled_pool() {

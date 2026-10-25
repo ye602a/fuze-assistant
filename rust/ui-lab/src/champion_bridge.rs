@@ -179,6 +179,9 @@ impl Binding {
             self.state.borrow_mut().loaded = None;
             ui.set_team(Default::default());
             ui.set_bench(Default::default());
+            ui.set_choices(Default::default());
+            ui.set_subset_active(false);
+            ui.set_local_slot(-1);
             ui.set_expanded_augment(-1);
             ui.set_augments(Default::default());
             ui.set_build_lines(Default::default());
@@ -222,6 +225,7 @@ impl Binding {
                 .team
                 .iter()
                 .chain(&view.bench)
+                .chain(view.choices.iter().flatten())
                 .map(|h| (h.id as i32, h.icon.clone()))
                 .collect();
             if p.version != view.version {
@@ -248,14 +252,19 @@ impl Binding {
             .team
             .iter()
             .chain(&view.bench)
+            .chain(view.choices.iter().flatten())
             .any(|h| h.id as i32 == ui.get_inspected_id());
         ui.set_team(model(&view.team));
         ui.set_bench(model(&view.bench));
+        ui.set_choices(model(view.choices.as_deref().unwrap_or(&[])));
+        ui.set_subset_active(view.choices.is_some());
+        ui.set_local_slot(view.local_slot.map(|i| i as i32).unwrap_or(-1));
         ui.set_local_id(local);
         if let Some(hero) = view
             .team
             .iter()
             .chain(&view.bench)
+            .chain(view.choices.iter().flatten())
             .find(|h| h.id as i32 == ui.get_inspected_id())
         {
             ui.set_inspected_name(hero.name.clone().into());
@@ -527,10 +536,12 @@ pub fn attach_shared(
             };
             ui.set_team(rows(ui.get_team()));
             ui.set_bench(rows(ui.get_bench()));
+            ui.set_choices(rows(ui.get_choices()));
             if let Some(hero) = ui
                 .get_team()
                 .iter()
                 .chain(ui.get_bench().iter())
+                .chain(ui.get_choices().iter())
                 .find(|h| h.id == ui.get_inspected_id())
             {
                 ui.set_inspected_icon(hero.icon);
@@ -564,11 +575,15 @@ pub fn attach_shared(
     let action_reset = actions.clone();
     let art_reset = art.clone();
     ui.on_inspect(move |id| {
+        if id <= 0 {
+            return;
+        }
         if let Some(ui) = weak.upgrade() {
             let found: Option<ChampionChoice> = ui
                 .get_team()
                 .iter()
                 .chain(ui.get_bench().iter())
+                .chain(ui.get_choices().iter())
                 .find(|h| h.id == id);
             if let Some(hero) = found {
                 let retry = ui.get_detail_failed();
@@ -720,6 +735,7 @@ pub fn attach_shared(
             .get_team()
             .iter()
             .chain(ui.get_bench().iter())
+            .chain(ui.get_choices().iter())
             .map(|h| (h.id, h.icon))
             .collect(),
     })
