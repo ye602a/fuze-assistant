@@ -522,8 +522,8 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                     13 if !ui.global::<crate::MaintenanceState>().get_busy() => {
                         let maintenance = ui.global::<crate::MaintenanceState>();
                         if maintenance.get_installable()
-                            || !maintenance.get_notice().contains("离线验证")
-                            || !maintenance.get_update_status().contains("离线验证")
+                            || !maintenance.get_notice().contains("离线模式")
+                            || !maintenance.get_update_status().contains("离线模式")
                         {
                             return Err("maintenance-offline-check".into());
                         }

@@ -317,8 +317,16 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                         SetWindowTextW(
                             GetDlgItem(hwnd, 1),
                             wide(&format!(
-                                "更新未完成：{}\n{}",
-                                error,
+                                "更新未完成。{}\n{}",
+                                match error {
+                                    "update-network" => "无法连接更新服务器，请检查网络。",
+                                    "update-cancelled-or-timeout" => "请求超时，请稍后重试。",
+                                    "update-forbidden" | "update-unauthorized" => "更新服务器拒绝访问，请稍后重试。",
+                                    "update-not-found" => "更新文件暂时不可用，请重新检查更新。",
+                                    "update-proxy-auth" => "网络代理要求身份验证，请检查代理设置。",
+                                    "update-rate-limited" => "请求暂时受限，请稍后重试。",
+                                    _ => "",
+                                },
                                 match error {
                                     "update-file-in-use" | "install-close-preview-first" => "文件仍被占用，尚未替换。请关闭占用该安装目录的程序后重试。",
                                     "update-parent-timeout" => "等待 FUZE 退出超时，尚未替换文件。请稍后重试。",

@@ -300,6 +300,20 @@ pub fn target(url: &str) -> Result<Target<'_>> {
         if suffix == "latest" || suffix == "tags/rust-preview" || asset {
             return Ok(Target::Api(path));
         }
+    } else if host == "github.com" {
+        let asset = path
+            .strip_prefix("/ye602a/fuze-assistant/releases/download/rust-preview/")
+            .ok_or("private-url")?;
+        if asset == "rust-update.json"
+            || asset.strip_prefix("Fuze-Rust-").is_some_and(|name| {
+                let revision = name
+                    .strip_suffix(".fuz.blockmap")
+                    .or_else(|| name.strip_suffix(".fuz"));
+                revision.is_some_and(crate::update_channel::revision)
+            })
+        {
+            return Ok(Target::Cdn { host, path });
+        }
     } else if [
         "release-assets.githubusercontent.com",
         "objects.githubusercontent.com",

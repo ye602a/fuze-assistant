@@ -246,6 +246,11 @@ fn run() -> Result<(), &'static str> {
                     e,
                     "update-cancelled-or-timeout"
                         | "update-access-or-release"
+                        | "update-unauthorized"
+                        | "update-forbidden"
+                        | "update-not-found"
+                        | "update-proxy-auth"
+                        | "update-rate-limited"
                         | "update-redirect-policy"
                         | "update-redirect-limit"
                         | "private-url"
