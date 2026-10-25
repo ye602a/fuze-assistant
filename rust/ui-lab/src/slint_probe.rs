@@ -37,6 +37,7 @@ fn champion_subset_offscreen() {
         ("three", 3, true),
         ("two", 2, true),
         ("unavailable", 0, true),
+        ("completed", 3, false),
         ("ordinary", 0, false),
     ] {
         ui.set_choices(Rc::new(VecModel::from(cards[..count].to_vec())).into());

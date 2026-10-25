@@ -96,6 +96,11 @@ fn selection(v: &Value) -> Result<Selection> {
             result.local_slot = Some(slot);
         }
     }
+    // The mode flag stays true after the local player finishes choosing.
+    // A resolved local champion ends this choice, even if the subset endpoint retains cards.
+    if result.local_slot.is_none_or(|slot| result.team[slot] != 0) {
+        result.choices = None;
+    }
     if v["benchEnabled"] == false {
         return Ok(result);
     }
@@ -221,6 +226,13 @@ mod tests {
         let second = selection(&session).unwrap();
         assert_eq!(second.choices, Some([0; 3]));
         assert_eq!(second.bench[0], 67);
+        session["myTeam"][0]["championId"] = 103.into();
+        let completed = selection(&session).unwrap();
+        assert_eq!(completed.choices, None);
+        assert_eq!(completed.team[1], 103);
+        assert_eq!(completed.bench[0], 67);
+        session["myTeam"][0]["championId"] = 0.into();
+        assert_eq!(selection(&session).unwrap().choices, Some([0; 3]));
         session["allowSubsetChampionPicks"] = false.into();
         assert_eq!(selection(&session).unwrap().choices, None);
     }
