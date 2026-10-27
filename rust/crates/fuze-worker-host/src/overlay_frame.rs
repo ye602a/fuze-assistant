@@ -4,6 +4,7 @@ use fuze_data::champion_detail::Augment;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 pub fn skill_cards() -> Vec<Augment> {
     fuze_contract::skill_choice::CHOICES.iter().map(|choice| Augment {
+        evidence: Default::default(),
         id: choice.id,
         name: format!("{} · {}", choice.key, choice.title),
         icon: fuze_contract::skill_choice::ICON_URL.into(),
@@ -160,6 +161,7 @@ impl Publisher {
             card.pick = None;
             card.tier = None;
             card.provenance.clear();
+            card.evidence = Default::default();
         }
         catalog.extend(augments);
         Self::new(catalog, scores)

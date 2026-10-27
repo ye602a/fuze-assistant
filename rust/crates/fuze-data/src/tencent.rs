@@ -466,7 +466,20 @@ mod tests {
         assert_eq!(rec[&id].win_rate, Some(0.55));
         assert_eq!(rec[&id].origin, "aramgg-client-upload");
         assert_eq!(rec[&id].score, Some(1.));
+        assert_eq!(rec[&id].evidence.games, Some(1000));
+        assert_eq!(rec[&id].evidence.wins, Some(550));
+        assert!(rec[&id].evidence.official);
+        assert!(rec[&id].evidence.win_date.is_empty());
         let detail = data.champion_detail(1).unwrap();
+        assert_eq!(detail.augments[0].evidence, rec[&id].evidence);
+        assert!(detail.augments[0]
+            .description_with_evidence()
+            .contains("1000 场"));
+        assert!(detail
+            .augments
+            .iter()
+            .skip(1)
+            .all(|a| a.evidence.games.is_none()));
         assert!(!detail.item_sets.is_empty());
         assert!(detail.augments[0].provenance.contains("腾讯101推荐"));
         data.version = "16.22.1".into();

@@ -4,12 +4,64 @@ use serde_json::Value;
 use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct Recommendation {
+    pub evidence: Evidence,
     pub win_rate: Option<f64>,
     pub pick_rate: Option<f64>,
     pub score: Option<f64>,
     pub origin: String,
     pub region: String,
     pub patch: String,
+}
+/// Display evidence only. It never changes ordering or borrows ranking sample counts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Evidence {
+    pub games: Option<u64>,
+    pub wins: Option<u64>,
+    pub rank: Option<u64>,
+    pub official: bool,
+    pub win_date: String,
+}
+impl Evidence {
+    pub fn from_stats(s: &Value) -> Self {
+        let games = s["games"].as_u64().filter(|n| *n > 0);
+        let explicit = s["winRateSource"].as_str().is_some_and(|s| !s.is_empty());
+        let date = text(s, if explicit { "winRateDate" } else { "date" });
+        Self {
+            games,
+            wins: s["wins"]
+                .as_u64()
+                .filter(|w| games.is_some_and(|n| *w <= n)),
+            rank: s["rank"].as_u64().filter(|n| *n > 0),
+            official: s["rankSource"] == crate::tencent::SOURCE,
+            win_date: if date == "unknown" {
+                String::new()
+            } else {
+                date
+            },
+        }
+    }
+    pub fn sample_label(&self, has_win: bool) -> String {
+        if !has_win {
+            return "暂无胜率统计".into();
+        }
+        self.games
+            .map(|n| format!("胜率样本 · {n} 场"))
+            .unwrap_or_else(|| "胜率样本数未提供".into())
+    }
+    pub fn rank_label(&self) -> String {
+        self.rank
+            .map(|n| {
+                format!(
+                    "{} · 第 {n}",
+                    if self.official {
+                        "腾讯101推荐"
+                    } else {
+                        "来源排名"
+                    }
+                )
+            })
+            .unwrap_or_default()
+    }
 }
 fn number(v: &Value, a: &str, b: &str) -> Option<f64> {
     v.get(a)
@@ -23,6 +75,41 @@ fn text(v: &Value, name: &str) -> String {
         .filter(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
         .unwrap_or("unknown")
         .into()
+}
+#[cfg(test)]
+mod evidence_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn separates_win_samples_and_date_from_official_ranking() {
+        let evidence = Evidence::from_stats(&json!({"games":423,"wins":233,
+            "winRateSource":"client-upload","winRateDate":"2026-10-24",
+            "date":"2026-10-28","rankDate":"20261028","rank":3,
+            "rankSource":crate::tencent::SOURCE,"total":127}));
+        assert_eq!(evidence.games, Some(423));
+        assert_eq!(evidence.wins, Some(233));
+        assert_eq!(evidence.win_date, "2026-10-24");
+        assert_eq!(evidence.rank_label(), "腾讯101推荐 · 第 3");
+        assert_eq!(evidence.sample_label(true), "胜率样本 · 423 场");
+        assert_eq!(evidence.sample_label(false), "暂无胜率统计");
+        let missing = Evidence::from_stats(&json!({"rank":1,"total":127,
+            "winRateSource":"client-upload","date":"2026-10-28"}));
+        assert_eq!(missing.games, None);
+        assert!(missing.win_date.is_empty());
+        assert_eq!(missing.sample_label(true), "胜率样本数未提供");
+    }
+    #[test]
+    fn rejects_invalid_counts_without_inventing_a_sample() {
+        for games in [json!(null), json!(-1), json!(0), json!(2.5)] {
+            let e = Evidence::from_stats(&json!({"games":games,"wins":5}));
+            assert_eq!(e.games, None);
+            assert_eq!(e.wins, None);
+        }
+        assert_eq!(
+            Evidence::from_stats(&json!({"games":10,"wins":11})).wins,
+            None
+        );
+    }
 }
 impl Prepared {
     pub fn recommendations(&self, champion: u32) -> Result<HashMap<u32, Recommendation>> {
@@ -85,6 +172,7 @@ impl Prepared {
                     pick_rate,
                 ));
                 let row = Recommendation {
+                    evidence: Evidence::from_stats(s),
                     win_rate,
                     pick_rate,
                     score,

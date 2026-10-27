@@ -17,6 +17,7 @@ pub struct Detail {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augment {
+    pub evidence: crate::recommendations::Evidence,
     pub id: u32,
     pub name: String,
     pub icon: String,
@@ -31,6 +32,30 @@ pub struct Augment {
 pub struct Guide {
     pub title: String,
     pub url: String,
+}
+impl Augment {
+    pub fn description_with_evidence(&self) -> String {
+        let mut text = if self.description.is_empty() {
+            "数据源暂未提供说明".into()
+        } else {
+            self.description.clone()
+        };
+        text.push_str(&format!(
+            "\n\n{}",
+            self.evidence.sample_label(self.win.is_some())
+        ));
+        if self.win.is_some() && !self.evidence.win_date.is_empty() {
+            text.push_str(&format!(" · {}", self.evidence.win_date));
+        }
+        let ranking = self.evidence.rank_label();
+        if !ranking.is_empty() && !self.provenance.contains(&ranking) {
+            text.push_str(&format!("\n{ranking}"));
+        }
+        if !self.provenance.is_empty() {
+            text.push_str(&format!("\n{}", self.provenance));
+        }
+        text
+    }
 }
 /// Plain text only: provider markup is never executed or handed to a web view.
 pub fn description(value: &str) -> String {
@@ -197,6 +222,7 @@ impl Prepared {
             .flat_map(|v| rows(&v["data"]))
             .filter_map(|a| {
                 Some(Augment {
+                    evidence: Default::default(),
                     id: u32::try_from(a["id"].as_u64()?).ok().filter(|id| *id > 0)?,
                     name: clean(&a["name"]),
                     icon: clean(&a["iconUrl"]),
@@ -503,6 +529,7 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                     .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
             };
             cards.push(Augment {
+                evidence: crate::recommendations::Evidence::from_stats(s),
                 id,
                 name: clean(&a["name"]),
                 icon: clean(&a["iconUrl"]),
@@ -520,8 +547,8 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                     clean(s.get("winRateGamePatch").unwrap_or(&s["gamePatch"]))
                 ) + &if s["rankSource"] == crate::tencent::SOURCE {
                     format!(
-                        " · 腾讯101推荐 #{} / {}（选取率，非胜率）",
-                        s["rank"],
+                        " · {} / {}",
+                        crate::recommendations::Evidence::from_stats(s).rank_label(),
                         clean(&s["rankDate"])
                     )
                 } else {

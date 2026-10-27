@@ -14,6 +14,8 @@ struct Card {
     score: Option<f64>,
     icon: String,
     description: String,
+    samples: String,
+    ranking: String,
 }
 fn frame_cards(frame: &Frame) -> [Card; 3] {
     let rate = |v: Option<f64>| {
@@ -27,13 +29,27 @@ fn frame_cards(frame: &Frame) -> [Card; 3] {
             win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
             pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
             score: frame.scores[i],
+            samples: frame.cards[i]
+                .as_ref()
+                .map(|a| a.evidence.sample_label(a.win.is_some()))
+                .unwrap_or_default(),
+            ranking: frame.cards[i]
+                .as_ref()
+                .map(|a| a.evidence.rank_label())
+                .unwrap_or_default(),
             icon: frame.cards[i]
                 .as_ref()
                 .map(|a| a.icon.clone())
                 .unwrap_or_default(),
             description: frame.cards[i]
                 .as_ref()
-                .map(|a| a.description.clone())
+                .map(|a| {
+                    if fuze_contract::skill_choice::get(a.id).is_some() {
+                        a.description.clone()
+                    } else {
+                        a.description_with_evidence()
+                    }
+                })
                 .unwrap_or_default(),
         },
         _ => Card::default(),
@@ -174,6 +190,8 @@ impl Scene {
                     win: ["52.0%", "53.0%", "54.0%"][i].into(),
                     pick: "12.0%".into(),
                     score: Some([0.62, 0.72, 0.82][i]),
+                    samples: "胜率样本 · 1088 场".into(),
+                    ranking: "腾讯101推荐 · 第 12".into(),
                     icon: String::new(),
                     description: "离线说明示例。此处仅说明候选强化的效果，不表示玩家已领取。"
                         .into(),
@@ -461,35 +479,31 @@ impl Surface {
                 scene,
                 target,
                 if best {
-                    "推荐度 · 优先"
+                    "优先参考"
+                } else if card.score.is_none() {
+                    "暂无推荐排名"
                 } else {
-                    "推荐度"
+                    "参考选择"
                 },
                 0,
-                rect(x + 14., 191., 156., 22.),
+                rect(x + 14., 187., 214., 22.),
                 if best { GOLD } else { MUTED },
             );
             self.text(
                 scene,
                 target,
-                &card
-                    .score
-                    .map(|v| format!("{:.0}", v * 100.))
-                    .unwrap_or_else(|| "—".into()),
-                4,
-                rect(x + 178., 186., 50., 28.),
-                if best { GOLD } else { TEXT },
+                &card.ranking,
+                0,
+                rect(x + 14., 209., 214., 18.),
+                MUTED,
             );
-            self.fill(target, rect(x + 14., 216., 214., 4.), 0x24343e);
-            self.fill(
+            self.text(
+                scene,
                 target,
-                rect(
-                    x + 14.,
-                    216.,
-                    214. * card.score.unwrap_or(0.).clamp(0., 1.) as f32,
-                    4.,
-                ),
-                if best { GOLD } else { 0x42c6cc },
+                &card.samples,
+                0,
+                rect(x + 14., 166., 214., 16.),
+                MUTED,
             );
             self.fill(target, rect(x + 14., 182., 214., 1.), 0x34434c);
         }
@@ -503,7 +517,7 @@ impl Surface {
             {
                 "点击卡片查看技能强化效果 · 暂无技能选择统计"
             } else {
-                "点击卡片查看效果与分阶段统计 · 推荐度用于比较，不代表胜率"
+                "点击卡片查看效果、统计来源与分阶段参考"
             },
             0,
             rect(12., 236., 736., 20.),
@@ -1517,6 +1531,88 @@ impl HostOverlay {
 #[cfg(test)]
 mod skill_tests {
     use super::*;
+    #[test]
+    fn recommendation_evidence_offscreen() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let _com = Com::new()?;
+        let mut cards = fuze_worker_host::overlay_frame::skill_cards();
+        for (i, a) in cards.iter_mut().take(3).enumerate() {
+            a.id = i as u32 + 1;
+            a.name = ["海洋龙魂", "家园卫士", "蓝色屏障"][i].into();
+            a.win = [Some(0.5508), Some(0.5506), None][i];
+            a.pick = Some(0.12);
+            a.description = "离线合成展示，不读取游戏或个人数据。".into();
+            a.provenance = "胜率来源：对局统计 / WORLD · 补丁 16.21".into();
+            a.evidence = fuze_data::recommendations::Evidence::from_stats(&serde_json::json!({
+                "games": ([Some(423u64), None, None][i]), "rank":i+1,
+                "rankSource":fuze_data::tencent::SOURCE,"winRateSource":"fixture",
+                "winRateDate":"2026-10-24"}));
+        }
+        let mut publisher = fuze_worker_host::overlay_frame::Publisher::new(
+            cards[..3].to_vec(),
+            [(1, 0.9), (2, 0.8), (3, 0.7)].into_iter().collect(),
+        );
+        publisher.publish(
+            fuze_contract::Snapshot {
+                schema_version: 1,
+                generation: 1,
+                sequence: 1,
+                dataset_version: "fixture".into(),
+                selection_confirmed: false,
+                actual_stage: fuze_contract::ActualStage::Unknown,
+                slots: std::array::from_fn(|i| Slot::Known {
+                    id: i as u32 + 1,
+                    name: cards[i].name.clone(),
+                    confidence: 1.,
+                }),
+            },
+            true,
+            false,
+            None,
+        );
+        let mut scene = Scene::new()?;
+        scene.cards = frame_cards(&publisher.current().unwrap());
+        assert_eq!(scene.cards[0].samples, "胜率样本 · 423 场");
+        assert_eq!(scene.cards[1].samples, "胜率样本数未提供");
+        assert_eq!(scene.cards[2].samples, "暂无胜率统计");
+        assert!(scene.cards[2].ranking.contains("第 3"));
+        assert!(scene.cards[0].description.contains("2026-10-24"));
+        assert_eq!(
+            scene.cards.map(|c| c.score),
+            [Some(0.9), Some(0.8), Some(0.7)]
+        );
+        scene.cards = frame_cards(&publisher.current().unwrap());
+        scene.select(Some(0))?;
+        unsafe {
+            let imaging: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let height = HEIGHT + DETAIL_HEIGHT;
+            let bitmap = imaging.CreateBitmap(
+                WIDTH,
+                height,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )?;
+            let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
+            props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+            let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
+            Surface::new(&scene, &target)?.draw(&scene, &target, false)?;
+            if let Some(path) = std::env::var_os("FUZE_EVIDENCE_REVIEW") {
+                let mut pixels = vec![0; (WIDTH * height * 4) as usize];
+                bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+                for pixel in pixels.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                image::save_buffer(
+                    Path::new(&path),
+                    &pixels,
+                    WIDTH,
+                    height,
+                    image::ColorType::Rgba8,
+                )?;
+            }
+        }
+        Ok(())
+    }
     #[test]
     fn skill_cards_render_offscreen_without_statistics_or_stage_reference(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {

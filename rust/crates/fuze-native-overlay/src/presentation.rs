@@ -236,49 +236,36 @@ pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Sn
             if priority { gold } else { pale },
         );
         label_at(
-            t("推荐度", "推薦度", "Recommendation"),
+            if priority {
+                "优先参考"
+            } else {
+                "参考选择"
+            },
             left + 10,
             top + 91,
-            left + 131,
+            left + 78,
             top + 108,
             10,
             dim,
         );
-        let score = row
-            .and_then(|r| r.score)
-            .filter(|s| s.is_finite())
-            .map(|s| s.clamp(0., 1.));
-        label_at(
-            &score
-                .map(|s| format!("{:.0} / 100", s * 100.))
-                .unwrap_or(t("暂无统计", "暫無統計", "No statistics").into()),
-            left + 140,
-            top + 91,
-            right - 9,
-            top + 108,
-            10,
-            dim,
-        );
-        fill(
-            dc,
-            rect(left + 10, top + 110, right - 10, top + 119),
-            rgb(54, 86, 104),
-        );
-        fill(
-            dc,
-            rect(left + 11, top + 111, right - 11, top + 118),
-            rgb(2, 11, 19),
-        );
-        if let Some(score) = score {
-            fill(
-                dc,
-                rect(
-                    left + 11,
-                    top + 111,
-                    left + 11 + (218. * score) as i32,
-                    top + 118,
-                ),
-                if priority { gold } else { rgb(97, 212, 223) },
+        if let Some(row) = row {
+            label_at(
+                &row.evidence.sample_label(row.win_rate.is_some()),
+                left + 10,
+                top + 110,
+                right - 9,
+                top + 124,
+                10,
+                dim,
+            );
+            label_at(
+                &row.evidence.rank_label(),
+                left + 80,
+                top + 91,
+                right - 9,
+                top + 108,
+                10,
+                dim,
             );
         }
     }
