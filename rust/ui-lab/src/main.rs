@@ -44,6 +44,18 @@ slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        None => {
+            // Normal shortcuts and portable launches enter the native frontend directly.
+            let executable = std::env::current_exe()?;
+            if let Err(error) = fuze_worker_host::managed_install::launch_current(executable.parent().ok_or("launch-directory")?) {
+                let text = if error == "install-close-preview-first" {
+                    "FUZE 已在运行，请查看任务栏或托盘。"
+                } else { "FUZE 未能启动。请确认程序文件完整，或使用安装包覆盖修复。" };
+                let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(std::ptr::null_mut(), wide(text).as_ptr(), wide("FUZE").as_ptr(), 0x10); }
+                return Err(error.into());
+            }
+        },
         Some("--review-icons") if args.len()==3 => println!("{}",direct::review_icons(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-close") if args.len()==3 => println!("{}",host_review::close_only(std::path::Path::new(&args[1]),std::path::Path::new(&args[2]))?),
         Some("--review-feedback") if args.len()==2 => println!("{}",feedback_review::run(std::path::Path::new(&args[1]))?),

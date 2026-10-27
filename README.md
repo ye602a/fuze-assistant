@@ -3,9 +3,9 @@
 <h1 align="center">符择 FUZE</h1>
 <p align="center"><strong>选英雄、看强化、导入出装。</strong></p>
 <p align="center">海克斯大乱斗助手 · Rust 原生开发 · Windows x64 · 简体中文</p>
-<p align="center"><a href="https://github.com/ye602a/fuze-assistant/releases/tag/rust-v0.7.0"><strong>下载 Windows 版</strong></a>　·　<a href="docs/PLAYER_GUIDE.md">快速开始</a>　·　<a href="https://github.com/ye602a/fuze-assistant/issues">问题反馈</a></p>
+<p align="center"><a href="https://github.com/ye602a/fuze-assistant/releases/latest"><strong>下载 Windows 版</strong></a>　·　<a href="docs/PLAYER_GUIDE.md">快速开始</a>　·　<a href="https://github.com/ye602a/fuze-assistant/issues">问题反馈</a></p>
 
-当前正式版：**v0.7.0**。下载 `FUZE-Setup-0.7.0-windows-x64.exe`，选择目录安装即可，所需 VC++ DLL 已包含在程序文件夹中。安装包暂未签名；也可选择发布页的 ZIP 便携包。
+在最新正式发布页下载 Setup 安装包，选择目录安装即可，所需 VC++ DLL 已包含在程序文件夹中。安装包暂未签名；也可选择发布页的 ZIP 便携包。
 
 FUZE 是 Windows 上的海克斯大乱斗助手。选人时查看阵容和候选英雄，局内识别三张强化卡片，选好的装备方案可以直接导入游戏商店。
 
@@ -39,17 +39,17 @@ FUZE 是 Windows 上的海克斯大乱斗助手。选人时查看阵容和候选
 
 ## 开始使用
 
-1. 从发布页下载 `FUZE-Setup-0.7.0-windows-x64.exe`，选择目录完成安装。
+1. 从发布页下载 Setup 安装包，选择目录完成安装。
 2. 登录英雄联盟并打开符择，确认首页显示连接已验证。
 3. 进入海克斯大乱斗。选人时查看阵容和装备方案，强化出现时查看三卡参考。
 
-玩家无需申请 API Key、配置令牌或安装开发工具。GitHub 自动生成的 Source code 压缩包是源码，请下载 Setup 或程序 ZIP。
+GitHub 自动生成的 Source code 压缩包是源码，请下载 Setup 或程序 ZIP。
 
 ## 数据与使用范围
 
 - 强化画面在本机完成 OCR 处理，不自动上传截图。
 - 不自动选英雄、选强化或购买装备。装备导入由你确认；自动导入需要单独开启。
-- 推荐数据通过现有公开接口检查更新，优先使用本地缓存；程序更新需手动确认。
+- 推荐数据通过现有公开接口检查更新，优先使用本地缓存；程序启动时检查新版，由你选择是否更新。
 - 反馈可手动导出。自动 GitHub 反馈需要独立授权，开启后报告会公开在 Issues。
 
 当前支持简体中文 Windows x64，游戏画面识别以主显示器为准。推荐数据来自 ARAMGG 等上游来源；数据版本可能落后于游戏版本，缺少新统计时不会套用旧版胜率。详情见[玩家指南](docs/PLAYER_GUIDE.md)与[来源说明](THANKS.md)。

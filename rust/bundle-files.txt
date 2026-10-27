@@ -1,5 +1,6 @@
 fuze-rust-host.exe
 fuze-ui-lab.exe
+FUZE.exe
 fuze-ocr-worker.exe
 fuze-update.exe
 onnxruntime.dll

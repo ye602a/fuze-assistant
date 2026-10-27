@@ -560,9 +560,24 @@ impl Controller {
                 .map(|s| s.0),
         }
     }
+    fn finish_capture_tick(&mut self, fresh_frame: bool) {
+        // A completed capture/gate tick need not produce OCR. Recovery already
+        // confirmed the replacement worker is ready; keep real failures latched.
+        let capture_recovered = fresh_frame
+            && self.last_error.is_some_and(|error| {
+                matches!(error, "capture-frame" | "capture-bitmap" | "capture-start")
+                    || error.starts_with("game-window-")
+            });
+        if self.last_error == Some("worker-recovered-use-next-frame") || capture_recovered {
+            self.last_error = None;
+            self.last_worker_cause = None;
+            self.retry = Retry::default();
+        }
+    }
     pub fn suspend(&mut self) {
         self.clear();
         self.last_error = None;
+        self.last_worker_cause = None;
         self.retry = Retry::default();
     }
     pub(crate) fn reconfigure(&mut self, config: Config) {
@@ -661,6 +676,7 @@ impl Controller {
             self.clear();
             self.revision = revision;
             self.last_error = None;
+            self.last_worker_cause = None;
             self.retry = Retry::default();
         }
         if fresh && context.is_some_and(|c| c.phase != Phase::InProgress || !c.supported) {
@@ -671,7 +687,7 @@ impl Controller {
             fresh && matches!(c.phase, Phase::Loading | Phase::InProgress) && c.supported
         });
         let (Some(context), Some(root)) = (active, root) else {
-            self.clear();
+            self.suspend();
             return Ok(());
         };
         self.gate_context = Some(context);
@@ -778,7 +794,9 @@ impl Controller {
             } else {
                 pipeline.clear_level();
             }
+            let previous_capture = pipeline.last_capture;
             let delivery = pipeline.tick_wgc()?;
+            let fresh_frame = pipeline.last_capture != previous_capture;
             self.last_frame = pipeline.last_capture.or(self.last_frame);
             if let Some(delivery) = delivery {
                 self.analyses = self.analyses.saturating_add(1);
@@ -821,6 +839,7 @@ impl Controller {
                 self.last_worker_cause = None;
                 self.retry.failures = 0;
             }
+            self.finish_capture_tick(fresh_frame);
             Ok(())
         })();
         match result {
@@ -880,8 +899,29 @@ mod tests {
         gate.screen_closed();
         let closed = gate.closed_window().unwrap();
         let mut controller = Controller::new(config.clone());
+        controller.last_error = Some("worker-recovered-use-next-frame");
+        controller.last_worker_cause = Some("worker-inference-failed");
+        controller.retry.fail(0);
+        controller.finish_capture_tick(false);
+        assert_eq!(controller.status().error, None);
+        assert_eq!(controller.status().worker_cause, None);
+        assert_eq!(controller.retry.failures, 0);
+        controller.last_error = Some("worker-not-ready");
+        controller.finish_capture_tick(false);
+        assert_eq!(controller.status().error, Some("worker-not-ready"));
+        controller.last_error = Some("capture-frame");
+        controller.finish_capture_tick(false);
+        assert_eq!(controller.status().error, Some("capture-frame"));
+        controller.finish_capture_tick(true);
+        assert_eq!(controller.status().error, None);
+        controller.last_error = Some("capture-atlas");
+        controller.finish_capture_tick(true);
+        assert_eq!(controller.status().error, Some("capture-atlas"));
+        controller.last_worker_cause = Some("worker-inference-failed");
         controller.gate_resume = Some((context(8, 1), closed));
         controller.suspend();
+        assert_eq!(controller.status().error, None);
+        assert_eq!(controller.status().worker_cause, None);
         controller.reconfigure(config);
         let saved = controller.resume_window(context(8, 1)).unwrap();
         let mut resumed = fuze_runtime::gate::LevelGate::default();

@@ -390,11 +390,19 @@ pub fn attach(
                     &name,
                     &target_start.borrow(),
                 )?;
+                // The user explicitly requested this updater window.
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        child.id(),
+                    );
+                }
                 Ok::<_, &'static str>((signal, child))
             })();
             match result {
                 Ok(update) => {
                     *active_start.borrow_mut() = Some(update);
+                    state.set_updating(true);
+                    state.set_update_fraction(-1.);
                     state.set_busy(true);
                     state.set_confirmation("".into());
                     state.set_notice("正在后台下载，完成后自动更新并重启；识别继续运行。".into());
@@ -455,6 +463,27 @@ pub fn attach(
             {
                 let mut slot = active.borrow_mut();
                 if let Some((signal, child)) = slot.as_mut() {
+                    if let (Some(ui), Some((stage, done))) = (
+                        weak.upgrade(),
+                        fuze_worker_host::update_progress::process_progress(child.id()),
+                    ) {
+                        let state = ui.global::<MaintenanceState>();
+                        state.set_updating(stage != 255);
+                        state.set_update_fraction(if stage == 2 {
+                            done as f32 / 1000.
+                        } else {
+                            -1.
+                        });
+                        state.set_update_status(
+                            match stage {
+                                255 => "更新未完成，请查看更新窗口中的具体原因。".into(),
+                                2 => format!("正在下载更新 · {:.1}%", done as f32 / 10.),
+                                3 => "下载完成，正在校验…".into(),
+                                _ => "正在准备更新…".into(),
+                            }
+                            .into(),
+                        );
+                    }
                     if signal.ready() {
                         // Normal shutdown already joins capture/OCR and releases the instance lock.
                         // Arm the supervisor's bounded shutdown before dropping UI services.
@@ -469,6 +498,7 @@ pub fn attach(
                         *slot = None;
                         if let Some(ui) = weak.upgrade() {
                             ui.global::<MaintenanceState>().set_busy(false);
+                            ui.global::<MaintenanceState>().set_updating(false);
                             ui.global::<MaintenanceState>().set_notice(
                                 "更新已结束，当前 FUZE 继续运行；可重新检查更新。".into(),
                             );

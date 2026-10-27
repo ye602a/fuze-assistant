@@ -133,6 +133,10 @@ codes!(WorkerFailure {
     Busy,
     InvalidFrame,
     InvalidResult,
+    InferenceFailed,
+    ResultIdMismatch,
+    InvalidResultFields,
+    UnexpectedReply,
     ResultExpired,
     Result,
     NotReady,
@@ -153,6 +157,10 @@ impl WorkerFailure {
             "worker-busy" => Self::Busy,
             "worker-invalid-frame" => Self::InvalidFrame,
             "worker-invalid-result" => Self::InvalidResult,
+            "worker-inference-failed" => Self::InferenceFailed,
+            "worker-result-id-mismatch" => Self::ResultIdMismatch,
+            "worker-invalid-result-fields" => Self::InvalidResultFields,
+            "worker-unexpected-reply" => Self::UnexpectedReply,
             "worker-result-expired" => Self::ResultExpired,
             "worker-result" => Self::Result,
             "worker-not-ready" => Self::NotReady,
@@ -873,6 +881,22 @@ mod tests {
     }
     #[test]
     fn worker_causes_are_allowlisted_and_old_reports_still_load() {
+        for (code, value) in [
+            ("worker-inference-failed", "inference-failed"),
+            ("worker-result-id-mismatch", "result-id-mismatch"),
+            ("worker-invalid-result-fields", "invalid-result-fields"),
+            ("worker-unexpected-reply", "unexpected-reply"),
+            ("worker-invalid-result", "invalid-result"),
+        ] {
+            let cause = WorkerFailure::from_code(Some(code)).unwrap();
+            let json = serde_json::to_value(cause).unwrap();
+            assert_eq!(json, value);
+            assert_eq!(
+                serde_json::from_value::<WorkerFailure>(json).unwrap(),
+                cause
+            );
+        }
+
         let mut status = Status::default();
         status.pipeline.error = Some("worker-recovered-use-next-frame");
         status.pipeline.worker_cause = Some("worker-pipe-eof");

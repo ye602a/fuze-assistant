@@ -12,4 +12,4 @@ Download `FUZE-Setup-0.7.0-windows-x64.exe` from the release page. This unsigned
 
 ## Repository layout
 
-The current application lives in `rust/crates/` and `rust/ui-lab/`. Root Node dependencies are development tools only. `scripts/`, `public/`, `resources/` and `tests/fixtures/` retain native build inputs. Run tooling checks with `npm test`. The former Electron application, its tests and build configuration are preserved in [legacy/electron](legacy/electron/README.md); they are not part of the current runtime.
+The current application lives in `rust/crates/` and `rust/ui-lab/`. Root Node dependencies are development tools only. `scripts/`, `public/`, `resources/` and `tests/fixtures/` retain native build inputs. Run tooling checks with `npm test`. Historical Electron sources are available in the [v0.6.3 tag](https://github.com/ye602a/fuze-assistant/tree/v0.6.3).

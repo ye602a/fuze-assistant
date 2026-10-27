@@ -1,2 +1,0 @@
-# Keep historical Electron sources browseable without counting them in language statistics.
-legacy/electron/** linguist-detectable=false

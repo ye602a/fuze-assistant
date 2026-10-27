@@ -20,7 +20,7 @@ try {
     $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $names = @('fuze-rust-host.exe','fuze-ui-lab.exe','fuze-ocr-worker.exe','fuze-update.exe','onnxruntime.dll','DirectML.dll','dxcompiler.dll','dxil.dll')
     $binaries = foreach ($name in $names) {
-        $file = Join-Path $request.bundle $name
+        $file = Join-Path $request.bundle $(if ($name -eq 'fuze-ui-lab.exe' -and $request.desktopExecutable -eq 'FUZE.exe') { 'FUZE.exe' } else { $name })
         $signature = Get-AuthenticodeSignature -LiteralPath $file
         $signer = $null
         if ($signature.SignerCertificate) {
