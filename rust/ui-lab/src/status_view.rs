@@ -25,7 +25,12 @@ pub fn present(s: &Status, offline: bool) -> View {
     let running = s.mode == 1;
     let active = running && phase == Phase::InProgress;
     let waiting_window = s.pipeline.error == Some("game-window-waiting");
-    let failed = s.pipeline.error.is_some() && !waiting_window && running;
+    let recovered = s.pipeline.error == Some("worker-recovered-use-next-frame");
+    let failed = s.pipeline.error.is_some()
+        && !waiting_window
+        && !recovered
+        && running
+        && matches!(phase, Phase::Loading | Phase::InProgress);
     let partial = s.pipeline.recent.as_ref().is_some_and(|slots| {
         slots
             .iter()
@@ -187,6 +192,11 @@ pub fn present(s: &Status, offline: bool) -> View {
         v.capture_hint = "客户端连接成功不代表画面已获取";
         v.capture_tone = 2;
     }
+    if active && recovered {
+        v.ocr = "兼容识别已就绪";
+        v.ocr_hint = "等待选择画面后继续识别";
+        v.ocr_tone = 0;
+    }
     if failed {
         v.health = 3;
         v.title = "识别异常 · 等待恢复";
@@ -258,6 +268,24 @@ fn connection_error(error: Error) -> (&'static str, &'static str, &'static str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_and_old_match_errors_do_not_override_current_state() {
+        let mut s = Status::default();
+        s.mode = 1;
+        s.connection = Some(State::Connected(Phase::InProgress));
+        s.pipeline.error = Some("worker-recovered-use-next-frame");
+        s.pipeline.schedule = Some((fuze_runtime::gate::Mode::Saving, 8000, Some(8)));
+        let v = present(&s, false);
+        assert_ne!(v.health, 3);
+        assert!(!v.busy);
+        assert_eq!(v.ocr, "兼容识别已就绪");
+        s.pipeline.error = Some("worker-not-ready");
+        assert_eq!(present(&s, false).health, 3);
+        s.connection = Some(State::Connected(Phase::ClientReady));
+        assert_eq!(present(&s, false).title, "已连接 · 等待对局");
+        s.connection = Some(State::Retry(Error::Unauthorized));
+        assert_eq!(present(&s, false).title, present(&s, false).connection);
+    }
     #[test]
     fn busy_motion_follows_work_not_idle_or_pause() {
         let mut s = Status::default();

@@ -27,7 +27,7 @@ export function inspectUpload(name, buffer) {
     const toys = new Set(['manual-lock-token', 'manual-log-token', 'private-lcu-token', 'private-token',
       'private-entitlements-token', 'lockfile-token', 'log-token', 'url-token', 'stale-private-token',
       'first-token', 'second-token', 'status-token', 'test-token-123', 'PRIVATE_TOKEN_AND_IDENTITY_MUST_NOT_ESCAPE'])
-    if ((file.startsWith('tests/unit/') || file.startsWith('legacy/electron/tests/unit/'))) {
+    if (file.startsWith('tests/unit/')) {
       if (rule === 'literal-credential' && toys.has(match[1])) continue
       if (rule === 'credential-url') {
         try { const url = new URL(match[0]); if (['127.0.0.1', 'localhost'].includes(url.hostname) && toys.has(url.password)) continue } catch { /* Report unparseable credentials. */ }
@@ -45,7 +45,7 @@ function git(args, input) {
 }
 export async function checkUploads(args = []) {
   let findings = [], checked = 0
-  if (args.includes('--packaged')) throw new Error('Electron package inspection is archived under legacy/electron/scripts')
+  if (args.includes('--packaged')) throw new Error('--packaged is unsupported; use the Rust packaging checks')
   {
     const files = git(['ls-files', '--stage', '-z']).toString('utf8').split('\0').filter(Boolean).map(line => {
       const [, mode, id, name] = /^(\d+) ([a-f0-9]+) \d\t([\s\S]+)$/.exec(line) || []

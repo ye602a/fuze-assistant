@@ -6,13 +6,12 @@
 
 ## 当前代码与发布边界
 
-当前正式发布为 v0.7.0，下一小版本源码为 `rust/app-version.txt` 中的 **0.7.1**，尚未打包发布。v0.6.3 Electron 源码已归档，历史发布继续保留。应用版本不使用根目录 `package.json` 的工具包版本；普通 PR 不自动发布安装包。
+当前应用版本以 `rust/app-version.txt` 为准，已发布版本以 Releases 为准。Electron 源码已从当前分支移除，历史源码可通过 `v0.6.3` 标签查阅，历史发布继续保留。应用版本不使用根目录 `package.json` 的工具包版本；普通 PR 不自动发布安装包。
 
 | 目录 | 用途 |
 | --- | --- |
 | `rust/crates/` | LCU、截图、OCR、数据、调度与宿主服务 |
 | `rust/ui-lab/` | 当前 Slint 主界面及 Direct2D / DirectWrite 三卡浮窗；目录名沿用原型阶段 |
-| `legacy/electron/` | 归档的 Electron / Vue v0.6.3 源码、专属测试与构建配置 |
 | `scripts/`、`tests/` | 数据准备、隔离验证、发布与维护脚本 |
 | `docs/development/rust/`、`rust/ui-lab/evidence/` | 迁移设计、阶段证据与历史检查记录 |
 
@@ -21,7 +20,7 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 数据准备使用 `node scripts/prepare-rust-data.mjs`，`npm run prepare:client-data` 指向同一入口。
 先构建 `fuze-rust-host.exe`；脚本从 `rust/target/release` 或 `FUZE_RUST_BIN_DIR` 查找该工具，
 以 `--prepare-data` 写入仓库的 `resources/client-data`，不启动桌面或连接游戏。
-旧 JS 下载器归入 `legacy/electron/scripts/`，不再与 Rust 下载器并行维护。
+旧 Electron 专属 JS 下载器已移除。
 
 公开数据读取、程序更新和对局上传的地址及范围见[数据接口说明](../client-api-strategy.md)。
 对局贡献模拟仍在独立的 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127)，不包含在这次 0.7.1 数据更新改动中。

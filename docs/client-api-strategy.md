@@ -28,9 +28,9 @@
 ## 保留与清理
 
 - 保留公开数据接口、现有缓存格式、程序更新清单及旧设置迁移。
-- 旧 JS 数据下载器移入 `legacy/electron/scripts/`，复用归档内的路径校验模块；删除根目录的重复校验副本。
+- 移除旧 Electron 专属 JS 数据下载器及其重复校验逻辑。
 - 根目录 `npm run prepare:client-data` 统一调用 Rust 数据准备脚本。
-- [旧 Electron 接口说明](../legacy/electron/docs/client-api-strategy.md)仅供追溯，不作为当前 Rust 接入指南。
+- [旧 Electron 接口说明](https://github.com/ye602a/fuze-assistant/blob/6970a60f63306a27a20930c8605a0f5c8405fee4/legacy/electron/docs/client-api-strategy.md)仅供追溯，不作为当前 Rust 接入指南。
 
 站方另有带 Key 的 `/api/v1/zh-CN/*` 开发者读取接口。本次不接入、不分发 Key、不添加代理服务；它不授予对局上传权限。
 站方将客户端分发与第三方开发者 API 分开说明，公开接口能匿名读取不等于对未来可用性或第三方使用范围的承诺。来源：[站方接口分发说明](https://github.com/valkia/aramgg_client/blob/master/docs/client-api-strategy.md)。

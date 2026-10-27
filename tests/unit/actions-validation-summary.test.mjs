@@ -38,7 +38,7 @@ test('milestone build records runtime evidence before bundling without enabling 
 
 test('summary never includes arbitrary output, account data or error text', () => {
   const privateText = 'private-fixture-do-not-print'
-  const summary = renderSummary('electron', privateText, {
+  const summary = renderSummary('rust', privateText, {
     secrets: { outcome: 'success', outputs: { token: privateText } },
     desktop: { outcome: privateText },
     [privateText]: { outcome: 'success' },
@@ -46,7 +46,7 @@ test('summary never includes arbitrary output, account data or error text', () =
   })
   assert.ok(!summary.includes(privateText))
   assert.match(summary, /按需测试包 \| 已跳过/)
-  assert.match(summary, /安装包窗口验证 \| 未运行或未知/)
+  assert.match(summary, /原生桌面交互 \| 未运行或未知/)
   assert.deepEqual(parseSteps('invalid'), {})
   assert.deepEqual(parseSteps('x'.repeat(262145)), {})
   assert.doesNotThrow(() => renderSummary('rust', 'cancelled', null))

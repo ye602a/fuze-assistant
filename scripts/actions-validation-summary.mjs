@@ -9,13 +9,7 @@ const checks = {
     ['fallback', 'CPU 对照与回退'], ['contracts', '工作流与数据契约'], ['frontend', '阶段验收：构建与依赖记录'], ['package', '阶段验收：打包、更新与安装回滚'],
     ['desktop', '原生桌面交互'], ['upload_scan', '上传内容隐私检查'],
   ],
-  electron: [
-    ['secrets', '源码隐私检查'], ['lint', '代码规范'], ['types', '类型检查'],
-    ['tests', '单元测试'], ['build', '应用编译'], ['contracts', '工作流契约'], ['ocr', 'OCR 回归'], ['stages', '阶段统计缓存'],
-    ['signals', '阶段信号隐私与传输'], ['differential', '差分更新回归'],
-    ['download', '私有频道下载'], ['package', 'Windows 安装包构建'],
-    ['upload_scan', '安装包隐私检查'], ['desktop', '安装包窗口验证'],
-  ],
+
 }
 const delivery = [
   ['upload_preview', '按需测试包'], ['upload_update', '按需更新包'],
@@ -29,7 +23,7 @@ export function renderSummary(kind, status, steps = {}) {
   if (!Object.hasOwn(checks, kind)) throw new Error('Unsupported workflow kind')
   if (!steps || typeof steps !== 'object' || Array.isArray(steps)) steps = {}
   const rows = (items) => items.map(([id, label]) => `| ${label} | ${state(steps[id]?.outcome)} |`).join('\n')
-  return `## FUZE ${kind === 'rust' ? 'Rust' : 'Electron'} 验证结果\n\n` +
+  return `## FUZE Rust 验证结果\n\n` +
     `作业状态（生成摘要前）：${state(status)}。\n\n` +
     `| 验证项目 | 结果 |\n| --- | --- |\n${rows(checks[kind])}\n\n` +
     `| 可选交付 | 结果 |\n| --- | --- |\n${rows(delivery.filter(([id]) => Object.hasOwn(steps, id)))}\n\n` +
