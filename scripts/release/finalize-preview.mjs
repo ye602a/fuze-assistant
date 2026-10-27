@@ -1,0 +1,16 @@
+import {readFile,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+const root=process.cwd(),require=createRequire(path.join(root,'package.json')),AdmZip=require('adm-zip');
+const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{encoding:'utf8'}).trim();
+if(!process.env.SOURCE_SHA?.startsWith(revision))throw Error('Source identity mismatch');
+const base=path.join(root,'rust/artifacts/preview'),name=`fuze-rust-preview-${revision}.zip`,dir=path.join(base,name.slice(0,-4));
+const zip=new AdmZip(path.join(base,name));
+const crt=JSON.parse(await readFile(path.join(dir,'vc-runtime-files.json'),'utf8'));
+for(const file of [...Object.keys(crt),'vc-runtime-files.json'])zip.addFile(file,await readFile(path.join(dir,file)));
+zip.writeZip(path.join(base,name));
+const sha=createHash('sha256').update(await readFile(path.join(base,name))).digest('hex');
+await writeFile(path.join(base,name+'.sha256'),`${sha}  ${name}\n`);
+console.log(JSON.stringify({revision,zipSha256:sha,appLocalRuntime:Object.keys(crt)}));

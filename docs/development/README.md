@@ -23,7 +23,7 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 旧 Electron 专属 JS 下载器已移除。
 
 公开数据读取、程序更新和对局上传的地址及范围见[数据接口说明](../client-api-strategy.md)。
-对局贡献模拟仍在独立的 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127)，不包含在这次 0.7.1 数据更新改动中。
+对局贡献模拟 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127) 已关闭，研究分支保留，当前正式程序未接入对局上传。
 
 ## 验证与发布
 
@@ -47,3 +47,11 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 历史原型、计划和验收文档保留供追溯，不应把其中“下一步”“未打包”或“私有仓库”视为当前发布状态。最新下载状态以 Releases 为准，当前行为以源码和对应提交的检查结果为准。
 
 不得提交真实日志、账号信息、个人截图、令牌或本机配置。公开更新无需令牌；自动创建诊断 Issue 仍需用户明确授权，不得内置共享凭据。
+
+## 发布与编译缓存
+
+新编号版本使用 Actions 的 `Publish numbered Rust release`，仅从 master 手动运行。
+更新 `rust/app-version.txt`、Setup 版本和 `docs/RELEASE_NOTES.md` 后经 PR 合并；已发布的版本在编译前终止，不重做同版本 Setup。
+发布复用 master 范围的 Rust 缓存，不再每次建立临时打包分支。发布脚本位于 `scripts/release/`，在线更新仍使用现有公开清单和包格式。
+只改 Slint 界面时由 UI 流水线验证，不再触发不含 UI 的核心 workspace 全量编译；服务源码改动仍触发两条相关流水线。
+本地继续复用显式指定的共享 target 目录，不为清理空间删除正在使用的编译缓存。
