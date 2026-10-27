@@ -23,7 +23,7 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 旧 Electron 专属 JS 下载器已移除。
 
 公开数据读取、程序更新和对局上传的地址及范围见[数据接口说明](../client-api-strategy.md)。
-对局贡献模拟仍在独立的 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127)，不包含在这次 0.7.1 数据更新改动中。
+对局贡献模拟 [PR #127](https://github.com/ye602a/fuze-assistant/pull/127) 已关闭，研究分支保留，当前正式程序未接入对局上传。
 
 ## 验证与发布
 

@@ -1,3 +1,4 @@
+import {verifyBinaries} from './verify-binaries.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
@@ -19,7 +20,7 @@ const name=`fuze-rust-preview-${revision}.zip`,zipBytes=await readFile(path.join
 if(build.revision!==revision||build.version!==version||build.uiFrontend!=='slint')throw Error('Wrong ZIP identity');
 const receipt=JSON.parse(await readFile('rust/target/release/fuze-build-evidence.json','utf8'));
 if(!receipt.completed||!receipt.sourceClean||receipt.revision!==revision)throw Error('Missing clean build receipt');
-for(const [file,digest]of Object.entries(receipt.binaries))if(hash(zip.readFile(file))!==digest)throw Error(`Build binary mismatch: ${file}`);
+verifyBinaries(zip,build,receipt.binaries);
 const crt=JSON.parse(zip.readAsText('vc-runtime-files.json'));for(const [file,digest]of Object.entries(crt))if(hash(zip.readFile(file))!==digest)throw Error('CRT mismatch');
 const manifestBytes=await readFile(path.join(directory,'rust-update.json')),manifest=JSON.parse(manifestBytes),fuz=await readFile(path.join(directory,manifest.archive)),map=await readFile(path.join(directory,manifest.archive+'.blockmap'));
 if(manifest.revision!==revision||manifest.sequence!==build.sequence||manifest.size!==fuz.length||manifest.sha512!==hash(fuz,'sha512')||manifest.blockmap_sha256!==hash(map))throw Error('Update integrity mismatch');
@@ -51,7 +52,7 @@ const body=`## FUZE v${version} 测试版
 - [下载安装包（Setup.exe）](${base+setupName})
 - [下载便携 ZIP](${base+name})
 
-Setup 未签名，所需 VC++ DLL 已随程序提供。可选择原目录覆盖安装；便携包请完整解压后运行 \`Start-preview.cmd\`。
+Setup 未签名，所需 VC++ DLL 已随程序提供。可选择原目录覆盖安装；便携包请完整解压后运行 \`FUZE.exe\`。
 
 ### 本次更新
 

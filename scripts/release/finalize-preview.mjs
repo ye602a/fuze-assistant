@@ -10,9 +10,6 @@ const base=path.join(root,'rust/artifacts/preview'),name=`fuze-rust-preview-${re
 const zip=new AdmZip(path.join(base,name));
 const crt=JSON.parse(await readFile(path.join(dir,'vc-runtime-files.json'),'utf8'));
 for(const file of [...Object.keys(crt),'vc-runtime-files.json'])zip.addFile(file,await readFile(path.join(dir,file)));
-let readme=await readFile(path.join(dir,'README.txt'),'utf8');
-readme=readme.replace('缺少依赖时显示微软下载地址；仅明确确认后才运行已验证的运行库安装程序，不自动重启。','本包已随附当前程序所需的最小 VC++ DLL，正常解压即可使用，无需另装运行库。').replace('需要重启时请自行安排，之后再次运行原始 ZIP 中的 Install-local.cmd。','Setup.exe 只解压程序并创建快捷方式；安装完成不会自动启动。').replace('当前载荷需要 Windows x64 和 Visual C++ x64 运行库，不会自动安装系统依赖。','当前载荷需要 Windows x64；所需 VC++ DLL 已放在程序目录。');
-await writeFile(path.join(dir,'README.txt'),readme);zip.addFile('README.txt',Buffer.from(readme));
 zip.writeZip(path.join(base,name));
 const sha=createHash('sha256').update(await readFile(path.join(base,name))).digest('hex');
 await writeFile(path.join(base,name+'.sha256'),`${sha}  ${name}\n`);
