@@ -1,5 +1,9 @@
 # FUZE 当前开发状态与新会话交接
 
+## 2026-10-27：移除已停用的 Electron 归档
+
+当前分支移除 Electron 源码、专属测试、锁文件和构建配置。历史源码仍在 Git 历史与 v0.6.3 标签中，旧 Release 保留。Rust 使用的共享资源、工具脚本及旧设置迁移逻辑不变。下方归档记录描述当时状态，不代表归档目录仍存在。
+
 ## 0.7.5 正式文件布局与软件更新进度
 
 玩家 ZIP / Setup 主入口为 FUZE.exe；源码 crate 和构建回执中的 fuze-ui-lab 名称保留。在线 .fuz 使用旧客户端允许的 fuze-ui-lab.exe 传输名，新更新器启动新版前按 build.json 的 desktopExecutable 标记重命名为 FUZE.exe；旧 --launch/--finish-update 入口保持兼容。preview.json 是仍在使用的运行配置，不是废弃测试产物。

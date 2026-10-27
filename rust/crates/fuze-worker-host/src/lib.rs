@@ -281,18 +281,13 @@ impl Worker {
                 .receive
                 .recv_timeout(timeout)
                 .map_err(worker_receive_error)??;
+            validate_worker_reply(&reply, id)?;
             match &reply {
                 Reply::Result {
-                    id: received,
-                    ocr_ms,
                     backend,
                     fallback_count,
                     ..
-                } if *received == id
-                    && ocr_ms.is_finite()
-                    && *ocr_ms >= 0.
-                    && *fallback_count <= 1 =>
-                {
+                } => {
                     self.backend = *backend;
                     self.fallback_count = *fallback_count;
                     Ok(reply)
@@ -358,6 +353,74 @@ impl Worker {
         }
     }
 }
+fn validate_worker_reply(reply: &Reply, expected: fuze_contract::wire::Identity) -> Result<()> {
+    match reply {
+        Reply::Result { id, .. } | Reply::Failed { id } if *id != expected => {
+            Err("worker-result-id-mismatch")
+        }
+        Reply::Failed { .. } => Err("worker-inference-failed"),
+        Reply::Result {
+            ocr_ms,
+            fallback_count,
+            ..
+        } if !ocr_ms.is_finite() || *ocr_ms < 0. || *fallback_count > 1 => {
+            Err("worker-invalid-result-fields")
+        }
+        Reply::Result { .. } => Ok(()),
+        _ => Err("worker-unexpected-reply"),
+    }
+}
+
+#[cfg(test)]
+mod reply_diagnostic_tests {
+    use super::*;
+    use fuze_contract::wire::Identity;
+    #[test]
+    fn worker_failures_keep_their_actual_category() {
+        let id = Identity {
+            generation: 1,
+            sequence: 2,
+        };
+        assert_eq!(
+            validate_worker_reply(&Reply::Failed { id }, id),
+            Err("worker-inference-failed")
+        );
+        let other = Identity {
+            generation: 1,
+            sequence: 3,
+        };
+        assert_eq!(
+            validate_worker_reply(&Reply::Failed { id: other }, id),
+            Err("worker-result-id-mismatch")
+        );
+        let result = |ocr_ms, fallback_count| Reply::Result {
+            id,
+            slots: std::array::from_fn(|_| fuze_contract::Slot::Unreadable),
+            title_kind: Default::default(),
+            title_reads: Default::default(),
+            ocr_ms,
+            backend: ActiveBackend::Cpu,
+            fallback_count,
+        };
+        assert_eq!(validate_worker_reply(&result(1.0, 0), id), Ok(()));
+        for reply in [result(f64::NAN, 0), result(-1.0, 0), result(1.0, 2)] {
+            assert_eq!(
+                validate_worker_reply(&reply, id),
+                Err("worker-invalid-result-fields")
+            );
+        }
+        let reply = Reply::Ready {
+            schema: 1,
+            backend: fuze_contract::wire::ActiveBackend::Cpu,
+            fallback_count: 0,
+        };
+        assert_eq!(
+            validate_worker_reply(&reply, id),
+            Err("worker-unexpected-reply")
+        );
+    }
+}
+
 impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.stop();

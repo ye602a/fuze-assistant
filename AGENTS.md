@@ -9,7 +9,6 @@ FUZE is a Rust application. Read `docs/CODEX_HANDOFF.md` for release identity an
 - `scripts/prepare-rust-data.mjs`: build-time data preparation through the Rust downloader.
 - `public/`, `resources/`, `tests/fixtures/`: assets and fixtures still used by Rust.
 - `tests/unit/`: focused native-tooling tests (`npm test`).
-- `legacy/electron/`: archived v0.6.3 source, tests and build configuration.
 
 Root `package.json` describes development tools, not the application version or runtime.
 Use `npm ci --ignore-scripts` for those tools. Rust builds use the existing Cargo
@@ -20,5 +19,5 @@ identity, user data and release channels compatible. Do not infer actual augment
 claim stages from levels or disappearance. Do not access the game or personal logs
 without the user's authorization. Never commit credentials or private runtime data.
 
-The archived Electron guide applies only to that historical code. Reproducing an
-old release uses its original tag, not the current native packaging pipeline.
+Historical Electron sources remain in Git history and the v0.6.3 tag. Reproduce
+an old release in a separate checkout of its original tag.

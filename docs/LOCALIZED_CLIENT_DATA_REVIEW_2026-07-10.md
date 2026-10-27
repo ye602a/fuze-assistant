@@ -96,7 +96,7 @@
 
 **证据**
 
-- [`scripts/fetch-client-data.mjs`](../legacy/electron/scripts/fetch-client-data.mjs#L240) 只请求一次 `/api/client/v1/config`。
+- [`scripts/fetch-client-data.mjs`](https://github.com/ye602a/fuze-assistant/blob/6970a60f63306a27a20930c8605a0f5c8405fee4/legacy/electron/scripts/fetch-client-data.mjs#L240) 只请求一次 `/api/client/v1/config`。
 - 数据仍写入 `versions/<dataVersion>/`，指针仍只有 `current.json`。
 - [`src/main/data-loader.ts`](../src/main/data-loader.ts#L420) 对非默认语言只读取 `versions/<locale>/<dataVersion>/`。
 - `getCurrentDataFileNames()` 对英文和繁中只读取 `current.en-US.json`、`current.zh-TW.json`。
