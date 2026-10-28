@@ -198,6 +198,13 @@ fn inspect(path: &Path) -> Option<Version> {
     file_version(path)
 }
 fn check_with(directory: &Path, inventory: &dyn Fn(&str) -> Option<Version>) -> Result<bool> {
+    inspect_with(directory, inventory, true)
+}
+fn inspect_with(
+    directory: &Path,
+    inventory: &dyn Fn(&str) -> Option<Version>,
+    verify_hashes: bool,
+) -> Result<bool> {
     let meta = fs::symlink_metadata(directory.join("build.json"))
         .map_err(|_| "runtime-contract-invalid")?;
     if !meta.is_file() || meta.file_attributes() & 0x400 != 0 {
@@ -229,6 +236,10 @@ fn check_with(directory: &Path, inventory: &dyn Fn(&str) -> Option<Version>) -> 
         {
             return Err("runtime-artifact-changed");
         }
+        if !verify_hashes {
+            continue;
+        }
+        // Installation validates complete bytes; ordinary launch only inspects PE headers.
         // Reuse the updater's 64 KiB buffer rather than allocating an entire native DLL.
         // One extra byte detects a file growing past the limit after the metadata check.
         let mut reader = fs::File::open(&path)
@@ -254,6 +265,16 @@ pub fn check(directory: &Path) -> Result<bool> {
     check_with(directory, &|name| {
         inspect(&runtime_path(directory, &system, name))
     })
+}
+/// Installed files were verified at installation/update. Avoid rereading all EXEs/DLLs
+/// on every launch; retain file structure and loader dependency checks.
+pub fn check_launch(directory: &Path) -> Result<bool> {
+    let system = system_directory()?;
+    inspect_with(
+        directory,
+        &|name| inspect(&runtime_path(directory, &system, name)),
+        false,
+    )
 }
 fn runtime_path(directory: &Path, system: &Path, name: &str) -> PathBuf {
     let local = directory.join(name);
@@ -414,6 +435,35 @@ mod tests {
         // Production entry must fail here rather than executing any of the inert fixtures.
         assert_eq!(
             crate::managed_install::check_bundle(&root),
+            Err("runtime-artifact-changed")
+        );
+    }
+    #[test]
+    fn launch_checks_headers_and_dependencies_without_rehashing_installed_payloads() {
+        let (root, build) = fixture();
+        write(&root, &build);
+        let valid = |_: &str| Some([14, 51, 36247, 0]);
+        assert_eq!(inspect_with(&root, &valid, false), Ok(true));
+        assert_eq!(
+            inspect_with(&root, &|_| None, false),
+            Err("runtime-required")
+        );
+        // Change only inert payload bytes: startup checks the header, installation
+        // still detects changed bytes. Nothing here is executable or launched.
+        let path = root.join("fuze-ui-lab.exe");
+        let mut bytes = fs::read(&path).unwrap();
+        bytes[255] = 1;
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(inspect_with(&root, &valid, false), Ok(true));
+        assert_eq!(check_with(&root, &valid), Err("runtime-artifact-changed"));
+        fs::write(&path, b"invalid header").unwrap();
+        assert_eq!(
+            inspect_with(&root, &valid, false),
+            Err("runtime-artifact-changed")
+        );
+        fs::remove_file(&path).unwrap();
+        assert_eq!(
+            inspect_with(&root, &valid, false),
             Err("runtime-artifact-changed")
         );
     }
