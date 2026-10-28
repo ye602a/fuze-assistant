@@ -456,11 +456,7 @@ fn apply(ui: &ChampionWindow, p: &Presentation) {
                 .map(|a| DetailRow {
                     title: a.name.clone().into(),
                     icon_url: a.icon.clone().into(),
-                    description: if a.description.is_empty() {
-                        "数据源暂未提供说明".into()
-                    } else {
-                        a.description.clone().into()
-                    },
+                    description: a.description_with_evidence().into(),
                     win: rate(a.win),
                     pick: rate(a.pick),
                     rarity: a.rarity.map(i32::from).unwrap_or(-1),

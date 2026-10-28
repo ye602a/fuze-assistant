@@ -24,6 +24,7 @@ pub(super) fn prepare() -> Result<()> {
         stats.insert(
             id,
             fuze_data::recommendations::Recommendation {
+                evidence: Default::default(),
                 win_rate: rate("win"),
                 pick_rate: rate("pick"),
                 score: rate("score"),

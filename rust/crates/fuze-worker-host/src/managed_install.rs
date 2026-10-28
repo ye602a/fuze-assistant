@@ -631,7 +631,7 @@ pub fn desktop_program(directory: &Path) -> Result<PathBuf> {
 }
 fn start_mode(directory: &Path, smoke: bool) -> Result<()> {
     supply_runtime(directory)?;
-    crate::runtime_prerequisites::check(directory)?;
+    crate::runtime_prerequisites::check_launch(directory)?;
     let program = desktop_program(directory)?;
     // Slint can perform one bounded graphics recovery before committing readiness.
     let readiness_seconds = if program
