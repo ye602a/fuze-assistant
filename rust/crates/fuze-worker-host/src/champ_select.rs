@@ -135,9 +135,14 @@ impl Catalog {
             team: selection.team.into_iter().map(hero).collect(),
             local_slot: selection.local_slot,
             bench,
-            choices: selection
-                .choices
-                .map(|ids| ids.into_iter().filter(|id| *id > 0).map(hero).collect()),
+            choices: selection.choices.map(|mut ids| {
+                // The client places the third (lucky) card in the center and moves
+                // the first two left/right. Two-card choices retain endpoint order.
+                if ids[2] != 0 {
+                    ids.swap(1, 2);
+                }
+                ids.into_iter().filter(|id| *id > 0).map(hero).collect()
+            }),
             version: self.version.clone(),
         }
     }
@@ -1042,15 +1047,46 @@ mod tests {
         let choices = v.choices.as_ref().unwrap();
         assert_eq!(
             choices.iter().map(|h| h.id).collect::<Vec<_>>(),
-            vec![3, 2, 999]
+            vec![3, 999, 2]
         );
-        assert_eq!(choices[2].win, None);
-        assert_eq!(choices[2].name, "英雄 999");
+        assert_eq!(choices[1].win, None);
+        assert_eq!(choices[1].name, "英雄 999");
         assert_eq!(v.team[0].id, 1);
         assert_eq!(
             v.bench.iter().map(|h| h.id).collect::<Vec<_>>(),
             vec![2, 1, 3]
         );
+    }
+
+    #[test]
+    fn choices_follow_client_card_positions_without_sorting_or_stale_cards() {
+        let c = Catalog::parse(&serde_json::json!({"data":[]}), "test".into()).unwrap();
+        for (input, expected) in [
+            (Some([893, 103, 875]), vec![893, 875, 103]),
+            (Some([875, 893, 103]), vec![875, 103, 893]),
+            (Some([103, 875, 893]), vec![103, 893, 875]),
+            (Some([893, 103, 0]), vec![893, 103]),
+            (Some([103, 893, 0]), vec![103, 893]),
+            (Some([0; 3]), vec![]),
+            (None, vec![]),
+        ] {
+            let view = c.view(Selection {
+                team: [0; 5],
+                local_slot: Some(0),
+                bench: [0; 20],
+                count: 0,
+                choices: input,
+            });
+            assert_eq!(view.choices.is_some(), input.is_some());
+            assert_eq!(
+                view.choices
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|h| h.id)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 }
 

@@ -8,6 +8,11 @@
 本次仅调整展示，不引入 Wilson 排序或新的数据源，也不改变实际领取轮次判断。
 必要验证为数据层回归及 WIC 离屏三卡渲染，不启动客户端或访问游戏；版本号保持不变，未打包。
 
+## 2026-10-27：选人卡片按画面位置显示（源码，未发布）
+
+二选一保留接口顺序；三选一按接口第 1、3、2 项展示。客户端把第 3 项标为 lucky card 并绝对定位在中央，前两项分别向左、右移动。只在 `Catalog::view` 转换显示顺序，原始 LCU 数据及公共候选池胜率排序不变。
+依据为 CommunityDragon 镜像的 Riot 16.21 [选人脚本](https://raw.communitydragon.org/16.21/plugins/rcp-fe-lol-champ-select/global/default/rcp-fe-lol-champ-select.js)（`cardsDisplayDetails`）和[样式](https://raw.communitydragon.org/16.21/plugins/rcp-fe-lol-champ-select/global/default/rcp-fe-lol-champ-select.css)（`lucky-card`、`cardTranslateLeft/Right`）。二/三选一、未知英雄占位、空数据和选择结束的回归通过；未操作游戏，实机位置仍待复测。
+
 ## 2026-10-27：移除已停用的 Electron 归档
 
 当前分支移除 Electron 源码、专属测试、锁文件和构建配置。历史源码仍在 Git 历史与 v0.6.3 标签中，旧 Release 保留。Rust 使用的共享资源、工具脚本及旧设置迁移逻辑不变。下方归档记录描述当时状态，不代表归档目录仍存在。
