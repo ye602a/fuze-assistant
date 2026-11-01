@@ -167,7 +167,7 @@ impl Worker {
                             .then(|| message(e).to_owned()),
                             ..Default::default()
                         });
-                        reply.read_only = matches!(action, Action::Check(_));
+                        reply.read_only = matches!(action, Action::Scan | Action::Check(_));
                         description = reply.description.take();
                         s.details_pending = description.is_some();
                         s.reply = Some(reply);
@@ -350,9 +350,6 @@ pub fn attach(
             if name == "clean" && !state.get_can_clean() {
                 return;
             }
-            if name == "install" && !state.get_installable() {
-                return;
-            }
             state.set_confirmation(name);
             return;
         }
@@ -366,7 +363,7 @@ pub fn attach(
         if operation.is_empty() {
             return;
         }
-        let read_only = operation == "check" || operation == "install";
+        let read_only = matches!(operation.as_str(), "scan" | "check" | "install");
         if !read_only {
             if let Err(e) = engine.begin_maintenance() {
                 state.set_notice(message(e).into());
@@ -427,7 +424,7 @@ pub fn attach(
         if !read_only {
             ui.global::<HostState>().set_busy(true);
         }
-        if read_only {
+        if matches!(action, Action::Check(_)) {
             state.set_update_status("正在检查更新…".into());
         }
         state.set_notice(

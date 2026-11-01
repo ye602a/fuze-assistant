@@ -23,7 +23,7 @@ export component MaintenancePage inherits VerticalLayout {
             for row in MaintenanceState.storage-rows: Label { height: 30px; text: row; font-size: 12px; }
         }
         HorizontalLayout { x: 23px; y: parent.height - 55px; width: 280px; height: 36px; spacing: 10px;
-            Action { label: "扫描本地占用"; enabled: MaintenanceState.attached && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("scan"); } }
+            Action { label: "扫描本地占用"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("scan"); } }
             Action { label: "清理可回收文件"; enabled: MaintenanceState.can-clean && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("clean"); } }
         }
     }
