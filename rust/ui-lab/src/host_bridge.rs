@@ -303,12 +303,19 @@ pub fn attach_recovered(
     offline: bool,
     start_paused: bool,
 ) -> Result<Binding, &'static str> {
+    let cache = if offline {
+        None
+    } else {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|p| std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"))
+    };
+    let roots = fuze_worker_host::host_config::data_roots(&config.roots, cache.as_deref());
     let popup = Rc::new(RefCell::new(crate::game_windows::Manager::new(
-        config.roots.clone(),
+        roots.clone(),
         offline,
         !offline,
     )));
-    let unbound = crate::unbound_bridge::attach(ui, config.roots.clone());
+    let unbound = crate::unbound_bridge::attach(ui, roots);
     let session = Rc::new(Session::start_with_recovery(config, offline, start_paused)?);
     let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
     let feedback =

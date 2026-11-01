@@ -4,6 +4,34 @@ use fuze_data::{Locale, Root, Source};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[test]
+fn downloaded_overview_and_details_share_the_same_roots() {
+    let bundled = Fixture::new();
+    let cache = Fixture::new();
+    bundled.dataset("zh-CN", "16.21.3", true);
+    cache.dataset("zh-CN", "16.21.5", true);
+    let config = bundled.config();
+    let roots = crate::host_config::data_roots(&config.roots, Some(&cache.0));
+    let overview = crate::champ_select::Catalog::load(&roots, Locale::ZhCn).unwrap();
+    assert!(overview.identity().contains("16.21.5"));
+    // Reproduce the production failure: the old UI saw only bundled 16.21.3.
+    assert!(matches!(
+        fuze_data::detail_cache::Cache::prepare(&config.roots, overview.identity()),
+        Err("data-no-complete-local-version")
+    ));
+    let mut details = fuze_data::detail_cache::Cache::prepare(&roots, overview.identity()).unwrap();
+    assert_eq!(details.get(1).unwrap().version, overview.identity());
+    assert_eq!(
+        crate::host_config::data_roots(&roots, Some(&cache.0)).len(),
+        2
+    );
+    // Offline callers keep only their explicitly supplied fixture roots.
+    let offline = crate::host_config::data_roots(&config.roots, None);
+    assert!(crate::champ_select::Catalog::load(&offline, Locale::ZhCn)
+        .unwrap()
+        .identity()
+        .contains("16.21.3"));
+}
 pub(crate) struct Fixture(pub PathBuf);
 impl Fixture {
     pub fn new() -> Self {

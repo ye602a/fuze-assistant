@@ -186,12 +186,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
     let cache = std::env::var_os("LOCALAPPDATA")
         .map(|p| std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"));
     if !fixture {
-        if let Some(path) = cache.as_ref() {
-            config.roots.push(fuze_data::Root {
-                path: path.clone(),
-                source: fuze_data::Source::Cache,
-            });
-        }
+        config.roots = crate::host_config::data_roots(&config.roots, cache.as_deref());
     }
     let mut preferences = crate::preferences::Preferences::default();
     let mut preferences_valid = true;
@@ -2778,15 +2773,13 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         import_selection: Mutex::new(None),
         export: Mutex::new(None),
     });
-    let mut champion_roots = config.roots.clone();
-    if !smoke {
-        if let Some(p) = std::env::var_os("LOCALAPPDATA") {
-            champion_roots.push(fuze_data::Root {
-                path: std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"),
-                source: fuze_data::Source::Cache,
-            });
-        }
-    }
+    let cache = if smoke {
+        None
+    } else {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|p| std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"))
+    };
+    let champion_roots = crate::host_config::data_roots(&config.roots, cache.as_deref());
     let worker_shared = shared.clone();
     let worker = thread::Builder::new()
         .name("fuze-desktop-control".into())
