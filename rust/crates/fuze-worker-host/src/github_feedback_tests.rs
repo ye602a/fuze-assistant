@@ -1,6 +1,30 @@
 use super::*;
 use crate::desktop::Status;
 
+#[test]
+fn recovered_inference_cause_reaches_final_issue_payload() {
+    use crate::runtime_log::WorkerFailure;
+    let mut tracker = Tracker::with_revision(43, Some(revision("111111111111")));
+    tracker.observe(state(Phase::Playing), 0);
+    let mut fault = state(Phase::Playing);
+    fault.ocr = Ocr::Failed;
+    fault.issue = Issue::Ocr;
+    fault.worker_failure = Some(WorkerFailure::RecoveredUseNextFrame);
+    fault.worker_cause = Some(WorkerFailure::InferenceExecution);
+    tracker.observe(fault, 10);
+    tracker.observe(state(Phase::Playing), 20);
+    let report = tracker.observe(state(Phase::PostGame), 30).unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&report.payload().unwrap()).unwrap();
+    assert!(payload["body"]
+        .as_str()
+        .unwrap()
+        .contains("inference-execution"));
+    assert!(payload["body"]
+        .as_str()
+        .unwrap()
+        .contains("recovered-use-next-frame"));
+}
+
 fn revision(value: &str) -> crate::build_identity::Revision {
     value.to_owned().try_into().unwrap()
 }

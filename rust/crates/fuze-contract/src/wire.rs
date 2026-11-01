@@ -111,7 +111,31 @@ pub enum Reply {
     },
     Failed {
         id: Identity,
+        #[serde(default)]
+        cause: InferenceFailure,
     },
+}
+/// Fixed categories only; never transport native error strings or recognized text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InferenceFailure {
+    #[default]
+    Unknown,
+    Input,
+    Execution,
+    OutputShape,
+    OutputValue,
+}
+impl InferenceFailure {
+    pub fn host_code(self) -> &'static str {
+        match self {
+            Self::Unknown => "worker-inference-failed",
+            Self::Input => "worker-inference-input",
+            Self::Execution => "worker-inference-execution",
+            Self::OutputShape => "worker-inference-output-shape",
+            Self::OutputValue => "worker-inference-output-value",
+        }
+    }
 }
 /// Evidence from the three fixed title regions; no full-screen or actual-claim assertion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]

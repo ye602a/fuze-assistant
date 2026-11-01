@@ -9,6 +9,23 @@ use serde::Serialize;
 use std::{collections::HashMap, path::Path, time::Instant};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub fn failure_category(
+    error: &(dyn std::error::Error + 'static),
+) -> fuze_contract::wire::InferenceFailure {
+    use fuze_contract::wire::InferenceFailure as F;
+    if error.downcast_ref::<ort::Error>().is_some() {
+        return F::Execution;
+    }
+    match error.to_string().as_str() {
+        "invalid-prepared-input"
+        | "title-exceeds-fixed-width"
+        | "invalid-title-buffer"
+        | "invalid-roi-buffer" => F::Input,
+        "invalid-output-shape" => F::OutputShape,
+        "invalid-output-value" => F::OutputValue,
+        _ => F::Unknown,
+    }
+}
 pub mod backend;
 mod metrics;
 pub mod reuse;
@@ -322,11 +339,14 @@ impl Recognizer {
         let padded = pad_input(input, self.fixed_width)?;
         let input = padded.as_ref().unwrap_or(input);
         let tensor =
-            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
+            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))
+                .map_err(|_| "invalid-prepared-input")?;
         let result = self.session.run(ort::inputs![tensor])?;
         let elapsed = started.elapsed().as_secs_f64() * 1000.0;
         let cpu_elapsed = metrics::cpu_ms().zip(cpu).map(|(end, start)| end - start);
-        let (shape, values) = result[0].try_extract_tensor::<f32>()?;
+        let (shape, values) = result[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|_| "invalid-output-shape")?;
         if shape.len() != 3 || shape[0] != 1 {
             return Err("invalid-output-shape".into());
         }
@@ -345,9 +365,12 @@ impl Recognizer {
         let padded = pad_input(&input, self.fixed_width)?;
         let input = padded.as_ref().unwrap_or(&input);
         let tensor =
-            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))?;
+            TensorRef::from_array_view(([1usize, 3, 48, input.width], input.data.as_slice()))
+                .map_err(|_| "invalid-prepared-input")?;
         let result = self.session.run(ort::inputs![tensor])?;
-        let (shape, values) = result[0].try_extract_tensor::<f32>()?;
+        let (shape, values) = result[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|_| "invalid-output-shape")?;
         if shape.len() != 3 || shape[0] != 1 {
             return Err("invalid-output-shape".into());
         }
@@ -436,15 +459,38 @@ impl Recognizer {
         })
     }
 }
-// Preserve glyph aspect ratio and vertical geometry. Never squeeze/crop an oversized title.
-// Auto mode can drop the GPU session and retry on CPU through the existing one-shot fallback.
+// Fit oversized titles without stretching or clipping glyphs. Input geometry is not
+// a GPU failure and must not consume the supervisor's one-shot CPU recovery.
 fn pad_input(input: &PreparedTitle, fixed: Option<usize>) -> Result<Option<PreparedTitle>> {
     if !(16..=1024).contains(&input.width) || input.data.len() != 3 * 48 * input.width {
         return Err("invalid-prepared-input".into());
     }
     let Some(width) = fixed else { return Ok(None) };
     if input.width > width {
-        return Err("title-exceeds-fixed-width".into());
+        let height = (48 * width / input.width).max(1);
+        let top = (48 - height) / 2;
+        let mut data = vec![0.; 3 * 48 * width];
+        for channel in 0..3 {
+            let plane = image::ImageBuffer::<image::Luma<f32>, _>::from_raw(
+                input.width as u32,
+                48,
+                input.data[channel * 48 * input.width..(channel + 1) * 48 * input.width]
+                    .iter()
+                    .map(|v| (v + 1.0) * 0.5)
+                    .collect::<Vec<_>>(),
+            )
+            .ok_or("invalid-prepared-input")?;
+            let resized =
+                image::imageops::resize(&plane, width as u32, height as u32, FilterType::Triangle);
+            let start = channel * 48 * width + top * width;
+            for (dst, value) in data[start..start + height * width]
+                .iter_mut()
+                .zip(resized.as_raw())
+            {
+                *dst = value * 2.0 - 1.0;
+            }
+        }
+        return Ok(Some(PreparedTitle { width, data }));
     }
     if input.width == width {
         return Ok(None);
@@ -462,6 +508,62 @@ fn pad_input(input: &PreparedTitle, fixed: Option<usize>) -> Result<Option<Prepa
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failure_categories_never_transport_error_text() {
+        use fuze_contract::wire::InferenceFailure as F;
+        for (text, expected) in [
+            ("invalid-output-shape", F::OutputShape),
+            ("invalid-output-value", F::OutputValue),
+            ("invalid-prepared-input", F::Input),
+            ("private path or OCR text", F::Unknown),
+        ] {
+            let error: Box<dyn std::error::Error> = text.into();
+            assert_eq!(failure_category(error.as_ref()), expected);
+        }
+    }
+    #[test]
+    #[ignore = "explicit isolated ONNX/DirectML check; requires local runtime and model"]
+    fn oversized_input_runs_on_real_directml_without_fallback() {
+        let dll = std::env::var("FUZE_TEST_ORT").unwrap();
+        ort::init_from(dll).commit().unwrap();
+        let dictionary = serde_json::from_slice(
+            &std::fs::read(std::env::var("FUZE_TEST_DICTIONARY").unwrap()).unwrap(),
+        )
+        .unwrap();
+        let mut engine = Recognizer::with_backend(
+            Path::new(&std::env::var("FUZE_TEST_MODEL").unwrap()),
+            dictionary,
+            HashMap::new(),
+            Backend::DirectMl,
+        )
+        .unwrap();
+        engine.warm_up().unwrap();
+        for width in [512, 513, 768, 1024, 256, 1024, 512] {
+            let input = PreparedTitle {
+                width,
+                data: vec![-1.0; 3 * 48 * width],
+            };
+            let result = engine.infer_prepared(&input).unwrap();
+            assert_eq!(result.0, None);
+            assert!(result.1.is_finite());
+        }
+    }
+    #[test]
+    fn thin_bright_band_fits_gpu_input_without_backend_failure() {
+        let mut crop = RgbImage::new(310, 103);
+        for y in 48..52 {
+            for x in (35..275).step_by(4) {
+                crop.put_pixel(x, y, image::Rgb([255, 255, 255]));
+            }
+        }
+        let input = Recognizer::prepare_crop(trim_title_padding(crop));
+        assert!(input.width > 512);
+        let fitted = pad_input(&input, Some(512)).unwrap().unwrap();
+        assert_eq!(fitted.width, 512);
+        assert_eq!(fitted.data.len(), 3 * 48 * 512);
+        assert!(fitted.data.iter().all(|v| v.is_finite()));
+        assert!(pad_input(&input, None).unwrap().is_none());
+    }
     #[test]
     fn persistent_card_edge_does_not_hide_a_short_title_row() {
         let mut crop = RgbImage::from_pixel(165, 55, image::Rgb([0, 0, 0]));
@@ -481,7 +583,7 @@ mod tests {
         assert!(title.pixels().any(|p| p[0] >= 200));
     }
     #[test]
-    fn padding_preserves_channels_and_rejects_overflow() {
+    fn padding_preserves_channels_and_fits_overflow() {
         let input = PreparedTitle {
             width: 32,
             data: (0..3 * 48 * 32).map(|v| v as f32).collect(),
@@ -496,7 +598,20 @@ mod tests {
                 .iter()
                 .all(|v| *v == 0.));
         }
-        assert!(pad_input(&input, Some(16)).is_err());
+        let normalized = PreparedTitle {
+            width: 32,
+            data: (0..3).flat_map(|c| vec![c as f32 - 1.0; 48 * 32]).collect(),
+        };
+        let fitted = pad_input(&normalized, Some(16)).unwrap().unwrap();
+        assert_eq!(fitted.data.len(), 3 * 48 * 16);
+        for channel in 0..3 {
+            let plane = &fitted.data[channel * 48 * 16..(channel + 1) * 48 * 16];
+            assert!(plane[..12 * 16].iter().all(|v| *v == 0.));
+            assert!(plane[36 * 16..].iter().all(|v| *v == 0.));
+            assert!(plane[12 * 16..36 * 16]
+                .iter()
+                .all(|v| (*v - (channel as f32 - 1.0)).abs() < 0.00001));
+        }
         assert!(pad_input(&input, None).unwrap().is_none());
     }
     #[test]
