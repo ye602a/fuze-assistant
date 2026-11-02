@@ -355,10 +355,10 @@ impl Worker {
 }
 fn validate_worker_reply(reply: &Reply, expected: fuze_contract::wire::Identity) -> Result<()> {
     match reply {
-        Reply::Result { id, .. } | Reply::Failed { id } if *id != expected => {
+        Reply::Result { id, .. } | Reply::Failed { id, .. } if *id != expected => {
             Err("worker-result-id-mismatch")
         }
-        Reply::Failed { .. } => Err("worker-inference-failed"),
+        Reply::Failed { cause, .. } => Err(cause.host_code()),
         Reply::Result {
             ocr_ms,
             fallback_count,
@@ -381,8 +381,28 @@ mod reply_diagnostic_tests {
             generation: 1,
             sequence: 2,
         };
+        use fuze_contract::wire::{read_reply, write_reply, InferenceFailure as F};
+        for cause in [F::Input, F::Execution, F::OutputShape, F::OutputValue] {
+            let mut bytes = Vec::new();
+            write_reply(&mut bytes, &Reply::Failed { id, cause }).unwrap();
+            let reply = read_reply(&mut bytes.as_slice()).unwrap();
+            assert_eq!(validate_worker_reply(&reply, id), Err(cause.host_code()));
+        }
+        let legacy: Reply =
+            serde_json::from_str(r#"{"kind":"failed","id":{"generation":1,"sequence":2}}"#)
+                .unwrap();
         assert_eq!(
-            validate_worker_reply(&Reply::Failed { id }, id),
+            validate_worker_reply(&legacy, id),
+            Err("worker-inference-failed")
+        );
+        assert_eq!(
+            validate_worker_reply(
+                &Reply::Failed {
+                    id,
+                    cause: Default::default()
+                },
+                id
+            ),
             Err("worker-inference-failed")
         );
         let other = Identity {
@@ -390,7 +410,13 @@ mod reply_diagnostic_tests {
             sequence: 3,
         };
         assert_eq!(
-            validate_worker_reply(&Reply::Failed { id: other }, id),
+            validate_worker_reply(
+                &Reply::Failed {
+                    id: other,
+                    cause: Default::default()
+                },
+                id
+            ),
             Err("worker-result-id-mismatch")
         );
         let result = |ocr_ms, fallback_count| Reply::Result {

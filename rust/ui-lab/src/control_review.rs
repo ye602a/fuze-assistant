@@ -623,7 +623,8 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.disabled(ui, "导出脱敏反馈");
     a.click(ui, "数据与更新", None);
     a.click(ui, "检查新版", Some("maintenance:check"));
-    a.disabled(ui, "扫描本地占用");
+    a.click(ui, "扫描本地占用", Some("maintenance:scan"));
+    a.disabled(ui, "清理可回收文件");
     a.disabled(ui, "检查数据更新");
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
     s.set_running(false);

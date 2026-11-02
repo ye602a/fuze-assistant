@@ -104,8 +104,14 @@ fn run() -> fuze_ocr::Result<()> {
                     },
                 )?;
             }
-            Err(_) => {
-                wire::write_reply(&mut out, &Reply::Failed { id })?;
+            Err(error) => {
+                wire::write_reply(
+                    &mut out,
+                    &Reply::Failed {
+                        id,
+                        cause: fuze_ocr::failure_category(error.as_ref()),
+                    },
+                )?;
                 return Err("worker-inference-failed".into());
             }
         }

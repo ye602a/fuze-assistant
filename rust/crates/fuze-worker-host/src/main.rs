@@ -34,6 +34,16 @@ fn probe(mode: &str, backend: &str) -> Result<()> {
         },
     )?;
     let request = Request::read(&mut io::stdin().lock())?.ok_or("probe-input")?;
+    if mode == "inference-error" && backend == "dml" {
+        wire::write_reply(
+            &mut io::stdout().lock(),
+            &Reply::Failed {
+                id: request.id,
+                cause: wire::InferenceFailure::Execution,
+            },
+        )?;
+        return Ok(());
+    }
     if mode == "crash" || mode == "recover" && backend == "dml" {
         std::process::exit(23);
     }
@@ -116,7 +126,7 @@ fn lifecycle() -> Result<()> {
         height: 1,
         pixels: vec![0; 12],
     };
-    for mode in ["recover", "crash", "startup-crash"] {
+    for mode in ["recover", "crash", "startup-crash", "inference-error"] {
         let mut supervisor = Supervisor::start(
             &exe,
             &["--probe".into(), mode.into(), "auto".into()],
@@ -129,6 +139,11 @@ fn lifecycle() -> Result<()> {
             return Err("recovery-not-once".into());
         }
         let next = supervisor.run(request(2), Duration::from_millis(250));
+        if mode == "inference-error"
+            && supervisor.last_failure() != Some("worker-inference-execution")
+        {
+            return Err("recovery-inference-cause-lost".into());
+        }
         if supervisor.last_failure().is_none() {
             return Err("recovery-cause-missing".into());
         }

@@ -134,6 +134,10 @@ codes!(WorkerFailure {
     InvalidFrame,
     InvalidResult,
     InferenceFailed,
+    InferenceInput,
+    InferenceExecution,
+    InferenceOutputShape,
+    InferenceOutputValue,
     ResultIdMismatch,
     InvalidResultFields,
     UnexpectedReply,
@@ -158,6 +162,10 @@ impl WorkerFailure {
             "worker-invalid-frame" => Self::InvalidFrame,
             "worker-invalid-result" => Self::InvalidResult,
             "worker-inference-failed" => Self::InferenceFailed,
+            "worker-inference-input" => Self::InferenceInput,
+            "worker-inference-execution" => Self::InferenceExecution,
+            "worker-inference-output-shape" => Self::InferenceOutputShape,
+            "worker-inference-output-value" => Self::InferenceOutputValue,
             "worker-result-id-mismatch" => Self::ResultIdMismatch,
             "worker-invalid-result-fields" => Self::InvalidResultFields,
             "worker-unexpected-reply" => Self::UnexpectedReply,
@@ -882,6 +890,10 @@ mod tests {
     #[test]
     fn worker_causes_are_allowlisted_and_old_reports_still_load() {
         for (code, value) in [
+            ("worker-inference-input", "inference-input"),
+            ("worker-inference-execution", "inference-execution"),
+            ("worker-inference-output-shape", "inference-output-shape"),
+            ("worker-inference-output-value", "inference-output-value"),
             ("worker-inference-failed", "inference-failed"),
             ("worker-result-id-mismatch", "result-id-mismatch"),
             ("worker-invalid-result-fields", "invalid-result-fields"),

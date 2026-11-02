@@ -558,7 +558,7 @@ pub fn attach_recovered(
                 state.set_pending_action("".into());
                 let message = match action.as_str() {
                     "pause" | "resume" if !offline && next.preferences.automatic != (action == "resume") => "识别状态已切换，但未能保存，下次启动可能恢复旧状态。",
-                    "pause" => "识别已暂停，现在可以更新、导入或管理存储。",
+                    "pause" => "识别已暂停。",
                     "resume" => "自动识别已恢复；正在等待客户端与对局状态。",
                     "history" => "",
                     _ if offline => "设置已在隔离会话中应用；未写入稳定版设置。",
@@ -585,10 +585,12 @@ pub fn attach_recovered(
             state.set_data_progress(if next.data_progress.message.is_empty() { "尚未检查数据更新".into() } else { next.data_progress.message.clone().into() });
             state.set_data_completed(next.data_progress.completed as i32);
             state.set_data_total(next.data_progress.total as i32);
-            let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref());
-            state.set_data_compatibility(compatibility.into());
-            state.set_data_mismatch(mismatch);
-            state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
+            if old.as_ref().is_none_or(|s| s.available != next.available) {
+                let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref());
+                state.set_data_compatibility(compatibility.into());
+                state.set_data_mismatch(mismatch);
+                state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
+            }
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
                 state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {
                     let (name, hint) = match next.pipeline.recent.as_ref().map(|slots| &slots[i]) {
@@ -598,14 +600,18 @@ pub fn attach_recovered(
                     }; crate::SlotRow { name: name.into(), hint: hint.into() }
                 }).collect::<Vec<_>>())).into());
             }
-            state.set_resources(Rc::new(VecModel::from(vec![
+            if old.as_ref().is_none_or(|s| s.resources != next.resources || s.pipeline.analyses != next.pipeline.analyses || s.pipeline.analysis_ms != next.pipeline.analysis_ms) {
+                state.set_resources(Rc::new(VecModel::from(vec![
                 next.resources.cpu.map(|v| format!("{v:.1}%")).unwrap_or("—".into()).into(),
                 next.resources.memory_mb.map(|v| format!("{v:.0} MiB")).unwrap_or("—".into()).into(),
                 next.pipeline.analyses.to_string().into(),
                 next.pipeline.analysis_ms.map(|v| format!("{v:.0} ms")).unwrap_or("—".into()).into(),
-            ])).into());
-            state.set_sampled(next.resources.sampled.as_deref().unwrap_or("等待首次采样").into());
-            state.set_schedule(format!("当前等级 {} · 跳过截图 {} 次\n等级不可读时恢复基础检测；等级不是实际领取轮次。",next.pipeline.level.map(|n|n.to_string()).unwrap_or("—".into()),next.pipeline.skipped_frames).into());
+                ])).into());
+                state.set_sampled(next.resources.sampled.as_deref().unwrap_or("等待首次采样").into());
+            }
+            if old.as_ref().is_none_or(|s| s.pipeline.level != next.pipeline.level || s.pipeline.skipped_frames != next.pipeline.skipped_frames) {
+                state.set_schedule(format!("当前等级 {} · 跳过截图 {} 次\n等级不可读时恢复基础检测；等级不是实际领取轮次。",next.pipeline.level.map(|n|n.to_string()).unwrap_or("—".into()),next.pipeline.skipped_frames).into());
+            }
             let view=crate::status_view::present(&next,offline);
             state.set_connection_value(view.connection.into());
             state.set_connection_hint(view.phase.into());
