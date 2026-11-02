@@ -24,6 +24,8 @@ verifyBinaries(zip,build,receipt.binaries);
 const crt=JSON.parse(zip.readAsText('vc-runtime-files.json'));for(const [file,digest]of Object.entries(crt))if(hash(zip.readFile(file))!==digest)throw Error('CRT mismatch');
 const manifestBytes=await readFile(path.join(directory,'rust-update.json')),manifest=JSON.parse(manifestBytes),fuz=await readFile(path.join(directory,manifest.archive)),map=await readFile(path.join(directory,manifest.archive+'.blockmap'));
 if(manifest.revision!==revision||manifest.sequence!==build.sequence||manifest.size!==fuz.length||manifest.sha512!==hash(fuz,'sha512')||manifest.blockmap_sha256!==hash(map))throw Error('Update integrity mismatch');
+const describedBytes=await readFile(path.join(directory,'rust-update-v2.json')),described=JSON.parse(describedBytes);
+if(describedBytes.length>16384||described.version!==version||described.notes!==await readFile('docs/RELEASE_NOTES.md','utf8')||JSON.stringify(described.manifest)!==JSON.stringify(manifest))throw Error('Update description mismatch');
 const validation=JSON.parse(await readFile('rust/artifacts/update-validation.json','utf8'));if(!validation.in_place_replacement||!validation.in_place_hidden_launch||!validation.installed||!validation.health_failure_rollback||!validation.repeat_launch||!validation.uninstall)throw Error('Package lifecycle validation absent');
 const preview=await request(`${api}/releases/tags/rust-preview`);if(!preview.prerelease||preview.draft)throw Error('Not a public prerelease');
 async function upload(name,bytes){
@@ -46,6 +48,20 @@ if(previous.revision!==revision){
  preview.assets=preview.assets.filter(a=>a.id!==old.id);
  try{await upload('rust-update.json',manifestBytes);}catch(error){await request(`${api}/releases/assets/${old.id}`,'PATCH',{name:'rust-update.json'});throw error;}
 }else if(previous.sha512!==manifest.sha512)throw Error('Published revision has different payload');
+// Old updaters keep their strict manifest; new clients read one complete description.
+const oldDescription=preview.assets.find(a=>a.name==='rust-update-v2.json');
+if(oldDescription?.digest!==`sha256:${hash(describedBytes)}`){
+ if(oldDescription){
+  const backup=`rust-update-v2-before-${revision}.json`;
+  if(preview.assets.some(a=>a.name===backup))throw Error('Description backup collision');
+  await request(`${api}/releases/assets/${oldDescription.id}`,'PATCH',{name:backup});
+  preview.assets=preview.assets.filter(a=>a.id!==oldDescription.id);
+ }
+ try{await upload('rust-update-v2.json',describedBytes);}catch(error){
+  if(oldDescription)await request(`${api}/releases/assets/${oldDescription.id}`,'PATCH',{name:'rust-update-v2.json'});
+  throw error;
+ }
+}
 const base='https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/';
 const body=`## FUZE v${version} 测试版
 
