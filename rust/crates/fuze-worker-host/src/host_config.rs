@@ -4,6 +4,22 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
+/// The engine and detail windows must resolve the same downloaded data versions.
+pub fn data_roots(roots: &[fuze_data::Root], cache: Option<&Path>) -> Vec<fuze_data::Root> {
+    let mut roots = roots.to_vec();
+    if let Some(path) = cache {
+        if !roots
+            .iter()
+            .any(|r| r.path == path && r.source == fuze_data::Source::Cache)
+        {
+            roots.push(fuze_data::Root {
+                path: path.into(),
+                source: fuze_data::Source::Cache,
+            });
+        }
+    }
+    roots
+}
 pub fn load(path: &Path) -> Result<Config> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
