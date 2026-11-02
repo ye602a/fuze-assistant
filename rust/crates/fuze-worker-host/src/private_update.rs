@@ -305,6 +305,7 @@ pub fn target(url: &str) -> Result<Target<'_>> {
             .strip_prefix("/ye602a/fuze-assistant/releases/download/rust-preview/")
             .ok_or("private-url")?;
         if asset == "rust-update.json"
+            || asset == "rust-update-v2.json"
             || asset.strip_prefix("Fuze-Rust-").is_some_and(|name| {
                 let revision = name
                     .strip_suffix(".fuz.blockmap")
