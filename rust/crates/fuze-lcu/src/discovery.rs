@@ -347,6 +347,7 @@ fn discover_lockfile() -> Result<Option<Candidate>> {
     }
 }
 struct Connected {
+    ux_pid: Option<u32>,
     socket: Option<crate::websocket::Socket>,
     socket_retry: u64,
     process: Watch,
@@ -397,6 +398,32 @@ impl AutoClient {
             return Err("journal-context-changed");
         }
         Ok(result)
+    }
+    /// Run on the existing LCU worker. Re-read the phase and bench before each POST to the verified lobby.
+    pub fn grab_bench(
+        &self,
+        game: u64,
+        hero: u32,
+        active: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::bench::Attempt> {
+        let c = self.connection.as_ref().ok_or(Error::Discovery)?;
+        if !c.process.alive() {
+            return Err(Error::Discovery);
+        }
+        if !self
+            .context
+            .and_then(|c| c.bench_lobby)
+            .is_some_and(|l| l.offers(game, hero))
+        {
+            return Ok(crate::bench::Attempt::Stop);
+        }
+        if c.client.phase(c.pid)? != fuze_runtime::session::Phase::ChampSelect {
+            return Ok(crate::bench::Attempt::Stop);
+        }
+        let lobby = c.client.current_bench(c.pid)?;
+        crate::bench::attempt(lobby, game, hero, active, |target| {
+            c.client.swap_bench(c.pid, target)
+        })
     }
     pub fn with_fallback(manual: Option<PathBuf>) -> Self {
         Self {
@@ -476,6 +503,7 @@ impl AutoClient {
                     return Ok(None);
                 };
                 self.connection = Some(Connected {
+                    ux_pid: None,
                     socket: None,
                     socket_retry: 0,
                     process: c.process,
@@ -486,7 +514,23 @@ impl AutoClient {
             }
             let now = self.now_ms();
             let c = self.connection.as_mut().ok_or(Error::Discovery)?;
-            let context = c.client.context(c.pid)?;
+            let mut context = c.client.context(c.pid)?;
+            if let Some(lobby) = context.bench_lobby.as_mut() {
+                // Lockfile auth can belong to LeagueClient.exe; its UX child owns the window.
+                if c.ux_pid.is_none() {
+                    c.ux_pid = crate::process_watch::observations(false)
+                        .ok()
+                        .and_then(|rows| {
+                            let mut matches = rows.iter().filter(|row| {
+                                row.kind == crate::directory_auth::Kind::Ux
+                                    && (row.pid == c.pid || row.parent == c.pid)
+                            });
+                            let pid = matches.next()?.pid;
+                            matches.next().is_none().then_some(pid)
+                        });
+                }
+                lobby.ux_pid = c.ux_pid.unwrap_or(0);
+            }
             let locale = c.client.locale(c.pid).ok();
             if !c.process.alive() {
                 return Err(Error::Discovery);

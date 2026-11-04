@@ -100,6 +100,7 @@ pub struct Status {
     pub preferences: crate::preferences::Preferences,
     pub selection: Option<crate::champ_select::View>,
     pub playing: Option<crate::champ_select::View>,
+    pub bench_lobby: Option<fuze_lcu::bench::Lobby>,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -124,6 +125,7 @@ impl Default for Status {
             preferences: Default::default(),
             selection: None,
             playing: None,
+            bench_lobby: None,
         }
     }
 }
@@ -865,6 +867,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     s.connection = m.state();
                     s.verified_time = m.verified_age().map(crate::resources::clock_ago);
                     s.pipeline = controller.status();
+                    s.bench_lobby = preferences.champ_select.then(|| m.bench_lobby()).flatten();
                     s.selection = champions.selection();
                     s.playing = m.playing_champion().and_then(|id| champions.playing(id));
                     // Only change interface language after that locale's catalogue is ready.
