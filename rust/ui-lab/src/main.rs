@@ -1,4 +1,5 @@
 mod art_cache;
+mod bench_strip;
 mod capture_review;
 mod champion_actions;
 mod champion_art;

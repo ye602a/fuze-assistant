@@ -489,6 +489,7 @@ pub fn attach_recovered(
         }
     });
     let previous = RefCell::new(None::<Status>);
+    let bench = RefCell::new(None::<crate::bench_strip::Strip>);
     let weak = ui.as_weak();
     let service = session.clone();
     let timer = slint::Timer::default();
@@ -521,6 +522,11 @@ pub fn attach_recovered(
             state.set_busy(engine_busy || (!action.is_empty() && !operation_completed));
             if previous.borrow().as_ref() == Some(&next) && !completed && !history_completed {
                 return;
+            }
+            if !offline {
+                if let Err(error) = crate::bench_strip::sync(&mut bench.borrow_mut(), &service, &next) {
+                    notice(&ui, Err(error));
+                }
             }
             let old = previous.borrow();
             if let Err(error)=popup.borrow_mut().update(&next){notice(&ui,Err(error));}

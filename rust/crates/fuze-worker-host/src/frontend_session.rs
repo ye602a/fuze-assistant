@@ -55,6 +55,12 @@ impl Session {
     pub fn snapshot(&self) -> Status {
         self.shared.status()
     }
+    pub fn grab_bench(&self, game: u64, hero: u32) -> Option<Arc<AtomicBool>> {
+        if self.offline || self.shared.desired.load(Ordering::Acquire) != RUNNING {
+            return None;
+        }
+        self.shared.monitor.lock().ok()?.as_ref()?.grab(game, hero)
+    }
     pub fn screenshot_status(&self) -> (bool, bool, String) {
         self.shared.screenshots.status()
     }
