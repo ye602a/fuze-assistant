@@ -65,7 +65,7 @@ export component SettingsPage inherits VerticalLayout {
             SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据"; }
             Label { x: 21px; y: 50px; width: parent.width - 42px; height: 46px; text: HostState.data-compatibility; wrap: word-wrap; color: HostState.data-mismatch ? Theme.gold : Theme.blue; font-size: 12px; }
             Label { x: 21px; y: 103px; width: parent.width - 42px; height: 42px; text: HostState.data-progress; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Action { x: 21px; y: 163px; width: 180px; height: 30px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.running && !HostState.busy; clicked => { HostState.command("data-update"); } }
+            Action { x: 21px; y: 163px; width: 180px; height: 30px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.busy; clicked => { HostState.command("data-update"); } }
         }
         MaintenancePage { entrance: root.entrance; }
         Action { label: root.migration-open ? "收起旧设置迁移" : "旧设置迁移"; clicked => { root.migration-open = !root.migration-open; } }
