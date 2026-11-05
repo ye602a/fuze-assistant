@@ -679,8 +679,6 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         ("正在退出 · 释放识别资源", rgb(59, 51, 32), GOLD)
     } else if u.desired == PAUSED && u.shown.mode != PAUSED {
         ("正在暂停 · 清理画面与 OCR", rgb(59, 51, 32), GOLD)
-    } else if u.desired == DATA {
-        ("正在更新推荐数据", rgb(18, 50, 75), rgb(105, 188, 230))
     } else if u.desired == PAUSED {
         ("已暂停 · 点击开始识别", rgb(59, 51, 32), GOLD)
     } else if p.error.is_some()
