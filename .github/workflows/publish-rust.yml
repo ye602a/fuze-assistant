@@ -9,6 +9,7 @@ concurrency:
 env:
   SOURCE_SHA: ${{ github.sha }}
   FUZE_UI_FRONTEND: slint
+  FUZE_RELEASE_CHANNEL: stable
 jobs:
   preview:
     if: github.ref == 'refs/heads/master'
