@@ -221,6 +221,9 @@ impl Session {
     }
     /// Optional display information never determines whether an update exists or can install.
     pub fn describe(&self, release: &mut Release, cancel: &dyn Fn() -> bool) {
+        if release.version.is_some() {
+            return;
+        }
         let details = self.bytes(RELEASE, 2 * 1024 * 1024, cancel);
         apply_description(release, details);
     }
@@ -272,10 +275,37 @@ impl Session {
     }
 }
 fn check_public(fetch: &dyn Fn(&str, usize) -> Result<Vec<u8>>) -> Result<Release> {
+    match fetch(&format!("{PUBLIC_DOWNLOAD}rust-update-v2.json"), 16384) {
+        Ok(bytes) => return described_release(&bytes),
+        Err("update-not-found") => {} // Older publication has no v2 endpoint yet.
+        Err(error) => return Err(error),
+    }
     public_release(&fetch(
         &format!("{PUBLIC_DOWNLOAD}rust-update.json"),
         16384,
     )?)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DescribedManifest {
+    version: String,
+    notes: String,
+    manifest: Manifest,
+}
+fn described_release(bytes: &[u8]) -> Result<Release> {
+    let data: DescribedManifest =
+        serde_json::from_slice(bytes).map_err(|_| "update-manifest-format")?;
+    data.manifest.validate()?;
+    if !crate::build_identity::semantic_version(&data.version) || data.notes.len() > 8192 {
+        return Err("update-manifest-policy");
+    }
+    Ok(Release {
+        archive: format!("{PUBLIC_DOWNLOAD}{}", data.manifest.archive),
+        map: format!("{PUBLIC_DOWNLOAD}{}.blockmap", data.manifest.archive),
+        manifest: data.manifest,
+        version: Some(data.version),
+        notes: release_notes(&data.notes),
+    })
 }
 fn public_release(bytes: &[u8]) -> Result<Release> {
     let manifest: Manifest = serde_json::from_slice(bytes).map_err(|_| "update-manifest-format")?;
@@ -624,12 +654,15 @@ mod tests {
         let calls = Cell::new(0);
         let release = check_public(&|url, limit| {
             calls.set(calls.get() + 1);
+            if url.ends_with("rust-update-v2.json") {
+                return Err("update-not-found");
+            }
             assert_eq!(url, format!("{PUBLIC_DOWNLOAD}rust-update.json"));
             assert_eq!(limit, 16384);
             Ok(public_manifest_fixture())
         })
         .unwrap();
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.get(), 2);
         for url in [&release.archive, &release.map] {
             assert!(matches!(
                 private_update::target(url),
@@ -647,6 +680,32 @@ mod tests {
             "https://github.com/another/repo/releases/download/rust-preview/rust-update.json"
         )
         .is_err());
+    }
+    #[test]
+    fn described_manifest_keeps_display_and_download_together() {
+        let raw = serde_json::json!({"version":"0.7.8","notes":"- 修复英雄详情空白",
+            "manifest":serde_json::from_slice::<serde_json::Value>(&public_manifest_fixture()).unwrap()});
+        let calls = Cell::new(0);
+        let release = check_public(&|url, _| {
+            calls.set(calls.get() + 1);
+            assert!(url.ends_with("rust-update-v2.json"));
+            Ok(serde_json::to_vec(&raw).unwrap())
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(release.version.as_deref(), Some("0.7.8"));
+        assert!(release.notes.contains("修复英雄详情空白"));
+        assert!(release.archive.contains(&release.manifest.revision));
+        let mut invalid = raw.clone();
+        invalid["version"] = "not-a-version".into();
+        assert!(described_release(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        assert_eq!(
+            check_public(&|_, _| Err("update-cancelled-or-timeout")).err(),
+            Some("update-cancelled-or-timeout")
+        );
+        assert!(check_public(&|_, _| Ok(b"broken".to_vec())).is_err());
+        // Deployed parsers still accept the unchanged inner legacy manifest.
+        assert!(public_release(&serde_json::to_vec(&raw["manifest"]).unwrap()).is_ok());
     }
     #[test]
     fn unavailable_or_stale_notes_do_not_invalidate_public_update() {

@@ -39,4 +39,10 @@ const map=gzipSync(JSON.stringify({version:'2',files:[{name:'file',offset:0,size
 await writeFile(path.join(directory,archive+'.blockmap'),map)
 const manifest={schema:1,channel:'rust-preview',revision,sequence,archive,size:(await stat(path.join(directory,archive))).size,sha512:hash.digest('hex'),blockmap_sha256:createHash('sha256').update(map).digest('hex')}
 await writeFile(path.join(directory,'rust-update.json'),JSON.stringify(manifest,null,2))
+const build=JSON.parse(zip.readAsText('build.json'))
+const notes=await readFile(path.join(root,'docs/RELEASE_NOTES.md'),'utf8')
+if(build.revision!==revision||!/^0\.7\.\d+$/.test(build.version)||Buffer.byteLength(notes)>8192)throw new Error('Invalid update description')
+const described=JSON.stringify({version:build.version,notes,manifest},null,2)
+if(Buffer.byteLength(described)>16384)throw new Error('Update description too large')
+await writeFile(path.join(directory,'rust-update-v2.json'),described)
 console.log(JSON.stringify({native_update_ready:true,revision,files:files.length,bytes:manifest.size,blocks:sizes.length,credentials:false}))

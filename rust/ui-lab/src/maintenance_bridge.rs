@@ -97,7 +97,12 @@ fn perform(
                 && release.manifest.revision != current.revision;
             reply.update = Some(if reply.installable {
                 format!(
-                    "发现新版本 · 下载大小约 {} MB",
+                    "发现{} · 下载大小约 {} MB",
+                    release
+                        .version
+                        .as_ref()
+                        .map(|v| format!("版本 {v}"))
+                        .unwrap_or_else(|| "新版本".into()),
                     release.manifest.size.div_ceil(1024 * 1024)
                 )
             } else if release.manifest.sequence < current.sequence {
@@ -105,7 +110,7 @@ fn perform(
             } else {
                 "已是最新版本。".into()
             });
-            if reply.installable {
+            if reply.installable && release.version.is_none() {
                 reply.notes = "正在获取更新说明…".into();
                 reply.description = Some(release);
             }
@@ -553,7 +558,13 @@ pub fn attach(
             if !reply.read_only {
                 engine.end_maintenance();
             }
-            if !reply.installable {
+            let awaiting_description = service
+                .work
+                .0
+                .lock()
+                .map(|s| s.details_pending || s.details.is_some())
+                .unwrap_or(false);
+            if !awaiting_description {
                 if let Some(timer) = tick.upgrade() {
                     timer.stop();
                 }
