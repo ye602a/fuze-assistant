@@ -3,6 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import path from 'node:path';
+const buildSetup=process.env.FUZE_BUILD_SETUP!=='false';
 const version=process.env.FUZE_RELEASE_VERSION;
 if(!/^0\.7\.\d+$/.test(version||''))throw Error('Release version required');
 const source=process.env.SOURCE_SHA,revision=source?.slice(0,12),root=process.cwd();
@@ -34,10 +35,10 @@ async function upload(name,bytes){
  if(asset.size!==bytes.length||asset.digest!==`sha256:${hash(bytes)}`)throw Error(`Asset collision or integrity: ${name}`);
  console.log(`Uploaded and verified: ${name}`);
 }
-const setupName=`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`,setup=await readFile(path.join(directory,setupName));
-const evidence={source,revision,version:version,sequence:manifest.sequence,zipSha256:hash(zipBytes),setupSha256:hash(setup),signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
+const setupName=`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`,setup=buildSetup?await readFile(path.join(directory,setupName)):null;
+const evidence={source,revision,version:version,sequence:manifest.sequence,zipSha256:hash(zipBytes),setupSha256:setup?hash(setup):null,signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
 await writeFile(path.join(directory,`build-evidence-${revision}.json`),JSON.stringify(evidence,null,2));
-for(const [file,bytes]of [[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)],[manifest.archive,fuz],[manifest.archive+'.blockmap',map],[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)],[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
+for(const [file,bytes]of [[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)],[manifest.archive,fuz],[manifest.archive+'.blockmap',map],...(setup?[[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
 const old=preview.assets.find(a=>a.name==='rust-update.json');if(!old)throw Error('Missing current update manifest');
 const response=await fetch(old.browser_download_url,{signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Cannot read current update manifest');
 const previous=await response.json();
@@ -65,10 +66,10 @@ if(oldDescription?.digest!==`sha256:${hash(describedBytes)}`){
 const base='https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/';
 const body=`## FUZE v${version} 测试版
 
-- [下载安装包（Setup.exe）](${base+setupName})
+${setup?'- [下载安装包（Setup.exe）]('+base+setupName+')':'可在 FUZE 设置中检查更新并安装。'}
 - [下载便携 ZIP](${base+name})
 
-Setup 未签名，所需 VC++ DLL 已随程序提供。可选择原目录覆盖安装；便携包请完整解压后运行 \`FUZE.exe\`。
+所需 VC++ DLL 已随程序提供。便携包请完整解压后运行 \`FUZE.exe\`。
 
 ### 本次更新
 
@@ -76,7 +77,7 @@ ${await readFile('docs/RELEASE_NOTES.md','utf8')}
 
 版本 **${version}** · 构建：\`${revision}\` · [对应源码](https://github.com/ye602a/fuze-assistant/commit/${source})
 
-ZIP、在线更新包和 Setup 来自同一提交、同一载荷。
+ZIP 和在线更新包来自同一提交。
 
 [构建记录](${base}build-evidence-${revision}.json) · [构建工作流](https://github.com/ye602a/fuze-assistant/actions/runs/${process.env.GITHUB_RUN_ID})
 `;
