@@ -625,7 +625,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "检查新版", Some("maintenance:check"));
     a.click(ui, "扫描本地占用", Some("maintenance:scan"));
     a.disabled(ui, "清理可回收文件");
-    a.disabled(ui, "检查数据更新");
+    a.click(ui, "检查数据更新", Some("host:data-update"));
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
     s.set_running(false);
     for (mode, offline, busy) in [("服务忙", false, true), ("离线", true, false)] {

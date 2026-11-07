@@ -2,7 +2,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc, Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -15,6 +15,8 @@ pub struct Outcome {
 pub struct Refresh {
     progress: Arc<Mutex<crate::data_update::Progress>>,
     due: Instant,
+    manual: bool,
+    activation: Arc<AtomicU8>,
     job: Option<(Arc<AtomicBool>, mpsc::Receiver<crate::Result<Outcome>>)>,
 }
 impl Refresh {
@@ -22,8 +24,23 @@ impl Refresh {
         Self {
             progress: Default::default(),
             due: Instant::now() + Duration::from_secs(20),
+            manual: false,
+            activation: Default::default(),
             job: None,
         }
+    }
+    pub fn request(&mut self) {
+        self.manual = true;
+        self.due = Instant::now();
+    }
+    pub fn needs_activation(&self) -> bool {
+        self.activation.load(Ordering::Acquire) == 1
+    }
+    pub fn allow_activation(&self) {
+        self.activation.store(2, Ordering::Release);
+    }
+    pub fn applying(&self) -> bool {
+        self.activation.load(Ordering::Acquire) == 2
     }
     pub fn cancel(&self) {
         if let Some((cancel, _)) = &self.job {
@@ -43,7 +60,7 @@ impl Refresh {
         roots: &[fuze_data::Root],
         locale: fuze_data::Locale,
     ) -> Option<crate::Result<Outcome>> {
-        if !idle {
+        if !idle && !self.manual {
             self.cancel();
         }
         let result = self.job.as_ref().and_then(|(_, rx)| match rx.try_recv() {
@@ -53,16 +70,21 @@ impl Refresh {
         });
         if let Some(result) = result {
             self.job = None;
+            self.manual = false;
+            self.activation.store(0, Ordering::Release);
             self.due =
                 Instant::now() + Duration::from_secs(if result.is_ok() { 1800 } else { 300 });
             return Some(result);
         }
-        if idle && self.job.is_none() && Instant::now() >= self.due {
+        if (idle || self.manual) && self.job.is_none() && Instant::now() >= self.due {
             let Some(root) = root.cloned() else {
-                return None;
+                self.manual = false;
+                return Some(Err("data-update-cache"));
             };
             let roots = roots.to_vec();
             let progress = self.progress.clone();
+            let activation = self.activation.clone();
+            let manual = self.manual;
             if let Ok(mut p) = progress.lock() {
                 *p = crate::data_update::Progress {
                     message: "正在自动检查数据…".into(),
@@ -80,24 +102,46 @@ impl Refresh {
                             *current = p;
                         }
                     };
-                    let result = if locale == fuze_data::Locale::ZhCn {
-                        crate::data_update::refresh_chinese(
-                            &root,
-                            &roots,
-                            &|| flag.load(Ordering::Acquire),
-                            &report,
-                        )
-                    } else {
-                        crate::data_update::refresh_current(&root, &roots, locale, &|| {
-                            flag.load(Ordering::Acquire)
-                        })
+                    let before_activate = || {
+                        activation.store(1, Ordering::Release);
+                        while activation.load(Ordering::Acquire) != 2 {
+                            if flag.load(Ordering::Acquire) {
+                                return Err("data-update-cancelled");
+                            }
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        Ok(())
                     };
+                    report(crate::data_update::Progress {
+                        message: "正在检查补充识别词库…".into(),
+                        ..Default::default()
+                    });
+                    let prepared = crate::recognition_sources::prepare_refresh(&root, &|| {
+                        flag.load(Ordering::Acquire)
+                    });
+                    let result = crate::data_update::refresh_guarded(
+                        &root,
+                        &roots,
+                        if manual {
+                            fuze_data::Locale::ZhCn
+                        } else {
+                            locale
+                        },
+                        &|| flag.load(Ordering::Acquire),
+                        &report,
+                        &|p, n, c| crate::update_io::data_get(p, n, c),
+                        &before_activate,
+                    );
                     let supplemental = if result.is_ok() {
-                        report(crate::data_update::Progress {
-                            message: "正在检查补充识别词库…".into(),
-                            ..Default::default()
-                        });
-                        crate::recognition_sources::refresh(&root, &|| flag.load(Ordering::Acquire))
+                        prepared.and_then(|prepared| {
+                            if prepared.changed() && activation.load(Ordering::Acquire) != 2 {
+                                before_activate()?;
+                            }
+                            if flag.load(Ordering::Acquire) {
+                                return Err("data-update-cancelled");
+                            }
+                            prepared.apply(&root)
+                        })
                     } else {
                         Ok(())
                     };
@@ -108,6 +152,7 @@ impl Refresh {
                 })
                 .is_err()
             {
+                self.manual = false;
                 self.due = Instant::now() + Duration::from_secs(300);
                 return Some(Err("data-update-worker"));
             }
@@ -125,12 +170,46 @@ impl Drop for Refresh {
 mod tests {
     use super::*;
     #[test]
+    fn manual_download_survives_play_and_activation_requires_host_ack() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::sync_channel(1);
+        let mut updater = Refresh::new();
+        updater.job = Some((flag.clone(), rx));
+        updater.request();
+        assert_eq!(
+            updater.tick(false, None, &[], fuze_data::Locale::ZhCn),
+            None
+        );
+        assert!(!flag.load(Ordering::Acquire));
+        updater.activation.store(1, Ordering::Release);
+        assert!(updater.needs_activation());
+        assert!(!updater.applying());
+        updater.allow_activation();
+        assert!(updater.applying());
+        tx.send(Ok(Outcome {
+            updated: true,
+            supplemental_error: None,
+        }))
+        .unwrap();
+        assert!(
+            updater
+                .tick(false, None, &[], fuze_data::Locale::ZhCn)
+                .unwrap()
+                .unwrap()
+                .updated
+        );
+        assert!(!updater.busy());
+        assert!(!updater.applying());
+    }
+    #[test]
     fn leaving_idle_cancels_the_only_job_and_failure_backs_off() {
         let flag = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::sync_channel(1);
         let mut updater = Refresh {
             progress: Default::default(),
             due: Instant::now(),
+            manual: false,
+            activation: Default::default(),
             job: Some((flag.clone(), rx)),
         };
         assert_eq!(

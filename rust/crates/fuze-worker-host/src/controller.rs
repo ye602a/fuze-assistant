@@ -37,7 +37,14 @@ fn keep_capture_worker(error: &str) -> bool {
         )
 }
 
+#[derive(Clone)]
+struct Grab {
+    game: u64,
+    hero: u32,
+    active: Arc<AtomicBool>,
+}
 struct Observation {
+    grab: Option<Grab>,
     journal: Option<crate::local_records::Binding>,
     locale: Option<fuze_lcu::locale::Locale>,
     state: fuze_lcu::reconnect::State,
@@ -58,6 +65,15 @@ impl Observation {
         }
     }
     fn publish(&mut self, context: Option<Context>, root: Option<PathBuf>) {
+        if let Some(g) = self.grab.as_ref() {
+            if !context
+                .and_then(|c| c.bench_lobby)
+                .is_some_and(|l| l.offers(g.game, g.hero))
+            {
+                g.active.store(false, Ordering::Release);
+                self.grab = None;
+            }
+        }
         if self.context != context || self.root != root {
             // Only the forward loading -> playing handoff may retain the warmed worker.
             let handoff = self.root == root
@@ -99,6 +115,25 @@ impl MonitorControl {
             .unwrap_or((0, false))
     }
 
+    pub(crate) fn grab(&self, game: u64, hero: u32) -> Option<Arc<AtomicBool>> {
+        let mut s = self.latest.lock().ok()?;
+        if !self.enabled.load(Ordering::Acquire) || !s.context?.bench_lobby?.offers(game, hero) {
+            return None;
+        }
+        if let Some(previous) = s.grab.take() {
+            previous.active.store(false, Ordering::Release);
+        }
+        let active = Arc::new(AtomicBool::new(true));
+        s.grab = Some(Grab {
+            game,
+            hero,
+            active: active.clone(),
+        });
+        if let Some(worker) = &self.wake {
+            worker.unpark();
+        }
+        Some(active)
+    }
     pub fn enable(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
         if let Some(wake) = self.wake.as_ref() {
@@ -108,6 +143,9 @@ impl MonitorControl {
             if let Ok(mut latest) = self.latest.lock() {
                 if let Some(c) = latest.cancellation.take() {
                     c.cancel();
+                }
+                if let Some(g) = latest.grab.take() {
+                    g.active.store(false, Ordering::Release);
                 }
                 latest.journal = None;
                 latest.publish(None, None);
@@ -126,6 +164,7 @@ impl Monitor {
     /// Isolated replay only: no auth discovery, network thread, or player records.
     pub(crate) fn review() -> Self {
         let latest = Arc::new(Mutex::new(Observation {
+            grab: None,
             journal: None,
             locale: Some(fuze_lcu::locale::Locale::ZhCn),
             state: fuze_lcu::reconnect::State::Waiting,
@@ -178,6 +217,18 @@ impl Monitor {
             fuze_lcu::locale::Locale::EnUs => fuze_data::Locale::EnUs,
         })
     }
+    pub fn bench_lobby(&self) -> Option<fuze_lcu::bench::Lobby> {
+        let s = self.latest.lock().ok()?;
+        if s.updated.elapsed() >= Duration::from_secs(8)
+            || !matches!(
+                s.state,
+                fuze_lcu::reconnect::State::Connected(Phase::ChampSelect)
+            )
+        {
+            return None;
+        }
+        s.context?.bench_lobby.filter(|l| l.ux_pid != 0)
+    }
     pub fn selection(&self) -> Option<fuze_lcu::context::Selection> {
         let latest = self.latest.lock().ok()?;
         if latest.updated.elapsed() >= Duration::from_secs(8)
@@ -224,6 +275,7 @@ impl Monitor {
         records: bool,
     ) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
+            grab: None,
             journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
@@ -294,6 +346,24 @@ impl Monitor {
                             latest.state = state;
                         }
                     }
+                    let grab = shared.lock().ok().and_then(|mut s| {
+                        if s.grab
+                            .as_ref()
+                            .is_some_and(|g| !g.active.load(Ordering::Acquire))
+                        {
+                            s.grab = None;
+                        }
+                        s.grab.clone()
+                    });
+                    if let Some(g) = grab {
+                        if client.grab_bench(g.game, g.hero, &g.active)
+                            == Ok(fuze_lcu::bench::Attempt::Retry)
+                        {
+                            thread::park_timeout(Duration::from_millis(125));
+                            continue;
+                        }
+                        g.active.store(false, Ordering::Release);
+                    }
                     let wait = client
                         .wake_at()
                         .unwrap_or(client.now_ms().saturating_add(1000))
@@ -317,6 +387,9 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Ok(mut latest) = self.latest.lock() {
+            if let Some(g) = latest.grab.take() {
+                g.active.store(false, Ordering::Release);
+            }
             if let Some(c) = latest.cancellation.take() {
                 c.cancel();
             }
@@ -965,8 +1038,25 @@ mod tests {
         assert!(!keep_capture_worker("locale-unavailable"));
     }
     #[test]
+    fn bench_grab_is_cancelled_on_monitor_exit_or_target_replacement() {
+        let monitor = Monitor::review();
+        let flow = br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#;
+        let session = br#"{"localPlayerCellId":0,"myTeam":[{"cellId":0,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":11},{"championId":22}]}"#;
+        monitor
+            .review_publish(fuze_lcu::context::parse(Phase::ChampSelect, flow, session).unwrap());
+        let control = monitor.control();
+        let first = control.grab(9, 11).unwrap();
+        let second = control.grab(9, 22).unwrap();
+        assert!(!first.load(Ordering::Acquire));
+        assert!(second.load(Ordering::Acquire));
+        monitor.review_publish(Context::idle(Phase::InProgress));
+        assert!(!second.load(Ordering::Acquire));
+        assert!(control.grab(9, 22).is_none());
+    }
+    #[test]
     fn locale_context_requires_fresh_connected_detection() {
         let latest = Arc::new(Mutex::new(Observation {
+            grab: None,
             journal: None,
             locale: Some(fuze_lcu::locale::Locale::EnUs),
             state: fuze_lcu::reconnect::State::Connected(Phase::ChampSelect),
@@ -1029,6 +1119,7 @@ mod tests {
                 .unwrap();
         let cancellation = window.cancellation();
         let mut observation = Observation {
+            grab: None,
             journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
@@ -1071,6 +1162,7 @@ mod tests {
         };
         let first = context(8, 1);
         let mut observation = Observation {
+            grab: None,
             journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,
@@ -1117,6 +1209,7 @@ mod tests {
     #[test]
     fn latest_observation_drops_old_context_and_backoff_is_bounded() {
         let mut observation = Observation {
+            grab: None,
             journal: None,
             locale: None,
             state: fuze_lcu::reconnect::State::Waiting,

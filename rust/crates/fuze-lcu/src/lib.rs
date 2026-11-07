@@ -1,6 +1,7 @@
-//! Read-only LCU boundary with a separately invoked, player-requested item-set transaction. Nothing runs at import; caller supplies freshly observed credentials.
+//! Local LCU reads plus explicit player-requested item-set and bench transactions. Nothing runs at import; caller supplies freshly observed credentials.
 use fuze_runtime::session::Phase;
 use std::fmt;
+pub mod bench;
 #[cfg(windows)]
 mod client_log;
 #[cfg(windows)]
@@ -134,6 +135,7 @@ pub(crate) enum Endpoint {
     Gameflow,
     ChampSelect,
     SubsetChampions,
+    PickableChampions,
     Locale,
     History,
     Authorization,
@@ -147,6 +149,7 @@ impl Endpoint {
             Self::SummonerStatus | Self::SummonerIdentity => "/lol-summoner/v1/current-summoner",
             Self::Gameflow => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
+            Self::PickableChampions => "/lol-champ-select/v1/pickable-champion-ids",
             Self::SubsetChampions => "/lol-lobby-team-builder/champ-select/v1/subset-champion-list",
             Self::Locale => "/riotclient/region-locale",
             Self::History => {

@@ -1,5 +1,6 @@
 // Publish the already verified binaries without rebuilding or changing the legacy update endpoint.
 import {createHash} from 'node:crypto';
+const buildSetup=process.env.FUZE_BUILD_SETUP!=='false';
 const api='https://api.github.com/repos/ye602a/fuze-assistant';
 const source=process.env.SOURCE_SHA, revision=source.slice(0,12);
 const version=process.env.FUZE_RELEASE_VERSION, tag=`rust-v${version}`;
@@ -24,10 +25,10 @@ async function download(name){
 const [receiptBytes,zip,setup]=await Promise.all([
  download(`build-evidence-${revision}.json`),
  download(`fuze-rust-preview-${revision}.zip`),
- download(`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`),
+ buildSetup?download(`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`):Promise.resolve(null),
 ]);
 const receipt=JSON.parse(receiptBytes);
-if(receipt.source!==source||receipt.version!==version||!receipt.buildEvidence.sourceClean||!receipt.updateValidation.package_verified||hash(zip)!==receipt.zipSha256||hash(setup)!==receipt.setupSha256)throw Error('Build receipt mismatch');
+if(receipt.source!==source||receipt.version!==version||!receipt.buildEvidence.sourceClean||!receipt.updateValidation.package_verified||hash(zip)!==receipt.zipSha256||(setup?hash(setup)!==receipt.setupSha256:receipt.setupSha256!==null))throw Error('Build receipt mismatch');
 const zipName=`FUZE-${version}-windows-x64.zip`,setupName=`FUZE-Setup-${version}-windows-x64.exe`;
 const base=`https://github.com/ye602a/fuze-assistant/releases/download/${tag}/`;
 let body=preview.body.replace(`## FUZE v${version} 测试版`,`## FUZE v${version}`);
@@ -37,7 +38,7 @@ body=body.replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download
 let release=await request(`${api}/releases/tags/${tag}`,'GET',undefined,false,true);
 if(!release)release=await request(`${api}/releases`,'POST',{tag_name:tag,target_commitish:source,name:`FUZE v${version}`,body,draft:true,prerelease:false});
 if(release.target_commitish!==source)throw Error('Unexpected existing release source');
-for(const [name,bytes] of [[zipName,zip],[setupName,setup],[zipName+'.sha256',Buffer.from(`${hash(zip)}  ${zipName}\n`)],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)],[`build-evidence-${revision}.json`,receiptBytes]]){
+for(const [name,bytes] of [[zipName,zip],...(setup?[[setupName,setup]]:[]),[zipName+'.sha256',Buffer.from(`${hash(zip)}  ${zipName}\n`)],...(setup?[[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,receiptBytes]]){
  let asset=release.assets.find(a=>a.name===name);
  if(asset?.digest!==`sha256:${hash(bytes)}`){
   const uploaded=await request(`https://uploads.github.com/repos/ye602a/fuze-assistant/releases/${release.id}/assets?name=${encodeURIComponent(name+'.pending-'+revision)}`,'POST',bytes,true);

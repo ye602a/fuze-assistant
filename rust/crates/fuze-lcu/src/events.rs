@@ -52,6 +52,7 @@ fn relevant(bytes: &[u8]) -> Result<bool> {
             "/lol-gameflow/v1/gameflow-phase"
                 | "/lol-gameflow/v1/session"
                 | "/lol-champ-select/v1/session"
+                | "/lol-champ-select/v1/pickable-champion-ids"
                 | "/riotclient/region-locale"
         )
     ))

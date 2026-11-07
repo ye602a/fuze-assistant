@@ -46,6 +46,35 @@ pub fn load(roots: &[fuze_data::Root]) -> Result<(fuze_data::recognition::Catalo
     Ok((chosen, summary))
 }
 pub fn refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result<()> {
+    prepare_refresh(cache, cancel)?.apply(cache)
+}
+pub(crate) struct Prepared {
+    catalog: Result<Option<serde_json::Value>>,
+    reference: Result<Option<serde_json::Value>>,
+}
+impl Prepared {
+    pub fn changed(&self) -> bool {
+        self.catalog.as_ref().is_ok_and(|v| v.is_some())
+            || self.reference.as_ref().is_ok_and(|v| v.is_some())
+    }
+    pub fn apply(self, cache: &Path) -> Result<()> {
+        let dir = cache
+            .parent()
+            .ok_or("recognition-root")?
+            .join("recognition-data");
+        let save = |result: Result<Option<serde_json::Value>>, name: &str| {
+            result.and_then(|value| {
+                value.map_or(Ok(()), |v| {
+                    crate::preferences::save_json(&dir.join(name), &v)
+                })
+            })
+        };
+        let catalog = save(self.catalog, "catalog.json");
+        let reference = save(self.reference, "reference.json");
+        catalog.and(reference)
+    }
+}
+pub(crate) fn prepare_refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result<Prepared> {
     let dir = cache
         .parent()
         .ok_or("recognition-root")?
@@ -72,11 +101,11 @@ pub fn refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result<()> {
             return Err("recognition-cancelled");
         }
         if candidate == old {
-            return Ok(());
+            return Ok(None);
         }
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| "recognition-format")?;
-        crate::preferences::save_json(&dir.join("catalog.json"), &value)
+        Ok(Some(value))
     })();
     if cancel() {
         return Err("recognition-cancelled");
@@ -102,10 +131,11 @@ pub fn refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result<()> {
         if cancel() {
             return Err("recognition-cancelled");
         }
-        crate::preferences::save_json(
-            &dir.join("reference.json"),
-            &serde_json::json!({"patch":patch}),
-        )
+        let value = serde_json::json!({"patch":patch});
+        let old = crate::update_channel::bounded(&dir.join("reference.json"), 4096)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        Ok((old.as_ref() != Some(&value)).then_some(value))
     })();
-    catalog.and(reference)
+    Ok(Prepared { catalog, reference })
 }

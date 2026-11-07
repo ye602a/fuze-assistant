@@ -1,4 +1,4 @@
-//! Explicit, pause-only downloads into an isolated cache. Stage, validate, then atomically point.
+//! Background downloads into an isolated cache. Stage, validate, then atomically point.
 use crate::{update_io, Result};
 use fuze_data::{Locale, Root, Scope, Source};
 use serde_json::{json, Value};
@@ -140,6 +140,24 @@ mod tests {
         .unwrap();
         assert_eq!(ok.len(), 3);
         let before = fs::read(test_dir.0.join("current.json")).unwrap();
+        let ready = std::cell::Cell::new(false);
+        assert_eq!(
+            refresh_transaction(
+                &test_dir.0,
+                &[Locale::ZhCn],
+                &|| false,
+                &|p, _, _| fixture(p, "1.0.1", false),
+                &|_| {},
+                &|| {
+                    ready.set(true);
+                    assert_eq!(fs::read(test_dir.0.join("current.json")).unwrap(), before);
+                    Err("data-update-cancelled")
+                }
+            ),
+            Err("data-update-cancelled")
+        );
+        assert!(ready.get());
+        assert_eq!(fs::read(test_dir.0.join("current.json")).unwrap(), before);
         assert_eq!(
             refresh_with(&test_dir.0, &|| false, &|p, _, _| fixture(p, "1.0.1", true)),
             Err("data-update-hash")
@@ -394,6 +412,17 @@ fn refresh_current_with(
     report: &Report<'_>,
     fetch: &Fetch<'_>,
 ) -> Result<bool> {
+    refresh_guarded(root, roots, locale, cancel, report, fetch, &|| Ok(()))
+}
+pub(crate) fn refresh_guarded(
+    root: &Path,
+    roots: &[Root],
+    locale: Locale,
+    cancel: &dyn Fn() -> bool,
+    report: &Report<'_>,
+    fetch: &Fetch<'_>,
+    before_activate: &dyn Fn() -> Result<()>,
+) -> Result<bool> {
     phase(report, "正在检查数据站版本…");
     let path = if locale == Locale::ZhCn {
         "/api/client/v1/config".into()
@@ -422,7 +451,7 @@ fn refresh_current_with(
     {
         return Ok(false);
     }
-    refresh_for_progress(
+    refresh_transaction(
         root,
         &[locale],
         cancel,
@@ -434,6 +463,7 @@ fn refresh_current_with(
             }
         },
         report,
+        before_activate,
     )?;
     Ok(true)
 }
@@ -451,6 +481,16 @@ fn refresh_for_progress(
     cancel: &dyn Fn() -> bool,
     fetch: &Fetch<'_>,
     report: &Report<'_>,
+) -> Result<Vec<String>> {
+    refresh_transaction(root, locales, cancel, fetch, report, &|| Ok(()))
+}
+fn refresh_transaction(
+    root: &Path,
+    locales: &[Locale],
+    cancel: &dyn Fn() -> bool,
+    fetch: &Fetch<'_>,
+    report: &Report<'_>,
+    before_activate: &dyn Fn() -> Result<()>,
 ) -> Result<Vec<String>> {
     clean_dir(root)?;
     let canonical = fs::canonicalize(root).map_err(|_| "data-update-directory")?;
@@ -605,6 +645,8 @@ fn refresh_for_progress(
             locale,
             Scope::Full,
         )?;
+        check()?;
+        before_activate()?;
         check()?;
         phase(report, "正在启用新数据…");
         let final_dir = root.join(&relative);
