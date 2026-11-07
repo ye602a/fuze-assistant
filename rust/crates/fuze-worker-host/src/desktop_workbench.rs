@@ -1036,7 +1036,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             ),
             format!(
                 "{} {}",
-                crate::i18n::text("腾讯版本参考（非本机实测）"),
+                crate::i18n::text("Riot 公开补丁（非本机实测）"),
                 if r.reference.is_empty() {
                     "—"
                 } else {

@@ -268,9 +268,14 @@ mod tests {
         assert!(result_message(&Ok(false), None).contains("无需下载"));
         assert!(result_message(&Ok(true), Some("failed")).contains("补充识别词库更新失败"));
         assert!(result_message(&Err("data-update-hash"), None).contains("校验失败"));
-        assert!(compatibility(Some("zh-CN@16.20.4")).1);
-        assert!(!compatibility(Some("zh-CN@16.21.1-augments16.21")).1);
-        assert!(compatibility(None).0.contains("未确认"));
+        assert!(compatibility(Some("zh-CN@16.20.4"), "16.22.1").1);
+        assert!(!compatibility(Some("zh-CN@16.21.1-augments16.21"), "16.21.1").1);
+        assert!(compatibility(None, "16.22.1").1);
+        assert!(compatibility(Some("zh-CN@16.21.5"), "16.22.1")
+            .0
+            .contains("落后"));
+        assert!(compatibility(Some("zh-CN@16.22.1"), "").1);
+        assert!(!compatibility(Some("zh-CN@16.22.1"), "26.22").1);
 
         // A stopped transfer must keep both the previous pointer and honest partial progress.
         let before = fs::read(dir.0.join("current.json")).unwrap();
@@ -334,38 +339,35 @@ pub fn result_message(result: &Result<bool>, supplemental_error: Option<&str>) -
         main.into()
     }
 }
-/// Compare the two data sources, not an unobserved live client version.
-pub fn compatibility(identity: Option<&str>) -> (String, bool) {
+/// Public patch reference is separate from both local data and the user's game client.
+pub fn compatibility(identity: Option<&str>, reference: &str) -> (String, bool) {
     let version = identity.unwrap_or("").rsplit('@').next().unwrap_or("");
     let version = version
         .strip_suffix(fuze_data::current_augments::IDENTITY_SUFFIX)
         .unwrap_or(version);
-    let patch = |v: &str| -> Option<(u32, u32)> {
-        let mut parts = v.split('.');
-        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
-    };
+    let patch = fuze_data::recognition::patch;
     let Some(stats) = patch(version) else {
-        return ("版本匹配：未确认 · 尚无可用统计数据".into(), true);
+        return ("尚无可用统计数据".into(), true);
     };
-    let builtin = fuze_data::current_augments::PATCH;
-    let metadata = if stats > patch(builtin).unwrap() {
-        version
+    let Some(latest) = patch(reference) else {
+        return (
+            format!("统计 {version} · 最新补丁尚未确认，请检查数据更新"),
+            true,
+        );
+    };
+    let status = if stats == latest {
+        "统计与公开补丁一致"
+    } else if stats < latest {
+        "统计落后于公开补丁，等待数据站更新"
     } else {
-        builtin
+        "统计与公开补丁不一致"
     };
-    let matched = patch(metadata) == Some(stats);
     (
-        format!(
-            "资料 {metadata} · 统计 {version}\n{}",
-            if matched {
-                "版本匹配 · 不代表每个符文已有统计"
-            } else {
-                "版本不匹配 · 不匹配的符文显示暂无统计"
-            }
-        ),
-        !matched,
+        format!("统计 {version} · 公开补丁 {reference}\n{status}"),
+        stats != latest,
     )
 }
+
 fn phase(report: &Report<'_>, message: &str) {
     report(Progress {
         message: message.into(),
