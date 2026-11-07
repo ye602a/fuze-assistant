@@ -9,6 +9,7 @@ pub struct Context {
     pub champion: Option<u32>,
     pub supported: bool,
     pub selection: Option<Selection>,
+    pub bench_lobby: Option<crate::bench::Lobby>,
     game: u64,
 }
 impl Context {
@@ -25,6 +26,7 @@ impl Context {
             champion: None,
             supported: false,
             selection: None,
+            bench_lobby: None,
             game: 0,
         }
     }
@@ -193,6 +195,9 @@ pub fn parse(phase: Phase, gameflow: &[u8], player: &[u8]) -> Result<Context> {
         } else {
             None
         },
+        bench_lobby: (phase == Phase::ChampSelect)
+            .then(|| crate::bench::Lobby::parse(&local, key))
+            .flatten(),
         game: key,
     })
 }

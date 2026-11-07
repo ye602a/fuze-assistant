@@ -41,7 +41,6 @@ mod workbench;
 const PAUSED: u8 = 0;
 const RUNNING: u8 = 1;
 const EXIT: u8 = 2;
-const DATA: u8 = 3;
 const APPLY: u8 = 4;
 const IMPORT: u8 = 5;
 const HISTORY: u8 = 6;
@@ -100,6 +99,7 @@ pub struct Status {
     pub preferences: crate::preferences::Preferences,
     pub selection: Option<crate::champ_select::View>,
     pub playing: Option<crate::champ_select::View>,
+    pub bench_lobby: Option<fuze_lcu::bench::Lobby>,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -124,10 +124,13 @@ impl Default for Status {
             preferences: Default::default(),
             selection: None,
             playing: None,
+            bench_lobby: None,
         }
     }
 }
 struct Shared {
+    data_requested: AtomicBool,
+    data_busy: AtomicBool,
     screenshots: crate::recognition_log::Control,
     external_overlays: bool,
     start_paused: bool,
@@ -427,6 +430,18 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 thread::sleep(Duration::from_millis(50));
                 continue;
             }
+            if shared.data_requested.swap(false, Ordering::AcqRel) {
+                background.request();
+            }
+            if background.needs_activation() {
+                controller.suspend();
+                champions.clear_selection();
+                if let Ok(mut status) = shared.status.lock() {
+                    status.pipeline = controller.status();
+                    status.selection = None;
+                }
+                background.allow_activation();
+            }
             let idle = desired == RUNNING
                 && matches!(
                     monitor.as_ref().and_then(|m: &Monitor| m.state()),
@@ -444,6 +459,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .or_else(|| monitor.as_ref().and_then(|m| m.data_locale()))
                     .unwrap_or(fuze_data::Locale::ZhCn),
             ) {
+                shared.data_busy.store(false, Ordering::Release);
                 if result.as_ref().is_ok_and(|o| o.updated) {
                     champions.invalidate();
                 }
@@ -469,14 +485,13 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 }
             }
             if background.busy() {
+                shared.data_busy.store(true, Ordering::Release);
                 if let Ok(mut status) = shared.status.lock() {
                     status.data_progress = background.progress();
                 }
             }
-            if desired == DATA && background.busy() {
-                // The writer owns an exclusive transaction lock. Wait outside the UI thread
-                // for its cancellation before an explicit refresh can acquire it.
-                thread::sleep(Duration::from_millis(50));
+            if background.applying() {
+                thread::sleep(Duration::from_millis(20));
                 continue;
             }
         }
@@ -740,63 +755,6 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             }
             shared.finish_request(desired, resume);
             shared.resume_apply.store(PAUSED, Ordering::Release);
-        } else if desired == DATA {
-            controller.suspend();
-            if let Ok(mut s) = shared.status.lock() {
-                s.mode = DATA;
-                s.update_error = None;
-                s.data_progress = crate::data_update::Progress {
-                    message: "正在检查数据站版本…".into(),
-                    ..Default::default()
-                };
-                s.notice = Some("正在检查推荐数据，进度显示在数据卡片中。");
-            }
-            let mut supplemental_error = None;
-            let result = if fixture {
-                Ok(false)
-            } else {
-                cache.as_ref().ok_or("data-update-cache").and_then(|path| {
-                    let cancel = || shared.desired.load(Ordering::Acquire) != DATA;
-                    let report = |progress| {
-                        if let Ok(mut s) = shared.status.lock() {
-                            s.data_progress = progress;
-                        }
-                    };
-                    let primary =
-                        crate::data_update::refresh_chinese(path, &roots, &cancel, &report);
-                    if primary.is_ok() {
-                        report(crate::data_update::Progress {
-                            message: "正在检查补充识别词库…".into(),
-                            ..Default::default()
-                        });
-                        supplemental_error =
-                            crate::recognition_sources::refresh(path, &cancel).err();
-                    }
-                    primary
-                })
-            };
-            let refreshed_available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
-            champions.invalidate();
-            if let Ok(mut s) = shared.status.lock() {
-                s.available = refreshed_available;
-                if let Ok((_, summary)) = crate::recognition_sources::load(&roots) {
-                    s.recognition = summary;
-                }
-                s.update_error = result.as_ref().err().copied();
-                s.data_progress = crate::data_update::Progress {
-                    message: crate::data_update::result_message(&result, supplemental_error),
-                    ..Default::default()
-                };
-                s.notice = Some(if result.is_ok() {
-                    "推荐数据已校验；下次开始识别时使用最新完整版本。"
-                } else {
-                    "更新未完成；保留可用数据，可稍后重试。"
-                });
-            }
-            let _ =
-                shared
-                    .desired
-                    .compare_exchange(DATA, PAUSED, Ordering::AcqRel, Ordering::Acquire);
         } else if fixture {
             // Explicit offline entry only. No discovery or game access exists in this branch.
             let mut selection = fuze_lcu::context::Selection {
@@ -865,6 +823,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     s.connection = m.state();
                     s.verified_time = m.verified_age().map(crate::resources::clock_ago);
                     s.pipeline = controller.status();
+                    s.bench_lobby = preferences.champ_select.then(|| m.bench_lobby()).flatten();
                     s.selection = champions.selection();
                     s.playing = m.playing_champion().and_then(|id| champions.playing(id));
                     // Only change interface language after that locale's catalogue is ready.
@@ -2284,8 +2243,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     u.shared.request(next)
                 }
                 UPDATE_DATA => {
-                    if u.shared.desired.load(Ordering::Acquire) == PAUSED {
-                        u.shared.request(DATA);
+                    if !u.smoke
+                        && [PAUSED, RUNNING].contains(&u.shared.desired.load(Ordering::Acquire))
+                        && !u.shared.data_busy.swap(true, Ordering::AcqRel)
+                    {
+                        u.shared.data_requested.store(true, Ordering::Release);
+                        u.shared.wake.notify_one();
                     }
                 }
                 UPDATE_APP => {
@@ -2578,7 +2541,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 );
                 EnableWindow(
                     GetDlgItem(hwnd, UPDATE_DATA as i32),
-                    i32::from(desired == PAUSED),
+                    i32::from(
+                        [PAUSED, RUNNING].contains(&desired)
+                            && !u.shared.data_busy.load(Ordering::Acquire),
+                    ),
                 );
                 EnableWindow(
                     GetDlgItem(hwnd, UPDATE_APP as i32),
@@ -2755,6 +2721,8 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
         }
     };
     let shared = Arc::new(Shared {
+        data_requested: AtomicBool::new(false),
+        data_busy: AtomicBool::new(false),
         screenshots: Default::default(),
         external_overlays: false,
         start_paused: false,

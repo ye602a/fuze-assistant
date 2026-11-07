@@ -17,6 +17,8 @@ impl Session {
     /// A recovered UI must not resume capture before the player explicitly continues.
     pub fn start_with_recovery(config: Config, offline: bool, start_paused: bool) -> Result<Self> {
         let shared = Arc::new(Shared {
+            data_requested: AtomicBool::new(false),
+            data_busy: AtomicBool::new(false),
             screenshots: Default::default(),
             external_overlays: true,
             start_paused,
@@ -54,6 +56,12 @@ impl Session {
     /// Account keys never need to be logged or serialized by a frontend.
     pub fn snapshot(&self) -> Status {
         self.shared.status()
+    }
+    pub fn grab_bench(&self, game: u64, hero: u32) -> Option<Arc<AtomicBool>> {
+        if self.offline || self.shared.desired.load(Ordering::Acquire) != RUNNING {
+            return None;
+        }
+        self.shared.monitor.lock().ok()?.as_ref()?.grab(game, hero)
     }
     pub fn screenshot_status(&self) -> (bool, bool, String) {
         self.shared.screenshots.status()
@@ -116,10 +124,13 @@ impl Session {
     }
     pub fn busy(&self) -> bool {
         self.maintenance.load(Ordering::Acquire)
+            || self.shared.data_busy.load(Ordering::Acquire)
             || self.shared.desired.load(Ordering::Acquire) > EXIT
     }
     pub fn set_running(&self, enabled: bool) -> Result<()> {
-        if self.busy() || self.shared.desired.load(Ordering::Acquire) == EXIT {
+        if self.maintenance.load(Ordering::Acquire)
+            || self.shared.desired.load(Ordering::Acquire) >= EXIT
+        {
             return Err("frontend-busy");
         }
         if !self.offline {
@@ -132,7 +143,7 @@ impl Session {
     }
     /// Pending values are committed by the existing engine only after validation succeeds.
     pub fn apply(&self, value: crate::preferences::Preferences) -> Result<()> {
-        if self.maintenance.load(Ordering::Acquire) || self.history_busy() {
+        if self.busy() || self.history_busy() {
             return Err("frontend-busy");
         }
         value.validate()?;
@@ -201,7 +212,17 @@ impl Session {
         Ok(())
     }
     pub fn update_data(&self) -> Result<()> {
-        self.request_idle(DATA)
+        let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
+        if self.offline {
+            return Err("frontend-offline-operation");
+        }
+        if self.busy() || self.history_busy() || !self.snapshot().initialized {
+            return Err("frontend-busy");
+        }
+        self.shared.data_busy.store(true, Ordering::Release);
+        self.shared.data_requested.store(true, Ordering::Release);
+        self.shared.wake.notify_one();
+        Ok(())
     }
     pub fn preview_history(&self, path: std::path::PathBuf, game: Option<u64>) -> Result<()> {
         self.history_request(
@@ -265,7 +286,7 @@ impl Session {
     }
     pub fn begin_maintenance(&self) -> Result<()> {
         let _guard = self.shared.wait.lock().map_err(|_| "frontend-lock")?;
-        if self.history_busy() || self.maintenance.load(Ordering::Acquire) {
+        if self.history_busy() || self.busy() {
             return Err("frontend-busy");
         }
         let status = self.snapshot();
@@ -322,6 +343,8 @@ mod locale_tests {
     fn history_reads_keep_recognition_mode_and_pause_exit_available() {
         // No engine, client discovery, disk access or worker: exercise the real command gate.
         let shared = Arc::new(Shared {
+            data_requested: AtomicBool::new(false),
+            data_busy: AtomicBool::new(false),
             screenshots: Default::default(),
             external_overlays: true,
             start_paused: false,
@@ -368,6 +391,16 @@ mod locale_tests {
         shared.status.lock().unwrap().history.pending = 0;
         assert_eq!(session.refresh_history(true), Err("history-page-limit"));
         session.cached_history().unwrap();
+        shared.history_busy.store(false, Ordering::Release);
+        shared.history_read.lock().unwrap().take();
+        shared.request(RUNNING);
+        session.update_data().unwrap();
+        assert_eq!(shared.desired.load(Ordering::Acquire), RUNNING);
+        assert!(shared.data_requested.load(Ordering::Acquire));
+        assert!(session.busy());
+        assert_eq!(session.update_data(), Err("frontend-busy"));
+        session.set_running(false).unwrap();
+        assert_eq!(shared.desired.load(Ordering::Acquire), PAUSED);
         session.stop();
         assert_eq!(shared.desired.load(Ordering::Acquire), EXIT);
     }

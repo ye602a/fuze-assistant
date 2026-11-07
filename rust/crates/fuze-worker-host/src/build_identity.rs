@@ -23,8 +23,10 @@ fn decode_release_label(bytes: &[u8]) -> Option<String> {
         None => "0.7.0",
         Some(v) => v.as_str().filter(|v| semantic_version(v))?,
     };
-    let channel = match value["channel"].as_str() {
-        Some("rust-development-preview") => "测试渠道",
+    let channel = match value["releaseChannel"].as_str() {
+        Some("stable") => "正式版",
+        Some("preview") => "测试版",
+        None if value.get("releaseChannel").is_none() => return Some(version.to_owned()),
         _ => "渠道未确认",
     };
     Some(format!("{version} · {channel}"))
@@ -108,9 +110,16 @@ mod tests {
         let mut v = serde_json::json!({"revision":"123456789abc","version":"0.7.1","channel":"rust-development-preview"});
         assert_eq!(
             decode_release_label(v.to_string().as_bytes()).as_deref(),
-            Some("0.7.1 · 测试渠道")
+            Some("0.7.1")
         );
-        v["channel"] = serde_json::json!("unknown");
+        for (channel, label) in [("stable", "正式版"), ("preview", "测试版")] {
+            v["releaseChannel"] = serde_json::json!(channel);
+            assert_eq!(
+                decode_release_label(v.to_string().as_bytes()),
+                Some(format!("0.7.1 · {label}"))
+            );
+        }
+        v["releaseChannel"] = serde_json::json!("unknown");
         assert_eq!(
             decode_release_label(v.to_string().as_bytes()).as_deref(),
             Some("0.7.1 · 渠道未确认")

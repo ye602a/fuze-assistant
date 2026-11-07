@@ -1,4 +1,4 @@
-//! Fixed loopback HTTPS. Reads by default; the explicit item-set transaction alone permits PUT.
+//! Fixed loopback HTTPS. Player-initiated writes use dedicated item-set and bench endpoints.
 //! Temporary identity responses are reduced to local hero context, never logged or returned.
 use super::{basic, parse_phase, status, wipe, Credentials, Endpoint, Error, Result};
 use fuze_runtime::session::Phase;
@@ -208,6 +208,34 @@ impl ReadOnlyClient {
         wipe(&mut saved);
         crate::item_sets::verify_saved(&merged, &decoded?)
     }
+    pub(crate) fn current_bench(&self, pid: u32) -> Result<Option<crate::bench::Lobby>> {
+        let (_, mut bytes) = self.request(pid, Endpoint::ChampSelect)?;
+        let session = serde_json::from_slice(&bytes).map_err(|_| Error::InvalidPhase);
+        wipe(&mut bytes);
+        let session: serde_json::Value = session?;
+        let game = if let Some(id) = session["gameId"].as_u64().filter(|id| *id > 0) {
+            id
+        } else {
+            let flow = self
+                .history_value(pid, Endpoint::Gameflow)
+                .map_err(|_| Error::InvalidPhase)?;
+            if flow["phase"] != "ChampSelect" || flow["gameData"]["queue"]["id"] != 2400 {
+                return Ok(None);
+            }
+            flow["gameData"]["gameId"].as_u64().unwrap_or(0)
+        };
+        Ok(crate::bench::Lobby::parse(&session, game))
+    }
+    pub(crate) fn swap_bench(&self, pid: u32, hero: u32) -> Result<crate::bench::Attempt> {
+        // Return the rejection status only for this endpoint. Never repeat an accepted POST.
+        let path = format!("/lol-champ-select/v1/session/bench/swap/{hero}");
+        let (code, _) = self.request_at(pid, &path, "POST", &[], 0, true)?;
+        Ok(if (200..300).contains(&code) {
+            crate::bench::Attempt::Stop
+        } else {
+            crate::bench::Attempt::Retry
+        })
+    }
     pub fn websocket(&self) -> Result<crate::websocket::Socket> {
         crate::websocket::Socket::connect(&self.credentials)
     }
@@ -236,6 +264,18 @@ impl ReadOnlyClient {
             let result = crate::context::parse(phase, &flow, &player);
             wipe(&mut player);
             let mut context = result?;
+            if let Some(lobby) = context
+                .bench_lobby
+                .as_mut()
+                .filter(|l| l.slots.iter().any(|id| *id != 0))
+            {
+                // A failed eligibility read hides only the action strip. Recommendations remain available.
+                let ids = self
+                    .request(current_pid, Endpoint::PickableChampions)
+                    .ok()
+                    .and_then(|(_, bytes)| serde_json::from_slice::<Vec<u32>>(&bytes).ok());
+                lobby.keep_pickable(ids.as_deref().unwrap_or_default());
+            }
             if let Some(selection) = context.selection.as_mut().filter(|s| s.choices.is_some()) {
                 if let Ok((code, mut body)) = self.request(current_pid, Endpoint::SubsetChampions) {
                     selection.choices = Some(if code == 200 {
@@ -299,7 +339,7 @@ impl ReadOnlyClient {
             matches!(endpoint, Endpoint::SummonerStatus),
         )
     }
-    // Private transport: only typed read endpoints and the explicit item-set transaction reach here.
+    // Private transport: only typed endpoint methods reach here.
     fn request_at(
         &self,
         current_pid: u32,
@@ -369,7 +409,9 @@ impl ReadOnlyClient {
                 &mut size,
                 null_mut(),
             ))?;
-            if !(method == "PUT" && (200..300).contains(&code)) {
+            let write_ok = matches!(method, "PUT" | "POST") && (200..300).contains(&code);
+            let bench_unavailable = method == "POST" && matches!(code, 400 | 409);
+            if !write_ok && !bench_unavailable {
                 status(code)?;
             }
             // Deliberately never read the body of status-only probes or successful writes.

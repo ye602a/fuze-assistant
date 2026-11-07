@@ -12,6 +12,8 @@ const revision=execFileSync('git',['rev-parse','--short=12','HEAD'],{cwd:root,en
 const version=(await readFile(path.join(root,'rust/app-version.txt'),'utf8')).trim()
 if(!/^0\.7\.(0|[1-9]\d*)$/.test(version))throw new Error('Invalid application version')
 if(!/^[a-f0-9]{12}$/.test(revision))throw new Error('Invalid revision')
+const releaseChannel=process.env.FUZE_RELEASE_CHANNEL || 'preview'
+if(!['stable','preview'].includes(releaseChannel))throw new Error('Invalid release channel')
 const frontend=process.env.FUZE_UI_FRONTEND || 'slint'
 if(!['win32','slint'].includes(frontend))throw new Error('Invalid UI frontend')
 const previewRoot=path.resolve(process.env.FUZE_RUST_PREVIEW_DIR || path.join(root,'rust/artifacts/preview'))
@@ -73,7 +75,7 @@ await text('README.txt',`FUZE ${version}（构建 ${revision}）
 用户设置和记录独立保存，更新不清空用户文件。
 来源与致谢见 THANKS.md。
 `.replace(/\n/g,'\r\n'))
-await text('build.json',JSON.stringify({version,revision,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,desktopExecutable:frontend==='slint'?'FUZE.exe':undefined,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
+await text('build.json',JSON.stringify({version,revision,releaseChannel,sequence:Number(execFileSync('git',['show','-s','--format=%ct','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true}).trim()),uiFrontend:frontend,desktopExecutable:frontend==='slint'?'FUZE.exe':undefined,channel:'rust-development-preview',runtime:onnxVersion,vcRuntime,stable_replacement:false},null,2))
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}
