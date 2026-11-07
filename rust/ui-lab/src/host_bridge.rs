@@ -628,7 +628,6 @@ pub fn attach_recovered(
             state.set_ocr_value(view.ocr.into());
             state.set_ocr_hint(view.ocr_hint.into());
             state.set_ocr_tone(view.ocr_tone);
-            state.set_verified(if offline { "隔离验证，未连接游戏".into() } else { next.verified_time.as_deref().unwrap_or("尚未验证").into() });
             ui.set_health(view.health);
             state.set_status_active(view.busy);
             state.set_status_title(view.title.into());

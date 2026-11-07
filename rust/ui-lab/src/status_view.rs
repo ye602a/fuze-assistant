@@ -42,7 +42,7 @@ pub fn present(s: &Status, offline: bool) -> View {
         busy: false,
         title: "等待英雄联盟客户端",
         hint: "登录后自动连接，通信成功后显示游戏阶段。",
-        connection: "尚未验证",
+        connection: "未连接",
         phase: "等待客户端",
         connection_tone: 0,
         capture: "正常待命",
@@ -60,7 +60,7 @@ pub fn present(s: &Status, offline: bool) -> View {
     } else {
         match s.connection {
             Some(State::Connected(p)) => {
-                v.connection = "通信已验证";
+                v.connection = "已连接";
                 v.connection_tone = 1;
                 v.phase = match p {
                     Phase::ClientReady => "大厅 / 匹配",
@@ -240,7 +240,7 @@ fn connection_error(error: Error) -> (&'static str, &'static str, &'static str) 
         ),
         Error::NotFound => (
             "客户端接口暂不可用",
-            "请求的接口返回 404，尚未验证当前游戏阶段；正在重试。",
+            "暂时无法获取游戏状态，正在重试。",
             "LCU-NOT-FOUND",
         ),
         Error::HttpStatus => (
@@ -345,7 +345,7 @@ mod tests {
         s.connection = Some(State::Retry(Error::Unauthorized));
         let v = present(&s, false);
         assert_eq!(v.health, 3);
-        assert_ne!(v.connection, "通信已验证");
+        assert_ne!(v.connection, "已连接");
         s.connection = Some(State::Connected(Phase::ClientReady));
         let v = present(&s, false);
         assert_eq!(v.health, 0);
