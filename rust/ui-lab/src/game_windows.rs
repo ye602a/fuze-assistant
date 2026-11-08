@@ -214,7 +214,6 @@ impl Drop for Panel {
 }
 pub struct Manager {
     stages: crate::stage_cards::Reference,
-    combo_revision: u64,
     roots: Vec<fuze_data::Root>,
     offline: bool,
     visible: bool,
@@ -239,7 +238,6 @@ impl Manager {
         let champion = Panel::new(&roots, false, offline, stages.store.clone()).ok();
         Self {
             stages,
-            combo_revision: 0,
             roots,
             offline,
             visible,
@@ -396,19 +394,6 @@ impl Manager {
                 .details
                 .options(&panel.ui, status.preferences.icon_downloads);
             panel.update(side, true, visible)?;
-        }
-        let revision = self
-            .stages
-            .store
-            .combos
-            .lock()
-            .map(|s| s.revision)
-            .unwrap_or(0);
-        if revision != self.combo_revision {
-            self.combo_revision = revision;
-            if let Some(panel) = &self.side {
-                panel.ui.invoke_combo_refresh();
-            }
         }
         let frame = (active && phase == Phase::InProgress && status.preferences.augment_overlay)
             .then_some(status.pipeline.overlay.clone())

@@ -318,7 +318,6 @@ pub struct Service {
 /// All native reference consumers share one cache/IO lock and one download cooldown.
 /// UI peeks never block on IO; entering gameplay revokes pending network work.
 pub struct Store {
-    pub combos: Mutex<crate::augment_combos::Selection>,
     cache: Mutex<Option<Cache>>,
     network: AtomicBool,
     network_epoch: AtomicU64,
@@ -327,7 +326,6 @@ impl Default for Store {
     fn default() -> Self {
         Self {
             cache: Mutex::new(None),
-            combos: Mutex::new(Default::default()),
             network: AtomicBool::new(true),
             network_epoch: AtomicU64::new(0),
         }

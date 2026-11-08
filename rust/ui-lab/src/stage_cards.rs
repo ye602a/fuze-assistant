@@ -12,7 +12,6 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
-    pub combinations: [String; 3],
     pub values: [[String; 4]; 3],
     pub details: [String; 3],
     pub source: String,
@@ -20,7 +19,6 @@ pub struct Comparison {
 impl Default for Comparison {
     fn default() -> Self {
         Self {
-            combinations: Default::default(),
             values: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
             details: Default::default(),
             source: "阶段参考暂无缓存 · 选人及加载时准备，局内不联网".into(),
@@ -97,7 +95,6 @@ pub struct Reference {
     retry: Option<u64>,
     serial: u64,
     snapshot: Option<Arc<Snapshot>>,
-    combo_revision: u64,
     rendered: Option<(
         u32,
         String,
@@ -122,28 +119,9 @@ impl Reference {
             serial: 0,
             snapshot: None,
             rendered: None,
-            combo_revision: 0,
         }
     }
     pub fn update(&mut self, status: &Status) {
-        if let Ok(mut selection) = self.store.combos.lock() {
-            match status.connection {
-                Some(State::Connected(Phase::InProgress)) => {
-                    if let Some(id) = status
-                        .playing
-                        .as_ref()
-                        .and_then(|v| v.team.get(v.local_slot?))
-                        .map(|h| h.id)
-                    {
-                        selection.context(id, &status.recognition.reference);
-                    }
-                }
-                Some(State::Connected(
-                    Phase::ChampSelect | Phase::ClientReady | Phase::PostGame,
-                )) => selection.context(0, ""),
-                _ => (), // A pause or temporary reconnect must not erase manual choices.
-            }
-        }
         let prepare = status.mode == 1
             && matches!(
                 status.connection,
@@ -241,10 +219,8 @@ impl Reference {
             .snapshot
             .as_ref()
             .is_some_and(|s| s.stale(stage_reference::now()));
-        let revision = self.store.combos.lock().map(|s| s.revision).unwrap_or(0);
-        let same = revision == self.combo_revision
-            && self
-                .rendered
+        let same =
+            self.rendered
                 .as_ref()
                 .is_some_and(|(id, version, slots, source, old_stale, _)| {
                     *id == champion
@@ -260,23 +236,13 @@ impl Reference {
         if same {
             return self.rendered.as_ref().unwrap().5.clone();
         }
-        let mut view = compare(
+        let view = Arc::new(compare(
             self.snapshot.as_deref(),
             champion,
             ids,
             dataset,
             stage_reference::now(),
-        );
-        if let Ok(selection) = self.store.combos.lock() {
-            for (i, id) in ids.into_iter().enumerate() {
-                if let Some(id) = id {
-                    view.combinations[i] =
-                        selection.detail(self.snapshot.as_deref(), id, stage_reference::now());
-                }
-            }
-        }
-        self.combo_revision = revision;
-        let view = Arc::new(view);
+        ));
         self.rendered = Some((
             champion,
             dataset.into(),
@@ -333,56 +299,8 @@ mod tests {
         let b = r.cards([Some(1), None, Some(3)], "16.20");
         assert!(Arc::ptr_eq(&a, &b));
         state.mode = 2;
-        r.store.combos.lock().unwrap().toggle(22, 1, "符文甲");
         r.update(&state);
         assert!(r.context.is_none() && r.snapshot.is_none());
-        assert_eq!(r.store.combos.lock().unwrap().picked.len(), 1);
-        state.connection = None;
-        r.update(&state);
-        assert_eq!(r.store.combos.lock().unwrap().picked.len(), 1);
-        state.connection = Some(State::Connected(Phase::PostGame));
-        r.update(&state);
-        assert!(r.store.combos.lock().unwrap().picked.is_empty());
-    }
-    #[test]
-    fn manual_combination_changes_only_reference_and_invalidates_the_render_cache() {
-        let mut r = Reference::new(true);
-        r.context = Some(Context {
-            champion: 145,
-            dataset: "16.22".into(),
-            prepare: false,
-        });
-        r.snapshot = Some(Arc::new(Snapshot {
-            schema: 1,
-            champion: 145,
-            patch: "16.22".into(),
-            date: "2026-11-06".into(),
-            data_path: String::new(),
-            fetched: stage_reference::now(),
-            rows: Default::default(),
-            combinations: Some(vec![stage_reference::Combination {
-                ids: vec![1004, 3086],
-                win: 0.6495,
-                samples: 6819,
-            }]),
-        }));
-        let ids = [Some(3086), None, Some(9)];
-        let before = r.cards(ids, "16.22");
-        assert!(before.combinations.iter().all(|s| s.is_empty()));
-        {
-            let mut manual = r.store.combos.lock().unwrap();
-            manual.context(145, "16.22.1");
-            manual.toggle(145, 1004, "符文甲");
-        }
-        let after = r.cards(ids, "16.22");
-        assert!(!Arc::ptr_eq(&before, &after));
-        assert!(after.combinations[0].contains("65.0% · 6819 场"));
-        assert!(after.combinations[1].is_empty() && after.combinations[2].is_empty());
-        assert_eq!(after.values, before.values);
-        assert_eq!(after.details, before.details);
-        assert!(Arc::ptr_eq(&after, &r.cards(ids, "16.22")));
-        r.store.combos.lock().unwrap().clear();
-        assert_eq!(*before, *r.cards(ids, "16.22"));
     }
     #[test]
     fn fixed_slots_missing_samples_expiry_and_context_never_borrow_overall_rates() {

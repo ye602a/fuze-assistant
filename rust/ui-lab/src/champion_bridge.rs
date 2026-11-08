@@ -454,7 +454,6 @@ fn apply(ui: &ChampionWindow, p: &Presentation) {
                 .skip(offset)
                 .take(12)
                 .map(|a| DetailRow {
-                    id: a.id as i32,
                     title: a.name.clone().into(),
                     icon_url: a.icon.clone().into(),
                     description: a.description_with_evidence().into(),
@@ -805,7 +804,6 @@ pub fn attach_shared(
     } else {
         timer.stop();
     }
-    crate::combo_bridge::attach(ui, store.clone());
     Ok(Binding {
         _stage: crate::stage_bridge::attach(ui, roots, ui.get_offline(), store),
         actions,
