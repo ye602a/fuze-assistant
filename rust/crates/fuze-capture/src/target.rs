@@ -22,6 +22,35 @@ impl Drop for GameWindow {
     }
 }
 impl GameWindow {
+    /// Metadata for passive click correlation with the existing primary-screen capture.
+    /// A moved/windowed game must not be matched against the desktop's fixed card coordinates.
+    pub fn primary_client(&self) -> Option<(isize, u32, u32)> {
+        use windows_sys::Win32::Graphics::Gdi::*;
+        unsafe {
+            if !self.valid() || self.minimized() || !self.foreground() {
+                return None;
+            }
+            let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            let mut info: MONITORINFO = zeroed();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            let mut rect: RECT = zeroed();
+            let mut origin = POINT { x: 0, y: 0 };
+            if GetMonitorInfoW(monitor, &mut info) == 0
+                || GetClientRect(self.hwnd as HWND, &mut rect) == 0
+                || ClientToScreen(self.hwnd as HWND, &mut origin) == 0
+            {
+                return None;
+            }
+            let screen = info.rcMonitor;
+            (origin.x == 0
+                && origin.y == 0
+                && screen.left == 0
+                && screen.top == 0
+                && rect.right == screen.right
+                && rect.bottom == screen.bottom)
+                .then_some((self.hwnd, rect.right as u32, rect.bottom as u32))
+        }
+    }
     pub(crate) fn handle(&self) -> isize {
         self.hwnd
     }

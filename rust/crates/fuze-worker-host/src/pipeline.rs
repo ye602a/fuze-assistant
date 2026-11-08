@@ -15,6 +15,7 @@ use fuze_runtime::{
 };
 use std::time::{Duration, Instant};
 pub struct Pipeline {
+    pub(crate) picks: crate::augment_picks::Recorder,
     pub(crate) tencent: Option<crate::tencent_data::Pending>,
     pub(crate) diagnostics: crate::recognition_log::Probe,
     diagnostic_level: Option<u8>,
@@ -131,6 +132,7 @@ impl Pipeline {
             HiddenOverlay::with_statistics(session.generation(), dataset.clone(), stats)?
         };
         Ok(Self {
+            picks: Default::default(),
             tencent: None,
             diagnostics: Default::default(),
             diagnostic_level: None,
@@ -256,6 +258,7 @@ impl Pipeline {
     }
     /// Shared installation path for production screen capture and isolated transport fixtures.
     pub fn capture_feed(&mut self, feed: Box<dyn CaptureFeed>) -> Result<()> {
+        self.picks.cancel();
         if self.closed || self.overlay.cancellation().cancelled() || self.wake_at().is_none() {
             return Err("capture-phase");
         }
@@ -277,6 +280,7 @@ impl Pipeline {
         Ok(())
     }
     pub fn capture_game(&mut self, target: fuze_capture::target::GameWindow) -> Result<()> {
+        self.picks.cancel();
         if self.closed || self.overlay.cancellation().cancelled() || self.wake_at().is_none() {
             return Err("capture-phase");
         }
@@ -305,6 +309,7 @@ impl Pipeline {
         Ok(())
     }
     pub fn capture_owned(&mut self, hwnd: isize, visible_ci: bool) -> Result<()> {
+        self.picks.cancel();
         if self.closed || self.wake_at().is_none() {
             return Err("capture-phase");
         }
@@ -498,6 +503,7 @@ impl Pipeline {
         self.diagnostic_active = diagnostic_due;
         self.diagnostic_ocr = None;
         let mut diagnostic_sample = None;
+        let captured = crate::augment_picks::Recorder::timestamp();
         let result = (|| match capture.next(Duration::from_millis(100)).map_err(|e| {
             if e.to_string() == "capture-bitmap" {
                 "capture-bitmap"
@@ -523,6 +529,18 @@ impl Pipeline {
                     sequence: capture.key().1,
                 };
                 let evidence = capture.selection();
+                let pick_evidence = if evidence
+                    == Some(fuze_contract::selection_pixels::Evidence::Absent)
+                    && !capture.titles().is_ok_and(|a| {
+                        a.bytes()
+                            .chunks_exact(4)
+                            .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
+                    }) {
+                    None // A black readback is not visual confirmation that a choice completed.
+                } else {
+                    evidence
+                };
+                self.picks.frame(pick_evidence);
                 if let Some(evidence) = evidence {
                     let now = self.now();
                     let decision = self.screen_gate.observe(evidence, now);
@@ -552,6 +570,22 @@ impl Pipeline {
                     sample.metadata["stage"] = serde_json::json!("ocr");
                 }
                 let delivery = self.recognize(key, &atlas)?;
+                if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible) {
+                    if let (Some(d), Some(pixels)) = (&delivery, capture.diagnostic_pixels()) {
+                        if !d.retained {
+                            self.picks.offer(
+                                &d.snapshot.slots,
+                                d.title_kind,
+                                captured,
+                                pixels.screen,
+                            );
+                        } else {
+                            self.picks.cancel();
+                        }
+                    } else {
+                        self.picks.cancel();
+                    }
+                }
                 if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible)
                     || delivery
                         .as_ref()
@@ -562,6 +596,7 @@ impl Pipeline {
                 Ok(delivery)
             }
             FrameStatus::Resized => {
+                self.picks.cancel();
                 self.capture_state = "resizing";
                 self.retention = Default::default();
                 self.screen_gate = Default::default();
@@ -587,6 +622,7 @@ impl Pipeline {
                 Ok(None)
             }
             FrameStatus::Suspended => {
+                self.picks.cancel();
                 self.capture_state = "suspended";
                 self.retention = Default::default();
                 self.screen_gate = Default::default();
@@ -617,6 +653,9 @@ impl Pipeline {
             self.diagnostics.control.record(sample);
         }
         self.diagnostic_active = false;
+        if result.is_err() {
+            self.picks.cancel();
+        }
         // Returned inference failures retain the capture stream; a capture failure stops it.
         if self.closed {
             return result;
@@ -655,6 +694,7 @@ impl Pipeline {
             "dataset": self.dataset, "level": self.diagnostic_level,
             "schedule": format!("{:?}", self.scheduling().0), "nextLevel": self.scheduling().2,
             "evidence": capture.selection().map(|e| format!("{e:?}")),
+            "pickedAugments": self.picks.owned().as_ref(), "pickTrackingError": self.picks.error,
         })
     }
 }

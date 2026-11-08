@@ -1,27 +1,34 @@
 //! Formatting of provider combination statistics. No ownership inference or UI interaction.
 use crate::stage_reference::Snapshot;
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reference {
+    pub partners: String,
+    pub statistic: String,
+    pub detail: String,
+}
 
 /// `owned` must come from an actual selected-augment source, never the offered cards.
-/// Production has no such source yet, so this formatter is not wired to live recommendations.
-pub fn detail(
+pub fn reference(
     snapshot: Option<&Snapshot>,
     champion: u32,
     patch: &str,
     owned: &[(u32, String)],
     candidate: u32,
     at: u64,
-) -> String {
+) -> Reference {
     let Some(s) = snapshot.filter(|s| s.usable(champion, at)) else {
-        return String::new();
+        return Reference::default();
     };
     let patch = fuze_data::recognition::patch(patch);
     if patch.is_none()
         || patch != fuze_data::recognition::patch(&s.patch)
         || owned.iter().any(|(id, _)| *id == candidate)
     {
-        return String::new();
+        return Reference::default();
     }
     let mut lines = Vec::new();
+    let mut best = (0, 0);
+    let mut view = Reference::default();
     for row in s.combinations.iter().flatten() {
         if !row.ids.contains(&candidate) {
             continue;
@@ -38,6 +45,21 @@ pub fn detail(
             })
             .collect();
         if let Some(names) = partners {
+            // Prefer the most specific observed combination, then the larger sample, not the highest win rate.
+            if (names.len(), row.samples) > best {
+                best = (names.len(), row.samples);
+                view.partners = format!("与 {}", names.join(" + "));
+                view.statistic = format!(
+                    "组合 {:.1}% · {} 场{}",
+                    row.win * 100.,
+                    row.samples,
+                    if row.samples < 200 {
+                        " · 少样本"
+                    } else {
+                        ""
+                    }
+                );
+            }
             lines.push(format!(
                 "与 {}：{:.1}% · {} 场{}",
                 names.join(" + "),
@@ -52,20 +74,31 @@ pub fn detail(
         }
     }
     if lines.is_empty() {
-        return String::new();
+        return view;
     }
-    format!(
+    view.detail = format!(
         "搭配历史胜率 · ARAMKit {} · {}\n{}",
         s.patch,
         s.date,
         lines.join("\n")
-    )
+    );
+    view
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::stage_reference::Combination;
+    fn detail(
+        s: Option<&Snapshot>,
+        hero: u32,
+        patch: &str,
+        owned: &[(u32, String)],
+        candidate: u32,
+        at: u64,
+    ) -> String {
+        reference(s, hero, patch, owned, candidate, at).detail
+    }
     #[test]
     fn explicit_owned_set_matches_complete_rows_without_combining_their_rates() {
         let snapshot = Snapshot {

@@ -232,10 +232,19 @@ impl Scene {
         };
         // The fixed header fits every observed real name; only an exceptional
         // external title needs a complete copy in the scrollable text.
-        let text = if self.cards[index].title.chars().count() > 20 {
-            format!("{}\n\n{}{}", self.cards[index].title, text, reference)
+        let combo = &self.reference.combos[index].detail;
+        let prefix = if combo.is_empty() {
+            String::new()
         } else {
-            format!("{}{}", text, reference)
+            format!("{}\n\n", combo)
+        };
+        let text = if self.cards[index].title.chars().count() > 20 {
+            format!(
+                "{}{}\n\n{}{}",
+                prefix, self.cards[index].title, text, reference
+            )
+        } else {
+            format!("{}{}{}", prefix, text, reference)
         };
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
@@ -475,10 +484,18 @@ impl Surface {
                     if j == 0 { TEXT } else { MUTED },
                 );
             }
+            let combo = &scene.reference.combos[i];
+            let partners = if combo.partners.chars().count() > 16 {
+                format!("{}…", combo.partners.chars().take(15).collect::<String>())
+            } else {
+                combo.partners.clone()
+            };
             self.text(
                 scene,
                 target,
-                if best {
+                if !partners.is_empty() {
+                    &partners
+                } else if best {
                     "优先参考"
                 } else if card.score.is_none() {
                     "暂无推荐排名"
@@ -492,10 +509,18 @@ impl Surface {
             self.text(
                 scene,
                 target,
-                &card.ranking,
+                if combo.statistic.is_empty() {
+                    &card.ranking
+                } else {
+                    &combo.statistic
+                },
                 0,
                 rect(x + 14., 209., 214., 18.),
-                MUTED,
+                if combo.statistic.is_empty() {
+                    MUTED
+                } else {
+                    GOLD
+                },
             );
             self.text(
                 scene,
@@ -1531,6 +1556,56 @@ impl HostOverlay {
 #[cfg(test)]
 mod skill_tests {
     use super::*;
+    #[test]
+    fn automatic_combination_reference_renders_without_opening_details(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let _com = Com::new()?;
+        let mut scene = Scene::new()?;
+        let scores = scene.cards.each_ref().map(|c| c.score);
+        let mut reference = crate::stage_cards::Comparison::default();
+        reference.combos[0] = fuze_worker_host::augment_combos::Reference {
+            partners: "与 秘术冲拳".into(),
+            statistic: "组合 65.0% · 6819 场".into(),
+            detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
+        };
+        reference.combos[2] = fuze_worker_host::augment_combos::Reference {
+            partners: "与 已选符文甲 + 已选符文乙 + 已选符文丙".into(),
+            statistic: "组合 42.0% · 120 场 · 少样本".into(),
+            detail: "合成少样本组合".into(),
+        };
+        scene.reference = std::sync::Arc::new(reference);
+        assert!(scene.selected.is_none() && scene.detail.is_none());
+        assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
+        unsafe {
+            let imaging: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let bitmap = imaging.CreateBitmap(
+                WIDTH,
+                HEIGHT,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )?;
+            let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
+            props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+            let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
+            Surface::new(&scene, &target)?.draw(&scene, &target, false)?;
+            if let Some(path) = std::env::var_os("FUZE_COMBO_REVIEW") {
+                let mut pixels = vec![0; (WIDTH * HEIGHT * 4) as usize];
+                bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+                for pixel in pixels.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                image::save_buffer(
+                    Path::new(&path),
+                    &pixels,
+                    WIDTH,
+                    HEIGHT,
+                    image::ColorType::Rgba8,
+                )?;
+            }
+        }
+        Ok(())
+    }
     #[test]
     fn recommendation_evidence_offscreen() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _com = Com::new()?;
