@@ -88,6 +88,7 @@ struct Context {
     prepare: bool,
 }
 pub struct Reference {
+    roots: Vec<fuze_data::Root>,
     owned: fuze_worker_host::augment_picks::Owned,
     patch: String,
     pub store: Arc<Store>,
@@ -110,9 +111,13 @@ pub struct Reference {
 }
 impl Reference {
     pub fn new(offline: bool) -> Self {
+        Self::with_roots(offline, Vec::new())
+    }
+    pub fn with_roots(offline: bool, roots: Vec<fuze_data::Root>) -> Self {
         let store = Arc::new(Store::default());
         store.allow_network(false);
         Self {
+            roots,
             owned: Default::default(),
             patch: String::new(),
             store,
@@ -207,8 +212,9 @@ impl Reference {
             return;
         }
         if self.service.is_none() {
-            // No name catalog needed here; card titles already come from OCR/catalog.
-            self.service = Service::with_store(Vec::new(), self.offline, self.store.clone()).ok();
+            // Reuse the same local data roots as the hero details and recognition service.
+            self.service =
+                Service::with_store(self.roots.clone(), self.offline, self.store.clone()).ok();
         }
         self.requested = true;
         self.retry = None;

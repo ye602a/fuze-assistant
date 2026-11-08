@@ -232,7 +232,7 @@ impl Manager {
         Ok(())
     }
     pub fn new(roots: Vec<fuze_data::Root>, offline: bool, visible: bool) -> Self {
-        let stages = crate::stage_cards::Reference::new(offline);
+        let stages = crate::stage_cards::Reference::with_roots(offline, roots.clone());
         // Construct the hidden component now so local detail preparation starts in the
         // background before champ select. It is shown only by the existing phase gate.
         let champion = Panel::new(&roots, false, offline, stages.store.clone()).ok();

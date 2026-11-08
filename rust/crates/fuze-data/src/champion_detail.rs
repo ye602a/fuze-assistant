@@ -364,12 +364,14 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
                 .collect::<Vec<String>>();
             add(
                 format!("{} · {} · {}", t("召唤师技能"), names.join(" / "), stats(r)),
-                rows(&r["summonerSpellIds"])
-                    .filter_map(Value::as_u64)
-                    .take(2)
-                    .map(|id| format!("https://cdn.dtodo.cn/hextech/summoner-spell-icons/{id}.png"))
+                rows(&r["icons"])
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
                     .collect(),
             );
+        }
+        for r in rows(&b["skillPriorities"]).take(3) {
+            add(format!("技能优先级 · {}", clean(&r["order"])), vec![]);
         }
         for r in rows(&b["skillOrders"]).take(3) {
             let keys = rows(&r["skillKeys"])

@@ -280,6 +280,10 @@ pub(crate) fn icon_path(url: &str) -> Result<&str> {
         }
         return Err("icon-path");
     }
+    if let Some(path) = url.strip_prefix("https://data.aramkit.cn/") {
+        fuze_data::aramkit::icon(path)?;
+        return Ok(&url["https://data.aramkit.cn".len()..]);
+    }
     let p = url
         .strip_prefix("https://cdn.dtodo.cn")
         .ok_or("icon-origin")?;
@@ -305,8 +309,9 @@ pub(crate) fn icon_path(url: &str) -> Result<&str> {
     Ok(p)
 }
 pub fn decode(bytes: &[u8]) -> Result<Picture> {
-    let mut reader =
-        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| "icon-format")?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(512);
     limits.max_image_height = Some(512);
@@ -336,7 +341,9 @@ fn icon_endpoint(url: &str) -> Result<(&str, &str)> {
         return Ok(("game.gtimg.cn", "/images/lol/act/img/item/4004.png"));
     }
     Ok((
-        if url.starts_with("https://game.gtimg.cn/") {
+        if url.starts_with("https://data.aramkit.cn/") {
+            "data.aramkit.cn"
+        } else if url.starts_with("https://game.gtimg.cn/") {
             "game.gtimg.cn"
         } else if url.starts_with("https://raw.communitydragon.org/") {
             "raw.communitydragon.org"
@@ -376,7 +383,8 @@ pub fn picture(
             }
         }
     }
-    if offline {
+    // Existing embedded/disk artwork remains usable after a data-source migration.
+    if offline || host == "cdn.dtodo.cn" {
         return Err("icon-offline");
     }
     let bytes = crate::update_io::get(host, path, 512 * 1024, None, None, cancel)?;
@@ -403,6 +411,26 @@ pub fn picture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn aramkit_webp_decodes_and_only_public_asset_paths_are_accepted() {
+        let mut bytes = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut bytes)
+            .encode(&[200, 100, 50, 255], 1, 1, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let pic = decode(&bytes).unwrap();
+        assert_eq!(&pic.bgra[..4], &[50, 100, 200, 255]);
+        assert_eq!(
+            icon_endpoint("https://data.aramkit.cn/assets/champion/145-abcdef.webp"),
+            Ok(("data.aramkit.cn", "/assets/champion/145-abcdef.webp"))
+        );
+        for url in [
+            "https://data.aramkit.cn.evil/assets/champion/145.webp",
+            "https://data.aramkit.cn/assets/champion/../145.webp",
+            "https://data.aramkit.cn/assets/champion/145.webp?key=abc",
+        ] {
+            assert!(icon_endpoint(url).is_err());
+        }
+    }
     #[test]
     fn missing_spectral_cutlass_icon_uses_the_exact_official_replacement() {
         assert_eq!(

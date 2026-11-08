@@ -158,7 +158,9 @@ pub fn create_indexed(champion: u32, name: &str, builds: &[&Value]) -> Vec<(usiz
             .filter(|c| !c.is_control())
             .take(160)
             .collect();
-        let maps = if build["source"] == crate::tencent::SOURCE {
+        let maps = if build["source"] == crate::tencent::SOURCE
+            || build["source"] == crate::aramkit::SOURCE
+        {
             json!([12])
         } else {
             json!([11, 12])

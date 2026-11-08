@@ -289,6 +289,7 @@ impl Prepared {
             .filter(|(p, _)| p.starts_with("champion-shards/"))
             .find_map(|(_, d)| d["champions"].get_mut(&key))
             .ok_or("tencent-champion")?;
+        let aramkit = row["champion"]["stats"]["source"] == crate::aramkit::SOURCE;
         let rows = row["augments"].as_array_mut().ok_or("tencent-ranks")?;
         for a in rows.iter_mut() {
             if let Some(s) = a["stats"].as_object_mut() {
@@ -319,11 +320,19 @@ impl Prepared {
             s["rank"] = json!(rank.rank);
             s["total"] = json!(snapshot.ranks.iter().map(|r| r.rank).max().unwrap_or(1));
             s["tier"] = json!(rank.tier);
-            s["pickRate"] = json!(rank.pick);
+            if !aramkit {
+                s["pickRate"] = json!(rank.pick);
+            }
             s["rankSource"] = json!(SOURCE);
             s["rankDate"] = json!(snapshot.date);
         }
-        row["builds"] = json!([snapshot.build]);
+        if aramkit {
+            let builds = row["builds"].as_array_mut().ok_or("tencent-builds")?;
+            builds.retain(|b| b["source"] != SOURCE);
+            builds.push(snapshot.build.clone());
+        } else {
+            row["builds"] = json!([snapshot.build]);
+        }
         let catalog = catalog();
         let items = self
             .documents
@@ -332,7 +341,9 @@ impl Prepared {
             .ok_or("tencent-items")?;
         for item in catalog["data"].as_array().unwrap() {
             if let Some(i) = items.iter().position(|v| v["id"] == item["id"]) {
-                items[i] = item.clone();
+                if !aramkit {
+                    items[i] = item.clone();
+                }
             } else {
                 items.push(item.clone());
             }
@@ -482,6 +493,23 @@ mod tests {
             .all(|a| a.evidence.games.is_none()));
         assert!(!detail.item_sets.is_empty());
         assert!(detail.augments[0].provenance.contains("腾讯101推荐"));
+        // The new primary source keeps its own build routes, artwork and pick rate.
+        let row = &mut data.documents.get_mut("champion-shards/0.json").unwrap()["champions"]["1"];
+        row["champion"]["stats"] = json!({"source":crate::aramkit::SOURCE});
+        row["augments"][0]["stats"]["pickRate"] = json!(0.123);
+        let build = json!({"source":crate::aramkit::SOURCE,"queueId":2400,"patch":"16.21"});
+        row["builds"] = json!([build]);
+        data.documents.get_mut("items.json").unwrap()["data"][0]["name"] = json!("ARAMKit item");
+        data.apply_tencent(&snap).unwrap();
+        data.apply_tencent(&snap).unwrap();
+        let row = &data.documents["champion-shards/0.json"]["champions"]["1"];
+        assert_eq!(row["builds"][0], build);
+        assert_eq!(row["builds"].as_array().unwrap().len(), 2);
+        assert_eq!(row["augments"][0]["stats"]["pickRate"], 0.123);
+        assert_eq!(
+            data.documents["items.json"]["data"][0]["name"],
+            "ARAMKit item"
+        );
         data.version = "16.22.1".into();
         assert!(data.apply_tencent(&snap).is_err());
     }

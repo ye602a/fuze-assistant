@@ -123,14 +123,17 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 /// No remote-provided URL is accepted. Resources are constructed from validated version/path.
-pub fn data_get(path: &str, limit: usize, cancel: &dyn Fn() -> bool) -> Result<Vec<u8>> {
-    if !path.starts_with("/api/client/v1/")
-        || path.len() > 512
-        || path.chars().any(|c| c.is_control() || "\\#%@".contains(c))
+pub fn aramkit_get(path: &str, limit: usize, cancel: &dyn Fn() -> bool) -> Result<Vec<u8>> {
+    if !(path.starts_with("/data/") || path.starts_with("/resources/"))
+        || !path.ends_with(".json")
+        || fuze_data::safe_path(path.trim_start_matches('/')).is_err()
+        || path.contains('?')
+        || path.contains('#')
+        || path.contains('%')
     {
         return Err("update-url");
     }
-    get("data.dtodo.cn", path, limit, None, None, cancel)
+    get(fuze_data::aramkit::HOST, path, limit, None, None, cancel)
 }
 /// Callers select a fixed host and path through the private-channel policy, never LCU auth.
 pub(crate) fn get(
@@ -437,7 +440,7 @@ mod tests {
             assert_eq!(access_type(host), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY);
         }
         for host in [
-            "data.dtodo.cn",
+            "data.aramkit.cn",
             "localhost",
             "127.0.0.1",
             "api.github.com.other",

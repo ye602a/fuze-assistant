@@ -4,7 +4,9 @@
 
 Original repository history and third-party notices are retained. This acknowledgement does not grant or replace any upstream or dependency license. Historical application and item-set identifiers are retained where needed for compatibility.
 
-The Rust production client still uses the upstream `https://data.dtodo.cn/api/client/v1/` API for data configuration and datasets, and `https://cdn.dtodo.cn` for some image resources. FUZE's program updates come from its own GitHub Releases. Independent client development does not mean an independent data service or official endorsement by the upstream project.
+The primary data source is [ARAMKit](https://aramkit.cn/), using its public versioned resources and ARAM Mayhem statistics at `https://data.aramkit.cn/`. FUZE retains the published patch, data date, sample counts and source attribution. Tencent 101 recommendations remain a separate, patch-matched supplement. No personal API key is distributed.
+
+Existing local datasets and embedded artwork originally obtained from dtodo remain readable for compatibility. New data and artwork downloads no longer call dtodo. FUZE's program updates come from its own GitHub Releases. These acknowledgements do not imply upstream endorsement or grant rights beyond the respective providers' terms.
 
 ## Riot client augment metadata
 

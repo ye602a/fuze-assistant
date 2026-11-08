@@ -239,6 +239,16 @@ fn fetch_snapshot(
     if data["champion"]["id"].as_u64() != Some(id as u64) {
         return Err("stage-champion");
     }
+    parse_snapshot(id, now, patch, date, data_path, &data)
+}
+fn parse_snapshot(
+    id: u32,
+    now: u64,
+    patch: String,
+    date: String,
+    data_path: String,
+    data: &Value,
+) -> Result<Snapshot> {
     let mut rows: [Vec<Row>; 5] = Default::default();
     for (stage, target) in rows.iter_mut().enumerate() {
         let value = if stage == 0 {
@@ -282,6 +292,31 @@ fn fetch_snapshot(
     }
     s.normalize();
     Ok(s)
+}
+pub(crate) fn local_snapshot(
+    roots: &[fuze_data::Root],
+    locale: fuze_data::Locale,
+    id: u32,
+    at: u64,
+) -> Result<Option<Snapshot>> {
+    let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Champion(id))?;
+    if data
+        .document("manifest.json")
+        .is_none_or(|v| v["source"] != fuze_data::aramkit::SOURCE)
+    {
+        return Ok(None);
+    }
+    let path = format!("champion-shards/{id}.json");
+    let reference = &data.document(&path).ok_or("stage-local-missing")?["champions"]
+        [id.to_string()]["aramkitReference"];
+    Ok(Some(parse_snapshot(
+        id,
+        at,
+        reference["patch"].as_str().ok_or("stage-format")?.into(),
+        reference["date"].as_str().ok_or("stage-format")?.into(),
+        reference["dataPath"].as_str().ok_or("stage-format")?.into(),
+        reference,
+    )?))
 }
 #[derive(Clone, Default)]
 pub struct Reply {
@@ -517,7 +552,25 @@ impl Service {
                     if cancel() {
                         continue;
                     }
-                    let mut reply = if offline {
+                    // A full ARAMKit update already contains these exact stage/combination rows.
+                    // Prefer the local bundle rather than fetching the same hero a second time.
+                    let local = local_snapshot(&roots, req.locale, req.id, now());
+                    let mut reply = if let Ok(Some(snapshot)) = local {
+                        let snapshot = Arc::new(snapshot);
+                        if let Ok(mut holder) = store.cache.lock() {
+                            let cache = holder.get_or_insert_with(|| Cache::new(None));
+                            cache.entries.retain(|old| old.champion != req.id);
+                            cache.entries.push_back(snapshot.clone());
+                            while cache.entries.len() > 8 {
+                                cache.entries.pop_front();
+                            }
+                        }
+                        Reply {
+                            snapshot: Some(snapshot),
+                            cached: true,
+                            ..Default::default()
+                        }
+                    } else if offline {
                         Reply {
                             issue: Some("stage-offline"),
                             ..Default::default()

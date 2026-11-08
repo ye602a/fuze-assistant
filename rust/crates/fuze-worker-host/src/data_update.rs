@@ -33,13 +33,6 @@ fn prefix(locale: Locale, version: &str) -> String {
         format!("versions/{}/{version}", locale.code())
     }
 }
-fn api(locale: Locale, version: &str) -> String {
-    if locale == Locale::ZhCn {
-        format!("/api/client/v1/data/{version}")
-    } else {
-        format!("/api/client/v1/data/{version}/{}", locale.code())
-    }
-}
 fn clean_dir(path: &Path) -> Result<()> {
     // Reject reparse ancestors before creating any file in the user-owned cache.
     for p in path.ancestors() {
@@ -79,43 +72,173 @@ impl Drop for Stage {
     }
 }
 pub fn refresh(root: &Path, cancel: &dyn Fn() -> bool) -> Result<Vec<String>> {
-    refresh_with(root, cancel, &|p, n, c| update_io::data_get(p, n, c))
+    refresh_with(root, cancel, &|p, n, c| update_io::aramkit_get(p, n, c))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture(path: &str, version: &str, broken: bool) -> Result<Vec<u8>> {
-        let locale = if path.contains("zh-TW") {
-            "zh-TW"
-        } else if path.contains("en-US") {
-            "en-US"
-        } else {
-            "zh-CN"
-        };
-        if path.contains("/config") {
-            return Ok(json!({"locale":locale,"dataVersion":version})
-                .to_string()
-                .into_bytes());
-        }
-        let document = |name: &str| {
-            if name == "augments.json" {
-                json!({"locale":locale,"dataVersion":version,"data":[{"id":1,"name":"Fixture"}]})
-            } else {
-                json!({"locale":locale,"dataVersion":version,"shards":[]})
+    #[test]
+    fn activated_aramkit_reference_is_available_offline_without_a_second_download() {
+        use crate::stage_reference::{Access, Request, Service, Store};
+        let dir = std::env::temp_dir().join(format!(
+            ".pending-aramkit-offline-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let dir = Stage(fs::canonicalize(dir).unwrap(), false);
+        refresh_with(&dir.0, &|| false, &|p, _, _| {
+            let mut bytes = fixture(p, "16.22.1", false)?;
+            if p.ends_with("versions.json") {
+                let mut value: Value = serde_json::from_slice(&bytes).unwrap();
+                value["versions"][0]["dataPath"] = json!("data/16.22-20261106-abcdef123456");
+                bytes = serde_json::to_vec(&value).unwrap();
             }
-            .to_string()
-            .into_bytes()
+            Ok(bytes)
+        })
+        .unwrap();
+        let store = std::sync::Arc::new(Store::default());
+        store.allow_network(false);
+        let service = Service::with_store(
+            vec![Root {
+                path: dir.0.clone(),
+                source: Source::Cache,
+            }],
+            true,
+            store.clone(),
+        )
+        .unwrap();
+        service.request(Some(Request {
+            id: 145,
+            locale: Locale::ZhCn,
+            access: Access::CacheOnly,
+        }));
+        let start = Instant::now();
+        loop {
+            if let Some(reply) = service.changed(0).filter(|r| r.snapshot.is_some()) {
+                assert_eq!(reply.snapshot.unwrap().rows[0][0].id, 1001);
+                assert_eq!(reply.names[&1001], "符文甲");
+                assert!(reply.issue.is_none());
+                assert!(store
+                    .peek(
+                        145,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                    )
+                    .is_some());
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "offline reference was not published"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    #[test]
+    #[ignore = "explicit offline public-data review directory"]
+    fn public_snapshot_activation_and_all_consumer_paths() {
+        let review =
+            PathBuf::from(std::env::var_os("FUZE_ARAMKIT_REVIEW").expect("review directory"));
+        let dir = std::env::temp_dir().join(format!(
+            ".pending-aramkit-review-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let dir = Stage(fs::canonicalize(dir).unwrap(), false);
+        let fetch = |path: &str, _: usize, _: &dyn Fn() -> bool| {
+            let tail = path.rsplit('/').next().unwrap();
+            let name = if path.contains("champion-details/") {
+                format!("aramkit-detail-{tail}")
+            } else {
+                format!("aramkit-{tail}")
+            };
+            fs::read(review.join(name)).map_err(|_| "review-missing")
         };
-        if path.ends_with("manifest.json") {
-            let files:Vec<_>=["augments.json","champions.json","items.json","champion-shards/index.json"].iter().map(|name|{let data=document(name);json!({"path":name,"bytes":data.len(),"hash":format!("sha256-{}",update_io::hex(&update_io::digest(&data,false).unwrap()))})}).collect();
-            return Ok(json!({"locale":locale,"dataVersion":version,"files":files})
-                .to_string()
-                .into_bytes());
+        refresh_with(&dir.0, &|| false, &fetch).unwrap();
+        let roots = [Root {
+            path: dir.0.clone(),
+            source: Source::Cache,
+        }];
+        let mut data = fuze_data::prepare(&roots, Locale::ZhCn, Scope::Full).unwrap();
+        let identity = data.identity();
+        let names = data.catalog().clone();
+        data.apply_current_augments().unwrap();
+        data.supplement_recognition(&fuze_data::recognition::Catalog::bundled().unwrap());
+        assert_eq!(identity, data.identity());
+        assert_eq!(names, *data.catalog());
+        assert!(!names.contains_key("力量"));
+        assert!(!names.contains_key("掷骰狂人"));
+        let champions: Vec<u32> = data.document("champions.json").unwrap()["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_u64().unwrap() as u32)
+            .collect();
+        let mut cache = fuze_data::detail_cache::Cache::prepare(&roots, &identity).unwrap();
+        let mut combos = 0;
+        for id in &champions {
+            let detail = cache.get(*id).unwrap();
+            assert!(!detail.detail.augments.is_empty(), "{id}");
+            assert!(!detail.detail.item_sets.is_empty(), "{id}");
+            assert!(data
+                .recommendations(*id)
+                .unwrap()
+                .values()
+                .any(|r| r.win_rate.is_some()));
+            let reference =
+                crate::stage_reference::local_snapshot(&roots, Locale::ZhCn, *id, 1794001361)
+                    .unwrap()
+                    .unwrap();
+            assert!(reference.patch_matches(&identity));
+            combos += reference.combinations.as_ref().unwrap().len();
+            for set in &detail.detail.item_sets {
+                assert_eq!(set["associatedMaps"], json!([12]));
+                for block in set["blocks"].as_array().unwrap() {
+                    for item in block["items"].as_array().unwrap() {
+                        let id = item["id"].as_str().unwrap().parse::<u64>().unwrap();
+                        let row = data.document("items.json").unwrap()["data"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|r| r["id"] == id)
+                            .unwrap();
+                        assert_eq!(row["acquisition"], "shop");
+                        assert_eq!(row["purchasable"], true);
+                    }
+                }
+            }
+        }
+        assert!(!cache.warming());
+        assert!(combos > 0);
+        eprintln!("{} heroes: atomic activation, OCR pool, recommendations, UI detail, store item sets and {combos} local combinations passed", champions.len());
+    }
+    fn fixture(path: &str, version: &str, broken: bool) -> Result<Vec<u8>> {
+        let pieces: Vec<_> = version.split('.').collect();
+        let patch = format!("{}.{}", pieces[0], pieces[1]);
+        if path.ends_with("versions.json") {
+            return Ok(json!({"latest":patch,"versions":[{"version":patch,"dataPath":format!("data/{patch}-20261106-test"),"resourcePath":format!("resources/{patch}-test"),"dataDate":"2026-11-06","buildTimeUnixMs":pieces[2].parse::<u64>().unwrap()}]}).to_string().into_bytes());
         }
         if broken {
             return Ok(b"corrupt".to_vec());
         }
-        Ok(document(path.rsplit('/').next().unwrap()))
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/aramkit/fixture.json"
+        ))
+        .unwrap();
+        let name = if path.contains("champion-details/") {
+            "detail"
+        } else {
+            path.rsplit('/').next().unwrap().trim_end_matches(".json")
+        };
+        Ok(serde_json::to_vec(&fixture[name]).unwrap())
     }
     #[test]
     fn complete_locale_activation_rejects_corruption_and_preserves_old_pointer() {
@@ -138,7 +261,7 @@ mod tests {
             fixture(p, "1.0.0", false)
         })
         .unwrap();
-        assert_eq!(ok.len(), 3);
+        assert_eq!(ok.len(), 1);
         let before = fs::read(test_dir.0.join("current.json")).unwrap();
         let ready = std::cell::Cell::new(false);
         assert_eq!(
@@ -160,7 +283,7 @@ mod tests {
         assert_eq!(fs::read(test_dir.0.join("current.json")).unwrap(), before);
         assert_eq!(
             refresh_with(&test_dir.0, &|| false, &|p, _, _| fixture(p, "1.0.1", true)),
-            Err("data-update-hash")
+            Err("data-update-json")
         );
         assert_eq!(fs::read(test_dir.0.join("current.json")).unwrap(), before);
         let orphan = test_dir.0.join("versions/1.0.1");
@@ -202,7 +325,7 @@ mod tests {
                 path: test_dir.0.clone(),
                 source: Source::Cache
             }],
-            Locale::ZhTw,
+            Locale::ZhCn,
             Scope::Full
         )
         .is_ok());
@@ -240,8 +363,8 @@ mod tests {
             .filter(|p| p.total > 0)
             .map(|p| (p.completed, p.total))
             .collect();
-        assert_eq!(counts.first(), Some(&(0, 4)));
-        assert_eq!(counts.last(), Some(&(4, 4)));
+        assert_eq!(counts.first(), Some(&(0, 5)));
+        assert_eq!(counts.last(), Some(&(5, 5)));
         assert!(counts.windows(2).all(|p| p[0].0 <= p[1].0));
         assert!(!dir.0.join("current.en-US.json").exists());
         let roots = [Root {
@@ -257,7 +380,7 @@ mod tests {
                 &|_| {},
                 &|p, _, _| {
                     assert!(
-                        p.ends_with("/config"),
+                        p.ends_with("/versions.json"),
                         "unchanged bundled data must not download"
                     );
                     fixture(p, "1.0.0", false)
@@ -276,6 +399,10 @@ mod tests {
             .contains("落后"));
         assert!(compatibility(Some("zh-CN@16.22.1"), "").1);
         assert!(!compatibility(Some("zh-CN@16.22.1"), "26.22").1);
+        let (label, mismatch) = compatibility(Some("zh-CN@16.22.1794001361404"), "26.22");
+        assert!(!mismatch);
+        assert!(label.starts_with("统计 16.22 ·"));
+        assert!(!label.contains("1794001361404"));
 
         // A stopped transfer must keep both the previous pointer and honest partial progress.
         let before = fs::read(dir.0.join("current.json")).unwrap();
@@ -298,7 +425,7 @@ mod tests {
         assert_eq!(fs::read(dir.0.join("current.json")).unwrap(), before);
         let events = events.borrow();
         let last = events.last().unwrap();
-        assert_eq!((last.completed, last.total), (2, 4));
+        assert_eq!((last.completed, last.total), (0, 0));
         assert!(last.message.contains("装备资料"));
         assert!(result_message(&interrupted, None).contains("未能连接数据站"));
         assert!(result_message(&Err("update-cancelled"), None).contains("已取消"));
@@ -306,10 +433,6 @@ mod tests {
     }
 }
 type Fetch<'a> = dyn Fn(&str, usize, &dyn Fn() -> bool) -> Result<Vec<u8>> + 'a;
-fn selected(name: &str) -> bool {
-    ["augments.json", "champions.json", "items.json"].contains(&name)
-        || name.starts_with("champion-shards/")
-}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Progress {
     pub message: String,
@@ -331,6 +454,9 @@ pub fn result_message(result: &Result<bool>, supplemental_error: Option<&str>) -
         Err("data-update-write" | "data-update-directory" | "data-update-activate") => {
             "数据写入失败，继续使用现有数据；请检查磁盘空间和目录权限。"
         }
+        Err(e) if e.starts_with("aramkit-") || *e == "data-update-json" => {
+            "数据站返回的资料格式无法读取，继续使用现有数据；请稍后重试。"
+        }
         Err(_) => "数据更新未完成，继续使用现有数据；可稍后重试。",
     };
     if result.is_ok() && supplemental_error.is_some() {
@@ -345,6 +471,11 @@ pub fn compatibility(identity: Option<&str>, reference: &str) -> (String, bool) 
     let version = version
         .strip_suffix(fuze_data::current_augments::IDENTITY_SUFFIX)
         .unwrap_or(version);
+    // Build timestamps identify immutable snapshots internally, not player-facing patches.
+    let version = version
+        .rsplit_once('.')
+        .filter(|(_, r)| r.parse::<u64>().is_ok_and(|n| n >= 1_000_000_000_000))
+        .map_or(version, |(p, _)| p);
     let patch = fuze_data::recognition::patch;
     let Some(stats) = patch(version) else {
         return ("尚无可用统计数据".into(), true);
@@ -375,12 +506,7 @@ fn phase(report: &Report<'_>, message: &str) {
     });
 }
 fn refresh_with(root: &Path, cancel: &dyn Fn() -> bool, fetch: &Fetch<'_>) -> Result<Vec<String>> {
-    refresh_for(
-        root,
-        &[Locale::ZhCn, Locale::ZhTw, Locale::EnUs],
-        cancel,
-        fetch,
-    )
+    refresh_for(root, &[Locale::ZhCn], cancel, fetch)
 }
 /// Idle background refresh compares the complete selected local bundle first. No repeated full
 /// verification/download of an unchanged bundled version and no unrelated language downloads.
@@ -391,7 +517,7 @@ pub fn refresh_current(
     cancel: &dyn Fn() -> bool,
 ) -> Result<bool> {
     refresh_current_with(root, roots, locale, cancel, &|_| {}, &|p, n, c| {
-        update_io::data_get(p, n, c)
+        update_io::aramkit_get(p, n, c)
     })
 }
 /// The production manual action only updates the Chinese catalogue, including bundled data
@@ -403,7 +529,7 @@ pub fn refresh_chinese(
     report: &Report<'_>,
 ) -> Result<bool> {
     refresh_current_with(root, roots, Locale::ZhCn, cancel, report, &|p, n, c| {
-        update_io::data_get(p, n, c)
+        update_io::aramkit_get(p, n, c)
     })
 }
 fn refresh_current_with(
@@ -426,20 +552,14 @@ pub(crate) fn refresh_guarded(
     before_activate: &dyn Fn() -> Result<()>,
 ) -> Result<bool> {
     phase(report, "正在检查数据站版本…");
-    let path = if locale == Locale::ZhCn {
-        "/api/client/v1/config".into()
-    } else {
-        format!("/api/client/v1/config?locale={}", locale.code())
-    };
-    let config = fetch(&path, 65536, cancel)?;
-    let value: Value = serde_json::from_slice(&config).map_err(|_| "data-update-config")?;
-    let version = value["dataVersion"]
-        .as_str()
-        .filter(|v| numeric(v))
-        .ok_or("data-update-version")?;
-    if locale != Locale::ZhCn && value["locale"] != locale.code() {
-        return Err("data-update-locale");
+    if cancel() {
+        return Err("data-update-cancelled");
     }
+    let path = "/data/versions.json";
+    let config = fetch(path, 65536, cancel)?;
+    let value: Value = serde_json::from_slice(&config).map_err(|_| "data-update-config")?;
+    let release = fuze_data::aramkit::Release::parse(&value)?;
+    let version = release.version.as_str();
     let order = |v: &str| {
         v.split('.')
             .map(|p| p.parse::<u64>())
@@ -515,20 +635,10 @@ fn refresh_transaction(
     let mut versions = Vec::new();
     for &locale in locales {
         check()?;
-        let config_path = if locale == Locale::ZhCn {
-            "/api/client/v1/config".into()
-        } else {
-            format!("/api/client/v1/config?locale={}", locale.code())
-        };
-        let config: Value = serde_json::from_slice(&fetch(&config_path, 65536, cancel)?)
+        let config: Value = serde_json::from_slice(&fetch("/data/versions.json", 65536, cancel)?)
             .map_err(|_| "data-update-config")?;
-        let version = config["dataVersion"]
-            .as_str()
-            .filter(|v| numeric(v))
-            .ok_or("data-update-version")?;
-        if locale != Locale::ZhCn && config["locale"].as_str() != Some(locale.code()) {
-            return Err("data-update-locale");
-        }
+        let release = fuze_data::aramkit::Release::parse(&config)?;
+        let version = release.version.as_str();
         let roots = [Root {
             path: root.to_path_buf(),
             source: Source::Cache,
@@ -544,20 +654,29 @@ fn refresh_transaction(
                 continue;
             }
         }
-        let remote = api(locale, version);
-        phase(report, "正在读取下载清单…");
-        let manifest_bytes = fetch(&format!("{remote}/manifest.json"), 2 * 1024 * 1024, cancel)?;
-        let manifest: Value =
-            serde_json::from_slice(&manifest_bytes).map_err(|_| "data-update-manifest")?;
-        if manifest["dataVersion"].as_str() != Some(version)
-            || manifest["locale"].as_str() != Some(locale.code())
-        {
-            return Err("data-update-locale");
-        }
-        let entries = manifest["files"]
-            .as_array()
-            .filter(|a| a.len() <= 1024)
-            .ok_or("data-update-manifest")?;
+        phase(report, "正在下载 ARAMKit 资料与统计…");
+        let read = |path: &str| -> Result<Value> {
+            check()?;
+            serde_json::from_slice(&fetch(path, 8 * 1024 * 1024, cancel)?)
+                .map_err(|_| "data-update-json")
+        };
+        let heroes = read(&release.resource(locale, "champions"))?;
+        let augments = read(&release.resource(locale, "augments"))?;
+        phase(report, "正在下载装备资料…");
+        let items = read(&release.resource(locale, "items"))?;
+        let spells = read(&release.resource(locale, "summoner-spells"))?;
+        let hero_ranks = read(&release.stats("champion-rankings"))?;
+        let augment_ranks = read(&release.stats("augment-rankings"))?;
+        let catalog = fuze_data::aramkit::Catalog::new(
+            release.clone(),
+            locale,
+            heroes,
+            augments,
+            items,
+            spells,
+            hero_ranks,
+            augment_ranks,
+        )?;
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| "data-update-clock")?
@@ -573,65 +692,47 @@ fn refresh_transaction(
         )?;
         let relative = prefix(locale, version);
         let destination = stage.0.join(&relative);
-        write(&destination.join("manifest.json"), &manifest_bytes)?;
-        let mut total = 0usize;
-        let mut seen = std::collections::HashSet::new();
-        let count = entries
-            .iter()
-            .filter(|e| e["path"].as_str().is_some_and(selected))
-            .count();
+        let count = 4 + catalog.champions.len();
         let mut completed = 0;
-        for e in entries {
+        let mut total = 0usize;
+        let mut files = Vec::new();
+        let mut save = |name: &str, value: Value| -> Result<()> {
             check()?;
-            let name = e["path"].as_str().ok_or("data-update-manifest")?;
-            fuze_data::safe_path(name)?;
-            if !selected(name) {
-                continue;
-            }
-            if !name.ends_with(".json") || !seen.insert(name) {
-                return Err("data-update-manifest");
-            }
-            let size = e["bytes"]
-                .as_u64()
-                .filter(|v| *v > 0 && *v <= 32 * 1024 * 1024)
-                .ok_or("data-update-size")? as usize;
-            total = total.checked_add(size).ok_or("data-update-size")?;
-            if total > 128 * 1024 * 1024 {
+            let bytes = serde_json::to_vec(&value).map_err(|_| "data-update-json")?;
+            total += bytes.len();
+            if bytes.len() > 32 * 1024 * 1024 || total > 128 * 1024 * 1024 {
                 return Err("data-update-size");
             }
-            let expected = e["hash"]
-                .as_str()
-                .and_then(|s| s.strip_prefix("sha256-"))
-                .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-                .ok_or("data-update-hash")?;
-            report(Progress {
-                message: format!(
-                    "正在下载{} · {completed}/{count} 个文件已完成",
-                    match name {
-                        "augments.json" => "强化资料",
-                        "champions.json" => "英雄列表",
-                        "items.json" => "装备资料",
-                        _ => "英雄详情",
-                    }
-                ),
-                completed,
-                total: count,
-            });
-            let bytes = fetch(&format!("{remote}/{name}"), size, cancel)?;
-            if bytes.len() != size
-                || update_io::hex(&update_io::digest(&bytes, false)?)
-                    != expected.to_ascii_lowercase()
-            {
-                return Err("data-update-hash");
-            }
             write(&destination.join(name), &bytes)?;
+            files.push(json!({"path":name,"bytes":bytes.len()}));
             completed += 1;
             report(Progress {
-                message: format!("已下载并校验 · {completed}/{count} 个文件"),
+                message: format!("已准备 · {completed}/{count} 个文件"),
                 completed,
                 total: count,
             });
+            Ok(())
+        };
+        report(Progress {
+            message: "正在整理英雄、海克斯与装备资料…".into(),
+            completed: 0,
+            total: count,
+        });
+        for (name, value) in catalog.documents() {
+            save(&name, value)?;
         }
+        for id in catalog.champions.keys() {
+            let value = read(&release.stats(&format!("champion-details/{id}")))?;
+            save(
+                &format!("champion-shards/{id}.json"),
+                catalog.detail(*id, &value)?,
+            )?;
+        }
+        let manifest = json!({"source":fuze_data::aramkit::SOURCE,"locale":locale.code(),"dataVersion":version,"gamePatch":release.patch,"dataDate":release.date,"dataPath":release.data,"resourcePath":release.resources,"files":files});
+        write(
+            &destination.join("manifest.json"),
+            &serde_json::to_vec(&manifest).map_err(|_| "data-update-json")?,
+        )?;
         phase(report, "正在校验完整数据…");
         let pointer_bytes = serde_json::to_vec(
             &json!({"schemaVersion":3,"locale":locale.code(),"dataVersion":version}),

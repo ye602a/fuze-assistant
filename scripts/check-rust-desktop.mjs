@@ -37,18 +37,8 @@ if(png.length<5000)throw new Error('Native desktop render missing')
 if((await readFile(path.join(root,'rust/artifacts/stage-reference.png'))).length<5000)throw new Error('Stage reference render missing')
 report.stage_reference_preview=true
 report.augment_reference_preview=true
-// Additional locales exercise the same owned, hidden windows; never read user preferences.
+// Production bundles contain Simplified Chinese data only.
 report.locales=['zh-CN']
-for (const locale of ['zh-TW','en-US']) {
- const prefix=path.join(root,'rust/artifacts',`desktop-${locale}`)
- const localized=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--desktop-smoke',path.join(folder,'preview.json')],{
-  cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,
-  env:{...process.env,FUZE_SMOKE_LOCALE:locale,FUZE_DESKTOP_PREVIEW:prefix+'.png',FUZE_CHAMPION_PREVIEW:prefix+'-champions.png',FUZE_SIDE_PREVIEW:prefix+'-augments.png',FUZE_STAGE_PREVIEW:prefix+'-stages.png',FUZE_SETTINGS_PREVIEW:prefix+'-settings.png',FUZE_RECORDS_PREVIEW:prefix+'-records.png',FUZE_HISTORY_PREVIEW:prefix+'-history.png',FUZE_JOURNAL_PREVIEW:prefix+'-journal.png'}
- })
- let value;try{value=JSON.parse(localized.stdout?.trim())}catch{}
- if(localized.status!==0||!value?.desktop_ready||!value.pause_resume_exit||!value.preview_rendered||!value.champion_preview||value.game_access!==false)throw new Error(`Native desktop locale failed: ${locale}`)
- report.locales.push(locale)
-}
 // Same two-step protocol as managed launch, but hidden and isolated from all game/user IO.
 const health=spawnSync(path.join(folder,'fuze-rust-host.exe'),['--managed-desktop-smoke',path.join(folder,'preview.json')],{
  cwd:root,windowsHide:true,timeout:20000,encoding:'utf8',maxBuffer:65536,env:{...process.env,FUZE_RUST_CI_TRAY:'0'}

@@ -170,7 +170,11 @@ impl Prepared {
     pub fn supplement_recognition(&mut self, catalog: &Catalog) {
         // The mode-specific client pool is authoritative; an older additive
         // name list must not resurrect retired or special-choice augments.
-        if self.current_augments {
+        if self.current_augments
+            || self
+                .document("manifest.json")
+                .is_some_and(|m| m["source"] == crate::aramkit::SOURCE)
+        {
             return;
         }
         self.catalog = catalog.merge(&self.catalog, self.locale);
