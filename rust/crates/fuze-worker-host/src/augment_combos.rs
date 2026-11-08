@@ -2,6 +2,7 @@
 use crate::stage_reference::Snapshot;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Reference {
+    pub ids: Vec<u32>,
     pub partners: String,
     pub statistic: String,
     pub detail: String,
@@ -49,6 +50,12 @@ pub fn reference(
             if (names.len(), row.samples) > best {
                 best = (names.len(), row.samples);
                 view.partners = format!("与 {}", names.join(" + "));
+                view.ids = row
+                    .ids
+                    .iter()
+                    .copied()
+                    .filter(|id| *id != candidate)
+                    .collect();
                 view.statistic = format!(
                     "组合 {:.1}% · {} 场{}",
                     row.win * 100.,
@@ -139,6 +146,9 @@ mod tests {
         assert!(!one.contains("71.0%") && !one.contains("42.0%") && !one.contains("99.0%"));
         owned.push((2018, "符文乙".into()));
         let two = detail(Some(&snapshot), 145, "16.22", &owned, 3086, 101);
+        let view = reference(Some(&snapshot), 145, "16.22", &owned, 3086, 101);
+        assert_eq!(view.ids, vec![1004, 2018]);
+        assert_eq!(view.statistic, "组合 71.0% · 400 场");
         assert!(two.contains("与 符文甲：65.0% · 6819 场"));
         assert!(two.contains("与 符文乙：42.0% · 120 场 · 样本较少"));
         assert!(two.contains("与 符文甲 + 符文乙：71.0% · 400 场"));

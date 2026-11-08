@@ -133,6 +133,7 @@ struct Scene {
     cards: [Card; 3],
     caption: String,
     image_cache: std::collections::HashMap<String, image::RgbaImage>,
+    icon_urls: std::collections::HashMap<u32, String>,
     dw: IDWriteFactory,
     selected: Option<usize>,
     detail: Option<IDWriteTextLayout>,
@@ -198,6 +199,7 @@ impl Scene {
                 }),
                 caption: "整体胜率 · 离线样例".into(),
                 image_cache: Default::default(),
+                icon_urls: Default::default(),
                 dw,
                 selected: None,
                 detail: None,
@@ -264,12 +266,12 @@ impl Scene {
 struct Surface {
     brush: ID2D1SolidColorBrush,
     icons: Vec<ID2D1Bitmap>,
+    combo_icons: Vec<Vec<Option<ID2D1Bitmap>>>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
         let brush = target.CreateSolidColorBrush(&color(TEXT), None)?;
-        let mut icons = Vec::new();
-        for icon in &scene.icons {
+        let bitmap = |icon: &image::RgbaImage| -> Result<ID2D1Bitmap> {
             let mut bgra = icon.as_raw().clone();
             for p in bgra.chunks_exact_mut(4) {
                 p.swap(0, 2);
@@ -293,9 +295,37 @@ impl Surface {
                     dpiY: 96.,
                 },
             )?;
-            icons.push(logo);
-        }
-        Ok(Self { brush, icons })
+            Ok(logo)
+        };
+        let icons = scene
+            .icons
+            .iter()
+            .map(&bitmap)
+            .collect::<Result<Vec<_>>>()?;
+        let combo_icons = scene
+            .reference
+            .combos
+            .iter()
+            .map(|combo| {
+                combo
+                    .ids
+                    .iter()
+                    .map(|id| {
+                        scene
+                            .icon_urls
+                            .get(id)
+                            .and_then(|url| scene.image_cache.get(url))
+                            .map(&bitmap)
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            brush,
+            icons,
+            combo_icons,
+        })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
         self.brush.SetColor(&color(rgb));
@@ -485,43 +515,77 @@ impl Surface {
                 );
             }
             let combo = &scene.reference.combos[i];
-            let partners = if combo.partners.chars().count() > 16 {
-                format!("{}…", combo.partners.chars().take(15).collect::<String>())
+            if combo.statistic.is_empty() {
+                self.text(
+                    scene,
+                    target,
+                    if best {
+                        "优先参考"
+                    } else if card.score.is_none() {
+                        "暂无推荐排名"
+                    } else {
+                        "参考选择"
+                    },
+                    0,
+                    rect(x + 14., 187., 214., 22.),
+                    if best { GOLD } else { MUTED },
+                );
+                self.text(
+                    scene,
+                    target,
+                    &card.ranking,
+                    0,
+                    rect(x + 14., 209., 214., 18.),
+                    MUTED,
+                );
             } else {
-                combo.partners.clone()
-            };
-            self.text(
-                scene,
-                target,
-                if !partners.is_empty() {
-                    &partners
-                } else if best {
-                    "优先参考"
-                } else if card.score.is_none() {
-                    "暂无推荐排名"
-                } else {
-                    "参考选择"
-                },
-                0,
-                rect(x + 14., 187., 214., 22.),
-                if best { GOLD } else { MUTED },
-            );
-            self.text(
-                scene,
-                target,
-                if combo.statistic.is_empty() {
-                    &card.ranking
-                } else {
-                    &combo.statistic
-                },
-                0,
-                rect(x + 14., 209., 214., 18.),
-                if combo.statistic.is_empty() {
-                    MUTED
-                } else {
-                    GOLD
-                },
-            );
+                let icons = &self.combo_icons[i];
+                let size = if icons.len() == 1 { 32. } else { 24. };
+                for (j, icon) in icons.iter().enumerate() {
+                    let area = rect(
+                        x + 14. + j as f32 * (size + 3.),
+                        207. - size / 2.,
+                        size,
+                        size,
+                    );
+                    self.fill(target, area, 0x152631);
+                    if let Some(icon) = icon {
+                        target.DrawBitmap(
+                            icon,
+                            Some(&area),
+                            1.,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                            None,
+                        );
+                    } else {
+                        self.text(scene, target, "?", 1, area, MUTED);
+                    }
+                    self.brush.SetColor(&color(0x52636d));
+                    target.DrawRectangle(&area, &self.brush, 1., None);
+                }
+                let offset = icons.len() as f32 * (size + 3.) + 7.;
+                // Both lines are formatted together by augment_combos; keep the sample warning intact.
+                let (rate, samples) = combo
+                    .statistic
+                    .split_once(" · ")
+                    .unwrap_or((&combo.statistic, ""));
+                self.text(
+                    scene,
+                    target,
+                    rate,
+                    1,
+                    rect(x + 14. + offset, 187., 214. - offset, 22.),
+                    GOLD,
+                );
+                self.text(
+                    scene,
+                    target,
+                    samples,
+                    0,
+                    rect(x + 14. + offset, 209., 214. - offset, 18.),
+                    MUTED,
+                );
+            }
             self.text(
                 scene,
                 target,
@@ -1016,10 +1080,16 @@ impl HostOverlay {
         }
         scene.reference = view;
         scene.select(scene.selected)?;
+        self.window.state.surface = None;
+        if let Some(target) = &self.window.state.target {
+            self.window.state.surface =
+                Some(unsafe { Surface::new(&self.window.state.scene, target)? });
+        }
         self.revisions += 1;
         unsafe {
             let _ = InvalidateRect(Some(self.window.hwnd), None, false);
         }
+        self.request_art();
         Ok(())
     }
     pub fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -1124,6 +1194,7 @@ impl HostOverlay {
                 self.generation = frame.snapshot.generation;
                 if self.dataset != frame.snapshot.dataset_version {
                     self.window.state.scene.image_cache.clear();
+                    self.window.state.scene.icon_urls.clear();
                 }
                 self.dataset = frame.snapshot.dataset_version.clone();
                 self.window.state.dismissed = false;
@@ -1198,6 +1269,10 @@ impl HostOverlay {
                         image
                     })
                     .collect();
+                scene.icon_urls.extend(cards.iter().filter_map(|c| {
+                    c.id.filter(|_| !c.icon.is_empty())
+                        .map(|id| (id, c.icon.clone()))
+                }));
                 scene.cards = cards;
                 scene.caption = caption;
                 scene.select(scene.selected)?;
@@ -1253,7 +1328,7 @@ impl HostOverlay {
     }
     fn request_art(&mut self) {
         let scene = &self.window.state.scene;
-        let urls: Vec<_> = scene
+        let mut urls: Vec<_> = scene
             .cards
             .iter()
             .filter(|c| {
@@ -1261,6 +1336,17 @@ impl HostOverlay {
             })
             .map(|c| c.icon.clone())
             .collect();
+        for id in scene.reference.combos.iter().flat_map(|c| &c.ids) {
+            if let Some(url) = scene
+                .icon_urls
+                .get(id)
+                .filter(|url| !scene.image_cache.contains_key(*url))
+            {
+                if !urls.contains(url) {
+                    urls.push(url.clone());
+                }
+            }
+        }
         if self.frame.is_none() || urls.is_empty() {
             self.art = None;
             self.art_request = None;
@@ -1297,10 +1383,22 @@ impl HostOverlay {
         let mut changed = false;
         if let Some(reply) = reply {
             let scene = &mut self.window.state.scene;
+            for (url, pic) in &reply.icons {
+                if !scene.image_cache.contains_key(url) {
+                    let mut rgba = pic.bgra.clone();
+                    for pixel in rgba.chunks_exact_mut(4) {
+                        pixel.swap(0, 2);
+                    }
+                    if let Some(image) = image::RgbaImage::from_raw(48, 48, rgba) {
+                        if scene.image_cache.len() >= 128 {
+                            scene.image_cache.clear();
+                        }
+                        scene.image_cache.insert(url.clone(), image);
+                        changed = true;
+                    }
+                }
+            }
             for (i, card) in scene.cards.iter().enumerate() {
-                let Some(pic) = reply.icons.get(&card.icon) else {
-                    continue;
-                };
                 if let Some(image) = scene.image_cache.get(&card.icon) {
                     // Several augments can share one asset. Fill every card position,
                     // even when an earlier position decoded this URL in the same reply.
@@ -1308,19 +1406,6 @@ impl HostOverlay {
                         scene.icons[i] = image.clone();
                         changed = true;
                     }
-                    continue;
-                }
-                let mut rgba = pic.bgra.clone();
-                for pixel in rgba.chunks_exact_mut(4) {
-                    pixel.swap(0, 2);
-                }
-                if let Some(image) = image::RgbaImage::from_raw(48, 48, rgba) {
-                    if scene.image_cache.len() >= 128 {
-                        scene.image_cache.clear();
-                    }
-                    scene.image_cache.insert(card.icon.clone(), image.clone());
-                    scene.icons[i] = image;
-                    changed = true;
                 }
             }
             self.art_reply = reply;
@@ -1564,16 +1649,23 @@ mod skill_tests {
         let scores = scene.cards.each_ref().map(|c| c.score);
         let mut reference = crate::stage_cards::Comparison::default();
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
+            ids: vec![10],
             partners: "与 秘术冲拳".into(),
             statistic: "组合 65.0% · 6819 场".into(),
             detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
         };
         reference.combos[2] = fuze_worker_host::augment_combos::Reference {
+            ids: vec![10, 11, 12],
             partners: "与 已选符文甲 + 已选符文乙 + 已选符文丙".into(),
             statistic: "组合 42.0% · 120 场 · 少样本".into(),
             detail: "合成少样本组合".into(),
         };
         scene.reference = std::sync::Arc::new(reference);
+        for (i, id) in [10, 11, 12].into_iter().enumerate() {
+            let url = format!("fixture-{id}");
+            scene.icon_urls.insert(id, url.clone());
+            scene.image_cache.insert(url, scene.icons[i].clone());
+        }
         assert!(scene.selected.is_none() && scene.detail.is_none());
         assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
         unsafe {
@@ -1588,7 +1680,13 @@ mod skill_tests {
             let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
             props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
             let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
-            Surface::new(&scene, &target)?.draw(&scene, &target, false)?;
+            let surface = Surface::new(&scene, &target)?;
+            assert_eq!(
+                surface.combo_icons.iter().map(Vec::len).collect::<Vec<_>>(),
+                vec![1, 0, 3]
+            );
+            assert!(surface.combo_icons.iter().flatten().all(Option::is_some));
+            surface.draw(&scene, &target, false)?;
             if let Some(path) = std::env::var_os("FUZE_COMBO_REVIEW") {
                 let mut pixels = vec![0; (WIDTH * HEIGHT * 4) as usize];
                 bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
@@ -1603,6 +1701,11 @@ mod skill_tests {
                     image::ColorType::Rgba8,
                 )?;
             }
+            scene.image_cache.remove("fixture-12");
+            let missing = Surface::new(&scene, &target)?;
+            assert!(missing.combo_icons[2][2].is_none());
+            assert!(missing.combo_icons[2][0].is_some());
+            missing.draw(&scene, &target, false)?;
         }
         Ok(())
     }
