@@ -204,6 +204,10 @@ codes!(Gate {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picks: Option<crate::augment_picks::Diagnostics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combos: Option<crate::augment_combos::Diagnostics>,
     #[serde(default)]
     pub process_cpu_percent: Option<f64>,
     #[serde(default)]
@@ -394,6 +398,8 @@ impl Snapshot {
                     .each_ref()
                     .map(|slot| matches!(slot, fuze_contract::Slot::Known { .. }))
             }),
+            picks: s.pipeline.pick_diagnostics,
+            combos: s.combo_diagnostics,
             overlay_prepared: s.pipeline.overlay.is_some(),
             analyses: s.pipeline.analyses.min(1_000_000_000_000),
             skipped: s.pipeline.skipped_frames.min(1_000_000_000_000),
@@ -427,7 +433,9 @@ impl Snapshot {
             other.worker_cause,
             other.capture_source,
             other.capture_fallback,
-        ) && self.level == other.level
+        ) && self.picks == other.picks
+            && self.combos == other.combos
+            && self.level == other.level
             && (
                 self.stream,
                 self.gate,
@@ -461,6 +469,7 @@ pub struct Record {
 impl Record {
     pub(crate) fn valid(&self) -> bool {
         self.schema == 1
+            && self.state.combos.is_none_or(|c| c.matched <= 3)
             && self
                 .state
                 .process_cpu_percent

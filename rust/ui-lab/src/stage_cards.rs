@@ -230,6 +230,33 @@ impl Reference {
             }));
         }
     }
+    pub fn diagnostics(&self) -> fuze_worker_host::augment_combos::Diagnostics {
+        use fuze_worker_host::augment_combos::{DataState, Diagnostics};
+        let champion = self.context.as_ref().map_or(0, |c| c.champion);
+        let source = self
+            .snapshot
+            .as_ref()
+            .filter(|s| s.usable(champion, stage_reference::now()));
+        let data = match source {
+            None => DataState::Unavailable,
+            Some(s)
+                if fuze_data::recognition::patch(&self.patch).is_none()
+                    || fuze_data::recognition::patch(&self.patch)
+                        != fuze_data::recognition::patch(&s.patch) =>
+            {
+                DataState::PatchMismatch
+            }
+            Some(_) => DataState::Ready,
+        };
+        Diagnostics {
+            data,
+            rows: source
+                .and_then(|s| s.combinations.as_ref())
+                .map_or(0, |r| r.len().min(u16::MAX as usize) as u16),
+            matched: 0,
+            delivered: false,
+        }
+    }
     pub fn cards(&mut self, ids: [Option<u32>; 3], dataset: &str) -> Arc<Comparison> {
         let champion = self.context.as_ref().map_or(0, |c| c.champion);
         let stale = self
@@ -334,6 +361,11 @@ mod tests {
             }]),
         }));
         let ids = [Some(3086), Some(9999), None];
+        assert_eq!(
+            r.diagnostics().data,
+            fuze_worker_host::augment_combos::DataState::Ready
+        );
+        assert_eq!(r.diagnostics().rows, 1);
         let single = r.cards(ids, "16.22");
         assert!(single.combos.iter().all(|c| c.detail.is_empty()));
         state.pipeline.picked = Arc::new(vec![(1004, "秘术冲拳".into())]);
@@ -347,8 +379,16 @@ mod tests {
         state.recognition.reference = "16.23".into();
         r.update(&state);
         assert!(r.cards(ids, "16.22").combos[0].detail.is_empty());
+        assert_eq!(
+            r.diagnostics().data,
+            fuze_worker_host::augment_combos::DataState::PatchMismatch
+        );
         state.mode = 2;
         r.update(&state);
+        assert_eq!(
+            r.diagnostics().data,
+            fuze_worker_host::augment_combos::DataState::Unavailable
+        );
         assert!(r.cards(ids, "16.22").combos[0].detail.is_empty());
     }
     #[test]

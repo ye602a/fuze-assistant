@@ -583,6 +583,7 @@ impl Retry {
 }
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PipelineStatus {
+    pub pick_diagnostics: Option<crate::augment_picks::Diagnostics>,
     pub picked: crate::augment_picks::Owned,
     pub title_reads: [fuze_contract::wire::TitleRead; 3],
     pub overlay: Option<std::sync::Arc<crate::overlay_frame::Frame>>,
@@ -649,6 +650,7 @@ impl Controller {
     }
     pub fn status(&self) -> PipelineStatus {
         PipelineStatus {
+            pick_diagnostics: self.pipeline.as_ref().map(|p| p.picks.diagnostics()),
             picked: self
                 .pipeline
                 .as_ref()

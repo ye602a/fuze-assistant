@@ -308,6 +308,11 @@ fn report_is_bounded_and_does_not_copy_free_form_status_or_account_data() {
     status.preferences.manual_directory = "C:\\private-name\\private-token".into();
     status.ui_locale = "private-name".into();
     status.pipeline.error = Some("private-token");
+    status.pipeline.picked = std::sync::Arc::new(vec![(1234, "private-name".into())]);
+    status.pipeline.pick_diagnostics = Some(crate::augment_picks::Diagnostics {
+        owned: 1,
+        ..Default::default()
+    });
     let mut s = Snapshot::from_status(&status);
     s.phase = Phase::Playing;
     let mut t = Tracker::with_nonce(4);
@@ -497,4 +502,69 @@ fn persistent_outbox_is_exclusive_and_corrupt_existing_data_is_preserved() {
         .to_string_lossy()
         .starts_with("fuze-feedback-fixture-"));
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn combo_transitions_survive_idle_tail_and_legacy_fields_remain_optional() {
+    use crate::{
+        augment_combos::{DataState, Diagnostics as Combos},
+        augment_picks::Diagnostics as Picks,
+    };
+    let mut s = state(Phase::Playing);
+    let legacy = serde_json::to_value(&s).unwrap();
+    assert!(legacy.get("picks").is_none() && legacy.get("combos").is_none());
+    assert!(serde_json::from_value::<Snapshot>(legacy)
+        .unwrap()
+        .picks
+        .is_none());
+    let mut t = Tracker::with_nonce(12);
+    s.picks = Some(Picks::default());
+    t.observe(s.clone(), 0);
+    s.picks.as_mut().unwrap().owned = 1;
+    s.picks.as_mut().unwrap().clicks = 1;
+    s.combos = Some(Combos {
+        data: DataState::Ready,
+        rows: 10,
+        matched: 1,
+        delivered: true,
+    });
+    t.observe(s.clone(), 1000);
+    s.combos.as_mut().unwrap().matched = 0;
+    s.combos.as_mut().unwrap().delivered = false;
+    for n in 1..200 {
+        t.observe(s.clone(), 1000 + n * 30_000);
+    }
+    let report = t.finish().unwrap();
+    assert_eq!(report.events.len(), MAX_EVENTS);
+    assert!(report
+        .events
+        .iter()
+        .any(|e| e.state.combos.is_some_and(|c| c.delivered)));
+    let payload = String::from_utf8(report.payload().unwrap()).unwrap();
+    assert!(payload.contains("delivered"));
+    assert!(!payload.contains("important"));
+    assert!(payload.len() <= 60 * 1024);
+    let mut invalid = serde_json::to_value(&s).unwrap();
+    invalid["picks"]["reason"] = "private-arbitrary-string".into();
+    assert!(serde_json::from_value::<Snapshot>(invalid).is_err());
+}
+
+#[test]
+fn legacy_long_reports_keep_fifo_recovery_layout() {
+    let mut t = Tracker::with_nonce(17);
+    let mut s = state(Phase::Playing);
+    for n in 0..100 {
+        s.capture = if n % 2 == 0 {
+            Capture::Failed
+        } else {
+            Capture::Waiting
+        };
+        t.observe(s.clone(), n * 30_000);
+    }
+    let r = t.finish().unwrap();
+    assert_eq!(
+        r.events.front().unwrap().elapsed_ms,
+        (100 - MAX_EVENTS as u64) * 30_000
+    );
+    assert!(r.events.iter().all(|e| !e.important));
 }

@@ -5,6 +5,28 @@ use std::sync::{
     Arc, Mutex,
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Reason {
+    #[default]
+    None,
+    IncompleteCards,
+    StaleOffer,
+    WindowUnavailable,
+    Interrupted,
+    CloseTimeout,
+    AmbiguousFrame,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Diagnostics {
+    pub owned: u16,
+    pub clicks: u16,
+    pub cancelled: u16,
+    pub reason: Reason,
+    pub observer_failed: bool,
+}
+
 const FRESH_MS: u64 = 900;
 const CLOSE_MS: u64 = 2000;
 pub type Owned = Arc<Vec<(u32, String)>>;
@@ -22,6 +44,7 @@ struct Pending {
 }
 #[derive(Default)]
 pub(crate) struct Tracker {
+    diagnostics: Diagnostics,
     offer: Option<Offer>,
     down: Option<(usize, u64)>,
     pending: Option<Pending>,
@@ -37,6 +60,10 @@ impl Tracker {
         }
     }
     fn cancel(&mut self) {
+        if self.pending.is_some() || self.down.is_some() {
+            self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
+            self.diagnostics.reason = Reason::Interrupted;
+        }
         self.offer = None;
         self.down = None;
         self.pending = None;
@@ -65,6 +92,7 @@ impl Tracker {
             })
         {
             self.cancel();
+            self.diagnostics.reason = Reason::IncompleteCards;
             return;
         }
         if self
@@ -91,19 +119,30 @@ impl Tracker {
             .position(|r| x >= r.x as i32 && x < (r.x + r.width) as i32)
     }
     fn pointer(&mut self, down: bool, point: Option<(i32, i32)>, at: u64) {
+        let stale = self
+            .offer
+            .as_ref()
+            .is_some_and(|o| at.saturating_sub(o.at) > FRESH_MS);
         let slot = point.and_then(|(x, y)| self.slot(x, y, at));
         if down {
-            self.pending = None;
+            if self.pending.take().is_some() {
+                self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
+                self.diagnostics.reason = Reason::Interrupted;
+            }
             self.down = slot.map(|slot| (slot, at));
             // A reroll or hide click invalidates the old offer immediately, before the next OCR.
             if slot.is_none() {
                 self.invalidated_at = at;
                 self.cancel();
+                if stale {
+                    self.diagnostics.reason = Reason::StaleOffer;
+                }
             }
         } else {
             let previous = self.down.take();
             if let (Some(slot), Some((pressed, since))) = (slot, previous) {
                 if pressed == slot && at.saturating_sub(since) <= FRESH_MS {
+                    self.diagnostics.clicks = self.diagnostics.clicks.saturating_add(1);
                     self.pending =
                         self.offer
                             .as_ref()
@@ -127,6 +166,7 @@ impl Tracker {
             .is_some_and(|p| at.saturating_sub(p.at) > CLOSE_MS)
         {
             self.cancel();
+            self.diagnostics.reason = Reason::CloseTimeout;
         }
         match evidence {
             Some(Evidence::Visible) => {
@@ -144,11 +184,18 @@ impl Tracker {
                         let p = self.pending.take().unwrap();
                         if !self.owned.iter().any(|c| c.0 == p.card.0) {
                             Arc::make_mut(&mut self.owned).push(p.card);
+                            self.diagnostics.reason = Reason::None;
                         }
                     }
                 }
             }
-            _ => self.cancel(),
+            _ => {
+                let pending = self.pending.is_some();
+                self.cancel();
+                if pending {
+                    self.diagnostics.reason = Reason::AmbiguousFrame;
+                }
+            }
         }
     }
 }
@@ -169,6 +216,14 @@ fn now() -> u64 {
 impl Recorder {
     pub fn configure(&mut self, root: std::path::PathBuf) {
         self.root = Some(root);
+    }
+    pub fn diagnostics(&self) -> Diagnostics {
+        let s = self.shared.lock().unwrap();
+        Diagnostics {
+            owned: s.owned.len().min(u16::MAX as usize) as u16,
+            observer_failed: self.error.is_some(),
+            ..s.diagnostics
+        }
     }
     pub fn owned(&self) -> Owned {
         self.shared.lock().unwrap().owned.clone()
@@ -193,6 +248,7 @@ impl Recorder {
         let at = now();
         if self.root.is_none() || at.saturating_sub(captured) > FRESH_MS {
             self.cancel();
+            self.shared.lock().unwrap().diagnostics.reason = Reason::StaleOffer;
             return;
         }
         {
@@ -215,6 +271,7 @@ impl Recorder {
         let Some((hwnd, width, height)) = self.target.as_ref().and_then(|w| w.primary_client())
         else {
             self.cancel();
+            self.shared.lock().unwrap().diagnostics.reason = Reason::WindowUnavailable;
             return;
         };
         if screen != (width, height) {
@@ -280,6 +337,8 @@ mod tests {
         s.frame(Some(Evidence::Visible), 500);
         assert!(s.owned.is_empty());
         s.frame(Some(Evidence::Visible), 2500);
+        assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
+        assert_eq!(s.diagnostics.cancelled, 1);
         close(&mut s, 2600);
         assert!(s.owned.is_empty());
     }
@@ -291,6 +350,9 @@ mod tests {
         assert!(s.owned.is_empty());
         s.frame(Some(Evidence::Absent), 800);
         assert_eq!(&*s.owned, &[(1004, "符文1004".into())]);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.cancelled, 0);
+        assert_eq!(s.diagnostics.reason, Reason::None);
         let previous = s.owned.clone();
         s.show(
             &cards([1004, 2018, 3060]),

@@ -170,3 +170,19 @@ mod tests {
         assert!(detail(Some(&snapshot), 17, "16.22", &owned, 3086, 101).is_empty());
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataState {
+    Unavailable,
+    PatchMismatch,
+    Ready,
+}
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Diagnostics {
+    pub data: DataState,
+    pub rows: u16,
+    pub matched: u8,
+    pub delivered: bool,
+}

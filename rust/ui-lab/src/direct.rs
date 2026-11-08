@@ -1085,6 +1085,9 @@ pub struct HostOverlay {
     art_retry: Instant,
 }
 impl HostOverlay {
+    pub fn is_visible(&self) -> bool {
+        unsafe { IsWindowVisible(self.window.hwnd).as_bool() }
+    }
     pub fn reference(
         &mut self,
         view: std::sync::Arc<crate::stage_cards::Comparison>,
