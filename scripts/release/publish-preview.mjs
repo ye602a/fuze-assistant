@@ -1,3 +1,4 @@
+import {releaseBody} from './release-body.mjs';
 import {verifyBinaries} from './verify-binaries.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
@@ -63,23 +64,6 @@ if(oldDescription?.digest!==`sha256:${hash(describedBytes)}`){
   throw error;
  }
 }
-const base='https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/';
-const body=`## FUZE v${version} 测试版
-
-${setup?'- [下载安装包（Setup.exe）]('+base+setupName+')':'可在 FUZE 设置中检查更新并安装。'}
-- [下载便携 ZIP](${base+name})
-
-所需 VC++ DLL 已随程序提供。便携包请完整解压后运行 \`FUZE.exe\`。
-
-### 本次更新
-
-${await readFile('docs/RELEASE_NOTES.md','utf8')}
-
-版本 **${version}** · 构建：\`${revision}\` · [对应源码](https://github.com/ye602a/fuze-assistant/commit/${source})
-
-ZIP 和在线更新包来自同一提交。
-
-[构建记录](${base}build-evidence-${revision}.json) · [构建工作流](https://github.com/ye602a/fuze-assistant/actions/runs/${process.env.GITHUB_RUN_ID})
-`;
-await request(`${api}/releases/${preview.id}`,'PATCH',{name:`FUZE v${version} 测试版`,body,prerelease:true,make_latest:'false'});
+const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:process.env.GITHUB_RUN_ID,buildSetup,updateChannel:true});
+await request(`${api}/releases/${preview.id}`,'PATCH',{name:'FUZE 在线更新文件',body,prerelease:true,make_latest:'false'});
 console.log(JSON.stringify({published:true,source,revision,version:version,previous:previous.revision,zip:name,setup:setupName}));
