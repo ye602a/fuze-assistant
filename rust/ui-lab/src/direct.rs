@@ -126,6 +126,7 @@ impl Drop for Com {
     }
 }
 struct Scene {
+    interactive: bool,
     reference: std::sync::Arc<crate::stage_cards::Comparison>,
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
@@ -181,6 +182,7 @@ impl Scene {
             .map(|bytes| image::load_from_memory(bytes).map(|i| i.into_rgba8()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(Self {
+                interactive: true,
                 reference: std::sync::Arc::new(Default::default()),
                 factory,
                 formats,
@@ -332,7 +334,7 @@ impl Surface {
                     .collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&title, &scene.formats[0], 184., 54.)?;
+                    .CreateTextLayout(&title, &scene.formats[0], 184., 36.)?;
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 layout.GetMetrics(&mut metrics)?;
                 Ok((layout, metrics.height))
@@ -597,7 +599,7 @@ impl Surface {
                     target,
                     &combo.statistic,
                     0,
-                    rect(x + 44., 193. + title_height, 184., 18.),
+                    rect(x + 44., 193. + title_height.min(36.), 184., 36.),
                     GOLD,
                 );
             }
@@ -614,7 +616,9 @@ impl Surface {
         self.text(
             scene,
             target,
-            if scene
+            if !scene.interactive {
+                ""
+            } else if scene
                 .cards
                 .iter()
                 .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
@@ -771,6 +775,10 @@ impl Native {
             self.target = Some(target);
             self.backend = backend;
         }
+        // Artwork/reference refresh may have discarded only the device resources.
+        if self.surface.is_none() {
+            self.surface = Some(Surface::new(&self.scene, self.target.as_ref().unwrap())?);
+        }
         let result =
             self.surface
                 .as_ref()
@@ -890,10 +898,13 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             LRESULT(0)
         }
         WM_DISPLAYCHANGE => {
+            state.surface = None;
+            state.target = None;
+            let _ = InvalidateRect(Some(hwnd), None, false);
             state.recover = true;
             LRESULT(0)
         }
-        WM_MOUSEWHEEL => {
+        WM_MOUSEWHEEL if state.scene.interactive => {
             if state.scene.selected.is_some() {
                 let steps = ((wp.0 >> 16) as u16 as i16) as f32 / 120.;
                 state.scene.scroll =
@@ -960,11 +971,15 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                     state.target = None;
                 }
             }
+            // Resize discards the render target contents, even when the frame is unchanged.
+            let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         }
         WM_LBUTTONUP => {
             let (x, y) = logical_point(hwnd, lp);
-            handle_click(hwnd, state, x, y);
+            if state.scene.interactive || (x >= 720. && x <= WIDTH as f32 && y < 30.) {
+                handle_click(hwnd, state, x, y);
+            }
             LRESULT(0)
         }
         WM_NCDESTROY => {
@@ -1032,6 +1047,7 @@ impl OwnWindow {
             // This is our own non-activating overlay HWND, never a game window.
             let mut window = window;
             if !offline {
+                window.state.scene.interactive = false;
                 // Our recommendation must not be read back as game title text when dragged
                 // over a card. Never applies display affinity to the game or another process.
                 let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
@@ -1085,6 +1101,9 @@ pub struct HostOverlay {
     art_retry: Instant,
 }
 impl HostOverlay {
+    pub fn is_visible(&self) -> bool {
+        unsafe { IsWindowVisible(self.window.hwnd).as_bool() }
+    }
     pub fn reference(
         &mut self,
         view: std::sync::Arc<crate::stage_cards::Comparison>,
@@ -1328,6 +1347,9 @@ impl HostOverlay {
                     self.window.hwnd,
                     if show { SW_SHOWNOACTIVATE } else { SW_HIDE },
                 );
+                if show {
+                    let _ = InvalidateRect(Some(self.window.hwnd), None, false);
+                }
             }
         }
         self.last_accepted = Some(frame.clone());
@@ -1657,6 +1679,57 @@ impl HostOverlay {
 mod skill_tests {
     use super::*;
     #[test]
+    fn cards_ignore_clicks_keep_close_drag_and_repaint(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let _com = Com::new()?;
+        let mut window = OwnWindow::new(true)?;
+        unsafe {
+            window.state.scene.interactive = false;
+            let mut bounds = RECT::default();
+            GetWindowRect(window.hwnd, &mut bounds)?;
+            let point = LPARAM(
+                ((bounds.left + 10) as u16 as isize) | (((bounds.top + 10) as u16 as isize) << 16),
+            );
+            assert_eq!(
+                SendMessageW(window.hwnd, WM_NCHITTEST, None, Some(point)).0,
+                HTCAPTION as isize
+            );
+
+            SendMessageW(
+                window.hwnd,
+                WM_LBUTTONUP,
+                None,
+                Some(LPARAM(100 | (100 << 16))),
+            );
+            assert!(window.state.scene.selected.is_none());
+            window.state.draw(window.hwnd)?;
+            window.state.surface = None;
+            window.state.draw(window.hwnd)?;
+            assert!(window.state.surface.is_some());
+            SendMessageW(
+                window.hwnd,
+                WM_SIZE,
+                None,
+                Some(LPARAM(WIDTH as isize | ((HEIGHT as isize) << 16))),
+            );
+            window.state.draw(window.hwnd)?;
+            SendMessageW(window.hwnd, WM_DISPLAYCHANGE, None, None);
+            assert!(window.state.target.is_none());
+            window.state.draw(window.hwnd)?;
+            assert!(!IsWindowVisible(window.hwnd).as_bool());
+            window.state.managed = true;
+            SendMessageW(
+                window.hwnd,
+                WM_LBUTTONUP,
+                None,
+                Some(LPARAM(735 | (15 << 16))),
+            );
+            assert!(window.state.dismissed);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn automatic_combination_reference_renders_without_opening_details(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _com = Com::new()?;
@@ -1666,13 +1739,13 @@ mod skill_tests {
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10],
             partners: "秘术冲拳".into(),
-            statistic: "组合 65.0% · 6819 场".into(),
+            statistic: "两符文搭配胜率\n65.0% · 6819 场".into(),
             detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
         };
         reference.combos[2] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10, 11, 12],
             partners: "已选符文甲 + 已选符文乙 + 已选符文丙".into(),
-            statistic: "组合 42.0% · 120 场 · 少样本".into(),
+            statistic: "多符文搭配胜率\n42.0% · 120 场 · 少样本".into(),
             detail: "合成少样本组合".into(),
         };
         scene.reference = std::sync::Arc::new(reference);
@@ -1694,16 +1767,17 @@ mod skill_tests {
                 let text: Vec<_> = title.encode_utf16().collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&text, &scene.formats[0], 184., 54.)?;
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 36.)?;
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 layout.GetMetrics(&mut metrics)?;
-                assert!(metrics.height <= 54. && metrics.width <= 184.);
+                assert!(metrics.width <= 184.);
                 let text: Vec<_> = combo.statistic.encode_utf16().collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&text, &scene.formats[0], 184., 18.)?;
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 36.)?;
                 layout.GetMetrics(&mut metrics)?;
-                assert_eq!(metrics.lineCount, 1);
+                assert_eq!(metrics.lineCount, 2);
+                assert!(metrics.height <= 36.);
             }
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;

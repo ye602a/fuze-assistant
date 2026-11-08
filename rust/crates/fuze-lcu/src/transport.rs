@@ -264,18 +264,8 @@ impl ReadOnlyClient {
             let result = crate::context::parse(phase, &flow, &player);
             wipe(&mut player);
             let mut context = result?;
-            if let Some(lobby) = context
-                .bench_lobby
-                .as_mut()
-                .filter(|l| l.slots.iter().any(|id| *id != 0))
-            {
-                // A failed eligibility read hides only the action strip. Recommendations remain available.
-                let ids = self
-                    .request(current_pid, Endpoint::PickableChampions)
-                    .ok()
-                    .and_then(|(_, bytes)| serde_json::from_slice::<Vec<u32>>(&bytes).ok());
-                lobby.keep_pickable(ids.as_deref().unwrap_or_default());
-            }
+            // Keep locked bench heroes visible and targetable. Availability is
+            // decided by the swap endpoint; temporary rejection uses its retry path.
             if let Some(selection) = context.selection.as_mut().filter(|s| s.choices.is_some()) {
                 if let Ok((code, mut body)) = self.request(current_pid, Endpoint::SubsetChampions) {
                     selection.choices = Some(if code == 200 {

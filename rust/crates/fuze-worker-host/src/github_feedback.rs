@@ -37,6 +37,8 @@ pub enum End {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Event {
+    #[serde(skip)]
+    important: bool,
     elapsed_ms: u64,
     state: Snapshot,
 }
@@ -239,6 +241,7 @@ impl Tracker {
             || partial;
         if fault && r.first_fault.is_none() {
             r.first_fault = Some(Event {
+                important: true,
                 elapsed_ms: r.duration_ms,
                 state: snapshot.clone(),
             });
@@ -251,12 +254,21 @@ impl Tracker {
             Phase::Lobby | Phase::Selection => Some(End::LeftMatch),
             _ => None,
         };
+        // Preserve the FIFO layout used by legacy recovery receipts.
+        let important = (snapshot.picks.is_some() || snapshot.combos.is_some())
+            && (fault
+                || r.events.back().is_none_or(|e| {
+                    e.state.picks != snapshot.picks || e.state.combos != snapshot.combos
+                }));
         if changed || ending.is_some() {
             if r.events.len() == MAX_EVENTS {
-                r.events.pop_front();
+                // Keep choice/combo transitions ahead of repetitive idle samples.
+                let discard = r.events.iter().position(|e| !e.important).unwrap_or(0);
+                r.events.remove(discard);
                 r.dropped_events += 1;
             }
             r.events.push_back(Event {
+                important,
                 elapsed_ms: r.duration_ms,
                 state: snapshot,
             });

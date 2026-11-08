@@ -504,7 +504,11 @@ pub fn attach_recovered(
             // Read completion first: a completed request has published its result before this snapshot.
             let engine_busy = service.busy();
             let history_busy = service.history_busy();
-            let next = service.snapshot();
+            let mut next = service.snapshot();
+            // Last completed UI delivery, sampled by the existing diagnostic poll.
+            next.combo_diagnostics = if next.mode == 1 && matches!(next.connection, Some(fuze_lcu::reconnect::State::Connected(fuze_runtime::session::Phase::InProgress))) {
+                popup.borrow().combo_diagnostics
+            } else { None };
             unbound.borrow_mut().update(&ui, &next, offline);
             diagnostics.borrow_mut().poll(&ui);
             feedback.borrow_mut().poll(&ui, &next, offline);

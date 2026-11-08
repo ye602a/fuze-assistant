@@ -213,6 +213,7 @@ impl Drop for Panel {
     }
 }
 pub struct Manager {
+    pub combo_diagnostics: Option<fuze_worker_host::augment_combos::Diagnostics>,
     stages: crate::stage_cards::Reference,
     roots: Vec<fuze_data::Root>,
     offline: bool,
@@ -237,6 +238,7 @@ impl Manager {
         // background before champ select. It is shown only by the existing phase gate.
         let champion = Panel::new(&roots, false, offline, stages.store.clone()).ok();
         Self {
+            combo_diagnostics: None,
             stages,
             roots,
             offline,
@@ -354,6 +356,7 @@ impl Manager {
     }
     pub fn update(&mut self, status: &Status) -> Result<(), &'static str> {
         self.stages.update(status);
+        self.combo_diagnostics = Some(self.stages.diagnostics());
         let active = status.mode == 1;
         let phase = match status.connection {
             Some(State::Connected(p)) => p,
@@ -412,7 +415,16 @@ impl Manager {
                 .as_ref()
                 .map_or("", |f| f.snapshot.dataset_version.as_str());
             let reference = self.stages.cards(cards.ids(), dataset);
+            let matched = reference
+                .combos
+                .iter()
+                .filter(|c| !c.statistic.is_empty())
+                .count() as u8;
             cards.reference(reference).map_err(|_| "overlay-window")?;
+            if let Some(d) = &mut self.combo_diagnostics {
+                d.matched = matched;
+                d.delivered = matched > 0 && cards.is_visible();
+            }
         }
         Ok(())
     }

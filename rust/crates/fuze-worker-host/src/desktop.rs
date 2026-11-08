@@ -79,6 +79,7 @@ const SIDE: usize = 109;
 const TRAY: u32 = WM_APP + 1;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
+    pub combo_diagnostics: Option<crate::augment_combos::Diagnostics>,
     pub initialized: bool,
     pub history: crate::account_history::View,
     pub records: Vec<crate::local_records::Row>,
@@ -104,6 +105,7 @@ pub struct Status {
 impl Default for Status {
     fn default() -> Self {
         Self {
+            combo_diagnostics: None,
             initialized: false,
             history: Default::default(),
             records: Vec::new(),

@@ -105,10 +105,20 @@ impl Pointer {
         self.pressed.take().filter(|id| Some(*id) == hero)
     }
 }
+// Accepted requests remain pending; only the observed champion confirms success.
+fn observed_outcome(hero: u32, own: Option<u32>, lobby: Lobby, task: GrabOutcome) -> GrabOutcome {
+    if own == Some(hero) {
+        GrabOutcome::Acquired
+    } else if !lobby.offers(lobby.game, hero) {
+        GrabOutcome::Unavailable
+    } else {
+        task
+    }
+}
 fn outcome_hint(outcome: GrabOutcome) -> &'static str {
     match outcome {
         GrabOutcome::Running => "按 F9 停止",
-        GrabOutcome::Requested => "正在确认换人…",
+        GrabOutcome::Requested => "正在确认换人 · 按 F9 停止",
         GrabOutcome::Acquired => "已抢到目标英雄",
         GrabOutcome::Unavailable => "目标英雄已不可用",
         GrabOutcome::Failed => "换人请求失败，请重试",
@@ -271,37 +281,32 @@ impl State {
     }
     unsafe fn feedback(&self, hwnd: HWND) {
         let finished = self.active.borrow().as_ref().and_then(|(hero, task)| {
-            let outcome = if self.own.get() == Some(*hero) {
-                GrabOutcome::Acquired
-            } else if task.outcome() != GrabOutcome::Running {
-                task.outcome()
-            } else if !self.lobby.get().offers(self.lobby.get().game, *hero) {
-                GrabOutcome::Unavailable
-            } else {
+            let outcome = observed_outcome(*hero, self.own.get(), self.lobby.get(), task.outcome());
+            if outcome == GrabOutcome::Running {
                 return None;
-            };
+            }
             Some((*hero, outcome))
         });
         if let Some((hero, outcome)) = finished {
-            self.stop(hwnd);
-            self.requested
-                .set((outcome == GrabOutcome::Requested).then_some(hero));
-            self.notice(hwnd, outcome_hint(outcome));
-        }
-        if self
-            .requested
-            .get()
-            .is_some_and(|id| self.own.get() == Some(id))
-        {
-            self.requested.set(None);
-            self.notice(hwnd, outcome_hint(GrabOutcome::Acquired));
+            if outcome == GrabOutcome::Requested {
+                // Keep the target and its stop control visible until the read-only
+                // champion state confirms the accepted request.
+                if self.requested.get() != Some(hero) {
+                    self.requested.set(Some(hero));
+                    self.notice(hwnd, outcome_hint(outcome));
+                }
+            } else {
+                self.stop(hwnd);
+                self.notice(hwnd, outcome_hint(outcome));
+            }
         }
         if self
             .hint_until
             .get()
             .is_some_and(|until| Instant::now() >= until)
         {
-            if self.requested.take().is_some() {
+            if self.requested.get().is_some() {
+                self.stop(hwnd);
                 self.notice(hwnd, "未确认换人结果，请查看当前英雄");
             } else {
                 self.hint.set("");
@@ -317,6 +322,8 @@ impl State {
             .as_ref()
             .is_some_and(|(id, _)| *id == hero);
         if same {
+            self.stop(hwnd);
+            self.notice(hwnd, outcome_hint(GrabOutcome::Stopped));
             return;
         }
         // Cancel the old target before queuing the next one; never wait for its retry loop.
@@ -566,7 +573,7 @@ unsafe fn draw(
                 0x00bbdafa
             },
         );
-        let label = wide("抢");
+        let label = wide(if active { "停" } else { "抢" });
         DrawTextW(
             dc,
             label.as_ptr(),
@@ -598,6 +605,35 @@ unsafe fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accepted_request_waits_for_observed_champion_and_detects_target_loss() {
+        let mut lobby = Lobby {
+            slots: [11, 22, 0, 0, 0, 0, 0, 0, 0, 0],
+            game: 1,
+            ux_pid: 1,
+        };
+        assert_eq!(
+            observed_outcome(11, Some(9), lobby, GrabOutcome::Requested),
+            GrabOutcome::Requested
+        );
+        assert_eq!(
+            observed_outcome(11, Some(9), lobby, GrabOutcome::Running),
+            GrabOutcome::Running
+        );
+        lobby.slots[0] = 33;
+        assert_eq!(
+            observed_outcome(11, Some(9), lobby, GrabOutcome::Requested),
+            GrabOutcome::Unavailable
+        );
+        assert_eq!(
+            observed_outcome(11, Some(11), lobby, GrabOutcome::Requested),
+            GrabOutcome::Acquired
+        );
+        assert_eq!(
+            observed_outcome(22, Some(9), lobby, GrabOutcome::Failed),
+            GrabOutcome::Failed
+        );
+    }
     #[test]
     fn arrow_tracks_target_id_and_portraits_remain_click_through() {
         let slots = [11, 22, 33, 0, 0, 0, 0, 0, 0, 0];

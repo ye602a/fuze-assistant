@@ -5,6 +5,28 @@ use std::sync::{
     Arc, Mutex,
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Reason {
+    #[default]
+    None,
+    IncompleteCards,
+    StaleOffer,
+    WindowUnavailable,
+    Interrupted,
+    CloseTimeout,
+    AmbiguousFrame,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Diagnostics {
+    pub owned: u16,
+    pub clicks: u16,
+    pub cancelled: u16,
+    pub reason: Reason,
+    pub observer_failed: bool,
+}
+
 const FRESH_MS: u64 = 900;
 const CLOSE_MS: u64 = 2000;
 pub type Owned = Arc<Vec<(u32, String)>>;
@@ -22,6 +44,7 @@ struct Pending {
 }
 #[derive(Default)]
 pub(crate) struct Tracker {
+    diagnostics: Diagnostics,
     offer: Option<Offer>,
     down: Option<(usize, u64)>,
     pending: Option<Pending>,
@@ -37,6 +60,10 @@ impl Tracker {
         }
     }
     fn cancel(&mut self) {
+        if self.pending.is_some() || self.down.is_some() {
+            self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
+            self.diagnostics.reason = Reason::Interrupted;
+        }
         self.offer = None;
         self.down = None;
         self.pending = None;
@@ -56,15 +83,16 @@ impl Tracker {
             }
             _ => None,
         });
-        // Incomplete readings remain useful for recommendations, but cannot identify a click.
-        if cards.iter().any(Option::is_none)
+        // A missing unrelated title must not invalidate a known clicked slot.
+        // Duplicate known IDs are ambiguous and still reject this offer.
+        if cards.iter().all(Option::is_none)
             || cards.iter().enumerate().any(|(i, c)| {
-                cards[..i]
-                    .iter()
-                    .any(|p| p.as_ref().map(|a| a.0) == c.as_ref().map(|a| a.0))
+                c.as_ref()
+                    .is_some_and(|c| cards[..i].iter().flatten().any(|p| p.0 == c.0))
             })
         {
             self.cancel();
+            self.diagnostics.reason = Reason::IncompleteCards;
             return;
         }
         if self
@@ -88,22 +116,40 @@ impl Tracker {
         }
         regions
             .iter()
-            .position(|r| x >= r.x as i32 && x < (r.x + r.width) as i32)
+            .enumerate()
+            .find(|(i, r)| o.cards[*i].is_some() && x >= r.x as i32 && x < (r.x + r.width) as i32)
+            .map(|(i, _)| i)
     }
     fn pointer(&mut self, down: bool, point: Option<(i32, i32)>, at: u64) {
+        // After a definite close, ordinary game clicks belong to gameplay. Keep
+        // waiting for the second absent frame; foreign input still cancels below.
+        if point.is_some() && self.pending.as_ref().is_some_and(|p| p.absent.is_some()) {
+            return;
+        }
+        let stale = self
+            .offer
+            .as_ref()
+            .is_some_and(|o| at.saturating_sub(o.at) > FRESH_MS);
         let slot = point.and_then(|(x, y)| self.slot(x, y, at));
         if down {
-            self.pending = None;
+            if self.pending.take().is_some() {
+                self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
+                self.diagnostics.reason = Reason::Interrupted;
+            }
             self.down = slot.map(|slot| (slot, at));
             // A reroll or hide click invalidates the old offer immediately, before the next OCR.
             if slot.is_none() {
                 self.invalidated_at = at;
                 self.cancel();
+                if stale {
+                    self.diagnostics.reason = Reason::StaleOffer;
+                }
             }
         } else {
             let previous = self.down.take();
             if let (Some(slot), Some((pressed, since))) = (slot, previous) {
                 if pressed == slot && at.saturating_sub(since) <= FRESH_MS {
+                    self.diagnostics.clicks = self.diagnostics.clicks.saturating_add(1);
                     self.pending =
                         self.offer
                             .as_ref()
@@ -127,6 +173,7 @@ impl Tracker {
             .is_some_and(|p| at.saturating_sub(p.at) > CLOSE_MS)
         {
             self.cancel();
+            self.diagnostics.reason = Reason::CloseTimeout;
         }
         match evidence {
             Some(Evidence::Visible) => {
@@ -144,11 +191,18 @@ impl Tracker {
                         let p = self.pending.take().unwrap();
                         if !self.owned.iter().any(|c| c.0 == p.card.0) {
                             Arc::make_mut(&mut self.owned).push(p.card);
+                            self.diagnostics.reason = Reason::None;
                         }
                     }
                 }
             }
-            _ => self.cancel(),
+            _ => {
+                let pending = self.pending.is_some();
+                self.cancel();
+                if pending {
+                    self.diagnostics.reason = Reason::AmbiguousFrame;
+                }
+            }
         }
     }
 }
@@ -169,6 +223,14 @@ fn now() -> u64 {
 impl Recorder {
     pub fn configure(&mut self, root: std::path::PathBuf) {
         self.root = Some(root);
+    }
+    pub fn diagnostics(&self) -> Diagnostics {
+        let s = self.shared.lock().unwrap();
+        Diagnostics {
+            owned: s.owned.len().min(u16::MAX as usize) as u16,
+            observer_failed: self.error.is_some(),
+            ..s.diagnostics
+        }
     }
     pub fn owned(&self) -> Owned {
         self.shared.lock().unwrap().owned.clone()
@@ -193,6 +255,7 @@ impl Recorder {
         let at = now();
         if self.root.is_none() || at.saturating_sub(captured) > FRESH_MS {
             self.cancel();
+            self.shared.lock().unwrap().diagnostics.reason = Reason::StaleOffer;
             return;
         }
         {
@@ -215,6 +278,7 @@ impl Recorder {
         let Some((hwnd, width, height)) = self.target.as_ref().and_then(|w| w.primary_client())
         else {
             self.cancel();
+            self.shared.lock().unwrap().diagnostics.reason = Reason::WindowUnavailable;
             return;
         };
         if screen != (width, height) {
@@ -280,6 +344,8 @@ mod tests {
         s.frame(Some(Evidence::Visible), 500);
         assert!(s.owned.is_empty());
         s.frame(Some(Evidence::Visible), 2500);
+        assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
+        assert_eq!(s.diagnostics.cancelled, 1);
         close(&mut s, 2600);
         assert!(s.owned.is_empty());
     }
@@ -291,6 +357,9 @@ mod tests {
         assert!(s.owned.is_empty());
         s.frame(Some(Evidence::Absent), 800);
         assert_eq!(&*s.owned, &[(1004, "符文1004".into())]);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.cancelled, 0);
+        assert_eq!(s.diagnostics.reason, Reason::None);
         let previous = s.owned.clone();
         s.show(
             &cards([1004, 2018, 3060]),
@@ -318,7 +387,7 @@ mod tests {
         let combo =
             crate::augment_combos::reference(Some(&snapshot), 145, "16.22", &s.owned, 3086, 101);
         assert_eq!(combo.partners, "符文1004");
-        assert_eq!(combo.statistic, "组合 65.0% · 6819 场");
+        assert_eq!(combo.statistic, "两符文搭配胜率\n65.0% · 6819 场");
     }
     #[test]
     fn reroll_invalidates_inflight_ocr_and_does_not_record_replacement_in_old_slot() {
@@ -373,7 +442,7 @@ mod tests {
         let mut partial = cards([1004, 2018, 3060]);
         partial[1] = Slot::Unreadable;
         s.show(&partial, TitleKind::Candidate, (1920, 1080), 200);
-        click(&mut s, 0, 300);
+        click(&mut s, 1, 300);
         close(&mut s, 400);
         assert!(s.owned.is_empty());
     }
@@ -443,5 +512,70 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod gameplay_regressions {
+    use super::*;
+    fn cards() -> [Slot; 3] {
+        [1004, 2018, 3060].map(|id| Slot::Known {
+            id,
+            name: format!("rune{id}"),
+            confidence: 1.0,
+        })
+    }
+    fn click(s: &mut Tracker, at: u64) {
+        let p = Some((550, 400));
+        s.pointer(true, p, at);
+        s.pointer(false, p, at + 20);
+    }
+    #[test]
+    fn known_clicked_card_survives_unreadable_other_card() {
+        let mut s = Tracker::default();
+        let mut offer = cards();
+        offer[2] = Slot::Unreadable;
+        s.show(&offer, TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        s.frame(Some(Evidence::Absent), 300);
+        s.frame(Some(Evidence::Absent), 800);
+        assert_eq!(s.owned[0].0, 1004);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.reason, Reason::None);
+    }
+    #[test]
+    fn post_close_foreign_input_reopen_and_ambiguity_still_cancel() {
+        for kind in 0..4 {
+            let mut s = Tracker::default();
+            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+            click(&mut s, 200);
+            s.frame(Some(Evidence::Absent), 300);
+            match kind {
+                0 => s.pointer(true, None, 400),
+                1 => {
+                    s.frame(Some(Evidence::Visible), 400);
+                    s.show(&cards(), TitleKind::Candidate, (1920, 1080), 400);
+                }
+                2 => s.frame(None, 400),
+                _ => s.frame(Some(Evidence::Uncertain), 400),
+            }
+            s.frame(Some(Evidence::Absent), 500);
+            s.frame(Some(Evidence::Absent), 1000);
+            assert!(s.owned.is_empty());
+        }
+    }
+    #[test]
+    fn game_click_after_first_absent_frame_preserves_pending_selection() {
+        let mut s = Tracker::default();
+        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        s.frame(Some(Evidence::Absent), 300);
+        // Another genuine left click after the choice closes, before confirmation completes.
+        s.pointer(true, Some((1000, 800)), 400);
+        s.pointer(false, Some((1000, 800)), 420);
+        s.frame(Some(Evidence::Absent), 800);
+        assert_eq!(s.owned[0].0, 1004);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.cancelled, 0);
     }
 }
