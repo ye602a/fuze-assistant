@@ -79,7 +79,10 @@ await text('build.json',JSON.stringify({version,revision,releaseChannel,sequence
 // Deliberately use another cwd and no repo runtime PATH: verifies relocation and DLL layout.
 const child=spawnSync(path.join(dir,'fuze-rust-host.exe'),['--check-bundle',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
 let result;try{result=JSON.parse(child.stdout?.trim())}catch{}
-if(child.status!==0||!result?.bundle_ready||result.game_access!==false||!result.worker_reaped)throw new Error('Isolated bundle self-check failed')
+if(child.status!==0||!result?.bundle_ready||result.game_access!==false||!result.worker_reaped) {
+ const category=/fuze-host: ([a-z0-9-]+)/.exec(child.stderr || '')?.[1] || child.error?.code || 'bundle-check-failed'
+ throw new Error(`Isolated bundle self-check failed: ${category}`)
+}
 if(frontend==='slint') {
  const smoke=spawnSync(path.join(dir,'FUZE.exe'),['--desktop-smoke',path.join(dir,'preview.json')],{cwd:path.dirname(dir),env:process.env,windowsHide:true,timeout:60000,encoding:'utf8',maxBuffer:65536})
  if(smoke.status!==0)throw new Error('Relocated Slint smoke failed')

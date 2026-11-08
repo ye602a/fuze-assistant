@@ -55,7 +55,9 @@ jobs:
         with:
           path: rust/target
           key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
-          restore-keys: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
+          restore-keys: |
+            rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
+            rust-preview-1.90-
       - name: Compile exact source with build receipt
         shell: pwsh
         run: |

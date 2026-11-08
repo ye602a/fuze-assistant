@@ -491,33 +491,27 @@ impl Config {
                 source: r.source,
             })
             .collect();
-        for locale in [
-            fuze_data::Locale::ZhCn,
-            fuze_data::Locale::ZhTw,
-            fuze_data::Locale::EnUs,
-        ] {
-            let data = fuze_data::prepare(&roots, locale, fuze_data::Scope::Full)?;
-            if locale == fuze_data::Locale::ZhCn {
-                let catalog = fuze_contract::wire::encode_catalog(data.catalog())
-                    .map_err(|_| "catalog-encode")?;
-                let args = vec![
-                    self.ort.to_string_lossy().into(),
-                    self.model.to_string_lossy().into(),
-                    self.dictionary.to_string_lossy().into(),
-                    "-".into(),
-                    "cpu".into(),
-                ];
-                let mut worker = Supervisor::start_with_catalog(
-                    &self.worker,
-                    &args,
-                    Duration::from_secs(30),
-                    Some(Arc::new(catalog)),
-                )?;
-                worker.stop()?;
-                if !worker.reaped() {
-                    return Err("bundle-worker-not-reaped");
-                }
-            }
+        // Current packages ship simplified Chinese only; old configured locales remain readable.
+        let locale = self.locale.unwrap_or(fuze_data::Locale::ZhCn);
+        let data = fuze_data::prepare(&roots, locale, fuze_data::Scope::Full)?;
+        let catalog =
+            fuze_contract::wire::encode_catalog(data.catalog()).map_err(|_| "catalog-encode")?;
+        let args = vec![
+            self.ort.to_string_lossy().into(),
+            self.model.to_string_lossy().into(),
+            self.dictionary.to_string_lossy().into(),
+            "-".into(),
+            "cpu".into(),
+        ];
+        let mut worker = Supervisor::start_with_catalog(
+            &self.worker,
+            &args,
+            Duration::from_secs(30),
+            Some(Arc::new(catalog)),
+        )?;
+        worker.stop()?;
+        if !worker.reaped() {
+            return Err("bundle-worker-not-reaped");
         }
         Ok(())
     }

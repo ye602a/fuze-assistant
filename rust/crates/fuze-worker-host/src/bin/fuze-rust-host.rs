@@ -55,7 +55,7 @@ fn run() -> Result<(), &'static str> {
     if check {
         config.check_bundle()?;
         println!(
-            "{{\"bundle_ready\":true,\"locales\":3,\"worker_reaped\":true,\"game_access\":false}}"
+            "{{\"bundle_ready\":true,\"locales\":1,\"worker_reaped\":true,\"game_access\":false}}"
         );
         return Ok(());
     }
