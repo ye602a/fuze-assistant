@@ -61,7 +61,7 @@ for(const locale of ['zh-CN']) {
  versions[locale]=current.dataVersion
 }
 await copy(path.join(root,'THANKS.md'),'THANKS.md')
-await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'zh-CN',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
+await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('README.txt',`FUZE ${version}（构建 ${revision}）
 
 启动：双击 ${frontend === 'slint' ? 'FUZE.exe' : 'fuze-update.exe'}，或使用安装后的 FUZE 快捷方式。
