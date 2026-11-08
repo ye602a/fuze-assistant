@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+pub mod aramkit;
 pub mod champion_detail;
 pub mod current_augments;
 pub mod detail_cache;

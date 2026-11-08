@@ -25,6 +25,8 @@ pub struct Row {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub combinations: Option<Vec<Combination>>,
     pub schema: u8,
     pub champion: u32,
     pub patch: String,
@@ -32,6 +34,50 @@ pub struct Snapshot {
     pub data_path: String,
     pub fetched: u64,
     pub rows: [Vec<Row>; 5],
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Combination {
+    pub ids: Vec<u32>,
+    pub win: f64,
+    pub samples: u64,
+}
+fn valid_combinations(rows: &[Combination]) -> bool {
+    let mut keys = HashSet::new();
+    rows.len() <= 512
+        && rows.iter().all(|r| {
+            let mut ids = r.ids.clone();
+            ids.sort_unstable();
+            (2..=4).contains(&ids.len())
+                && ids.iter().all(|id| *id > 0 && *id <= 100000)
+                && ids.windows(2).all(|p| p[0] != p[1])
+                && keys.insert(ids)
+                && r.samples > 0
+                && r.samples <= 9007199254740991
+                && r.win.is_finite()
+                && (0.0..=1.0).contains(&r.win)
+        })
+}
+fn combinations(value: &Value) -> Option<Vec<Combination>> {
+    let rows = value.as_array()?;
+    if rows.len() > 512 {
+        return None;
+    }
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            Some(Combination {
+                ids: r["augmentIds"]
+                    .as_array()?
+                    .iter()
+                    .map(|id| u32::try_from(id.as_u64()?).ok())
+                    .collect::<Option<Vec<_>>>()?,
+                win: r["winRate"].as_f64()?,
+                samples: r["sampleCount"].as_u64()?,
+            })
+        })
+        .collect::<Option<_>>()?;
+    valid_combinations(&rows).then_some(rows)
 }
 fn patch(v: &str) -> Option<(u32, u32)> {
     let (a, b) = v.split_once('.')?;
@@ -127,7 +173,7 @@ impl Snapshot {
         self.patch == version.split('.').take(2).collect::<Vec<_>>().join(".")
     }
     fn valid(&self, now: u64) -> bool {
-        self.schema==1 && self.champion>0 && self.champion<=10000 && self.fetched<=now && now-self.fetched<=RETAIN && !self.rows[0].is_empty() && self.rows.iter().all(|r|valid_rows(r)) && version(&serde_json::json!({"version":self.patch,"dataDate":self.date,"dataPath":self.data_path})).is_ok()
+        self.combinations.as_ref().is_none_or(|r| valid_combinations(r)) && self.schema==1 && self.champion>0 && self.champion<=10000 && self.fetched<=now && now-self.fetched<=RETAIN && !self.rows[0].is_empty() && self.rows.iter().all(|r|valid_rows(r)) && version(&serde_json::json!({"version":self.patch,"dataDate":self.date,"dataPath":self.data_path})).is_ok()
     }
     fn normalize(&mut self) {
         for rows in &mut self.rows {
@@ -140,7 +186,7 @@ impl Snapshot {
         }
     }
     pub fn stale(&self, now: u64) -> bool {
-        now.saturating_sub(self.fetched) >= FRESH
+        self.combinations.is_none() || now.saturating_sub(self.fetched) >= FRESH
     }
     pub fn visible(&self, stage: usize) -> Vec<&Row> {
         self.rows[stage.min(4)]
@@ -193,6 +239,16 @@ fn fetch_snapshot(
     if data["champion"]["id"].as_u64() != Some(id as u64) {
         return Err("stage-champion");
     }
+    parse_snapshot(id, now, patch, date, data_path, &data)
+}
+fn parse_snapshot(
+    id: u32,
+    now: u64,
+    patch: String,
+    date: String,
+    data_path: String,
+    data: &Value,
+) -> Result<Snapshot> {
     let mut rows: [Vec<Row>; 5] = Default::default();
     for (stage, target) in rows.iter_mut().enumerate() {
         let value = if stage == 0 {
@@ -220,6 +276,9 @@ fn fetch_snapshot(
         }
     }
     let mut s = Snapshot {
+        // None is reserved for caches written before combination support. A provider
+        // without valid combinations still supplies usable single-augment statistics.
+        combinations: Some(combinations(&data["augmentCombinations"]).unwrap_or_default()),
         schema: 1,
         champion: id,
         patch,
@@ -233,6 +292,31 @@ fn fetch_snapshot(
     }
     s.normalize();
     Ok(s)
+}
+pub(crate) fn local_snapshot(
+    roots: &[fuze_data::Root],
+    locale: fuze_data::Locale,
+    id: u32,
+    at: u64,
+) -> Result<Option<Snapshot>> {
+    let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Champion(id))?;
+    if data
+        .document("manifest.json")
+        .is_none_or(|v| v["source"] != fuze_data::aramkit::SOURCE)
+    {
+        return Ok(None);
+    }
+    let path = format!("champion-shards/{id}.json");
+    let reference = &data.document(&path).ok_or("stage-local-missing")?["champions"]
+        [id.to_string()]["aramkitReference"];
+    Ok(Some(parse_snapshot(
+        id,
+        at,
+        reference["patch"].as_str().ok_or("stage-format")?.into(),
+        reference["date"].as_str().ok_or("stage-format")?.into(),
+        reference["dataPath"].as_str().ok_or("stage-format")?.into(),
+        reference,
+    )?))
 }
 #[derive(Clone, Default)]
 pub struct Reply {
@@ -468,7 +552,25 @@ impl Service {
                     if cancel() {
                         continue;
                     }
-                    let mut reply = if offline {
+                    // A full ARAMKit update already contains these exact stage/combination rows.
+                    // Prefer the local bundle rather than fetching the same hero a second time.
+                    let local = local_snapshot(&roots, req.locale, req.id, now());
+                    let mut reply = if let Ok(Some(snapshot)) = local {
+                        let snapshot = Arc::new(snapshot);
+                        if let Ok(mut holder) = store.cache.lock() {
+                            let cache = holder.get_or_insert_with(|| Cache::new(None));
+                            cache.entries.retain(|old| old.champion != req.id);
+                            cache.entries.push_back(snapshot.clone());
+                            while cache.entries.len() > 8 {
+                                cache.entries.pop_front();
+                            }
+                        }
+                        Reply {
+                            snapshot: Some(snapshot),
+                            cached: true,
+                            ..Default::default()
+                        }
+                    } else if offline {
                         Reply {
                             issue: Some("stage-offline"),
                             ..Default::default()
@@ -583,6 +685,67 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn same_download_parses_combinations_and_legacy_cache_remains_readable() {
+        let payload = serde_json::json!([
+            {"rank":1,"augmentIds":[1004,3086],"sampleCount":6819,"pickRate":0.0102,"winRate":0.6495}
+        ]);
+        let fetch = |path: &str| {
+            let mut value: Value = serde_json::from_slice(&fixture(path)?).unwrap();
+            if !path.ends_with("versions.json") {
+                value["augmentCombinations"] = payload.clone();
+            }
+            Ok(serde_json::to_vec(&value).unwrap())
+        };
+        let s = fetch_snapshot(21, 100, &fetch, &|| false).unwrap();
+        let rows = s.combinations.as_ref().unwrap();
+        assert_eq!(rows[0].ids, [1004, 3086]);
+        assert_eq!(rows[0].samples, 6819);
+        assert_eq!(rows[0].win, 0.6495);
+        assert_eq!(s.rows[0][0].win, 0.6);
+        assert!(!s.stale(101));
+        let mut old = serde_json::to_value(&s).unwrap();
+        old.as_object_mut().unwrap().remove("combinations");
+        let legacy: Snapshot = serde_json::from_value(old).unwrap();
+        assert!(legacy.valid(101) && legacy.usable(21, 101));
+        assert!(legacy.combinations.is_none() && legacy.stale(101));
+        let mut cache = Cache::new(None);
+        cache.get_policy(21, Access::Prepare, 100, &fetch, &|| false);
+        let reply = cache.get_policy(
+            21,
+            Access::CacheOnly,
+            101,
+            &|_| panic!("in-game network"),
+            &|| false,
+        );
+        assert_eq!(
+            reply.snapshot.unwrap().combinations.as_ref().unwrap()[0].samples,
+            6819
+        );
+    }
+
+    #[test]
+    fn invalid_or_missing_combinations_do_not_hide_single_augment_statistics() {
+        for payload in [
+            serde_json::json!(null),
+            serde_json::json!([{"augmentIds":[1,1],"sampleCount":20,"winRate":0.5}]),
+            serde_json::json!([{"augmentIds":[1,2],"sampleCount":0,"winRate":0.5}]),
+            serde_json::json!([{"augmentIds":[1,2],"sampleCount":20,"winRate":50}]),
+            serde_json::json!([{"augmentIds":[1,2],"sampleCount":20,"winRate":0.5}, {"augmentIds":[2,1],"sampleCount":20,"winRate":0.5}]),
+        ] {
+            let fetch = |path: &str| {
+                let mut value: Value = serde_json::from_slice(&fixture(path)?).unwrap();
+                if !path.ends_with("versions.json") {
+                    value["augmentCombinations"] = payload.clone();
+                }
+                Ok(serde_json::to_vec(&value).unwrap())
+            };
+            let s = fetch_snapshot(21, 100, &fetch, &|| false).unwrap();
+            assert!(s.combinations.unwrap().is_empty());
+            assert_eq!(s.rows[0][0].win, 0.6);
+            assert_eq!(s.rows[1][0].samples, 199);
+        }
+    }
     #[test]
     fn prepare_reuses_fresh_cache_and_gameplay_never_fetches_or_promotes_missing_rows() {
         let at = now();

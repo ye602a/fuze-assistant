@@ -43,7 +43,7 @@ const args=await prepare()
 await copy(args[1],'resources/inference.onnx')
 await copy(args[2],'resources/dictionary.json')
 const versions={}
-for(const locale of ['zh-CN','zh-TW','en-US']) {
+for(const locale of ['zh-CN']) {
  const pointer=locale==='zh-CN'?'current.json':`current.${locale}.json`
  const base='resources/client-data'
  const current=JSON.parse(await readFile(path.join(root,base,pointer),'utf8'))
@@ -61,7 +61,7 @@ for(const locale of ['zh-CN','zh-TW','en-US']) {
  versions[locale]=current.dataVersion
 }
 await copy(path.join(root,'THANKS.md'),'THANKS.md')
-await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'auto',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
+await text('preview.json',JSON.stringify({bundled_data:'resources/client-data',locale:'zh-CN',worker:'fuze-ocr-worker.exe',ort:'onnxruntime.dll',model:'resources/inference.onnx',dictionary:'resources/dictionary.json',backend:'auto'},null,2))
 await text('README.txt',`FUZE ${version}（构建 ${revision}）
 
 启动：双击 ${frontend === 'slint' ? 'FUZE.exe' : 'fuze-update.exe'}，或使用安装后的 FUZE 快捷方式。

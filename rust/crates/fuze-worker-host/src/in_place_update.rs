@@ -165,8 +165,24 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
     }
     let mut files = Vec::new();
     collect(payload, payload, &mut files)?;
+    // Compare actual bytes once at installation; unchanged DLLs need no write access.
+    let mut changed = Vec::new();
+    for relative in files {
+        let target = directory.join(
+            if relative == Path::new("fuze-ui-lab.exe") && directory.join("FUZE.exe").exists() {
+                Path::new("FUZE.exe")
+            } else {
+                &relative
+            },
+        );
+        if !same_contents(&payload.join(&relative), &target)? {
+            changed.push(relative);
+        }
+    }
+    let mut files = changed;
     files.sort_by_key(|p| p == Path::new("build.json"));
     for relative in &files {
+        crate::update_progress::file_started(relative);
         let target = directory.join(
             if relative == Path::new("fuze-ui-lab.exe") && directory.join("FUZE.exe").exists() {
                 Path::new("FUZE.exe")
@@ -193,6 +209,39 @@ pub fn replace(directory: &Path, payload: &Path) -> Result<()> {
     }
     install::finalize_player_layout(directory)?;
     Ok(())
+}
+
+fn same_contents(source: &Path, target: &Path) -> Result<bool> {
+    use std::io::Read;
+    if !target.exists() {
+        return Ok(false);
+    }
+    crate::local_setup::regular(target)?;
+    let mut old = match fs::File::open(target) {
+        Ok(file) => file,
+        // Let the existing write preflight report an occupied target before changing files.
+        Err(_) => return Ok(false),
+    };
+    let mut new = fs::File::open(source).map_err(|_| "update-compare-file")?;
+    let size = new.metadata().map_err(|_| "update-compare-file")?.len();
+    if old.metadata().map_err(|_| "update-compare-file")?.len() != size {
+        return Ok(false);
+    }
+    let mut left = [0u8; 65536];
+    let mut right = [0u8; 65536];
+    let mut remaining = size;
+    while remaining > 0 {
+        let n = remaining.min(left.len() as u64) as usize;
+        new.read_exact(&mut left[..n])
+            .map_err(|_| "update-compare-file")?;
+        old.read_exact(&mut right[..n])
+            .map_err(|_| "update-compare-file")?;
+        if left[..n] != right[..n] {
+            return Ok(false);
+        }
+        remaining -= n as u64;
+    }
+    Ok(true)
 }
 
 fn collect(root: &Path, directory: &Path, files: &mut Vec<std::path::PathBuf>) -> Result<()> {
@@ -225,6 +274,31 @@ mod tests {
         fs::write(path.join("build.json"), serde_json::json!({"revision":revision,"sequence":sequence,"channel":"rust-development-preview"}).to_string()).unwrap();
         fs::write(path.join("fuze-update.exe"), revision).unwrap();
         fs::write(path.join("fuze-ui-lab.exe"), revision).unwrap();
+    }
+    #[test]
+    fn unchanged_runtime_is_not_replaced_even_when_write_locked() {
+        let root =
+            std::env::temp_dir().join(format!("fuze-unchanged-runtime-{}", std::process::id()));
+        let current = root.join("current");
+        let payload = root.join("payload");
+        bundle(&current, "111111111111", 1);
+        bundle(&payload, "222222222222", 2);
+        let dll = current.join("vcruntime140.dll");
+        fs::write(&dll, b"same runtime").unwrap();
+        fs::write(payload.join("vcruntime140.dll"), b"same runtime").unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&dll)
+            .unwrap();
+        replace(&current, &payload).unwrap();
+        assert_eq!(fs::read(&dll).unwrap(), b"same runtime");
+        assert_eq!(
+            install::bundled_version(&current).unwrap().revision,
+            "222222222222"
+        );
+        drop(held);
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn occupied_program_aborts_before_changing_any_files() {

@@ -12,6 +12,7 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
+    pub combos: [fuze_worker_host::augment_combos::Reference; 3],
     pub values: [[String; 4]; 3],
     pub details: [String; 3],
     pub source: String,
@@ -19,6 +20,7 @@ pub struct Comparison {
 impl Default for Comparison {
     fn default() -> Self {
         Self {
+            combos: Default::default(),
             values: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
             details: Default::default(),
             source: "阶段参考暂无缓存 · 选人及加载时准备，局内不联网".into(),
@@ -86,6 +88,9 @@ struct Context {
     prepare: bool,
 }
 pub struct Reference {
+    roots: Vec<fuze_data::Root>,
+    owned: fuze_worker_host::augment_picks::Owned,
+    patch: String,
     pub store: Arc<Store>,
     offline: bool,
     service: Option<Service>,
@@ -106,9 +111,15 @@ pub struct Reference {
 }
 impl Reference {
     pub fn new(offline: bool) -> Self {
+        Self::with_roots(offline, Vec::new())
+    }
+    pub fn with_roots(offline: bool, roots: Vec<fuze_data::Root>) -> Self {
         let store = Arc::new(Store::default());
         store.allow_network(false);
         Self {
+            roots,
+            owned: Default::default(),
+            patch: String::new(),
             store,
             offline,
             service: None,
@@ -122,6 +133,11 @@ impl Reference {
         }
     }
     pub fn update(&mut self, status: &Status) {
+        if *self.owned != *status.pipeline.picked || self.patch != status.recognition.reference {
+            self.owned = status.pipeline.picked.clone();
+            self.patch = status.recognition.reference.clone();
+            self.rendered = None;
+        }
         let prepare = status.mode == 1
             && matches!(
                 status.connection,
@@ -196,8 +212,9 @@ impl Reference {
             return;
         }
         if self.service.is_none() {
-            // No name catalog needed here; card titles already come from OCR/catalog.
-            self.service = Service::with_store(Vec::new(), self.offline, self.store.clone()).ok();
+            // Reuse the same local data roots as the hero details and recognition service.
+            self.service =
+                Service::with_store(self.roots.clone(), self.offline, self.store.clone()).ok();
         }
         self.requested = true;
         self.retry = None;
@@ -236,13 +253,28 @@ impl Reference {
         if same {
             return self.rendered.as_ref().unwrap().5.clone();
         }
-        let view = Arc::new(compare(
+        let mut view = compare(
             self.snapshot.as_deref(),
             champion,
             ids,
             dataset,
             stage_reference::now(),
-        ));
+        );
+        for (i, candidate) in ids.into_iter().enumerate() {
+            if let Some(candidate) =
+                candidate.filter(|id| fuze_contract::skill_choice::get(*id).is_none())
+            {
+                view.combos[i] = fuze_worker_host::augment_combos::reference(
+                    self.snapshot.as_deref(),
+                    champion,
+                    &self.patch,
+                    &self.owned,
+                    candidate,
+                    stage_reference::now(),
+                );
+            }
+        }
+        let view = Arc::new(view);
         self.rendered = Some((
             champion,
             dataset.into(),
@@ -259,6 +291,66 @@ impl Reference {
 mod tests {
     use super::*;
     use stage_reference::Row;
+    #[test]
+    fn automatic_status_updates_combo_cards_without_actions_or_changing_single_rates() {
+        use fuze_worker_host::{
+            champ_select::{Hero, View},
+            stage_reference::Combination,
+        };
+        let mut state = Status::default();
+        state.mode = 1;
+        state.preferences.augment_overlay = true;
+        state.connection = Some(State::Connected(Phase::InProgress));
+        state.recognition.reference = "16.22.1".into();
+        state.playing = Some(View {
+            team: vec![Hero {
+                id: 145,
+                name: "合成英雄".into(),
+                icon: String::new(),
+                win: None,
+                pick: None,
+                games: None,
+                tier: None,
+            }],
+            local_slot: Some(0),
+            bench: vec![],
+            choices: None,
+            version: "16.22".into(),
+        });
+        let mut r = Reference::new(true);
+        r.update(&state);
+        r.snapshot = Some(Arc::new(Snapshot {
+            schema: 1,
+            champion: 145,
+            patch: "16.22".into(),
+            date: "2026-11-06".into(),
+            data_path: String::new(),
+            fetched: stage_reference::now(),
+            rows: Default::default(),
+            combinations: Some(vec![Combination {
+                ids: vec![1004, 3086],
+                win: 0.6495,
+                samples: 6819,
+            }]),
+        }));
+        let ids = [Some(3086), Some(9999), None];
+        let single = r.cards(ids, "16.22");
+        assert!(single.combos.iter().all(|c| c.detail.is_empty()));
+        state.pipeline.picked = Arc::new(vec![(1004, "秘术冲拳".into())]);
+        r.update(&state);
+        let combo = r.cards(ids, "16.22");
+        assert_eq!(combo.combos[0].partners, "秘术冲拳");
+        assert_eq!(combo.combos[0].statistic, "组合 65.0% · 6819 场");
+        assert!(combo.combos[1].detail.is_empty() && combo.combos[2].detail.is_empty());
+        assert_eq!(combo.values, single.values);
+        assert!(Arc::ptr_eq(&combo, &r.cards(ids, "16.22")));
+        state.recognition.reference = "16.23".into();
+        r.update(&state);
+        assert!(r.cards(ids, "16.22").combos[0].detail.is_empty());
+        state.mode = 2;
+        r.update(&state);
+        assert!(r.cards(ids, "16.22").combos[0].detail.is_empty());
+    }
     #[test]
     fn loading_carries_verified_champion_but_gameplay_rechecks_and_pause_clears_it() {
         use fuze_worker_host::champ_select::{Hero, View};
@@ -305,6 +397,7 @@ mod tests {
     #[test]
     fn fixed_slots_missing_samples_expiry_and_context_never_borrow_overall_rates() {
         let mut s = Snapshot {
+            combinations: Some(Vec::new()),
             schema: 1,
             champion: 21,
             patch: "16.20".into(),

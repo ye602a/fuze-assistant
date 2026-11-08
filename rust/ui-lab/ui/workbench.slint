@@ -73,7 +73,6 @@ export component Workbench inherits Window {
         }
         Image { x: 21px; y: parent.height - 50px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: #42c6cc; }
         Label { x: 36px; y: parent.height - 58px; width: parent.width - 44px; height: 24px; text: HostState.offline ? "离线界面预览" : MaintenanceState.release-label; color: Theme.muted; font-size: 12px; }
-        Label { x: 21px; y: parent.height - 34px; width: parent.width - 32px; height: 20px; text: HostState.offline ? "未连接游戏" : HostState.connection-value; color: #83929d; font-size: 12px; }
     }
     Rectangle { y: 0px;
         x: root.rail-width; width: root.width - self.x; height: 42px;
@@ -109,7 +108,6 @@ export component Workbench inherits Window {
                         Label { x: 44px; y: 22px; height: 24px; text: "实时状态"; color: Theme.gold; font-size: 12px; letter-spacing: 2px; }
                         Label { x: 27px; y: 47px; width: parent.width - 170px; height: 36px; text: HostState.connected ? HostState.status-title : root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "识别正常 · 推荐已就绪" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: root.tone; font-size: 22px; font-weight: 700; }
                         Label { x: 27px; y: 88px; width: parent.width - 170px; height: 28px; text: HostState.connected ? HostState.status-hint : root.paused ? "已暂停识别。继续后恢复自动识别。" : root.health == 0 ? "客户端通信正常。进入对局后才会开始截图识别。" : root.health == 2 ? "保留卡位，等待下一次识别；可能被遮挡或正在刷新。" : root.health == 3 ? "暂时无法连接客户端，等待重连。" : "已展示识别结果。仅作推荐，不自动选择。"; color: #bacbd0; wrap: word-wrap; }
-                        Label { x: 27px; y: 126px; height: 18px; text: "最近连接验证 · " + (HostState.connected ? HostState.verified : "固定预览状态，非本机连接结果"); color: #91afb6; font-size: 12px; }
                         Action { x: parent.width - 130px; y: 63px; width: 103px; primary: true; label: root.paused ? "继续识别" : "暂停识别"; enabled: !HostState.busy; clicked => { if HostState.connected { HostState.command("toggle-running"); } else { root.paused = !root.paused; } } }
                     }
                     VerticalLayout {
@@ -118,10 +116,10 @@ export component Workbench inherits Window {
                             opacity: UiMotion.reveal(page-entrance.progress, 1);
                             height: root.narrow ? 220px : 145px;
                             for item[index] in [
-                                {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "通信已验证", hint: HostState.connected ? HostState.connection-hint : root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
+                                {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "已连接", hint: HostState.connected ? HostState.connection-hint : root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
                                 {label: "游戏画面", value: HostState.connected ? HostState.capture-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: HostState.connected ? HostState.capture-hint : "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: HostState.connected ? (HostState.capture-tone == 3 ? Theme.red : HostState.capture-tone == 2 ? Theme.yellow : HostState.capture-tone == 1 ? Theme.green : Theme.blue) : root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
                                 {label: "中文识别", value: HostState.connected ? HostState.ocr-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : root.health == 2 ? "部分卡位暂不可读" : "识别结果已就绪", hint: HostState.connected ? HostState.ocr-hint : "预览不启动识别引擎", icon: @image-url("assets/recognition.svg"), tone: HostState.connected ? (HostState.ocr-tone == 3 ? Theme.red : HostState.ocr-tone == 2 ? Theme.yellow : HostState.ocr-tone == 1 ? Theme.green : Theme.blue) : root.paused || root.health == 2 ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
-                                {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20.1 · 示例", hint: "保留数据版本 · 使用整体胜率", icon: @image-url("assets/data.svg"), tone: HostState.connected && HostState.data-version == "—" ? Theme.yellow : Theme.green}
+                                {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20.1 · 示例", hint: "英雄整体胜率", icon: @image-url("assets/data.svg"), tone: HostState.connected && HostState.data-version == "—" ? Theme.yellow : Theme.green}
                             ]: Module {
                                 x: mod(index, root.narrow ? 2 : 4) * (self.width + 12px);
                                 y: root.narrow && index >= 2 ? 116px : 0px;
@@ -159,7 +157,7 @@ export component Workbench inherits Window {
                             Label { x: 21px; y: 130px; height: 22px; text: "当前界面与识别进程 · 内存为工作集之和；离线预览不采样。"; color: #98a9b3; font-size: 12px; }
                         }
                         Disclosure { label: "等级调度 · 等待对局"; expanded <=> root.level-open; detail: HostState.connected ? HostState.schedule : "当前等级 — · 下次强化等级 — · 跳过次数 —\n无法确认等级时恢复基础检测；等级不是实际领取轮次。"; }
-                        Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：" + HostState.data-version + " · 实际领取轮次未确认，继续使用整体胜率。"; }
+                        Disclosure { label: "数据来源与版本"; expanded <=> root.sources-open; detail: "识别字典与推荐统计独立更新；不混合不同版本胜率。\n推荐数据：" + HostState.data-version + " · 英雄整体胜率。"; }
                     }
                 }
                 if root.page == 1: HistoryPage { sample: root.history-sample; entrance: page-entrance.progress; tools-open <=> root.history-tools-open; }

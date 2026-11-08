@@ -57,7 +57,7 @@ impl Session {
     pub fn snapshot(&self) -> Status {
         self.shared.status()
     }
-    pub fn grab_bench(&self, game: u64, hero: u32) -> Option<Arc<AtomicBool>> {
+    pub fn grab_bench(&self, game: u64, hero: u32) -> Option<Arc<crate::controller::BenchGrab>> {
         if self.offline || self.shared.desired.load(Ordering::Acquire) != RUNNING {
             return None;
         }

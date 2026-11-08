@@ -1,36 +1,33 @@
 # FUZE 数据读取与更新
 
-核对日期：2026-10-24。当前 Rust 继续使用已有公开数据接口，不读取个人 API Key，也不经过 FUZE 自建服务器。玩家无需申请开发者账号。
+核对日期：2026-11-08。本分支以 ARAMKit 为主数据源，不读取个人 API Key，也不经过 FUZE 自建服务器。玩家无需申请开发者账号。
 
 ## 三条独立路径
 
 | 功能 | 来源与入口 | 当前接线 |
 | --- | --- | --- |
-| 推荐数据更新 | `https://data.dtodo.cn/api/client/v1/config` 及其版本数据 | Rust 下载器，无鉴权头 |
-| FUZE 程序更新 | `ye602a/fuze-assistant` 的 `rust-preview` Release | Rust 更新器，公开下载无需令牌 |
-| 对局贡献 | 站方独立的上传会话与批次接口 | 本次未接入，条件见[对局上传接入核对](DATA_CONTRIBUTION_ACCESS.md) |
-
-数据配置中的 `client.latestVersion`、`downloadUrl`、`updateFeedUrl` 是上游客户端的信息，不能用于 FUZE 程序更新。旧 Electron 的 `latest.yml` 也不是 Rust 更新清单。
+| 推荐数据更新 | `https://data.aramkit.cn/data/versions.json` 及其版本资源 | Rust 下载器，无鉴权头，简体中文 |
+| FUZE 程序更新 | FUZE GitHub Release 的公开更新清单 | 独立原生更新器 |
+| 对局贡献 | 站方独立的上传会话与批次接口 | 未接入；读取数据的权限不包含上传权限，见[接入核对](DATA_CONTRIBUTION_ACCESS.md) |
 
 ## Rust 数据链路
 
 1. 先展示随包数据或完整本地缓存。
-2. 空闲时自动检查数据版本；手动“检查数据更新”在识别期间也可使用，只处理简体中文。
-3. 本地已有同版或更新的完整资料时，不重复下载。
-4. 有新版本时后台下载清单和所需文件，显示实际已完成文件数。下载及完整性校验完成后暂停识别、启用新数据，再按用户当前选择恢复识别。补充识别词库也先下载，确认需要替换后才进入应用阶段。
-5. 失败或取消时继续使用现有数据，结果保留在数据卡片中。
+2. 空闲时自动检查数据版本；手动检查在识别期间也可使用。
+3. 从版本索引固定同一个 `dataPath` / `resourcePath`，下载英雄、强化、装备、召唤师技能、总榜和英雄详情。相同构建且本地完整时跳过下载。
+4. `fuze-data::aramkit` 转成现有 client-data 格式，一次写入一个英雄文件；不在内存中另存全部原始响应。内部版本由补丁和构建时间组成，支持同补丁数据更新，玩家看到补丁号。
+5. 完整校验后才短暂暂停识别、切换数据指针，再恢复原状态。下载失败、取消或激活失败时保留现有数据。进度显示本次已准备的实际文件数。
+6. 英雄整体胜率、英雄专属强化胜率、分阶段和组合数据来自同一快照；未提供统计时显示暂无。普通推荐不读取五杀摇滚的技能选择项，识别门禁和商店过滤不变。
+7. 出装仅使用 filtered 海斗路线，保留购买顺序；条件装备和占位项不导入，转化装备按唯一前置映射到商店商品。腾讯 101 仅在补丁一致时追加补充推荐，不覆盖主来源的出装、装备资料及选取率。
+8. 本地英雄文件已经包含阶段和组合记录，优先复用，不再次请求同一英雄。旧数据格式继续兼容原独立参考缓存。图标支持 ARAMKit WebP，旧内嵌图片及磁盘缓存仍可读。
 
-入口位于 `rust/crates/fuze-worker-host/src/data_update.rs`、`background_data.rs` 和 `update_io.rs::data_get`。
-构建时的 `scripts/prepare-rust-data.mjs` 复用 `fuze-rust-host --prepare-data`，保留打包所需的语言数据；应用内的手动简中更新不会触发它。
+生产入口：`fuze-worker-host::data_update`、`background_data`、`update_io::aramkit_get`。
+构建时 `scripts/prepare-rust-data.mjs` 复用 `fuze-rust-host --prepare-data`，只准备简中；`scripts/prepare-rust-augment-icons.mjs --download` 准备对应公开美术。本轮没有打包，也没有更换用户本地数据。
 
-资料补丁与统计补丁分别显示。2026-10-24 核对时，公开配置仍为 `dataVersion=16.20.4`、`gamePatch=16.20`，内置符文资料为 16.21。接口可访问或数据检查完成，都不表示新补丁胜率已发布。
+16.22 / 2026-11-06 公开快照共 173 个英雄；已在隔离目录通过完整转换、激活、详情、推荐、商店方案和阶段/组合读取测试。统计描述该站样本，不宣称覆盖全球所有对局。
 
-## 保留与清理
+## 旧来源与发布边界
 
-- 保留公开数据接口、现有缓存格式、程序更新清单及旧设置迁移。
-- 移除旧 Electron 专属 JS 数据下载器及其重复校验逻辑。
-- 根目录 `npm run prepare:client-data` 统一调用 Rust 数据准备脚本。
-- [旧 Electron 接口说明](https://github.com/ye602a/fuze-assistant/blob/6970a60f63306a27a20930c8605a0f5c8405fee4/legacy/electron/docs/client-api-strategy.md)仅供追溯，不作为当前 Rust 接入指南。
+生产数据和新图片下载不再访问 dtodo。旧缓存、内嵌素材、历史装备方案 UID 保留兼容；个人读取 Key 不使用，对局上传研究仍单独保留。
 
-站方另有带 Key 的 `/api/v1/zh-CN/*` 开发者读取接口。本次不接入、不分发 Key、不添加代理服务；它不授予对局上传权限。
-站方将客户端分发与第三方开发者 API 分开说明，公开接口能匿名读取不等于对未来可用性或第三方使用范围的承诺。来源：[站方接口分发说明](https://github.com/valkia/aramgg_client/blob/master/docs/client-api-strategy.md)。
+保留来源致谢。ARAMKit 公开网站和资源访问不代表 FUZE 获得站方背书；公开分发仍需遵守站方条款，正式第三方客户端分发许可范围尚待站方明确。当前技术接入未新增服务器或共享凭据。

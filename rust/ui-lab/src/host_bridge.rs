@@ -591,8 +591,8 @@ pub fn attach_recovered(
             state.set_data_progress(if next.data_progress.message.is_empty() { "尚未检查数据更新".into() } else { next.data_progress.message.clone().into() });
             state.set_data_completed(next.data_progress.completed as i32);
             state.set_data_total(next.data_progress.total as i32);
-            if old.as_ref().is_none_or(|s| s.available != next.available) {
-                let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref());
+            if old.as_ref().is_none_or(|s| s.available != next.available || s.recognition.reference != next.recognition.reference) {
+                let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref(), &next.recognition.reference);
                 state.set_data_compatibility(compatibility.into());
                 state.set_data_mismatch(mismatch);
                 state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
@@ -628,7 +628,6 @@ pub fn attach_recovered(
             state.set_ocr_value(view.ocr.into());
             state.set_ocr_hint(view.ocr_hint.into());
             state.set_ocr_tone(view.ocr_tone);
-            state.set_verified(if offline { "隔离验证，未连接游戏".into() } else { next.verified_time.as_deref().unwrap_or("尚未验证").into() });
             ui.set_health(view.health);
             state.set_status_active(view.busy);
             state.set_status_title(view.title.into());

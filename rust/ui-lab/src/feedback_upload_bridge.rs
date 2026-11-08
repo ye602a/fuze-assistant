@@ -39,7 +39,7 @@ impl Binding {
                 state.set_upload_busy(false);
                 state.set_upload_notice(
                     match result {
-                        Ok(()) => "上传凭据已保存，正在检查仓库访问；写入权限以实际报告上传为准。",
+                        Ok(()) => "上传凭据已保存，正在检查授权…",
                         Err("credential-cancelled") => "已取消，现有上传凭据保持不变。",
                         _ => "上传凭据未能保存，请重试。",
                     }
@@ -59,14 +59,12 @@ impl Binding {
         state.set_upload_busy(self.credential.is_some() || view.authorization == "checking");
         let auth = match view.authorization {
             "checking" => "正在验证反馈授权…",
-            "readable" => "令牌可访问仓库；Issues 写入权限待首次上传验证。",
-            "write-confirmed" => "本次运行已成功写入报告，上传授权有效。",
-            "credential-unavailable" | "credential-format" => {
-                "未配置有效上传令牌；本地摘要可排队，下载更新不受影响。"
-            }
+            "readable" => "已连接 GitHub，等待上传报告。",
+            "write-confirmed" => "报告上传成功。",
+            "credential-unavailable" | "credential-format" => "请配置 GitHub 上传令牌。",
             "feedback-auth" => "上传令牌失效或被拒绝，请重新配置。",
             "feedback-permission" => "上传令牌无法访问仓库或缺少 Issues 权限。",
-            "unchecked" | "" => "反馈授权尚未验证；配置令牌后可检查，更新下载无需令牌。",
+            "unchecked" | "" => "请检查 GitHub 上传授权。",
             _ => "授权检查未完成，请检查网络后重试；摘要仍保留在本机。",
         };
         if state.get_upload_authorization() != auth {
@@ -91,18 +89,18 @@ impl Binding {
                 "feedback-queue-full" => {
                     "待传队列已满（32 局），本局未能加入；请处理上传失败并手动导出反馈。"
                 }
-                "feedback-store" => "自动反馈文件无法读写，上传未完成；不会覆盖损坏的旧文件。",
+                "feedback-store" => "无法读取或保存反馈报告，请稍后重试。",
                 "feedback-rate-limit" => "GitHub 暂时限流，摘要保留，稍后重试。",
                 "feedback-network" | "feedback-response" | "feedback-not-sent" => {
                     "GitHub 暂时不可达，摘要保留，稍后重试。"
                 }
                 "feedback-rejected" => "GitHub 拒绝了报告，请检查仓库 Issues 设置。",
-                "feedback-no-local-match" => "本地保留日志中没有对局记录；不会创建空报告。",
+                "feedback-no-local-match" => "本地没有可补传的对局报告。",
                 "feedback-log-busy" => "本地日志尚未完成保存，请稍后补传。",
                 "feedback-already-sent" => "这份本地摘要已上传，可查看最近报告，无需重复提交。",
                 "feedback-recovery-cooldown" => "补传请求间隔至少 10 秒，请稍候。",
                 "" => "正在读取自动反馈设置…",
-                _ => "自动反馈未完成，可重试；识别不受此操作阻塞。",
+                _ => "反馈上传未完成，请重试。",
             };
             state.set_upload_status(
                 format!(

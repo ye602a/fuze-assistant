@@ -129,7 +129,7 @@ impl Refresh {
                         },
                         &|| flag.load(Ordering::Acquire),
                         &report,
-                        &|p, n, c| crate::update_io::data_get(p, n, c),
+                        &|p, n, c| crate::update_io::aramkit_get(p, n, c),
                         &before_activate,
                     );
                     let supplemental = if result.is_ok() {

@@ -71,7 +71,7 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 260;
+const HEIGHT: u32 = 296;
 const TITLE_WIDTH: f32 = 154.;
 const TITLE_HEIGHT: f32 = 64.;
 const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
@@ -133,6 +133,7 @@ struct Scene {
     cards: [Card; 3],
     caption: String,
     image_cache: std::collections::HashMap<String, image::RgbaImage>,
+    icon_urls: std::collections::HashMap<u32, String>,
     dw: IDWriteFactory,
     selected: Option<usize>,
     detail: Option<IDWriteTextLayout>,
@@ -198,6 +199,7 @@ impl Scene {
                 }),
                 caption: "整体胜率 · 离线样例".into(),
                 image_cache: Default::default(),
+                icon_urls: Default::default(),
                 dw,
                 selected: None,
                 detail: None,
@@ -232,10 +234,19 @@ impl Scene {
         };
         // The fixed header fits every observed real name; only an exceptional
         // external title needs a complete copy in the scrollable text.
-        let text = if self.cards[index].title.chars().count() > 20 {
-            format!("{}\n\n{}{}", self.cards[index].title, text, reference)
+        let combo = &self.reference.combos[index].detail;
+        let prefix = if combo.is_empty() {
+            String::new()
         } else {
-            format!("{}{}", text, reference)
+            format!("{}\n\n", combo)
+        };
+        let text = if self.cards[index].title.chars().count() > 20 {
+            format!(
+                "{}{}\n\n{}{}",
+                prefix, self.cards[index].title, text, reference
+            )
+        } else {
+            format!("{}{}{}", prefix, text, reference)
         };
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
@@ -255,12 +266,13 @@ impl Scene {
 struct Surface {
     brush: ID2D1SolidColorBrush,
     icons: Vec<ID2D1Bitmap>,
+    combo_icons: Vec<Vec<Option<ID2D1Bitmap>>>,
+    combo_titles: Vec<(IDWriteTextLayout, f32)>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
         let brush = target.CreateSolidColorBrush(&color(TEXT), None)?;
-        let mut icons = Vec::new();
-        for icon in &scene.icons {
+        let bitmap = |icon: &image::RgbaImage| -> Result<ID2D1Bitmap> {
             let mut bgra = icon.as_raw().clone();
             for p in bgra.chunks_exact_mut(4) {
                 p.swap(0, 2);
@@ -284,9 +296,54 @@ impl Surface {
                     dpiY: 96.,
                 },
             )?;
-            icons.push(logo);
-        }
-        Ok(Self { brush, icons })
+            Ok(logo)
+        };
+        let icons = scene
+            .icons
+            .iter()
+            .map(&bitmap)
+            .collect::<Result<Vec<_>>>()?;
+        let combo_icons = scene
+            .reference
+            .combos
+            .iter()
+            .map(|combo| {
+                combo
+                    .ids
+                    .iter()
+                    .map(|id| {
+                        scene
+                            .icon_urls
+                            .get(id)
+                            .and_then(|url| scene.image_cache.get(url))
+                            .map(&bitmap)
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let combo_titles = scene
+            .cards
+            .iter()
+            .zip(&scene.reference.combos)
+            .map(|(card, combo)| {
+                let title: Vec<_> = format!("{} + {}", combo.partners, card.title)
+                    .encode_utf16()
+                    .collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&title, &scene.formats[0], 184., 54.)?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                Ok((layout, metrics.height))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            brush,
+            icons,
+            combo_icons,
+            combo_titles,
+        })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
         self.brush.SetColor(&color(rgb));
@@ -363,10 +420,15 @@ impl Surface {
                     .cards
                     .iter()
                     .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
-            self.fill(target, rect(x, 34., 242., 196.), PANEL);
+            self.fill(target, rect(x, 34., 242., (HEIGHT - 64) as f32), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
-            target.DrawRectangle(&rect(x, 34., 242., 196.), &self.brush, 1., None);
+            target.DrawRectangle(
+                &rect(x, 34., 242., (HEIGHT - 64) as f32),
+                &self.brush,
+                1.,
+                None,
+            );
             if (partial && i == 1) || card.id.is_none() {
                 self.text(
                     scene,
@@ -475,28 +537,70 @@ impl Surface {
                     if j == 0 { TEXT } else { MUTED },
                 );
             }
-            self.text(
-                scene,
-                target,
-                if best {
-                    "优先参考"
-                } else if card.score.is_none() {
-                    "暂无推荐排名"
-                } else {
-                    "参考选择"
-                },
-                0,
-                rect(x + 14., 187., 214., 22.),
-                if best { GOLD } else { MUTED },
-            );
-            self.text(
-                scene,
-                target,
-                &card.ranking,
-                0,
-                rect(x + 14., 209., 214., 18.),
-                MUTED,
-            );
+            let combo = &scene.reference.combos[i];
+            if combo.statistic.is_empty() {
+                self.text(
+                    scene,
+                    target,
+                    if best {
+                        "优先参考"
+                    } else if card.score.is_none() {
+                        "暂无推荐排名"
+                    } else {
+                        "参考选择"
+                    },
+                    0,
+                    rect(x + 14., 187., 214., 22.),
+                    if best { GOLD } else { MUTED },
+                );
+                self.text(
+                    scene,
+                    target,
+                    &card.ranking,
+                    0,
+                    rect(x + 14., 209., 214., 18.),
+                    MUTED,
+                );
+            } else {
+                let (title, title_height) = &self.combo_titles[i];
+                self.brush.SetColor(&color(TEXT));
+                target.DrawTextLayout(
+                    windows_numerics::Vector2 {
+                        X: x + 44.,
+                        Y: 187.,
+                    },
+                    title,
+                    &self.brush,
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP,
+                );
+                let icons = &self.combo_icons[i];
+                let size = 20.;
+                for (j, icon) in icons.iter().enumerate() {
+                    let area = rect(x + 14., 189. + j as f32 * (size + 3.), size, size);
+                    self.fill(target, area, 0x152631);
+                    if let Some(icon) = icon {
+                        target.DrawBitmap(
+                            icon,
+                            Some(&area),
+                            1.,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                            None,
+                        );
+                    } else {
+                        self.text(scene, target, "?", 1, area, MUTED);
+                    }
+                    self.brush.SetColor(&color(0x52636d));
+                    target.DrawRectangle(&area, &self.brush, 1., None);
+                }
+                self.text(
+                    scene,
+                    target,
+                    &combo.statistic,
+                    0,
+                    rect(x + 44., 193. + title_height, 184., 18.),
+                    GOLD,
+                );
+            }
             self.text(
                 scene,
                 target,
@@ -520,7 +624,7 @@ impl Surface {
                 "点击卡片查看效果、统计来源与分阶段参考"
             },
             0,
-            rect(12., 236., 736., 20.),
+            rect(12., (HEIGHT - 24) as f32, 736., 20.),
             MUTED,
         );
         if let Some(index) = scene.selected {
@@ -740,7 +844,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..230.).contains(&y) {
+    } else if (34. ..(HEIGHT - 30) as f32).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -991,10 +1095,16 @@ impl HostOverlay {
         }
         scene.reference = view;
         scene.select(scene.selected)?;
+        self.window.state.surface = None;
+        if let Some(target) = &self.window.state.target {
+            self.window.state.surface =
+                Some(unsafe { Surface::new(&self.window.state.scene, target)? });
+        }
         self.revisions += 1;
         unsafe {
             let _ = InvalidateRect(Some(self.window.hwnd), None, false);
         }
+        self.request_art();
         Ok(())
     }
     pub fn new(offline: bool) -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -1099,6 +1209,7 @@ impl HostOverlay {
                 self.generation = frame.snapshot.generation;
                 if self.dataset != frame.snapshot.dataset_version {
                     self.window.state.scene.image_cache.clear();
+                    self.window.state.scene.icon_urls.clear();
                 }
                 self.dataset = frame.snapshot.dataset_version.clone();
                 self.window.state.dismissed = false;
@@ -1173,6 +1284,10 @@ impl HostOverlay {
                         image
                     })
                     .collect();
+                scene.icon_urls.extend(cards.iter().filter_map(|c| {
+                    c.id.filter(|_| !c.icon.is_empty())
+                        .map(|id| (id, c.icon.clone()))
+                }));
                 scene.cards = cards;
                 scene.caption = caption;
                 scene.select(scene.selected)?;
@@ -1228,7 +1343,7 @@ impl HostOverlay {
     }
     fn request_art(&mut self) {
         let scene = &self.window.state.scene;
-        let urls: Vec<_> = scene
+        let mut urls: Vec<_> = scene
             .cards
             .iter()
             .filter(|c| {
@@ -1236,6 +1351,17 @@ impl HostOverlay {
             })
             .map(|c| c.icon.clone())
             .collect();
+        for id in scene.reference.combos.iter().flat_map(|c| &c.ids) {
+            if let Some(url) = scene
+                .icon_urls
+                .get(id)
+                .filter(|url| !scene.image_cache.contains_key(*url))
+            {
+                if !urls.contains(url) {
+                    urls.push(url.clone());
+                }
+            }
+        }
         if self.frame.is_none() || urls.is_empty() {
             self.art = None;
             self.art_request = None;
@@ -1272,10 +1398,22 @@ impl HostOverlay {
         let mut changed = false;
         if let Some(reply) = reply {
             let scene = &mut self.window.state.scene;
+            for (url, pic) in &reply.icons {
+                if !scene.image_cache.contains_key(url) {
+                    let mut rgba = pic.bgra.clone();
+                    for pixel in rgba.chunks_exact_mut(4) {
+                        pixel.swap(0, 2);
+                    }
+                    if let Some(image) = image::RgbaImage::from_raw(48, 48, rgba) {
+                        if scene.image_cache.len() >= 128 {
+                            scene.image_cache.clear();
+                        }
+                        scene.image_cache.insert(url.clone(), image);
+                        changed = true;
+                    }
+                }
+            }
             for (i, card) in scene.cards.iter().enumerate() {
-                let Some(pic) = reply.icons.get(&card.icon) else {
-                    continue;
-                };
                 if let Some(image) = scene.image_cache.get(&card.icon) {
                     // Several augments can share one asset. Fill every card position,
                     // even when an earlier position decoded this URL in the same reply.
@@ -1283,19 +1421,6 @@ impl HostOverlay {
                         scene.icons[i] = image.clone();
                         changed = true;
                     }
-                    continue;
-                }
-                let mut rgba = pic.bgra.clone();
-                for pixel in rgba.chunks_exact_mut(4) {
-                    pixel.swap(0, 2);
-                }
-                if let Some(image) = image::RgbaImage::from_raw(48, 48, rgba) {
-                    if scene.image_cache.len() >= 128 {
-                        scene.image_cache.clear();
-                    }
-                    scene.image_cache.insert(card.icon.clone(), image.clone());
-                    scene.icons[i] = image;
-                    changed = true;
                 }
             }
             self.art_reply = reply;
@@ -1532,6 +1657,95 @@ impl HostOverlay {
 mod skill_tests {
     use super::*;
     #[test]
+    fn automatic_combination_reference_renders_without_opening_details(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let _com = Com::new()?;
+        let mut scene = Scene::new()?;
+        let scores = scene.cards.each_ref().map(|c| c.score);
+        let mut reference = crate::stage_cards::Comparison::default();
+        reference.combos[0] = fuze_worker_host::augment_combos::Reference {
+            ids: vec![10],
+            partners: "秘术冲拳".into(),
+            statistic: "组合 65.0% · 6819 场".into(),
+            detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
+        };
+        reference.combos[2] = fuze_worker_host::augment_combos::Reference {
+            ids: vec![10, 11, 12],
+            partners: "已选符文甲 + 已选符文乙 + 已选符文丙".into(),
+            statistic: "组合 42.0% · 120 场 · 少样本".into(),
+            detail: "合成少样本组合".into(),
+        };
+        scene.reference = std::sync::Arc::new(reference);
+        for (i, id) in [10, 11, 12].into_iter().enumerate() {
+            let url = format!("fixture-{id}");
+            scene.icon_urls.insert(id, url.clone());
+            scene.image_cache.insert(url, scene.icons[i].clone());
+        }
+        assert!(scene.selected.is_none() && scene.detail.is_none());
+        assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
+        unsafe {
+            for (card, combo) in scene
+                .cards
+                .iter()
+                .zip(&scene.reference.combos)
+                .filter(|(_, combo)| !combo.statistic.is_empty())
+            {
+                let title = format!("{} + {}", combo.partners, card.title);
+                let text: Vec<_> = title.encode_utf16().collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 54.)?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                assert!(metrics.height <= 54. && metrics.width <= 184.);
+                let text: Vec<_> = combo.statistic.encode_utf16().collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 18.)?;
+                layout.GetMetrics(&mut metrics)?;
+                assert_eq!(metrics.lineCount, 1);
+            }
+            let imaging: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let bitmap = imaging.CreateBitmap(
+                WIDTH,
+                HEIGHT,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )?;
+            let mut props = properties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, 96.);
+            props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+            let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
+            let surface = Surface::new(&scene, &target)?;
+            assert_eq!(
+                surface.combo_icons.iter().map(Vec::len).collect::<Vec<_>>(),
+                vec![1, 0, 3]
+            );
+            assert!(surface.combo_icons.iter().flatten().all(Option::is_some));
+            surface.draw(&scene, &target, false)?;
+            if let Some(path) = std::env::var_os("FUZE_COMBO_REVIEW") {
+                let mut pixels = vec![0; (WIDTH * HEIGHT * 4) as usize];
+                bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+                for pixel in pixels.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                image::save_buffer(
+                    Path::new(&path),
+                    &pixels,
+                    WIDTH,
+                    HEIGHT,
+                    image::ColorType::Rgba8,
+                )?;
+            }
+            scene.image_cache.remove("fixture-12");
+            let missing = Surface::new(&scene, &target)?;
+            assert!(missing.combo_icons[2][2].is_none());
+            assert!(missing.combo_icons[2][0].is_some());
+            missing.draw(&scene, &target, false)?;
+        }
+        Ok(())
+    }
+    #[test]
     fn recommendation_evidence_offscreen() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _com = Com::new()?;
         let mut cards = fuze_worker_host::overlay_frame::skill_cards();
@@ -1708,6 +1922,7 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
         }
     }
     Snapshot {
+        combinations: Some(Vec::new()),
         schema: 1,
         champion: 4,
         patch: "16.20".into(),

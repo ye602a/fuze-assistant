@@ -1,4 +1,4 @@
-//! Public names + Tencent patch reference, loaded once per preparation, never per OCR frame.
+//! Public names + Riot public patch reference, loaded once per preparation, never per OCR frame.
 use crate::Result;
 use std::path::Path;
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -28,6 +28,9 @@ pub fn load(roots: &[fuze_data::Root]) -> Result<(fuze_data::recognition::Catalo
         }
         if let Ok(bytes) = crate::update_channel::bounded(&dir.join("reference.json"), 4096) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if v["source"] != "riot-ddragon" {
+                    continue;
+                }
                 if let Some(p) = v["patch"]
                     .as_str()
                     .filter(|p| fuze_data::recognition::patch(p).is_some())
@@ -112,8 +115,8 @@ pub(crate) fn prepare_refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result
     }
     let reference = (|| {
         let bytes = crate::update_io::get(
-            "game.gtimg.cn",
-            "/images/lol/act/img/js/heroList/hero_list.js",
+            "ddragon.leagueoflegends.com",
+            "/api/versions.json",
             2 * 1024 * 1024,
             None,
             None,
@@ -121,21 +124,42 @@ pub(crate) fn prepare_refresh(cache: &Path, cancel: &dyn Fn() -> bool) -> Result
         )?;
         let v: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| "recognition-reference")?;
-        let patch = v["version"]
+        let patch = v[0]
             .as_str()
             .filter(|p| fuze_data::recognition::patch(p).is_some())
             .ok_or("recognition-reference")?;
-        if !v["hero"].as_array().is_some_and(|h| h.len() >= 100) {
-            return Err("recognition-reference");
-        }
         if cancel() {
             return Err("recognition-cancelled");
         }
-        let value = serde_json::json!({"patch":patch});
+        let value = serde_json::json!({"patch":patch,"source":"riot-ddragon"});
         let old = crate::update_channel::bounded(&dir.join("reference.json"), 4096)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
         Ok((old.as_ref() != Some(&value)).then_some(value))
     })();
     Ok(Prepared { catalog, reference })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn legacy_reference_is_not_relabelled_as_a_riot_patch() {
+        let root =
+            std::env::temp_dir().join(format!("fuze-reference-source-{}", std::process::id()));
+        let dir = root.join("recognition-data");
+        std::fs::create_dir_all(&dir).unwrap();
+        let roots = [fuze_data::Root {
+            path: root.join("client-data"),
+            source: fuze_data::Source::Cache,
+        }];
+        std::fs::write(dir.join("reference.json"), r#"{"patch":"16.21"}"#).unwrap();
+        assert!(super::load(&roots).unwrap().1.reference.is_empty());
+        std::fs::write(
+            dir.join("reference.json"),
+            r#"{"patch":"16.22.1","source":"riot-ddragon"}"#,
+        )
+        .unwrap();
+        assert_eq!(super::load(&roots).unwrap().1.reference, "16.22.1");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -34,6 +34,12 @@ pub fn metadata() -> Result<Value> {
 }
 impl Prepared {
     pub fn apply_current_augments(&mut self) -> Result<()> {
+        if self
+            .document("manifest.json")
+            .is_some_and(|m| m["source"] == crate::aramkit::SOURCE)
+        {
+            return Ok(());
+        }
         if self.current_augments || self.locale != Locale::ZhCn || self.scope == Scope::History {
             return Ok(());
         }

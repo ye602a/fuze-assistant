@@ -21,7 +21,7 @@ export global DiagnosticState {
     in-out property <bool> upload-has-report: false;
     in-out property <string> upload-status: "默认关闭；开启后才收集并上传每局脱敏摘要。";
     in-out property <string> upload-notice;
-    in-out property <string> upload-authorization: "反馈上传需要单独授权；下载更新无需令牌。";
+    in-out property <string> upload-authorization: "上传反馈需要 GitHub 授权。";
     in-out property <string> upload-tracking: "自动反馈关闭；已有记录可手动补传。";
     in-out property <bool> upload-confirm: false;
     callback upload-action(string);
@@ -136,7 +136,6 @@ export global HostState {
     in-out property <int> connection-tone;
     in-out property <int> capture-tone;
     in-out property <int> ocr-tone;
-    in-out property <string> verified;
     callback preference(string, bool);
     callback backend-changed(int);
     callback directory-save(string);

@@ -417,11 +417,16 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                                     "update-not-found" => "更新文件暂时不可用，请重新检查更新。",
                                     "update-proxy-auth" => "网络代理要求身份验证，请检查代理设置。",
                                     "update-rate-limited" => "请求暂时受限，请稍后重试。",
-                                    _ => "",
+                                    "update-final-hash" => "下载文件校验失败。",
+                                    "update-compare-file" => "无法读取待更新文件。",
+                                    "update-replace-file" => "无法写入程序文件。",
+                                    "runtime-required" | "runtime-inspection-failed" => "无法读取所需运行库。",
+                                    "runtime-contract-invalid" | "runtime-artifact-changed" => "程序文件或构建记录不完整。",
+                                    _ => "具体原因见下方错误代码。",
                                 },
                                 match error {
                                     "install-close-preview-first" if STAGE.load(Ordering::Acquire) == 6 => "文件已更新，但仍有 FUZE 进程，暂时无法启动新版。请退出托盘中的 FUZE，再从原快捷方式启动。",
-                                    "update-file-in-use" | "install-close-preview-first" => "文件仍被占用，尚未替换。请关闭占用该安装目录的程序后重试。",
+                                    "update-file-in-use" | "install-close-preview-first" => "程序文件仍被占用，无法完成更新。请关闭占用该安装目录的程序后重试。",
                                     "update-parent-timeout" => "等待 FUZE 退出超时，尚未替换文件。请稍后重试。",
                                     "update-window-not-ready" => "更新窗口未能显示到前台，FUZE 保持运行。请重新点击更新。",
                                     "install-launch" | "install-launch-readiness" | "install-launch-cancelled" => "文件已更新，但新版未能启动。请从原快捷方式启动 FUZE。",
@@ -432,6 +437,12 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
                             ))
                             .as_ptr(),
                         );
+                        // Keep the failure stage and code in the selectable details area.
+                        let stage = STAGE.load(Ordering::Acquire);
+                        let (done, total, current, recent) =
+                            FILES.lock().map(|f| f.clone()).unwrap_or_default();
+                        let detail = failure_detail(error, stage, done, total, &current, &recent);
+                        SetWindowTextW(GetDlgItem(hwnd, 4), wide(&detail).as_ptr());
                         SetWindowTextW(GetDlgItem(hwnd, 2), wide("关闭").as_ptr());
                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
                             GetDlgItem(hwnd, 2),
@@ -511,6 +522,26 @@ pub fn run(work: fn() -> crate::Result<()>) -> crate::Result<()> {
     }
 }
 
+fn failure_detail(
+    error: &str,
+    stage: u8,
+    done: usize,
+    total: usize,
+    current: &str,
+    recent: &[String],
+) -> String {
+    let phase = match stage {
+        0 | 1 => "检查更新",
+        2 => "下载更新",
+        3 => "校验更新包",
+        4 => "替换文件",
+        5 => "等待主程序退出",
+        6 => "启动新版",
+        _ => "准备更新",
+    };
+    format!("失败阶段：{phase}\r\n错误代码：{error}\r\n已替换 {done} / {total} 个文件\r\n{current}\r\n{}", recent.join("\r\n"))
+}
+
 /// The launching desktop supplies its resolved language. Standalone commands use saved settings.
 pub fn init_locale() {
     let locale = std::env::var("FUZE_UPDATE_LOCALE")
@@ -537,6 +568,14 @@ pub fn translated(template: &str, values: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failure_details_preserve_stage_code_and_file() {
+        let text = super::failure_detail("update-replace-file", 4, 2, 5, "FUZE.exe", &[]);
+        assert!(text.contains("替换文件"));
+        assert!(text.contains("update-replace-file"));
+        assert!(text.contains("2 / 5"));
+        assert!(text.contains("FUZE.exe"));
+    }
     #[test]
     fn restart_failure_keeps_progress_visible_until_closed() {
         let _state = super::TEST_STATE.lock().unwrap();

@@ -6,19 +6,24 @@ import {root} from './rust-prototype-tools.mjs'
 const download = process.argv.includes('--download')
 const incumbent = await readFile(path.join(root,'rust/ui-lab/src/public_art.rs'),'utf8')
 const urls = new Set()
-for (const locale of ['zh-CN','zh-TW','en-US']) {
+for (const locale of ['zh-CN']) {
  const base=path.join(root,'resources/client-data')
  const current=JSON.parse(await readFile(path.join(base,locale==='zh-CN'?'current.json':`current.${locale}.json`),'utf8'))
  if (!/^\d+(\.\d+){1,5}$/.test(current.dataVersion)) throw new Error('Invalid data version')
- const data=JSON.parse(await readFile(path.join(base,'versions',...(locale==='zh-CN'?[]:[locale]),current.dataVersion,'augments.json'),'utf8'))
- for (const row of data.data) if(row.iconUrl) urls.add(row.iconUrl)
+ for (const name of ['augments','champions','items']) {
+  const data=JSON.parse(await readFile(path.join(base,'versions',current.dataVersion,`${name}.json`),'utf8'))
+  for (const row of data.data) if(row.iconUrl) urls.add(row.iconUrl)
+ }
+
 }
 const entries=[...urls].sort().map(url=>{
- if (!/^https:\/\/cdn\.dtodo\.cn\/hextech\/augment-icons\/[a-zA-Z0-9_-]+\.png$/.test(url)) throw new Error('Unapproved icon URL')
- const relative=url.slice('https://cdn.dtodo.cn/'.length)
+ const modern=/^https:\/\/data\.aramkit\.cn\/assets\/(champion|augment|item|summoner)\/[a-zA-Z0-9_-]+\.webp$/.test(url)
+ const legacy=/^https:\/\/cdn\.dtodo\.cn\/hextech\/(champion|augment|item)-icons\/[a-zA-Z0-9_-]+\.png$/.test(url)
+ if(!modern&&!legacy)throw new Error('Unapproved icon URL')
+ const relative=new URL(url).pathname.slice(1)
  const old=incumbent.split(/\r?\n/).find(line=>line.includes(`"${relative}" =>`))
  const source=old?.match(/include_bytes!\("([^\"]+)"\)/)?.[1] || `../ui/assets/public-cache/${relative}`
- return {url,relative,source,existing:!!old}
+ return {url,relative,source,existing:!!old,modern}
 })
 let cursor=0, downloaded=0, bytes=0
 await Promise.all(Array.from({length:4},async()=>{
@@ -28,17 +33,18 @@ await Promise.all(Array.from({length:4},async()=>{
   try { data=await readFile(file) } catch(error) { if(error.code!=='ENOENT')throw error }
   if (!data) {
    if(!download)throw new Error('Missing bundled icon: '+e.relative)
+   if(!e.modern)throw new Error('Refresh ARAMKit data before downloading artwork')
    const response=await fetch(e.url,{redirect:'error',signal:AbortSignal.timeout(15000)})
    if(!response.ok)throw new Error(`Icon HTTP ${response.status}: ${e.relative}`)
    const chunks=[];let length=0
    for await (const chunk of response.body) {length+=chunk.length;if(length>512*1024)throw new Error('Oversize icon');chunks.push(chunk)}
    data=Buffer.concat(chunks)
    const info=await sharp(data).metadata()
-   if(info.format!=='png'||info.width>512||info.height>512)throw new Error('Invalid public icon')
+   if(!['png','webp'].includes(info.format)||info.width>512||info.height>512)throw new Error('Invalid public icon')
    await mkdir(path.dirname(file),{recursive:true});await writeFile(file,data,{flag:'wx'});downloaded++
   }
   const info=await sharp(data).metadata()
-  if(data.length>512*1024||info.format!=='png'||!info.width||!info.height||info.width>512||info.height>512)throw new Error('Invalid bundled icon')
+  if(data.length>512*1024||!['png','webp'].includes(info.format)||!info.width||!info.height||info.width>512||info.height>512)throw new Error('Invalid bundled icon')
   bytes+=data.length
  }
 }))
