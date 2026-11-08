@@ -231,7 +231,7 @@ impl ReadOnlyClient {
         let path = format!("/lol-champ-select/v1/session/bench/swap/{hero}");
         let (code, _) = self.request_at(pid, &path, "POST", &[], 0, true)?;
         Ok(if (200..300).contains(&code) {
-            crate::bench::Attempt::Stop
+            crate::bench::Attempt::Accepted
         } else {
             crate::bench::Attempt::Retry
         })

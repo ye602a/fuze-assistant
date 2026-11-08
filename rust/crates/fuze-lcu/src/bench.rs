@@ -67,6 +67,7 @@ impl Lobby {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Attempt {
+    Accepted,
     Stop,
     Retry,
 }
@@ -123,9 +124,9 @@ mod tests {
         assert_eq!(
             attempt(lobby(&session), 81, hero, &active, |id| {
                 sent.push(id);
-                Ok(Attempt::Stop)
+                Ok(Attempt::Accepted)
             }),
-            Ok(Attempt::Stop)
+            Ok(Attempt::Accepted)
         );
         assert_eq!(sent, [22, 22]);
 

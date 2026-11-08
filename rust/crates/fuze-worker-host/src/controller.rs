@@ -5,7 +5,7 @@ use fuze_runtime::session::Phase;
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -37,11 +37,54 @@ fn keep_capture_worker(error: &str) -> bool {
         )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum GrabOutcome {
+    Running,
+    Requested,
+    Unavailable,
+    Failed,
+    Stopped,
+    Acquired,
+}
+/// One lobby request: cancellation and its terminal result stay available to the UI.
+pub struct BenchGrab {
+    active: AtomicBool,
+    outcome: AtomicU8,
+}
+impl BenchGrab {
+    fn new() -> Self {
+        Self {
+            active: AtomicBool::new(true),
+            outcome: AtomicU8::new(0),
+        }
+    }
+    pub fn outcome(&self) -> GrabOutcome {
+        match self.outcome.load(Ordering::Acquire) {
+            0 => GrabOutcome::Running,
+            1 => GrabOutcome::Requested,
+            2 => GrabOutcome::Unavailable,
+            3 => GrabOutcome::Failed,
+            5 => GrabOutcome::Acquired,
+            _ => GrabOutcome::Stopped,
+        }
+    }
+    fn finish(&self, outcome: GrabOutcome) {
+        let _ =
+            self.outcome
+                .compare_exchange(0, outcome as u8, Ordering::AcqRel, Ordering::Acquire);
+        self.active.store(false, Ordering::Release);
+    }
+    pub fn cancel(&self) {
+        self.finish(GrabOutcome::Stopped);
+    }
+}
+
 #[derive(Clone)]
 struct Grab {
     game: u64,
     hero: u32,
-    active: Arc<AtomicBool>,
+    task: Arc<BenchGrab>,
 }
 struct Observation {
     grab: Option<Grab>,
@@ -70,7 +113,15 @@ impl Observation {
                 .and_then(|c| c.bench_lobby)
                 .is_some_and(|l| l.offers(g.game, g.hero))
             {
-                g.active.store(false, Ordering::Release);
+                g.task.finish(
+                    if context.is_some_and(|c| {
+                        c.phase == Phase::ChampSelect && c.champion == Some(g.hero)
+                    }) {
+                        GrabOutcome::Acquired
+                    } else {
+                        GrabOutcome::Unavailable
+                    },
+                );
                 self.grab = None;
             }
         }
@@ -115,24 +166,24 @@ impl MonitorControl {
             .unwrap_or((0, false))
     }
 
-    pub(crate) fn grab(&self, game: u64, hero: u32) -> Option<Arc<AtomicBool>> {
+    pub(crate) fn grab(&self, game: u64, hero: u32) -> Option<Arc<BenchGrab>> {
         let mut s = self.latest.lock().ok()?;
         if !self.enabled.load(Ordering::Acquire) || !s.context?.bench_lobby?.offers(game, hero) {
             return None;
         }
         if let Some(previous) = s.grab.take() {
-            previous.active.store(false, Ordering::Release);
+            previous.task.cancel();
         }
-        let active = Arc::new(AtomicBool::new(true));
+        let task = Arc::new(BenchGrab::new());
         s.grab = Some(Grab {
             game,
             hero,
-            active: active.clone(),
+            task: task.clone(),
         });
         if let Some(worker) = &self.wake {
             worker.unpark();
         }
-        Some(active)
+        Some(task)
     }
     pub fn enable(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
@@ -145,7 +196,7 @@ impl MonitorControl {
                     c.cancel();
                 }
                 if let Some(g) = latest.grab.take() {
-                    g.active.store(false, Ordering::Release);
+                    g.task.cancel();
                 }
                 latest.journal = None;
                 latest.publish(None, None);
@@ -349,20 +400,26 @@ impl Monitor {
                     let grab = shared.lock().ok().and_then(|mut s| {
                         if s.grab
                             .as_ref()
-                            .is_some_and(|g| !g.active.load(Ordering::Acquire))
+                            .is_some_and(|g| !g.task.active.load(Ordering::Acquire))
                         {
                             s.grab = None;
                         }
                         s.grab.clone()
                     });
                     if let Some(g) = grab {
-                        if client.grab_bench(g.game, g.hero, &g.active)
-                            == Ok(fuze_lcu::bench::Attempt::Retry)
-                        {
-                            thread::park_timeout(Duration::from_millis(125));
-                            continue;
+                        match client.grab_bench(g.game, g.hero, &g.task.active) {
+                            Ok(fuze_lcu::bench::Attempt::Retry) => {
+                                thread::park_timeout(Duration::from_millis(125));
+                                continue;
+                            }
+                            Ok(fuze_lcu::bench::Attempt::Accepted) => {
+                                g.task.finish(GrabOutcome::Requested)
+                            }
+                            Ok(fuze_lcu::bench::Attempt::Stop) => {
+                                g.task.finish(GrabOutcome::Unavailable)
+                            }
+                            Err(_) => g.task.finish(GrabOutcome::Failed),
                         }
-                        g.active.store(false, Ordering::Release);
                     }
                     let wait = client
                         .wake_at()
@@ -388,7 +445,7 @@ impl Drop for Monitor {
         self.stop.store(true, Ordering::Release);
         if let Ok(mut latest) = self.latest.lock() {
             if let Some(g) = latest.grab.take() {
-                g.active.store(false, Ordering::Release);
+                g.task.cancel();
             }
             if let Some(c) = latest.cancellation.take() {
                 c.cancel();
@@ -1073,6 +1130,25 @@ mod tests {
         assert!(!keep_capture_worker("locale-unavailable"));
     }
     #[test]
+    fn bench_grab_terminal_feedback_survives_cleanup_and_late_responses() {
+        for result in [
+            GrabOutcome::Requested,
+            GrabOutcome::Acquired,
+            GrabOutcome::Unavailable,
+            GrabOutcome::Failed,
+        ] {
+            let task = BenchGrab::new();
+            task.finish(result);
+            assert!(!task.active.load(Ordering::Acquire));
+            task.cancel();
+            assert_eq!(task.outcome(), result);
+        }
+        let task = BenchGrab::new();
+        task.cancel();
+        task.finish(GrabOutcome::Requested);
+        assert_eq!(task.outcome(), GrabOutcome::Stopped);
+    }
+    #[test]
     fn bench_grab_is_cancelled_on_monitor_exit_or_target_replacement() {
         let monitor = Monitor::review();
         let flow = br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#;
@@ -1082,11 +1158,29 @@ mod tests {
         let control = monitor.control();
         let first = control.grab(9, 11).unwrap();
         let second = control.grab(9, 22).unwrap();
-        assert!(!first.load(Ordering::Acquire));
-        assert!(second.load(Ordering::Acquire));
+        assert_eq!(first.outcome(), GrabOutcome::Stopped);
+        assert_eq!(second.outcome(), GrabOutcome::Running);
         monitor.review_publish(Context::idle(Phase::InProgress));
-        assert!(!second.load(Ordering::Acquire));
+        assert_eq!(second.outcome(), GrabOutcome::Unavailable);
         assert!(control.grab(9, 22).is_none());
+    }
+    #[test]
+    fn bench_grab_distinguishes_local_acquisition_from_target_loss() {
+        let flow = br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#;
+        let before = br#"{"localPlayerCellId":0,"myTeam":[{"cellId":0,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":11}]}"#;
+        for (own, result) in [(11, GrabOutcome::Acquired), (2, GrabOutcome::Unavailable)] {
+            let monitor = Monitor::review();
+            monitor.review_publish(
+                fuze_lcu::context::parse(Phase::ChampSelect, flow, before).unwrap(),
+            );
+            let task = monitor.control().grab(9, 11).unwrap();
+            let after = serde_json::json!({"localPlayerCellId":0,"myTeam":[{"cellId":0,"championId":own}],"benchEnabled":true,"benchChampions":[{"championId":99}]}).to_string();
+            monitor.review_publish(
+                fuze_lcu::context::parse(Phase::ChampSelect, flow, after.as_bytes()).unwrap(),
+            );
+            assert_eq!(task.outcome(), result);
+            assert!(!task.active.load(Ordering::Acquire));
+        }
     }
     #[test]
     fn locale_context_requires_fresh_connected_detection() {
