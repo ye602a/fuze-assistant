@@ -47,8 +47,6 @@ jobs:
           cache: npm
       - name: Install existing build dependencies
         run: npm ci --ignore-scripts
-      - name: Seed build data from the verified public package
-        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/seed-public-data.mjs')
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal
       - uses: actions/cache@v4
