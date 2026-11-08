@@ -53,13 +53,6 @@ impl Lobby {
             game,
         })
     }
-    pub(crate) fn keep_pickable(&mut self, ids: &[u32]) {
-        for slot in &mut self.slots {
-            if !ids.contains(slot) {
-                *slot = 0;
-            }
-        }
-    }
     pub fn offers(&self, game: u64, hero: u32) -> bool {
         self.game == game && hero != 0 && self.slots.contains(&hero)
     }
@@ -96,6 +89,42 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
+    fn locked_target_retries_until_swap_is_accepted_and_never_switches_slots() {
+        let session = json!({"localPlayerCellId":1,"myTeam":[{"cellId":1,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":22},{"championId":11}]});
+        let mut lobby = Lobby::parse(&session, 81).unwrap();
+        let active = AtomicBool::new(true);
+        let mut requests = Vec::new();
+        // The endpoint rejects swaps during the portrait cooldown, then accepts.
+        for response in [Attempt::Retry, Attempt::Retry, Attempt::Accepted] {
+            assert!(lobby.offers(81, 22));
+            assert_eq!(
+                attempt(Some(lobby), 81, 22, &active, |hero| {
+                    requests.push(hero);
+                    Ok(response)
+                }),
+                Ok(response)
+            );
+            lobby.slots.swap(0, 1);
+        }
+        assert_eq!(requests, [22, 22, 22]);
+        active.store(false, Ordering::Release);
+        assert_eq!(
+            attempt(Some(lobby), 81, 22, &active, |_| panic!("cancelled")),
+            Ok(Attempt::Stop)
+        );
+        active.store(true, Ordering::Release);
+        for slot in &mut lobby.slots {
+            if *slot == 22 {
+                *slot = 99;
+            }
+        }
+        assert_eq!(
+            attempt(Some(lobby), 81, 22, &active, |_| panic!("replacement hero")),
+            Ok(Attempt::Stop)
+        );
+    }
+
+    #[test]
     fn grab_stays_on_clicked_champion_across_reorders_and_terminates() {
         let flow = br#"{"phase":"ChampSelect","gameData":{"queue":{"id":2400},"gameId":81}}"#;
         let mut session = json!({"localPlayerCellId":1,"myTeam":[{"cellId":1,"championId":2},{"cellId":2,"championId":3}],"benchEnabled":true,"benchChampions":[{"championId":0},{"championId":22},{"championId":11}]});
@@ -107,9 +136,6 @@ mod tests {
         assert!(Lobby::parse(&session, 0).is_none());
         let first = lobby(&session).unwrap();
         assert_eq!(first.slots[..3], [0, 22, 11]);
-        let mut pickable = first;
-        pickable.keep_pickable(&[11]);
-        assert_eq!(pickable.slots[..3], [0, 0, 11]);
         let hero = first.slots[1];
         let active = AtomicBool::new(true);
         let mut sent = Vec::new();
