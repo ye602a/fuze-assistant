@@ -572,16 +572,10 @@ impl Pipeline {
                 let delivery = self.recognize(key, &atlas)?;
                 if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible) {
                     if let (Some(d), Some(pixels)) = (&delivery, capture.diagnostic_pixels()) {
-                        if !d.retained {
-                            self.picks.offer(
-                                &d.snapshot.slots,
-                                d.title_kind,
-                                captured,
-                                pixels.screen,
-                            );
-                        } else {
-                            self.picks.cancel();
-                        }
+                        // The raw snapshot identifies only freshly read slots. Never
+                        // pass the display retainer's substituted cards to the picker.
+                        self.picks
+                            .offer(&d.snapshot.slots, d.title_kind, captured, pixels.screen);
                     } else {
                         self.picks.cancel();
                     }

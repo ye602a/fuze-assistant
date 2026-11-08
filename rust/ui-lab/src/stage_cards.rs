@@ -372,7 +372,7 @@ mod tests {
         r.update(&state);
         let combo = r.cards(ids, "16.22");
         assert_eq!(combo.combos[0].partners, "秘术冲拳");
-        assert_eq!(combo.combos[0].statistic, "组合 65.0% · 6819 场");
+        assert_eq!(combo.combos[0].statistic, "两符文搭配胜率\n65.0% · 6819 场");
         assert!(combo.combos[1].detail.is_empty() && combo.combos[2].detail.is_empty());
         assert_eq!(combo.values, single.values);
         assert!(Arc::ptr_eq(&combo, &r.cards(ids, "16.22")));

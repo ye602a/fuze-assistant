@@ -83,12 +83,12 @@ impl Tracker {
             }
             _ => None,
         });
-        // Incomplete readings remain useful for recommendations, but cannot identify a click.
-        if cards.iter().any(Option::is_none)
+        // A missing unrelated title must not invalidate a known clicked slot.
+        // Duplicate known IDs are ambiguous and still reject this offer.
+        if cards.iter().all(Option::is_none)
             || cards.iter().enumerate().any(|(i, c)| {
-                cards[..i]
-                    .iter()
-                    .any(|p| p.as_ref().map(|a| a.0) == c.as_ref().map(|a| a.0))
+                c.as_ref()
+                    .is_some_and(|c| cards[..i].iter().flatten().any(|p| p.0 == c.0))
             })
         {
             self.cancel();
@@ -116,9 +116,16 @@ impl Tracker {
         }
         regions
             .iter()
-            .position(|r| x >= r.x as i32 && x < (r.x + r.width) as i32)
+            .enumerate()
+            .find(|(i, r)| o.cards[*i].is_some() && x >= r.x as i32 && x < (r.x + r.width) as i32)
+            .map(|(i, _)| i)
     }
     fn pointer(&mut self, down: bool, point: Option<(i32, i32)>, at: u64) {
+        // After a definite close, ordinary game clicks belong to gameplay. Keep
+        // waiting for the second absent frame; foreign input still cancels below.
+        if point.is_some() && self.pending.as_ref().is_some_and(|p| p.absent.is_some()) {
+            return;
+        }
         let stale = self
             .offer
             .as_ref()
@@ -380,7 +387,7 @@ mod tests {
         let combo =
             crate::augment_combos::reference(Some(&snapshot), 145, "16.22", &s.owned, 3086, 101);
         assert_eq!(combo.partners, "符文1004");
-        assert_eq!(combo.statistic, "组合 65.0% · 6819 场");
+        assert_eq!(combo.statistic, "两符文搭配胜率\n65.0% · 6819 场");
     }
     #[test]
     fn reroll_invalidates_inflight_ocr_and_does_not_record_replacement_in_old_slot() {
@@ -435,7 +442,7 @@ mod tests {
         let mut partial = cards([1004, 2018, 3060]);
         partial[1] = Slot::Unreadable;
         s.show(&partial, TitleKind::Candidate, (1920, 1080), 200);
-        click(&mut s, 0, 300);
+        click(&mut s, 1, 300);
         close(&mut s, 400);
         assert!(s.owned.is_empty());
     }
@@ -505,5 +512,70 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod gameplay_regressions {
+    use super::*;
+    fn cards() -> [Slot; 3] {
+        [1004, 2018, 3060].map(|id| Slot::Known {
+            id,
+            name: format!("rune{id}"),
+            confidence: 1.0,
+        })
+    }
+    fn click(s: &mut Tracker, at: u64) {
+        let p = Some((550, 400));
+        s.pointer(true, p, at);
+        s.pointer(false, p, at + 20);
+    }
+    #[test]
+    fn known_clicked_card_survives_unreadable_other_card() {
+        let mut s = Tracker::default();
+        let mut offer = cards();
+        offer[2] = Slot::Unreadable;
+        s.show(&offer, TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        s.frame(Some(Evidence::Absent), 300);
+        s.frame(Some(Evidence::Absent), 800);
+        assert_eq!(s.owned[0].0, 1004);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.reason, Reason::None);
+    }
+    #[test]
+    fn post_close_foreign_input_reopen_and_ambiguity_still_cancel() {
+        for kind in 0..4 {
+            let mut s = Tracker::default();
+            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+            click(&mut s, 200);
+            s.frame(Some(Evidence::Absent), 300);
+            match kind {
+                0 => s.pointer(true, None, 400),
+                1 => {
+                    s.frame(Some(Evidence::Visible), 400);
+                    s.show(&cards(), TitleKind::Candidate, (1920, 1080), 400);
+                }
+                2 => s.frame(None, 400),
+                _ => s.frame(Some(Evidence::Uncertain), 400),
+            }
+            s.frame(Some(Evidence::Absent), 500);
+            s.frame(Some(Evidence::Absent), 1000);
+            assert!(s.owned.is_empty());
+        }
+    }
+    #[test]
+    fn game_click_after_first_absent_frame_preserves_pending_selection() {
+        let mut s = Tracker::default();
+        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        s.frame(Some(Evidence::Absent), 300);
+        // Another genuine left click after the choice closes, before confirmation completes.
+        s.pointer(true, Some((1000, 800)), 400);
+        s.pointer(false, Some((1000, 800)), 420);
+        s.frame(Some(Evidence::Absent), 800);
+        assert_eq!(s.owned[0].0, 1004);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.cancelled, 0);
     }
 }

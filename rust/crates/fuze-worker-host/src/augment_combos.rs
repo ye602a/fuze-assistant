@@ -57,7 +57,12 @@ pub fn reference(
                     .filter(|id| *id != candidate)
                     .collect();
                 view.statistic = format!(
-                    "组合 {:.1}% · {} 场{}",
+                    "{}\n{:.1}% · {} 场{}",
+                    if row.ids.len() == 2 {
+                        "两符文搭配胜率"
+                    } else {
+                        "多符文搭配胜率"
+                    },
                     row.win * 100.,
                     row.samples,
                     if row.samples < 200 {
@@ -148,7 +153,7 @@ mod tests {
         let two = detail(Some(&snapshot), 145, "16.22", &owned, 3086, 101);
         let view = reference(Some(&snapshot), 145, "16.22", &owned, 3086, 101);
         assert_eq!(view.ids, vec![1004, 2018]);
-        assert_eq!(view.statistic, "组合 71.0% · 400 场");
+        assert_eq!(view.statistic, "多符文搭配胜率\n71.0% · 400 场");
         assert!(two.contains("与 符文甲：65.0% · 6819 场"));
         assert!(two.contains("与 符文乙：42.0% · 120 场 · 样本较少"));
         assert!(two.contains("与 符文甲 + 符文乙：71.0% · 400 场"));

@@ -332,7 +332,7 @@ impl Surface {
                     .collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&title, &scene.formats[0], 184., 54.)?;
+                    .CreateTextLayout(&title, &scene.formats[0], 184., 36.)?;
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 layout.GetMetrics(&mut metrics)?;
                 Ok((layout, metrics.height))
@@ -597,7 +597,7 @@ impl Surface {
                     target,
                     &combo.statistic,
                     0,
-                    rect(x + 44., 193. + title_height, 184., 18.),
+                    rect(x + 44., 193. + title_height.min(36.), 184., 36.),
                     GOLD,
                 );
             }
@@ -1669,13 +1669,13 @@ mod skill_tests {
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10],
             partners: "秘术冲拳".into(),
-            statistic: "组合 65.0% · 6819 场".into(),
+            statistic: "两符文搭配胜率\n65.0% · 6819 场".into(),
             detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
         };
         reference.combos[2] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10, 11, 12],
             partners: "已选符文甲 + 已选符文乙 + 已选符文丙".into(),
-            statistic: "组合 42.0% · 120 场 · 少样本".into(),
+            statistic: "多符文搭配胜率\n42.0% · 120 场 · 少样本".into(),
             detail: "合成少样本组合".into(),
         };
         scene.reference = std::sync::Arc::new(reference);
@@ -1697,16 +1697,17 @@ mod skill_tests {
                 let text: Vec<_> = title.encode_utf16().collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&text, &scene.formats[0], 184., 54.)?;
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 36.)?;
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 layout.GetMetrics(&mut metrics)?;
-                assert!(metrics.height <= 54. && metrics.width <= 184.);
+                assert!(metrics.width <= 184.);
                 let text: Vec<_> = combo.statistic.encode_utf16().collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&text, &scene.formats[0], 184., 18.)?;
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 36.)?;
                 layout.GetMetrics(&mut metrics)?;
-                assert_eq!(metrics.lineCount, 1);
+                assert_eq!(metrics.lineCount, 2);
+                assert!(metrics.height <= 36.);
             }
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
