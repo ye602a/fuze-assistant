@@ -1160,6 +1160,14 @@ mod tests {
         let second = control.grab(9, 22).unwrap();
         assert_eq!(first.outcome(), GrabOutcome::Stopped);
         assert_eq!(second.outcome(), GrabOutcome::Running);
+        assert!(!first.active.load(Ordering::Acquire));
+        assert!(second.active.load(Ordering::Acquire));
+        assert_eq!(
+            control.latest.lock().unwrap().grab.as_ref().unwrap().hero,
+            22
+        );
+        first.finish(GrabOutcome::Failed);
+        assert_eq!(second.outcome(), GrabOutcome::Running);
         monitor.review_publish(Context::idle(Phase::InProgress));
         assert_eq!(second.outcome(), GrabOutcome::Unavailable);
         assert!(control.grab(9, 22).is_none());

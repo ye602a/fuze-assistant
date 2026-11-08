@@ -37,6 +37,47 @@ fn button(slot: usize, width: i32) -> RECT {
     }
 }
 
+// The transparent window includes the portrait row; only the buttons at y=61 take input.
+fn arrow_bounds(slots: [u32; 10], hero: u32, width: i32) -> Option<RECT> {
+    let slot = slots.iter().position(|id| *id == hero)?;
+    let r = button(slot, width);
+    let center = (r.left + r.right) / 2;
+    Some(RECT {
+        left: center - scaled(12, width),
+        right: center + scaled(12, width) + 1,
+        top: scaled(9, width),
+        bottom: scaled(41, width),
+    })
+}
+fn bob(elapsed: Duration) -> i32 {
+    (3.0 - 3.0 * (elapsed.as_secs_f64() * std::f64::consts::TAU / 0.9).cos()).round() as i32
+}
+unsafe fn draw_arrow(dc: HDC, bounds: RECT, width: i32, offset: i32) {
+    let x = (bounds.left + bounds.right) / 2;
+    let y = scaled(12 + offset, width);
+    let points = [
+        (-4i32, 0),
+        (4, 0),
+        (4, 8),
+        (10, 8),
+        (0, 18),
+        (-10, 8),
+        (-4, 8),
+    ]
+    .map(|(dx, dy)| POINT {
+        x: x + scaled(dx.abs(), width) * dx.signum(),
+        y: y + scaled(dy, width),
+    });
+    let fill = CreateSolidBrush(0x0085a8c8);
+    let border = CreatePen(PS_SOLID, scaled(2, width).max(1), 0x00231a10);
+    let old_fill = SelectObject(dc, fill);
+    let old_border = SelectObject(dc, border);
+    Polygon(dc, points.as_ptr(), points.len() as i32);
+    SelectObject(dc, old_border);
+    SelectObject(dc, old_fill);
+    DeleteObject(border);
+    DeleteObject(fill);
+}
 fn hint_rect(width: i32) -> RECT {
     RECT {
         left: scaled(936, width),
@@ -51,6 +92,9 @@ fn hit(slots: [u32; 10], width: i32, x: i32, y: i32) -> Option<u32> {
         (id != 0 && x >= r.left && x < r.right && y >= r.top && y < r.bottom).then_some(id)
     })
 }
+fn window_hit(slots: [u32; 10], width: i32, x: i32, y: i32) -> Option<u32> {
+    hit(slots, width, x, y - scaled(61, width))
+}
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Pointer {
     hover: Option<u32>,
@@ -63,7 +107,7 @@ impl Pointer {
 }
 fn outcome_hint(outcome: GrabOutcome) -> &'static str {
     match outcome {
-        GrabOutcome::Running => "正在抢取 · 按 F9 停止",
+        GrabOutcome::Running => "按 F9 停止",
         GrabOutcome::Requested => "正在确认换人…",
         GrabOutcome::Acquired => "已抢到目标英雄",
         GrabOutcome::Unavailable => "目标英雄已不可用",
@@ -118,6 +162,8 @@ struct State {
     requested: Cell<Option<u32>>,
     hint: Cell<&'static str>,
     hint_until: Cell<Option<Instant>>,
+    motion: Cell<Option<Instant>>,
+    arrow_offset: Cell<i32>,
 }
 impl Strip {
     fn new(session: Rc<Session>, lobby: Lobby) -> Result<Self, &'static str> {
@@ -133,6 +179,8 @@ impl Strip {
             requested: Cell::default(),
             hint: Cell::new(""),
             hint_until: Cell::default(),
+            motion: Cell::default(),
+            arrow_offset: Cell::new(0),
         });
         unsafe {
             let class = wide("FuzeBenchGrabStrip");
@@ -208,6 +256,8 @@ impl State {
             ReleaseCapture();
         }
         self.pointer.set(Pointer::default());
+        self.motion.set(None);
+        self.arrow_offset.set(0);
         self.requested.set(None);
         self.hint.set("");
         self.hint_until.set(None);
@@ -266,16 +316,28 @@ impl State {
             .borrow()
             .as_ref()
             .is_some_and(|(id, _)| *id == hero);
-        self.stop(hwnd);
         if same {
-            self.notice(hwnd, outcome_hint(GrabOutcome::Stopped));
             return;
         }
+        // Cancel the old target before queuing the next one; never wait for its retry loop.
+        self.stop(hwnd);
         if RegisterHotKey(hwnd, STOP_KEY, MOD_NOREPEAT, VK_F9.into()) == 0 {
             self.notice(hwnd, "F9 被其他程序占用，无法开始抢取");
         } else if let Some(task) = self.session.grab_bench(self.lobby.get().game, hero) {
             *self.active.borrow_mut() = Some((hero, task));
             self.hint.set(outcome_hint(GrabOutcome::Running));
+            let mut animate = 0i32;
+            if GetSystemMetrics(SM_REMOTESESSION) == 0
+                && SystemParametersInfoW(
+                    SPI_GETCLIENTAREAANIMATION,
+                    0,
+                    (&mut animate as *mut i32).cast(),
+                    0,
+                ) != 0
+                && animate != 0
+            {
+                self.motion.set(Some(Instant::now()));
+            }
             self.repaint(hwnd);
         } else {
             UnregisterHotKey(hwnd, STOP_KEY);
@@ -309,7 +371,7 @@ impl State {
             }
             return;
         }
-        let pos = (origin.x, origin.y + scaled(61, rect.right), rect.right);
+        let pos = (origin.x, origin.y, rect.right);
         if self.geometry.replace(Some(pos)) != Some(pos) {
             SetWindowPos(
                 hwnd,
@@ -317,12 +379,22 @@ impl State {
                 pos.0,
                 pos.1,
                 pos.2,
-                scaled(22, pos.2),
+                scaled(83, pos.2),
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
             InvalidateRect(hwnd, null(), 0);
         }
         self.feedback(hwnd);
+        if let Some(start) = self.motion.get() {
+            let offset = bob(start.elapsed());
+            if self.arrow_offset.replace(offset) != offset {
+                if let Some((hero, _)) = self.active.borrow().as_ref() {
+                    if let Some(bounds) = arrow_bounds(self.lobby.get().slots, *hero, rect.right) {
+                        InvalidateRect(hwnd, &bounds, 0);
+                    }
+                }
+            }
+        }
     }
 }
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
@@ -355,13 +427,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             };
             ScreenToClient(hwnd, &mut point);
             if let Some((_, _, width)) = s.geometry.get() {
-                if s.lobby
-                    .get()
-                    .slots
-                    .iter()
-                    .enumerate()
-                    .any(|(i, id)| *id != 0 && PtInRect(&button(i, width), point) != 0)
-                {
+                if window_hit(s.lobby.get().slots, width, point.x, point.y).is_some() {
                     return HTCLIENT as isize;
                 }
             }
@@ -369,7 +435,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP => {
             let hero = s.geometry.get().and_then(|(_, _, width)| {
-                hit(
+                window_hit(
                     s.lobby.get().slots,
                     width,
                     l as i16 as i32,
@@ -418,14 +484,24 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             FillRect(dc, &ps.rcPaint, GetStockObject(BLACK_BRUSH).cast());
             if let Some((_, _, width)) = s.geometry.get() {
                 let active = s.active.borrow().as_ref().map(|(hero, _)| *hero);
-                draw(
-                    dc,
-                    width,
-                    s.lobby.get().slots,
-                    active,
-                    s.hint.get(),
-                    s.pointer.get(),
-                );
+                if let Some(bounds) =
+                    active.and_then(|id| arrow_bounds(s.lobby.get().slots, id, width))
+                {
+                    draw_arrow(dc, bounds, width, s.arrow_offset.get());
+                }
+                let top = scaled(61, width);
+                if ps.rcPaint.bottom > top {
+                    SetViewportOrgEx(dc, 0, top, null_mut());
+                    draw(
+                        dc,
+                        width,
+                        s.lobby.get().slots,
+                        active,
+                        s.hint.get(),
+                        s.pointer.get(),
+                    );
+                    SetViewportOrgEx(dc, 0, 0, null_mut());
+                }
             }
             EndPaint(hwnd, &ps);
             0
@@ -490,7 +566,7 @@ unsafe fn draw(
                 0x00bbdafa
             },
         );
-        let label = wide(if active { "停" } else { "抢" });
+        let label = wide("抢");
         DrawTextW(
             dc,
             label.as_ptr(),
@@ -522,6 +598,84 @@ unsafe fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn arrow_tracks_target_id_and_portraits_remain_click_through() {
+        let slots = [11, 22, 33, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(bob(Duration::ZERO), 0);
+        assert_eq!(bob(Duration::from_millis(450)), 6);
+        assert_eq!(bob(Duration::from_millis(900)), 0);
+        for width in [640, 1280, 1920, 2560] {
+            let a = arrow_bounds(slots, 11, width).unwrap();
+            let b = arrow_bounds(slots, 22, width).unwrap();
+            assert!(a.right < b.left);
+            let moved = arrow_bounds([22, 11, 33, 0, 0, 0, 0, 0, 0, 0], 11, width).unwrap();
+            assert_eq!(moved.left, b.left);
+            assert!(arrow_bounds(slots, 99, width).is_none());
+            assert_eq!(
+                window_hit(slots, width, (a.left + a.right) / 2, scaled(20, width)),
+                None
+            );
+            assert_eq!(
+                window_hit(slots, width, (a.left + a.right) / 2, scaled(65, width)),
+                Some(11)
+            );
+        }
+    }
+    #[test]
+    fn arrow_render_moves_vertically_and_switches_to_the_new_portrait() {
+        unsafe {
+            let dc = CreateCompatibleDC(null_mut());
+            let mut info: BITMAPINFO = zeroed();
+            info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            info.bmiHeader.biWidth = 1280;
+            info.bmiHeader.biHeight = -270;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            let mut bits = null_mut();
+            let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            assert!(!bitmap.is_null());
+            let old = SelectObject(dc, bitmap);
+            PatBlt(dc, 0, 0, 1280, 270, BLACKNESS);
+            let slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+            for (row, (hero, offset)) in [(3, 0), (3, 6), (6, 0)].into_iter().enumerate() {
+                SetViewportOrgEx(dc, 0, row as i32 * 90, null_mut());
+                draw_arrow(dc, arrow_bounds(slots, hero, 1280).unwrap(), 1280, offset);
+                SetViewportOrgEx(dc, 0, row as i32 * 90 + 61, null_mut());
+                draw(
+                    dc,
+                    1280,
+                    slots,
+                    Some(hero),
+                    outcome_hint(GrabOutcome::Running),
+                    Pointer::default(),
+                );
+            }
+            SetViewportOrgEx(dc, 0, 0, null_mut());
+            let a = arrow_bounds(slots, 3, 1280).unwrap();
+            let x = (a.left + a.right) / 2;
+            assert_ne!(GetPixel(dc, x, 13), 0);
+            assert_eq!(GetPixel(dc, x, 103), 0);
+            assert_ne!(GetPixel(dc, x, 119), 0);
+            assert_eq!(GetPixel(dc, x, 193), 0);
+            let b = arrow_bounds(slots, 6, 1280).unwrap();
+            assert_ne!(GetPixel(dc, (b.left + b.right) / 2, 193), 0);
+            if let Some(path) = std::env::var_os("FUZE_BENCH_ARROW_PNG") {
+                let mut rgba =
+                    std::slice::from_raw_parts(bits as *const u8, 1280 * 270 * 4).to_vec();
+                for p in rgba.chunks_exact_mut(4) {
+                    p.swap(0, 2);
+                    p[3] = 255;
+                }
+                image::RgbaImage::from_raw(1280, 270, rgba)
+                    .unwrap()
+                    .save(path)
+                    .unwrap();
+            }
+            SelectObject(dc, old);
+            DeleteObject(bitmap);
+            DeleteDC(dc);
+        }
+    }
     #[test]
     fn clicks_require_the_same_hero_on_release_and_ignore_hint_and_empty_slots() {
         for width in [640, 1024, 1280, 1600, 1920, 2560] {
