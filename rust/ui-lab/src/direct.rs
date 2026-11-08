@@ -267,6 +267,7 @@ struct Surface {
     brush: ID2D1SolidColorBrush,
     icons: Vec<ID2D1Bitmap>,
     combo_icons: Vec<Vec<Option<ID2D1Bitmap>>>,
+    combo_titles: Vec<(IDWriteTextLayout, f32)>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
@@ -321,10 +322,27 @@ impl Surface {
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
+        let combo_titles = scene
+            .cards
+            .iter()
+            .zip(&scene.reference.combos)
+            .map(|(card, combo)| {
+                let title: Vec<_> = format!("{} + {}", combo.partners, card.title)
+                    .encode_utf16()
+                    .collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&title, &scene.formats[0], 184., 54.)?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                Ok((layout, metrics.height))
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             brush,
             icons,
             combo_icons,
+            combo_titles,
         })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
@@ -544,23 +562,21 @@ impl Surface {
                     MUTED,
                 );
             } else {
-                self.text(
-                    scene,
-                    target,
-                    &combo.partners,
-                    0,
-                    rect(x + 14., 187., 214., 36.),
-                    TEXT,
+                let (title, title_height) = &self.combo_titles[i];
+                self.brush.SetColor(&color(TEXT));
+                target.DrawTextLayout(
+                    windows_numerics::Vector2 {
+                        X: x + 44.,
+                        Y: 187.,
+                    },
+                    title,
+                    &self.brush,
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP,
                 );
                 let icons = &self.combo_icons[i];
-                let size = if icons.len() == 1 { 32. } else { 24. };
+                let size = 20.;
                 for (j, icon) in icons.iter().enumerate() {
-                    let area = rect(
-                        x + 14. + j as f32 * (size + 3.),
-                        243. - size / 2.,
-                        size,
-                        size,
-                    );
+                    let area = rect(x + 14., 189. + j as f32 * (size + 3.), size, size);
                     self.fill(target, area, 0x152631);
                     if let Some(icon) = icon {
                         target.DrawBitmap(
@@ -576,27 +592,13 @@ impl Surface {
                     self.brush.SetColor(&color(0x52636d));
                     target.DrawRectangle(&area, &self.brush, 1., None);
                 }
-                let offset = icons.len() as f32 * (size + 3.) + 7.;
-                // Both lines are formatted together by augment_combos; keep the sample warning intact.
-                let (rate, samples) = combo
-                    .statistic
-                    .split_once(" · ")
-                    .unwrap_or((&combo.statistic, ""));
                 self.text(
                     scene,
                     target,
-                    rate,
-                    1,
-                    rect(x + 14. + offset, 223., 214. - offset, 22.),
-                    GOLD,
-                );
-                self.text(
-                    scene,
-                    target,
-                    samples,
+                    &combo.statistic,
                     0,
-                    rect(x + 14. + offset, 245., 214. - offset, 18.),
-                    MUTED,
+                    rect(x + 44., 193. + title_height, 184., 18.),
+                    GOLD,
                 );
             }
             self.text(
@@ -1663,13 +1665,13 @@ mod skill_tests {
         let mut reference = crate::stage_cards::Comparison::default();
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10],
-            partners: "与 秘术冲拳".into(),
+            partners: "秘术冲拳".into(),
             statistic: "组合 65.0% · 6819 场".into(),
             detail: "搭配历史胜率 · ARAMKit 16.22\n与 秘术冲拳：65.0% · 6819 场".into(),
         };
         reference.combos[2] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10, 11, 12],
-            partners: "与 已选符文甲 + 已选符文乙 + 已选符文丙".into(),
+            partners: "已选符文甲 + 已选符文乙 + 已选符文丙".into(),
             statistic: "组合 42.0% · 120 场 · 少样本".into(),
             detail: "合成少样本组合".into(),
         };
@@ -1682,14 +1684,26 @@ mod skill_tests {
         assert!(scene.selected.is_none() && scene.detail.is_none());
         assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
         unsafe {
-            for combo in &scene.reference.combos {
-                let text: Vec<_> = combo.partners.encode_utf16().collect();
+            for (card, combo) in scene
+                .cards
+                .iter()
+                .zip(&scene.reference.combos)
+                .filter(|(_, combo)| !combo.statistic.is_empty())
+            {
+                let title = format!("{} + {}", combo.partners, card.title);
+                let text: Vec<_> = title.encode_utf16().collect();
                 let layout = scene
                     .dw
-                    .CreateTextLayout(&text, &scene.formats[0], 214., 36.)?;
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 54.)?;
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 layout.GetMetrics(&mut metrics)?;
-                assert!(metrics.height <= 36. && metrics.width <= 214.);
+                assert!(metrics.height <= 54. && metrics.width <= 184.);
+                let text: Vec<_> = combo.statistic.encode_utf16().collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&text, &scene.formats[0], 184., 18.)?;
+                layout.GetMetrics(&mut metrics)?;
+                assert_eq!(metrics.lineCount, 1);
             }
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;

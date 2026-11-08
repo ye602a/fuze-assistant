@@ -317,7 +317,7 @@ mod tests {
         };
         let combo =
             crate::augment_combos::reference(Some(&snapshot), 145, "16.22", &s.owned, 3086, 101);
-        assert_eq!(combo.partners, "与 符文1004");
+        assert_eq!(combo.partners, "符文1004");
         assert_eq!(combo.statistic, "组合 65.0% · 6819 场");
     }
     #[test]

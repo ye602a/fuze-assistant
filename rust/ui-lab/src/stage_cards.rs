@@ -333,7 +333,7 @@ mod tests {
         state.pipeline.picked = Arc::new(vec![(1004, "秘术冲拳".into())]);
         r.update(&state);
         let combo = r.cards(ids, "16.22");
-        assert_eq!(combo.combos[0].partners, "与 秘术冲拳");
+        assert_eq!(combo.combos[0].partners, "秘术冲拳");
         assert_eq!(combo.combos[0].statistic, "组合 65.0% · 6819 场");
         assert!(combo.combos[1].detail.is_empty() && combo.combos[2].detail.is_empty());
         assert_eq!(combo.values, single.values);

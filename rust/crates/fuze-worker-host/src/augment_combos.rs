@@ -49,7 +49,7 @@ pub fn reference(
             // Prefer the most specific observed combination, then the larger sample, not the highest win rate.
             if (names.len(), row.samples) > best {
                 best = (names.len(), row.samples);
-                view.partners = format!("与 {}", names.join(" + "));
+                view.partners = names.join(" + ");
                 view.ids = row
                     .ids
                     .iter()
