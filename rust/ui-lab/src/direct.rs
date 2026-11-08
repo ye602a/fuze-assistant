@@ -71,7 +71,7 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 260;
+const HEIGHT: u32 = 296;
 const TITLE_WIDTH: f32 = 154.;
 const TITLE_HEIGHT: f32 = 64.;
 const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
@@ -402,10 +402,15 @@ impl Surface {
                     .cards
                     .iter()
                     .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
-            self.fill(target, rect(x, 34., 242., 196.), PANEL);
+            self.fill(target, rect(x, 34., 242., (HEIGHT - 64) as f32), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
-            target.DrawRectangle(&rect(x, 34., 242., 196.), &self.brush, 1., None);
+            target.DrawRectangle(
+                &rect(x, 34., 242., (HEIGHT - 64) as f32),
+                &self.brush,
+                1.,
+                None,
+            );
             if (partial && i == 1) || card.id.is_none() {
                 self.text(
                     scene,
@@ -539,12 +544,20 @@ impl Surface {
                     MUTED,
                 );
             } else {
+                self.text(
+                    scene,
+                    target,
+                    &combo.partners,
+                    0,
+                    rect(x + 14., 187., 214., 36.),
+                    TEXT,
+                );
                 let icons = &self.combo_icons[i];
                 let size = if icons.len() == 1 { 32. } else { 24. };
                 for (j, icon) in icons.iter().enumerate() {
                     let area = rect(
                         x + 14. + j as f32 * (size + 3.),
-                        207. - size / 2.,
+                        243. - size / 2.,
                         size,
                         size,
                     );
@@ -574,7 +587,7 @@ impl Surface {
                     target,
                     rate,
                     1,
-                    rect(x + 14. + offset, 187., 214. - offset, 22.),
+                    rect(x + 14. + offset, 223., 214. - offset, 22.),
                     GOLD,
                 );
                 self.text(
@@ -582,7 +595,7 @@ impl Surface {
                     target,
                     samples,
                     0,
-                    rect(x + 14. + offset, 209., 214. - offset, 18.),
+                    rect(x + 14. + offset, 245., 214. - offset, 18.),
                     MUTED,
                 );
             }
@@ -609,7 +622,7 @@ impl Surface {
                 "点击卡片查看效果、统计来源与分阶段参考"
             },
             0,
-            rect(12., 236., 736., 20.),
+            rect(12., (HEIGHT - 24) as f32, 736., 20.),
             MUTED,
         );
         if let Some(index) = scene.selected {
@@ -829,7 +842,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..230.).contains(&y) {
+    } else if (34. ..(HEIGHT - 30) as f32).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -1669,6 +1682,15 @@ mod skill_tests {
         assert!(scene.selected.is_none() && scene.detail.is_none());
         assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
         unsafe {
+            for combo in &scene.reference.combos {
+                let text: Vec<_> = combo.partners.encode_utf16().collect();
+                let layout = scene
+                    .dw
+                    .CreateTextLayout(&text, &scene.formats[0], 214., 36.)?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                assert!(metrics.height <= 36. && metrics.width <= 214.);
+            }
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let bitmap = imaging.CreateBitmap(
