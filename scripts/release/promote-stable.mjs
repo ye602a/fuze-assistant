@@ -1,3 +1,5 @@
+import {releaseBody} from './release-body.mjs';
+import {readFile} from 'node:fs/promises';
 // Publish the already verified binaries without rebuilding or changing the legacy update endpoint.
 import {createHash} from 'node:crypto';
 const buildSetup=process.env.FUZE_BUILD_SETUP!=='false';
@@ -30,11 +32,7 @@ const [receiptBytes,zip,setup]=await Promise.all([
 const receipt=JSON.parse(receiptBytes);
 if(receipt.source!==source||receipt.version!==version||!receipt.buildEvidence.sourceClean||!receipt.updateValidation.package_verified||hash(zip)!==receipt.zipSha256||(setup?hash(setup)!==receipt.setupSha256:receipt.setupSha256!==null))throw Error('Build receipt mismatch');
 const zipName=`FUZE-${version}-windows-x64.zip`,setupName=`FUZE-Setup-${version}-windows-x64.exe`;
-const base=`https://github.com/ye602a/fuze-assistant/releases/download/${tag}/`;
-let body=preview.body.replace(`## FUZE v${version} 测试版`,`## FUZE v${version}`);
-body=body.replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/fuze-rust-preview-${revision}.zip`,base+zipName)
- .replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`,base+setupName)
- .replaceAll(`https://github.com/ye602a/fuze-assistant/releases/download/rust-preview/build-evidence-${revision}.json`,base+`build-evidence-${revision}.json`);
+const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:receipt.buildRun,buildSetup});
 let release=await request(`${api}/releases/tags/${tag}`,'GET',undefined,false,true);
 if(!release)release=await request(`${api}/releases`,'POST',{tag_name:tag,target_commitish:source,name:`FUZE v${version}`,body,draft:true,prerelease:false});
 if(release.target_commitish!==source)throw Error('Unexpected existing release source');
