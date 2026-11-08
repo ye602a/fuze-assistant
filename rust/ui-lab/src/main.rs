@@ -5,6 +5,7 @@ mod champion_actions;
 mod champion_art;
 mod champion_bridge;
 mod closure_review;
+mod combo_bridge;
 #[cfg(feature = "ui-audit")]
 mod control_review;
 mod desktop_runner;

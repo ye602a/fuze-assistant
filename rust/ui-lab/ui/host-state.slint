@@ -81,7 +81,7 @@ export global RecordState {
     callback refresh;
     callback action(string, int);
 }
-export struct DetailRow { icon-url: string, title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
+export struct DetailRow { id: int, icon-url: string, title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }
 export struct SlotRow { name: string, hint: string }
 export global ShellState {

@@ -2,6 +2,8 @@
 #[cfg(windows)]
 pub mod app_registration;
 #[cfg(windows)]
+pub mod augment_combos;
+#[cfg(windows)]
 pub mod install_entries;
 #[cfg(windows)]
 pub mod local_setup;

@@ -4,6 +4,7 @@ import { DetailRow, BuildRow } from "host-state.slint";
 import { Theme, UiMotion, Label, Action, Panel, SectionTitle, Disclosure, Scrollbar, NoticeBar, Tabs } from "components.slint";
 import { ChampionFixture, ChampionChoice } from "champion-fixture.slint";
 
+export struct ComboPick { id: int, name: string }
 export struct StageRow { name: string, win: string, pick: string, samples: string }
 
 export component ChampionWindow inherits Window {
@@ -23,6 +24,15 @@ export component ChampionWindow inherits Window {
     in-out property <bool> side-mode:false;
     in-out property <bool> offline:true;
     callback drag-window;
+    in-out property <[ComboPick]> combo-picked;
+    in-out property <string> combo-detail;
+    in-out property <bool> combo-current-picked;
+    callback combo-toggle(int);
+    callback combo-clear;
+    callback combo-refresh;
+    changed expanded-augment => { root.combo-refresh(); }
+    changed augments => { root.combo-refresh(); }
+    changed inspected-id => { root.combo-refresh(); }
     in-out property <bool> stage-open: false;
     in-out property <int> stage-index: 0;
     in-out property <bool> stage-busy: false;
@@ -75,7 +85,7 @@ export component ChampionWindow inherits Window {
     out property <float> content-bottom: (scroll.y + scroll.height) / 1px;
     in-out property <string> action-notice;
     private property <length> footer-top: root.height - 64px - (root.action-notice == "" ? 0px : 60px);
-    private property <length> description-height: 228px;
+    private property <length> description-height: root.side-mode ? 270px : 228px;
     private property <length> description-top: root.footer-top - root.description-height - 6px;
     out property <float> description-bottom: (root.description-top + root.description-height) / 1px;
     out property <float> feedback-top: root.footer-top / 1px;
@@ -182,6 +192,16 @@ export component ChampionWindow inherits Window {
 
             Label { height: max(24px, self.preferred-height); wrap: word-wrap; text: root.detail-status; color: Theme.muted; font-size: 12px; }
             if root.detail-failed: Action { label: "重新读取本地详情"; clicked => { root.inspect(root.inspected-id); } }
+            if root.detail-tab == 0 && root.side-mode: VerticalLayout { spacing: 6px;
+                Rectangle { height: 28px;
+                    SectionTitle { width: parent.width - 74px; height: 28px; text: "已选符文 · 搭配参考"; font-size: 13px; }
+                    if root.combo-picked.length > 0: Action { x: parent.width - 66px; width: 66px; height: 28px; min-width: 0px; label: "清空"; description: "清空已选符文"; quiet: true; clicked => { root.combo-clear(); } }
+                }
+                if root.combo-picked.length == 0: Label { height: 38px; wrap: word-wrap; text: "在下方符文说明中点「记为已选」，查看后续搭配。"; color: Theme.muted; font-size: 12px; }
+                if root.combo-picked.length > 0: Rectangle { height: ceil(root.combo-picked.length / 2) * 34px;
+                    for pick[index] in root.combo-picked: Action { x: mod(index, 2) * (self.width + 6px); y: floor(index / 2) * 34px; width: (parent.width - 6px) / 2; height: 28px; min-width: 0px; label: pick.name + " ×"; description: "移除已选符文 " + pick.name; clicked => { root.combo-toggle(pick.id); } }
+                }
+            }
             if root.detail-tab == 0: VerticalLayout { spacing: 10px;
                 LineEdit { accessible-label: "搜索强化符文"; text <=> root.augment-query; placeholder-text: "搜索强化符文"; height: 34px; edited(value) => { root.filter(value, root.rarity); } }
                 HorizontalLayout { height: 32px; spacing: 5px;
@@ -247,8 +267,9 @@ export component ChampionWindow inherits Window {
         TouchArea { }
         SectionTitle { x: 14px; y: 10px; width: parent.width - 62px; height: 28px; text: root.augments[root.expanded-augment].title; }
         Action { x: parent.width - 40px; y: 5px; width: 34px; min-width: 0px; height: 34px; icon-only: true; icon: @image-url("assets/x.svg"); description: "关闭符文说明"; quiet: true; clicked => { root.expanded-augment = -1; } }
+        if root.side-mode: Action { x: 14px; y: 222px; width: parent.width - 28px; height: 34px; label: root.combo-current-picked ? "移除已选记录" : "记为已选"; clicked => { root.combo-toggle(root.augments[root.expanded-augment].id); } }
         desc-scroll := Flickable { x: 14px; y: 50px; width: parent.width - 28px; height: 162px; viewport-width: self.width; viewport-height: description-text.preferred-height;
-            description-text := Text { width: desc-scroll.width; height: self.preferred-height; text: root.augments[root.expanded-augment].description; color: Theme.ivory; font-size: 12px; wrap: word-wrap; }
+            description-text := Text { width: desc-scroll.width; height: self.preferred-height; text: root.combo-detail == "" ? root.augments[root.expanded-augment].description : root.combo-detail + "\n\n" + root.augments[root.expanded-augment].description; color: Theme.ivory; font-size: 12px; wrap: word-wrap; }
         }
     }
     Scrollbar { x: root.width - 13px; y: scroll.y; height: scroll.height; content-height: scroll.viewport-height; offset <=> scroll.viewport-y; }

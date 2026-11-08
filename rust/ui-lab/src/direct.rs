@@ -237,6 +237,12 @@ impl Scene {
         } else {
             format!("{}{}", text, reference)
         };
+        let combo = &self.reference.combinations[index];
+        let text = if combo.is_empty() {
+            text
+        } else {
+            format!("{combo}\n\n{text}")
+        };
         let utf16 = text.encode_utf16().collect::<Vec<_>>();
         unsafe {
             let layout =
@@ -475,6 +481,16 @@ impl Surface {
                     if j == 0 { TEXT } else { MUTED },
                 );
             }
+            if !scene.reference.combinations[i].is_empty() {
+                self.text(
+                    scene,
+                    target,
+                    "有搭配",
+                    0,
+                    rect(x + 14., 99., 52., 18.),
+                    GOLD,
+                );
+            }
             self.text(
                 scene,
                 target,
@@ -516,6 +532,8 @@ impl Surface {
                 .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
             {
                 "点击卡片查看技能强化效果 · 暂无技能选择统计"
+            } else if scene.reference.combinations.iter().any(|s| !s.is_empty()) {
+                "已有搭配统计 · 点击标注「有搭配」的卡片查看胜率和场次"
             } else {
                 "点击卡片查看效果、统计来源与分阶段参考"
             },
@@ -1581,6 +1599,20 @@ mod skill_tests {
             [Some(0.9), Some(0.8), Some(0.7)]
         );
         scene.cards = frame_cards(&publisher.current().unwrap());
+        let mut manual = fuze_worker_host::augment_combos::Selection::default();
+        manual.context(4, "16.20");
+        manual.toggle(4, 4, "符文甲");
+        let mut snapshot = reference_fixture([Some(1), Some(2), Some(3)]);
+        snapshot.combinations = Some(vec![fuze_worker_host::stage_reference::Combination {
+            ids: vec![4, 1],
+            win: 0.6495,
+            samples: 6819,
+        }]);
+        let mut reference = crate::stage_cards::Comparison::default();
+        reference.combinations[0] =
+            manual.detail(Some(&snapshot), 1, fuze_worker_host::stage_reference::now());
+        assert!(reference.combinations[0].contains("65.0% · 6819 场"));
+        scene.reference = std::sync::Arc::new(reference);
         scene.select(Some(0))?;
         unsafe {
             let imaging: IWICImagingFactory =
@@ -1708,6 +1740,7 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
         }
     }
     Snapshot {
+        combinations: Some(Vec::new()),
         schema: 1,
         champion: 4,
         patch: "16.20".into(),

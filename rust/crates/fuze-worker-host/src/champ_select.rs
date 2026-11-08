@@ -545,6 +545,7 @@ impl Window {
             .collect();
         self.state.stage_reply = crate::stage_reference::Reply {
             snapshot: Some(std::sync::Arc::new(crate::stage_reference::Snapshot {
+                combinations: Some(Vec::new()),
                 schema: 1,
                 champion: self.state.selected,
                 patch: "16.20".into(),

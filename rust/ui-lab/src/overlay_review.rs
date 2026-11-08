@@ -212,6 +212,7 @@ pub fn stage(ui: &crate::ChampionWindow, output: &Path) -> Result<(), Box<dyn st
     ];
     let reply = Reply {
         snapshot: Some(Arc::new(Snapshot {
+            combinations: Some(Vec::new()),
             schema: 1,
             champion: ui.get_inspected_id() as u32,
             patch: "16.20".into(),
