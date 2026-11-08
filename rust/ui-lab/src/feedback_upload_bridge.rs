@@ -61,9 +61,7 @@ impl Binding {
             "checking" => "正在验证反馈授权…",
             "readable" => "已连接 GitHub，等待上传报告。",
             "write-confirmed" => "报告上传成功。",
-            "credential-unavailable" | "credential-format" => {
-                "请配置 GitHub 上传令牌。"
-            }
+            "credential-unavailable" | "credential-format" => "请配置 GitHub 上传令牌。",
             "feedback-auth" => "上传令牌失效或被拒绝，请重新配置。",
             "feedback-permission" => "上传令牌无法访问仓库或缺少 Issues 权限。",
             "unchecked" | "" => "请检查 GitHub 上传授权。",
