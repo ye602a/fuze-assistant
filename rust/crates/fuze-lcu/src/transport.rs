@@ -230,11 +230,7 @@ impl ReadOnlyClient {
         // Return the rejection status only for this endpoint. Never repeat an accepted POST.
         let path = format!("/lol-champ-select/v1/session/bench/swap/{hero}");
         let (code, _) = self.request_at(pid, &path, "POST", &[], 0, true)?;
-        Ok(if (200..300).contains(&code) {
-            crate::bench::Attempt::Accepted
-        } else {
-            crate::bench::Attempt::Retry
-        })
+        crate::bench::response(code)
     }
     pub fn websocket(&self) -> Result<crate::websocket::Socket> {
         crate::websocket::Socket::connect(&self.credentials)
@@ -400,8 +396,9 @@ impl ReadOnlyClient {
                 null_mut(),
             ))?;
             let write_ok = matches!(method, "PUT" | "POST") && (200..300).contains(&code);
-            let bench_unavailable = method == "POST" && matches!(code, 400 | 409);
-            if !write_ok && !bench_unavailable {
+            let bench_response =
+                method == "POST" && path.starts_with("/lol-champ-select/v1/session/bench/swap/");
+            if !write_ok && !bench_response {
                 status(code)?;
             }
             // Deliberately never read the body of status-only probes or successful writes.

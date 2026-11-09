@@ -81,6 +81,23 @@ impl BenchGrab {
             _ => "换人请求失败，请重试",
         }
     }
+    /// A retry always re-enters grab_bench, which re-reads the phase and target ID.
+    fn apply_result(&self, result: fuze_lcu::Result<fuze_lcu::bench::Attempt>) -> Option<Duration> {
+        if !self.active.load(Ordering::Acquire) {
+            return None;
+        }
+        use fuze_lcu::bench::Attempt;
+        match result {
+            Ok(Attempt::Retry) => return Some(Duration::from_millis(125)),
+            Ok(Attempt::Backoff) | Err(fuze_lcu::Error::Transport) => {
+                return Some(Duration::from_secs(1))
+            }
+            Ok(Attempt::Accepted) => self.finish(GrabOutcome::Requested),
+            Ok(Attempt::Stop) => self.finish(GrabOutcome::Unavailable),
+            Err(error) => self.fail(error),
+        }
+        None
+    }
     fn fail(&self, error: fuze_lcu::Error) {
         use fuze_lcu::Error;
         let reason = match error {
@@ -431,18 +448,12 @@ impl Monitor {
                         s.grab.clone()
                     });
                     if let Some(g) = grab {
-                        match client.grab_bench(g.game, g.hero, &g.task.active) {
-                            Ok(fuze_lcu::bench::Attempt::Retry) => {
-                                thread::park_timeout(Duration::from_millis(125));
-                                continue;
-                            }
-                            Ok(fuze_lcu::bench::Attempt::Accepted) => {
-                                g.task.finish(GrabOutcome::Requested)
-                            }
-                            Ok(fuze_lcu::bench::Attempt::Stop) => {
-                                g.task.finish(GrabOutcome::Unavailable)
-                            }
-                            Err(error) => g.task.fail(error),
+                        if let Some(delay) =
+                            g.task
+                                .apply_result(client.grab_bench(g.game, g.hero, &g.task.active))
+                        {
+                            thread::park_timeout(delay);
+                            continue;
                         }
                     }
                     let wait = client
@@ -1148,6 +1159,36 @@ mod tests {
         }
         assert!(!keep_capture_worker("worker-result"));
         assert!(!keep_capture_worker("locale-unavailable"));
+    }
+    #[test]
+    fn bench_grab_keeps_waiting_on_transient_errors_and_stops_after_accept_or_cancel() {
+        use fuze_lcu::bench::Attempt;
+        let task = BenchGrab::new();
+        for response in [
+            Ok(Attempt::Retry),
+            Ok(Attempt::Backoff),
+            Err(fuze_lcu::Error::Transport),
+        ] {
+            assert!(task.apply_result(response).is_some());
+            assert_eq!(task.outcome(), GrabOutcome::Running);
+            assert!(task.active.load(Ordering::Acquire));
+        }
+        assert_eq!(task.apply_result(Ok(Attempt::Accepted)), None);
+        assert_eq!(task.outcome(), GrabOutcome::Requested);
+        assert_eq!(task.apply_result(Ok(Attempt::Retry)), None);
+        let task = BenchGrab::new();
+        task.cancel();
+        assert_eq!(task.apply_result(Ok(Attempt::Backoff)), None);
+        assert_eq!(task.outcome(), GrabOutcome::Stopped);
+        for error in [
+            fuze_lcu::Error::Unauthorized,
+            fuze_lcu::Error::NotFound,
+            fuze_lcu::Error::HttpStatus,
+        ] {
+            let task = BenchGrab::new();
+            assert_eq!(task.apply_result(Err(error)), None);
+            assert_eq!(task.outcome(), GrabOutcome::Failed);
+        }
     }
     #[test]
     fn bench_grab_reports_the_actual_failure_category_without_resuming_cancelled_work() {
