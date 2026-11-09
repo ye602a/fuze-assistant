@@ -186,12 +186,14 @@ impl Pipeline {
         if self.closed {
             None
         } else {
-            self.session.wake_at(self.now()).map(|at| {
-                let at = at.max(self.next_capture_at);
-                self.retention
-                    .deadline()
-                    .map_or(at, |deadline| at.min(deadline))
-            })
+            self.picks
+                .capture_at(self.session.wake_at(self.now()), self.next_capture_at)
+                .map(|at| {
+                    let at = at.max(self.next_capture_at);
+                    self.retention
+                        .deadline()
+                        .map_or(at, |deadline| at.min(deadline))
+                })
         }
     }
     pub fn clear_level(&mut self) {
@@ -480,16 +482,21 @@ impl Pipeline {
         if let Some(capture) = self.capture.as_mut() {
             capture.saving(saving);
         }
-        let recognition_due =
+        let recognition_due = self.now() >= self.next_capture_at
+            && self
+                .session
+                .wake_at(self.now())
+                .is_some_and(|at| self.now() >= at);
+        let capture_due =
             self.now() >= self.next_capture_at && self.wake_at().is_some_and(|at| self.now() >= at);
         let diagnostic_due = self.diagnostics.begin();
-        if !recognition_due && !diagnostic_due {
+        if !capture_due && !diagnostic_due {
             self.expire_retained()?;
             self.skipped_frames = self.skipped_frames.saturating_add(1);
             return Ok(None);
         }
         // Separate GDI probes cannot drain the production DXGI stream, enter a gate or publish.
-        if !recognition_due {
+        if !capture_due {
             if let Some(capture) = self.capture.as_ref() {
                 let metadata = self.diagnostic_metadata("level-or-schedule-gate", &**capture);
                 self.diagnostics.gated(metadata);
@@ -521,7 +528,7 @@ impl Pipeline {
                 self.last_capture = Some(Instant::now());
                 self.capture_state = "receiving";
                 self.busy_streak = 0;
-                if capture.source().starts_with("screen-") {
+                if capture.source().starts_with("screen-") || !recognition_due {
                     self.next_capture_at = self.now().saturating_add(500);
                 }
                 let key = FrameKey {
@@ -540,7 +547,12 @@ impl Pipeline {
                 } else {
                     evidence
                 };
-                self.picks.frame(pick_evidence);
+                self.picks.frame(pick_evidence, captured);
+                if !recognition_due {
+                    // Pending-click confirmation only: no OCR, level-gate input or new offers.
+                    self.capture_state = "waiting-selection";
+                    return Ok(None);
+                }
                 if let Some(evidence) = evidence {
                     let now = self.now();
                     let decision = self.screen_gate.observe(evidence, now);
