@@ -410,17 +410,23 @@ impl AutoClient {
         if !c.process.alive() {
             return Err(Error::Discovery);
         }
-        if !self
-            .context
-            .and_then(|c| c.bench_lobby)
-            .is_some_and(|l| l.offers(game, hero))
-        {
+        let phase = c.client.phase(c.pid)?;
+        if phase == fuze_runtime::session::Phase::Disconnected {
+            return Ok(crate::bench::Attempt::Retry);
+        }
+        if phase != fuze_runtime::session::Phase::ChampSelect {
             return Ok(crate::bench::Attempt::Stop);
         }
-        if c.client.phase(c.pid)? != fuze_runtime::session::Phase::ChampSelect {
+        let (current_game, own, lobby) = c.client.current_bench(c.pid)?;
+        if current_game == 0 {
+            return Ok(crate::bench::Attempt::Retry);
+        }
+        if current_game != game {
             return Ok(crate::bench::Attempt::Stop);
         }
-        let lobby = c.client.current_bench(c.pid)?;
+        if own == Some(hero) {
+            return Ok(crate::bench::Attempt::Acquired);
+        }
         crate::bench::attempt(lobby, game, hero, active, |target| {
             c.client.swap_bench(c.pid, target)
         })

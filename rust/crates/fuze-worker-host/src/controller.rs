@@ -43,22 +43,19 @@ pub enum GrabOutcome {
     Running,
     Requested,
     Unavailable,
-    Failed,
-    Stopped,
-    Acquired,
+    Stopped = 4,
+    Acquired = 5,
 }
 /// One lobby request: cancellation and its terminal result stay available to the UI.
 pub struct BenchGrab {
     active: AtomicBool,
     outcome: AtomicU8,
-    failure: AtomicU8,
 }
 impl BenchGrab {
     fn new() -> Self {
         Self {
             active: AtomicBool::new(true),
             outcome: AtomicU8::new(0),
-            failure: AtomicU8::new(0),
         }
     }
     pub fn outcome(&self) -> GrabOutcome {
@@ -66,19 +63,8 @@ impl BenchGrab {
             0 => GrabOutcome::Running,
             1 => GrabOutcome::Requested,
             2 => GrabOutcome::Unavailable,
-            3 => GrabOutcome::Failed,
             5 => GrabOutcome::Acquired,
             _ => GrabOutcome::Stopped,
-        }
-    }
-    pub fn failure_hint(&self) -> &'static str {
-        match self.failure.load(Ordering::Acquire) {
-            1 => "客户端连接中断，抢取已停止",
-            2 => "客户端授权已失效，请等待重新连接",
-            3 => "客户端换人接口暂不可用，抢取已停止",
-            4 => "客户端拒绝换人请求，抢取已停止",
-            5 => "未能读取选人状态，抢取已停止",
-            _ => "换人请求失败，请重试",
         }
     }
     /// A retry always re-enters grab_bench, which re-reads the phase and target ID.
@@ -88,32 +74,25 @@ impl BenchGrab {
         }
         use fuze_lcu::bench::Attempt;
         match result {
-            Ok(Attempt::Retry) => return Some(Duration::from_millis(125)),
-            Ok(Attempt::Backoff) | Err(fuze_lcu::Error::Transport) => {
-                return Some(Duration::from_secs(1))
+            Ok(Attempt::Retry) | Err(_) => return Some(Duration::from_millis(125)),
+            Ok(Attempt::Accepted) => {
+                // Acceptance is not ownership. Keep checking the target until observed.
+                let _ = self
+                    .outcome
+                    .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+                return Some(Duration::from_millis(125));
             }
-            Ok(Attempt::Accepted) => self.finish(GrabOutcome::Requested),
+            Ok(Attempt::Acquired) => self.finish(GrabOutcome::Acquired),
             Ok(Attempt::Stop) => self.finish(GrabOutcome::Unavailable),
-            Err(error) => self.fail(error),
         }
         None
     }
-    fn fail(&self, error: fuze_lcu::Error) {
-        use fuze_lcu::Error;
-        let reason = match error {
-            Error::Transport | Error::Discovery | Error::AmbiguousClient => 1,
-            Error::Unauthorized | Error::AuthInput => 2,
-            Error::NotFound => 3,
-            Error::HttpStatus => 4,
-            Error::InvalidPhase | Error::ResponseLimit => 5,
-        };
-        self.failure.store(reason, Ordering::Release);
-        self.finish(GrabOutcome::Failed);
-    }
     fn finish(&self, outcome: GrabOutcome) {
-        let _ =
-            self.outcome
-                .compare_exchange(0, outcome as u8, Ordering::AcqRel, Ordering::Acquire);
+        let _ = self
+            .outcome
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                matches!(old, 0 | 1).then_some(outcome as u8)
+            });
         self.active.store(false, Ordering::Release);
     }
     pub fn cancel(&self) {
@@ -150,19 +129,25 @@ impl Observation {
     }
     fn publish(&mut self, context: Option<Context>, root: Option<PathBuf>) {
         if let Some(g) = self.grab.as_ref() {
-            if !context
-                .and_then(|c| c.bench_lobby)
-                .is_some_and(|l| l.offers(g.game, g.hero))
-            {
-                g.task.finish(
-                    if context.is_some_and(|c| {
-                        c.phase == Phase::ChampSelect && c.champion == Some(g.hero)
-                    }) {
-                        GrabOutcome::Acquired
-                    } else {
-                        GrabOutcome::Unavailable
-                    },
-                );
+            let result = context.and_then(|c| {
+                if !matches!(c.phase, Phase::ChampSelect | Phase::Disconnected) {
+                    Some(GrabOutcome::Unavailable)
+                } else {
+                    c.bench_lobby.and_then(|l| {
+                        if l.game != g.game {
+                            Some(GrabOutcome::Unavailable)
+                        } else if c.champion == Some(g.hero) {
+                            Some(GrabOutcome::Acquired)
+                        } else if !l.offers(g.game, g.hero) {
+                            Some(GrabOutcome::Unavailable)
+                        } else {
+                            None
+                        }
+                    })
+                }
+            });
+            if let Some(result) = result {
+                g.task.finish(result);
                 self.grab = None;
             }
         }
@@ -1161,63 +1146,69 @@ mod tests {
         assert!(!keep_capture_worker("locale-unavailable"));
     }
     #[test]
-    fn bench_grab_keeps_waiting_on_transient_errors_and_stops_after_accept_or_cancel() {
-        use fuze_lcu::bench::Attempt;
+    fn bench_grab_retries_errors_and_acceptance_until_observed_success_or_cancel() {
+        use fuze_lcu::{bench::Attempt, Error};
         let task = BenchGrab::new();
-        for response in [
-            Ok(Attempt::Retry),
-            Ok(Attempt::Backoff),
-            Err(fuze_lcu::Error::Transport),
-        ] {
-            assert!(task.apply_result(response).is_some());
-            assert_eq!(task.outcome(), GrabOutcome::Running);
+        for _ in 0..80 {
+            for response in [
+                Ok(Attempt::Retry),
+                Err(Error::Transport),
+                Err(Error::Discovery),
+                Err(Error::Unauthorized),
+                Err(Error::NotFound),
+                Err(Error::HttpStatus),
+                Err(Error::InvalidPhase),
+            ] {
+                assert_eq!(
+                    task.apply_result(response),
+                    Some(Duration::from_millis(125))
+                );
+                assert_eq!(task.outcome(), GrabOutcome::Running);
+                assert!(task.active.load(Ordering::Acquire));
+            }
+        }
+        for _ in 0..40 {
+            assert_eq!(
+                task.apply_result(Ok(Attempt::Accepted)),
+                Some(Duration::from_millis(125))
+            );
+            assert_eq!(task.outcome(), GrabOutcome::Requested);
             assert!(task.active.load(Ordering::Acquire));
         }
-        assert_eq!(task.apply_result(Ok(Attempt::Accepted)), None);
-        assert_eq!(task.outcome(), GrabOutcome::Requested);
+        assert_eq!(task.apply_result(Ok(Attempt::Acquired)), None);
+        assert_eq!(task.outcome(), GrabOutcome::Acquired);
         assert_eq!(task.apply_result(Ok(Attempt::Retry)), None);
         let task = BenchGrab::new();
+        task.apply_result(Ok(Attempt::Accepted));
         task.cancel();
-        assert_eq!(task.apply_result(Ok(Attempt::Backoff)), None);
+        assert_eq!(task.apply_result(Ok(Attempt::Accepted)), None);
         assert_eq!(task.outcome(), GrabOutcome::Stopped);
-        for error in [
-            fuze_lcu::Error::Unauthorized,
-            fuze_lcu::Error::NotFound,
-            fuze_lcu::Error::HttpStatus,
-        ] {
-            let task = BenchGrab::new();
-            assert_eq!(task.apply_result(Err(error)), None);
-            assert_eq!(task.outcome(), GrabOutcome::Failed);
-        }
     }
     #[test]
-    fn bench_grab_reports_the_actual_failure_category_without_resuming_cancelled_work() {
-        for (error, text) in [
-            (fuze_lcu::Error::Transport, "连接中断"),
-            (fuze_lcu::Error::Unauthorized, "授权"),
-            (fuze_lcu::Error::NotFound, "接口暂不可用"),
-            (fuze_lcu::Error::HttpStatus, "拒绝"),
-            (fuze_lcu::Error::InvalidPhase, "选人状态"),
-        ] {
-            let task = BenchGrab::new();
-            task.fail(error);
-            assert_eq!(task.outcome(), GrabOutcome::Failed);
-            assert!(task.failure_hint().contains(text));
-            assert!(!task.active.load(Ordering::Acquire));
-        }
-        let task = BenchGrab::new();
-        task.cancel();
-        task.fail(fuze_lcu::Error::Transport);
-        assert_eq!(task.outcome(), GrabOutcome::Stopped);
+    fn bench_grab_survives_missing_context_and_still_stops_on_confirmed_exit() {
+        let monitor = Monitor::review();
+        let flow = br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#;
+        let session = br#"{"localPlayerCellId":0,"myTeam":[{"cellId":0,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":11}]}"#;
+        let context = fuze_lcu::context::parse(Phase::ChampSelect, flow, session).unwrap();
+        monitor.review_publish(context);
+        let task = monitor.control().grab(9, 11).unwrap();
+        monitor.latest.lock().unwrap().publish(None, None);
+        assert_eq!(task.outcome(), GrabOutcome::Running);
+        let mut temporary = context;
+        temporary.bench_lobby = None;
+        monitor.review_publish(temporary);
+        assert_eq!(task.outcome(), GrabOutcome::Running);
+        monitor.review_publish(context);
+        assert!(Arc::ptr_eq(
+            &task,
+            &monitor.latest.lock().unwrap().grab.as_ref().unwrap().task
+        ));
+        monitor.review_publish(Context::idle(Phase::Loading));
+        assert_eq!(task.outcome(), GrabOutcome::Unavailable);
     }
     #[test]
     fn bench_grab_terminal_feedback_survives_cleanup_and_late_responses() {
-        for result in [
-            GrabOutcome::Requested,
-            GrabOutcome::Acquired,
-            GrabOutcome::Unavailable,
-            GrabOutcome::Failed,
-        ] {
+        for result in [GrabOutcome::Acquired, GrabOutcome::Unavailable] {
             let task = BenchGrab::new();
             task.finish(result);
             assert!(!task.active.load(Ordering::Acquire));
@@ -1226,7 +1217,7 @@ mod tests {
         }
         let task = BenchGrab::new();
         task.cancel();
-        task.finish(GrabOutcome::Requested);
+        task.apply_result(Ok(fuze_lcu::bench::Attempt::Accepted));
         assert_eq!(task.outcome(), GrabOutcome::Stopped);
     }
     #[test]
@@ -1247,7 +1238,7 @@ mod tests {
             control.latest.lock().unwrap().grab.as_ref().unwrap().hero,
             22
         );
-        first.finish(GrabOutcome::Failed);
+        first.finish(GrabOutcome::Acquired);
         assert_eq!(second.outcome(), GrabOutcome::Running);
         monitor.review_publish(Context::idle(Phase::InProgress));
         assert_eq!(second.outcome(), GrabOutcome::Unavailable);

@@ -61,9 +61,9 @@ impl Lobby {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Attempt {
     Accepted,
+    Acquired,
     Stop,
     Retry,
-    Backoff,
 }
 
 /// Only the bench write uses this policy; other LCU endpoints keep their own status contract.
@@ -71,7 +71,7 @@ pub(crate) fn response(code: u32) -> crate::Result<Attempt> {
     match code {
         200..=299 => Ok(Attempt::Accepted),
         400 | 409 => Ok(Attempt::Retry),
-        429 | 500 | 502 | 503 | 504 => Ok(Attempt::Backoff),
+        429 | 500 | 502 | 503 | 504 => Ok(Attempt::Retry),
         _ => crate::status(code).map(|_| Attempt::Accepted),
     }
 }
@@ -83,12 +83,13 @@ pub(crate) fn attempt(
     active: &std::sync::atomic::AtomicBool,
     post: impl FnOnce(u32) -> crate::Result<Attempt>,
 ) -> crate::Result<Attempt> {
-    if active.load(std::sync::atomic::Ordering::Acquire)
-        && lobby.is_some_and(|l| l.offers(game, hero))
-    {
-        post(hero)
-    } else {
-        Ok(Attempt::Stop)
+    if !active.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(Attempt::Stop);
+    }
+    match lobby {
+        Some(l) if l.offers(game, hero) => post(hero),
+        Some(_) => Ok(Attempt::Stop),
+        None => Ok(Attempt::Retry), // Missing/temporarily disabled is not a known empty pool.
     }
 }
 #[cfg(test)]
@@ -100,12 +101,12 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
-    fn bench_status_distinguishes_waiting_from_fatal_rejection() {
+    fn bench_status_classification_preserves_request_errors() {
         for code in [400, 409] {
             assert_eq!(response(code), Ok(Attempt::Retry));
         }
         for code in [429, 500, 502, 503, 504] {
-            assert_eq!(response(code), Ok(Attempt::Backoff));
+            assert_eq!(response(code), Ok(Attempt::Retry));
         }
         for code in [200, 204] {
             assert_eq!(response(code), Ok(Attempt::Accepted));
@@ -121,7 +122,7 @@ mod tests {
         let active = AtomicBool::new(true);
         let mut requests = Vec::new();
         // The endpoint rejects swaps during the portrait cooldown, then accepts.
-        for response in [Attempt::Retry, Attempt::Backoff, Attempt::Accepted] {
+        for response in [Attempt::Retry, Attempt::Retry, Attempt::Accepted] {
             assert!(lobby.offers(81, 22));
             assert_eq!(
                 attempt(Some(lobby), 81, 22, &active, |hero| {
@@ -201,7 +202,10 @@ mod tests {
         stopped(lobby(&gone));
         session["gameId"] = 82.into();
         stopped(lobby(&session));
-        stopped(None); // left the lobby
+        assert_eq!(
+            attempt(None, 81, hero, &active, |_| panic!("unknown pool")),
+            Ok(Attempt::Retry)
+        );
         session["benchEnabled"] = false.into();
         assert!(lobby(&session).is_none());
     }

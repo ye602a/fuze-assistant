@@ -208,7 +208,10 @@ impl ReadOnlyClient {
         wipe(&mut saved);
         crate::item_sets::verify_saved(&merged, &decoded?)
     }
-    pub(crate) fn current_bench(&self, pid: u32) -> Result<Option<crate::bench::Lobby>> {
+    pub(crate) fn current_bench(
+        &self,
+        pid: u32,
+    ) -> Result<(u64, Option<u32>, Option<crate::bench::Lobby>)> {
         let (_, mut bytes) = self.request(pid, Endpoint::ChampSelect)?;
         let session = serde_json::from_slice(&bytes).map_err(|_| Error::InvalidPhase);
         wipe(&mut bytes);
@@ -220,14 +223,23 @@ impl ReadOnlyClient {
                 .history_value(pid, Endpoint::Gameflow)
                 .map_err(|_| Error::InvalidPhase)?;
             if flow["phase"] != "ChampSelect" || flow["gameData"]["queue"]["id"] != 2400 {
-                return Ok(None);
+                return Ok((0, None, None));
             }
             flow["gameData"]["gameId"].as_u64().unwrap_or(0)
         };
-        Ok(crate::bench::Lobby::parse(&session, game))
+        let own = session["localPlayerCellId"].as_u64().and_then(|cell| {
+            session["myTeam"]
+                .as_array()?
+                .iter()
+                .find(|p| p["cellId"].as_u64() == Some(cell))?["championId"]
+                .as_u64()
+                .and_then(|id| u32::try_from(id).ok())
+                .filter(|id| *id > 0)
+        });
+        Ok((game, own, crate::bench::Lobby::parse(&session, game)))
     }
     pub(crate) fn swap_bench(&self, pid: u32, hero: u32) -> Result<crate::bench::Attempt> {
-        // Return the rejection status only for this endpoint. Never repeat an accepted POST.
+        // Each attempt is preceded by a fresh phase, game and target-pool check.
         let path = format!("/lol-champ-select/v1/session/bench/swap/{hero}");
         let (code, _) = self.request_at(pid, &path, "POST", &[], 0, true)?;
         crate::bench::response(code)
