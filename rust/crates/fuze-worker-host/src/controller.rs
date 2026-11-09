@@ -51,12 +51,14 @@ pub enum GrabOutcome {
 pub struct BenchGrab {
     active: AtomicBool,
     outcome: AtomicU8,
+    failure: AtomicU8,
 }
 impl BenchGrab {
     fn new() -> Self {
         Self {
             active: AtomicBool::new(true),
             outcome: AtomicU8::new(0),
+            failure: AtomicU8::new(0),
         }
     }
     pub fn outcome(&self) -> GrabOutcome {
@@ -68,6 +70,28 @@ impl BenchGrab {
             5 => GrabOutcome::Acquired,
             _ => GrabOutcome::Stopped,
         }
+    }
+    pub fn failure_hint(&self) -> &'static str {
+        match self.failure.load(Ordering::Acquire) {
+            1 => "客户端连接中断，抢取已停止",
+            2 => "客户端授权已失效，请等待重新连接",
+            3 => "客户端换人接口暂不可用，抢取已停止",
+            4 => "客户端拒绝换人请求，抢取已停止",
+            5 => "未能读取选人状态，抢取已停止",
+            _ => "换人请求失败，请重试",
+        }
+    }
+    fn fail(&self, error: fuze_lcu::Error) {
+        use fuze_lcu::Error;
+        let reason = match error {
+            Error::Transport | Error::Discovery | Error::AmbiguousClient => 1,
+            Error::Unauthorized | Error::AuthInput => 2,
+            Error::NotFound => 3,
+            Error::HttpStatus => 4,
+            Error::InvalidPhase | Error::ResponseLimit => 5,
+        };
+        self.failure.store(reason, Ordering::Release);
+        self.finish(GrabOutcome::Failed);
     }
     fn finish(&self, outcome: GrabOutcome) {
         let _ =
@@ -418,7 +442,7 @@ impl Monitor {
                             Ok(fuze_lcu::bench::Attempt::Stop) => {
                                 g.task.finish(GrabOutcome::Unavailable)
                             }
-                            Err(_) => g.task.finish(GrabOutcome::Failed),
+                            Err(error) => g.task.fail(error),
                         }
                     }
                     let wait = client
@@ -1124,6 +1148,26 @@ mod tests {
         }
         assert!(!keep_capture_worker("worker-result"));
         assert!(!keep_capture_worker("locale-unavailable"));
+    }
+    #[test]
+    fn bench_grab_reports_the_actual_failure_category_without_resuming_cancelled_work() {
+        for (error, text) in [
+            (fuze_lcu::Error::Transport, "连接中断"),
+            (fuze_lcu::Error::Unauthorized, "授权"),
+            (fuze_lcu::Error::NotFound, "接口暂不可用"),
+            (fuze_lcu::Error::HttpStatus, "拒绝"),
+            (fuze_lcu::Error::InvalidPhase, "选人状态"),
+        ] {
+            let task = BenchGrab::new();
+            task.fail(error);
+            assert_eq!(task.outcome(), GrabOutcome::Failed);
+            assert!(task.failure_hint().contains(text));
+            assert!(!task.active.load(Ordering::Acquire));
+        }
+        let task = BenchGrab::new();
+        task.cancel();
+        task.fail(fuze_lcu::Error::Transport);
+        assert_eq!(task.outcome(), GrabOutcome::Stopped);
     }
     #[test]
     fn bench_grab_terminal_feedback_survives_cleanup_and_late_responses() {

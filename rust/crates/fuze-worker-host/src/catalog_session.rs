@@ -49,6 +49,9 @@ impl Session {
             self.selection = selection;
         }
     }
+    pub fn display_version(&self) -> Option<&str> {
+        self.catalog.as_ref().map(Catalog::display_version)
+    }
     pub fn identity(&self) -> Option<&str> {
         self.catalog.as_ref().map(Catalog::identity)
     }

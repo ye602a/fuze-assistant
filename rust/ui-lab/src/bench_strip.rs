@@ -285,9 +285,9 @@ impl State {
             if outcome == GrabOutcome::Running {
                 return None;
             }
-            Some((*hero, outcome))
+            Some((*hero, outcome, task.failure_hint()))
         });
-        if let Some((hero, outcome)) = finished {
+        if let Some((hero, outcome, failure)) = finished {
             if outcome == GrabOutcome::Requested {
                 // Keep the target and its stop control visible until the read-only
                 // champion state confirms the accepted request.
@@ -297,7 +297,14 @@ impl State {
                 }
             } else {
                 self.stop(hwnd);
-                self.notice(hwnd, outcome_hint(outcome));
+                self.notice(
+                    hwnd,
+                    if outcome == GrabOutcome::Failed {
+                        failure
+                    } else {
+                        outcome_hint(outcome)
+                    },
+                );
             }
         }
         if self

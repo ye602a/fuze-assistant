@@ -35,6 +35,7 @@ pub struct View {
     pub version: String,
 }
 pub struct Catalog {
+    display_version: String,
     heroes: HashMap<u32, Hero>,
     version: String,
 }
@@ -47,6 +48,9 @@ impl Catalog {
             count: 0,
             choices: None,
         })
+    }
+    pub fn display_version(&self) -> &str {
+        &self.display_version
     }
     pub fn identity(&self) -> &str {
         &self.version
@@ -102,7 +106,11 @@ impl Catalog {
                 return Err("champions-duplicate");
             }
         }
-        Ok(Self { heroes, version })
+        Ok(Self {
+            heroes,
+            display_version: fuze_data::display_version(&version, value["dataDate"].as_str()),
+            version,
+        })
     }
     pub fn view(&self, selection: Selection) -> View {
         let hero = |id| {

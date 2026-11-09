@@ -99,6 +99,28 @@ mod tests {
             Ok(bytes)
         })
         .unwrap();
+        let prepared = fuze_data::prepare(
+            &[Root {
+                path: dir.0.clone(),
+                source: Source::Cache,
+            }],
+            Locale::ZhCn,
+            Scope::Full,
+        )
+        .unwrap();
+        let identity = prepared.identity();
+        assert!(prepared.display_version().contains("2026-11-06"));
+        let mut details = fuze_data::detail_cache::Cache::prepare(
+            &[Root {
+                path: dir.0.clone(),
+                source: Source::Cache,
+            }],
+            &identity,
+        )
+        .unwrap();
+        let hero = details.get(145).unwrap();
+        assert_eq!(hero.version, identity);
+        assert_eq!(hero.display_version, prepared.display_version());
         let store = std::sync::Arc::new(Store::default());
         store.allow_network(false);
         let service = Service::with_store(

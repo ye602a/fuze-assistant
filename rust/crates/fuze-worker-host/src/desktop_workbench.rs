@@ -722,11 +722,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         x(13),
         rgb(183, 211, 219),
     );
-    let data = p.dataset.as_deref().or(u.shown.available.as_deref());
-    let version = data
-        .and_then(|s| s.split_once('@').map(|v| v.1))
-        .or(data)
-        .unwrap_or("未加载");
+    let version = u.shown.data_label.as_str();
     let values = [
         (
             "客户端连接",
@@ -1032,7 +1028,7 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
             format!(
                 "{} / ARAMGG {}",
                 crate::i18n::text("推荐数据"),
-                u.shown.available.as_deref().unwrap_or("—")
+                u.shown.data_label.as_str()
             ),
             format!(
                 "{} {}",

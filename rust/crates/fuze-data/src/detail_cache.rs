@@ -7,6 +7,7 @@ pub struct Loaded {
     pub id: u32,
     pub detail: Detail,
     pub version: String,
+    pub display_version: String,
 }
 
 pub struct Cache {
@@ -88,6 +89,7 @@ impl Cache {
                     id,
                     detail,
                     version: self.identity.clone(),
+                    display_version: self.source.as_ref().unwrap().display_version(),
                 })
             });
         self.details.insert(id, result.clone());

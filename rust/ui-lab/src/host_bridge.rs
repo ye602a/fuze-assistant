@@ -595,11 +595,11 @@ pub fn attach_recovered(
             state.set_data_progress(if next.data_progress.message.is_empty() { "尚未检查数据更新".into() } else { next.data_progress.message.clone().into() });
             state.set_data_completed(next.data_progress.completed as i32);
             state.set_data_total(next.data_progress.total as i32);
-            if old.as_ref().is_none_or(|s| s.available != next.available || s.recognition.reference != next.recognition.reference) {
+            if old.as_ref().is_none_or(|s| s.available != next.available || s.data_label != next.data_label || s.recognition.reference != next.recognition.reference) {
                 let (compatibility, mismatch) = fuze_worker_host::data_update::compatibility(next.available.as_deref(), &next.recognition.reference);
                 state.set_data_compatibility(compatibility.into());
                 state.set_data_mismatch(mismatch);
-                state.set_data_version(next.available.as_deref().unwrap_or("—").rsplit('@').next().unwrap_or("—").into());
+                state.set_data_version(next.data_label.clone().into());
             }
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
                 state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {
