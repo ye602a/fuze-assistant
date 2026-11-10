@@ -11,7 +11,7 @@ export component ChampionWindow inherits Window {
     icon: @image-url("../../../public/fuze.png");
     init => { Palette.color-scheme = ColorScheme.dark; }
     no-frame: true;
-    preferred-width: 420px; preferred-height: 640px; min-width: 380px; min-height: 600px;
+    preferred-width: 420px; preferred-height: root.side-mode ? 640px : 800px; min-width: 380px; min-height: 600px;
     background: Theme.background;
     default-font-family: "Microsoft YaHei UI"; default-font-size: 12px;
     in-out property <length> scroll-y <=> scroll.viewport-y;

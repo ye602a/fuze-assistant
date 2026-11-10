@@ -121,9 +121,28 @@ fn outcome_hint(outcome: GrabOutcome) -> &'static str {
         GrabOutcome::Requested => "正在确认换人 · 按 F9 停止",
         GrabOutcome::Acquired => "已抢到目标英雄",
         GrabOutcome::Unavailable => "目标英雄已不可用",
-        GrabOutcome::Failed => "换人请求失败，请重试",
         GrabOutcome::Stopped => "已停止抢取",
     }
+}
+
+fn keep_waiting(
+    connection: Option<fuze_lcu::reconnect::State>,
+    enabled: bool,
+    active: bool,
+) -> bool {
+    use fuze_lcu::reconnect::State;
+    use fuze_runtime::session::Phase;
+    enabled
+        && active
+        && !matches!(
+            connection,
+            Some(
+                State::Paused
+                    | State::Connected(
+                        Phase::ClientReady | Phase::Loading | Phase::InProgress | Phase::PostGame
+                    )
+            )
+        )
 }
 
 pub fn sync(
@@ -139,7 +158,15 @@ pub fn sync(
             && matches!(status.connection, Some(Connected(ChampSelect)))
     });
     let Some(lobby) = lobby else {
-        *strip = None;
+        if !keep_waiting(
+            status.connection,
+            status.mode == 1 && status.preferences.champ_select,
+            strip
+                .as_ref()
+                .is_some_and(|s| s.state.active.borrow().is_some()),
+        ) {
+            *strip = None;
+        }
         return Ok(());
     };
     let own = status
@@ -293,7 +320,9 @@ impl State {
                 // champion state confirms the accepted request.
                 if self.requested.get() != Some(hero) {
                     self.requested.set(Some(hero));
-                    self.notice(hwnd, outcome_hint(outcome));
+                    self.hint.set(outcome_hint(outcome));
+                    self.hint_until.set(None);
+                    self.repaint(hwnd);
                 }
             } else {
                 self.stop(hwnd);
@@ -305,14 +334,9 @@ impl State {
             .get()
             .is_some_and(|until| Instant::now() >= until)
         {
-            if self.requested.get().is_some() {
-                self.stop(hwnd);
-                self.notice(hwnd, "未确认换人结果，请查看当前英雄");
-            } else {
-                self.hint.set("");
-                self.hint_until.set(None);
-                self.repaint(hwnd);
-            }
+            self.hint.set("");
+            self.hint_until.set(None);
+            self.repaint(hwnd);
         }
     }
     unsafe fn start(&self, hwnd: HWND, hero: u32) {
@@ -373,7 +397,7 @@ impl State {
             || (rect.right * 9 - rect.bottom * 16).abs() > rect.right / 8
         {
             if self.geometry.take().is_some() {
-                self.stop(hwnd);
+                // Window visibility does not cancel the player's target. F9 remains registered.
                 ShowWindow(hwnd, SW_HIDE);
             }
             return;
@@ -606,6 +630,32 @@ unsafe fn draw(
 mod tests {
     use super::*;
     #[test]
+    fn temporary_status_loss_keeps_target_but_exit_and_user_disable_remove_it() {
+        use fuze_lcu::reconnect::State;
+        use fuze_runtime::session::Phase;
+        for connection in [
+            None,
+            Some(State::Waiting),
+            Some(State::Retry(fuze_lcu::Error::Transport)),
+            Some(State::Retry(fuze_lcu::Error::Unauthorized)),
+            Some(State::Connected(Phase::Disconnected)),
+            Some(State::Connected(Phase::ChampSelect)),
+        ] {
+            assert!(keep_waiting(connection, true, true));
+            assert!(!keep_waiting(connection, false, true));
+            assert!(!keep_waiting(connection, true, false));
+        }
+        for connection in [
+            State::Paused,
+            State::Connected(Phase::Loading),
+            State::Connected(Phase::ClientReady),
+            State::Connected(Phase::InProgress),
+            State::Connected(Phase::PostGame),
+        ] {
+            assert!(!keep_waiting(Some(connection), true, true));
+        }
+    }
+    #[test]
     fn accepted_request_waits_for_observed_champion_and_detects_target_loss() {
         let mut lobby = Lobby {
             slots: [11, 22, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -630,8 +680,8 @@ mod tests {
             GrabOutcome::Acquired
         );
         assert_eq!(
-            observed_outcome(22, Some(9), lobby, GrabOutcome::Failed),
-            GrabOutcome::Failed
+            observed_outcome(22, Some(9), lobby, GrabOutcome::Stopped),
+            GrabOutcome::Stopped
         );
     }
     #[test]

@@ -32,7 +32,7 @@ fn champion_subset_offscreen() {
     ui.set_inspected_icon(Default::default());
     ui.set_subset_active(true);
     ui.show().unwrap();
-    window.set_size(slint::PhysicalSize::new(420, 640));
+    window.set_size(slint::PhysicalSize::new(420, 800));
     for (name, count, active) in [
         ("three", 3, true),
         ("two", 2, true),
@@ -42,7 +42,7 @@ fn champion_subset_offscreen() {
     ] {
         ui.set_choices(Rc::new(VecModel::from(cards[..count].to_vec())).into());
         ui.set_subset_active(active);
-        let mut pixels = vec![Rgb8Pixel::default(); 420 * 640];
+        let mut pixels = vec![Rgb8Pixel::default(); 420 * 800];
         window.request_redraw();
         window.draw_if_needed(|r| {
             r.render(&mut pixels, 420);
@@ -56,7 +56,7 @@ fn champion_subset_offscreen() {
                     .flat_map(|p| [p.r, p.g, p.b])
                     .collect::<Vec<_>>(),
                 420,
-                640,
+                800,
                 image::ColorType::Rgb8,
             )
             .unwrap();

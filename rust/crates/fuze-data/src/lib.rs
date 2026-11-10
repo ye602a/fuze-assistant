@@ -78,6 +78,13 @@ impl Prepared {
     pub fn version(&self) -> &str {
         &self.version
     }
+    /// Player-facing metadata only; identity/version remain the immutable cache key.
+    pub fn display_version(&self) -> String {
+        let meta = self.documents.values().find(|v| {
+            v["dataVersion"].as_str() == Some(self.version.as_str()) && v["dataDate"].is_string()
+        });
+        display_version(&self.version, meta.and_then(|v| v["dataDate"].as_str()))
+    }
     pub fn source(&self) -> Source {
         self.source
     }
@@ -445,4 +452,44 @@ pub fn prepare_version(
         }
     }
     Err("data-no-complete-local-version")
+}
+
+/// Strip snapshot revisions only for presentation. Dates come from source metadata.
+pub fn display_version(identity: &str, date: Option<&str>) -> String {
+    let version = identity.rsplit('@').next().unwrap_or(identity);
+    let patch = recognition::patch(version)
+        .map(|_| version.split('.').take(2).collect::<Vec<_>>().join("."));
+    let label = patch.unwrap_or_else(|| "版本未知".into());
+    match date.filter(|d| {
+        d.len() == 10
+            && d.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            })
+    }) {
+        Some(date) => format!("{label} · {date} 更新"),
+        None => format!("{label} · 更新日期未知"),
+    }
+}
+#[cfg(test)]
+mod display_version_tests {
+    #[test]
+    fn snapshot_id_is_not_a_date_and_legacy_versions_remain_readable() {
+        let identity = "zh-CN@16.22.1794190210597";
+        assert_eq!(
+            super::display_version(identity, Some("2026-11-08")),
+            "16.22 · 2026-11-08 更新"
+        );
+        assert_eq!(
+            super::display_version(identity, None),
+            "16.22 · 更新日期未知"
+        );
+        assert_eq!(
+            super::display_version("zh-CN@16.21.5-augments16.21", None),
+            "16.21 · 更新日期未知"
+        );
+    }
 }

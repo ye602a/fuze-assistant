@@ -94,6 +94,7 @@ pub struct Status {
     pub recognition: crate::recognition_sources::Summary,
     pub done: bool,
     pub available: Option<String>,
+    pub data_label: String,
     pub notice: Option<&'static str>,
     pub update_error: Option<&'static str>,
     pub data_progress: crate::data_update::Progress,
@@ -120,6 +121,7 @@ impl Default for Status {
             recognition: Default::default(),
             done: false,
             available: None,
+            data_label: "—".into(),
             notice: None,
             update_error: None,
             data_progress: Default::default(),
@@ -235,7 +237,8 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
     let available = |locale| {
         fuze_data::prepare(&roots, locale, fuze_data::Scope::Ocr)
             .ok()
-            .map(|d| d.identity())
+            .map(|d| (Some(d.identity()), d.display_version()))
+            .unwrap_or((None, "—".into()))
     };
     if let Ok((_, summary)) = crate::recognition_sources::load(&roots) {
         if let Ok(mut s) = shared.status.lock() {
@@ -293,7 +296,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             s.history = fixture_history;
         }
         s.initialized = true;
-        s.available = initial_available;
+        (s.available, s.data_label) = initial_available;
         s.preferences = preferences.clone();
         s.ui_locale = match preferences.locale.as_str() {
             "auto" => "zh-CN",
@@ -469,7 +472,8 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     .ok()
                     .map(|(_, s)| s);
                 if let Ok(mut status) = shared.status.lock() {
-                    status.available = available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
+                    (status.available, status.data_label) =
+                        available(config.locale.unwrap_or(fuze_data::Locale::ZhCn));
                     status.data_progress = crate::data_update::Progress {
                         message: crate::data_update::result_message(
                             &result.as_ref().map(|o| o.updated).map_err(|e| *e),
@@ -720,7 +724,10 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
             let data = if reconfigured {
                 available(config.locale.unwrap_or(fuze_data::Locale::ZhCn))
             } else {
-                shared.status().available
+                {
+                    let s = shared.status();
+                    (s.available, s.data_label)
+                }
             };
             let mut history = shared.status().history;
             if result.is_ok() && reconfigured {
@@ -740,7 +747,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     v => v,
                 }
                 .into();
-                s.available = data;
+                (s.available, s.data_label) = data;
                 if reconfigured {
                     s.selection = None;
                     s.playing = None;
@@ -836,6 +843,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                             }
                         }
                         s.available = Some(identity.into());
+                        s.data_label = champions.display_version().unwrap_or("—").into();
                     }
                     if selection.is_some() && selected_locale.is_none() {
                         s.notice = Some("选人参考等待客户端语言，暂不混用不同语言数据。");

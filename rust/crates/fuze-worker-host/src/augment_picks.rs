@@ -39,6 +39,8 @@ struct Offer {
 }
 struct Pending {
     card: (u32, String),
+    slot: usize,
+    screen: (u32, u32),
     at: u64,
     absent: Option<u64>,
 }
@@ -95,11 +97,18 @@ impl Tracker {
             self.diagnostics.reason = Reason::IncompleteCards;
             return;
         }
-        if self
-            .offer
-            .as_ref()
-            .is_none_or(|o| o.cards != cards || o.screen != screen)
-        {
+        // OCR changes in another slot do not change the card the player clicked.
+        let changed_pending = self.pending.as_ref().is_some_and(|p| {
+            p.absent.is_some()
+                || p.screen != screen
+                || cards[p.slot].as_ref().map(|c| c.0) != Some(p.card.0)
+        });
+        let changed_press = self.down.is_some_and(|(slot, _)| {
+            self.offer
+                .as_ref()
+                .is_none_or(|o| o.screen != screen || o.cards[slot] != cards[slot])
+        });
+        if changed_pending || changed_press {
             self.cancel();
         }
         self.offer = Some(Offer { cards, screen, at });
@@ -156,6 +165,8 @@ impl Tracker {
                             .and_then(|o| o.cards[slot].clone())
                             .map(|card| Pending {
                                 card,
+                                slot,
+                                screen: self.offer.as_ref().unwrap().screen,
                                 at,
                                 absent: None,
                             });
@@ -166,7 +177,7 @@ impl Tracker {
             self.cancel();
         }
     }
-    fn frame(&mut self, evidence: Option<Evidence>, at: u64) {
+    fn expire(&mut self, at: u64) {
         if self
             .pending
             .as_ref()
@@ -175,11 +186,37 @@ impl Tracker {
             self.cancel();
             self.diagnostics.reason = Reason::CloseTimeout;
         }
+    }
+    fn capture_at(&mut self, scheduled: Option<u64>, next_capture: u64, at: u64) -> Option<u64> {
+        // Also expire on duplicate/timeout frames, which never reach frame().
+        self.expire(at);
+        scheduled.map(|at| {
+            if self.pending.is_some() {
+                at.min(next_capture)
+            } else {
+                at
+            }
+        })
+    }
+    fn frame(&mut self, evidence: Option<Evidence>, at: u64) {
+        // A capture already in flight when the click arrived cannot confirm its result.
+        if self.pending.as_ref().is_some_and(|p| at <= p.at) {
+            return;
+        }
+        self.expire(at);
         match evidence {
             Some(Evidence::Visible) => {
-                if let Some(p) = &mut self.pending {
-                    p.absent = None;
+                if self.pending.as_ref().is_some_and(|p| p.absent.is_some()) {
+                    self.cancel();
                 }
+            }
+            Some(Evidence::Partial | Evidence::Uncertain)
+                if self.pending.as_ref().is_some_and(|p| p.absent.is_none()) =>
+            {
+                // Fade-out is not confirmation. Keep only the actual click until
+                // fresh absent frames arrive; do not accept clicks on stale cards.
+                self.offer = None;
+                self.down = None;
             }
             Some(Evidence::Absent) => {
                 self.offer = None;
@@ -241,7 +278,15 @@ impl Recorder {
     pub fn cancel(&mut self) {
         self.shared.lock().unwrap().cancel();
     }
-    pub fn frame(&mut self, evidence: Option<Evidence>) {
+    /// Finish the observed click even if closing the popup already slowed recognition.
+    /// None still means paused/disconnected/faulted; this never starts recognition.
+    pub fn capture_at(&self, scheduled: Option<u64>, next_capture: u64) -> Option<u64> {
+        self.shared
+            .lock()
+            .unwrap()
+            .capture_at(scheduled, next_capture, now())
+    }
+    pub fn frame(&mut self, evidence: Option<Evidence>, captured: u64) {
         let visible = self
             .target
             .as_ref()
@@ -249,7 +294,11 @@ impl Recorder {
             .is_some();
         let mut s = self.shared.lock().unwrap();
         s.lost_input(self.input_lost.load(Ordering::Acquire));
-        s.frame(if visible { evidence } else { None }, now());
+        if visible {
+            s.frame(evidence, captured);
+        } else {
+            s.cancel();
+        }
     }
     pub fn offer(&mut self, slots: &[Slot; 3], kind: TitleKind, captured: u64, screen: (u32, u32)) {
         let at = now();
@@ -414,13 +463,8 @@ mod tests {
         assert_eq!(s.owned[0].0, 9999);
     }
     #[test]
-    fn occlusion_alt_tab_shards_skills_and_unreadable_cards_never_confirm_a_pick() {
-        for evidence in [
-            None,
-            Some(Evidence::Partial),
-            Some(Evidence::Uncertain),
-            Some(Evidence::TitlesOnly),
-        ] {
+    fn black_frame_shards_skills_and_unreadable_clicked_card_never_confirm_a_pick() {
+        for evidence in [None, Some(Evidence::TitlesOnly)] {
             let mut s = offer();
             click(&mut s, 1, 200);
             s.frame(evidence, 300);
@@ -529,6 +573,151 @@ mod gameplay_regressions {
         let p = Some((550, 400));
         s.pointer(true, p, at);
         s.pointer(false, p, at + 20);
+    }
+    #[test]
+    fn closed_level_gate_allows_only_the_pending_close_confirmation_then_sleeps() {
+        use fuze_runtime::{
+            screen_gate::ScreenGate,
+            session::{FrameKey, Phase, Session},
+        };
+        let mut session = Session::new("zh-CN@fixture".into()).unwrap();
+        session.update_phase(Phase::InProgress).unwrap();
+        session.update_level(3, 0);
+        let ticket = session
+            .begin(
+                FrameKey {
+                    epoch: 1,
+                    sequence: 1,
+                },
+                0,
+            )
+            .unwrap();
+        assert!(session
+            .finish(
+                ticket,
+                cards(),
+                fuze_runtime::gate::Selection::Candidate,
+                100
+            )
+            .is_some());
+        session.screen_visible(100);
+        let mut gate = ScreenGate::default();
+        gate.observe(Evidence::Visible, 0);
+        gate.observe(Evidence::Visible, 100);
+        let mut s = Tracker::default();
+        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        s.frame(Some(Evidence::Uncertain), 600);
+        gate.observe(Evidence::Uncertain, 600);
+        s.frame(Some(Evidence::Absent), 1100);
+        let decision = gate.observe(Evidence::Absent, 1100);
+        assert!(decision.closed);
+        session.screen_probe(false, decision.closed, 1100);
+        assert!(session.wake_at(1100).unwrap() > 2220);
+        assert_eq!(s.capture_at(session.wake_at(1100), 1600, 1100), Some(1600));
+        assert_eq!(s.capture_at(None, 1600, 1100), None);
+        assert!(session
+            .begin(
+                FrameKey {
+                    epoch: 1,
+                    sequence: 2
+                },
+                1600
+            )
+            .is_none());
+        s.frame(Some(Evidence::Absent), 1600);
+        assert_eq!(s.owned[0].0, 1004);
+        session.update_level(6, 1600);
+        assert_eq!(
+            s.capture_at(session.wake_at(1600), 2100, 1600),
+            session.wake_at(1600)
+        );
+        assert_eq!(
+            session.level_schedule(1600).0.mode,
+            fuze_runtime::gate::Mode::Saving
+        );
+    }
+    #[test]
+    fn missing_capture_cannot_keep_confirmation_polling_after_timeout() {
+        let mut s = Tracker::default();
+        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        assert_eq!(s.capture_at(Some(9000), 800, 300), Some(800));
+        // No usable capture ever arrives; the scheduling boundary must expire the click.
+        assert_eq!(s.capture_at(Some(9000), 2800, 2500), Some(9000));
+        assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
+        assert!(s.owned.is_empty());
+    }
+    #[test]
+    fn unrelated_ocr_change_during_press_and_after_click_keeps_clicked_identity() {
+        let mut s = Tracker::default();
+        let mut shown = cards();
+        s.show(&shown, TitleKind::Candidate, (1920, 1080), 100);
+        s.pointer(true, Some((550, 400)), 200);
+        shown[2] = Slot::Unreadable;
+        s.show(&shown, TitleKind::Candidate, (1920, 1080), 210);
+        s.pointer(false, Some((550, 400)), 220);
+        shown[1] = Slot::Unreadable;
+        s.show(&shown, TitleKind::Candidate, (1920, 1080), 250);
+        s.frame(Some(Evidence::Absent), 300);
+        s.frame(Some(Evidence::Absent), 800);
+        assert_eq!(s.owned.iter().map(|c| c.0).collect::<Vec<_>>(), [1004]);
+        assert_eq!(s.diagnostics.clicks, 1);
+        assert_eq!(s.diagnostics.cancelled, 0);
+    }
+    #[test]
+    fn fade_only_waits_for_two_fresh_absent_frames_and_does_not_extend_deadline() {
+        for late in [false, true] {
+            let mut s = Tracker::default();
+            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+            click(&mut s, 200);
+            s.frame(Some(Evidence::Partial), 300);
+            s.frame(Some(Evidence::Uncertain), 600);
+            assert!(s.owned.is_empty());
+            assert_eq!(s.slot(550, 400, 650), None);
+            let first = if late { 2000 } else { 800 };
+            s.frame(Some(Evidence::Absent), first);
+            assert!(s.owned.is_empty());
+            s.frame(Some(Evidence::Absent), first + 500);
+            assert_eq!(s.owned.len(), usize::from(!late));
+            if late {
+                assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
+            }
+        }
+    }
+    #[test]
+    fn pre_click_capture_cannot_start_close_confirmation() {
+        let mut s = Tracker::default();
+        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+        click(&mut s, 200);
+        // Capture started before mouse-up; its delivery must not count as a post-click close.
+        s.frame(Some(Evidence::Absent), 210);
+        s.frame(Some(Evidence::Absent), 750);
+        assert!(s.owned.is_empty());
+        s.frame(Some(Evidence::Absent), 1250);
+        assert_eq!(s.owned[0].0, 1004);
+    }
+    #[test]
+    fn fade_does_not_survive_black_frame_foreign_click_or_changed_target() {
+        for kind in 0..4 {
+            let mut s = Tracker::default();
+            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
+            click(&mut s, 200);
+            s.frame(Some(Evidence::Partial), 300);
+            match kind {
+                0 => s.frame(None, 400),
+                1 => s.pointer(true, None, 400),
+                2 => {
+                    let mut next = cards();
+                    next[0] = Slot::Unreadable;
+                    s.show(&next, TitleKind::Candidate, (1920, 1080), 400);
+                }
+                _ => s.show(&cards(), TitleKind::Candidate, (1280, 720), 400),
+            }
+            s.frame(Some(Evidence::Absent), 500);
+            s.frame(Some(Evidence::Absent), 1000);
+            assert!(s.owned.is_empty());
+        }
     }
     #[test]
     fn known_clicked_card_survives_unreadable_other_card() {

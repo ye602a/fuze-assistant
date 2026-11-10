@@ -64,6 +64,7 @@ impl Worker {
                                         Arc::new(Loaded {
                                             id: local.id,
                                             version: local.version.clone(),
+                                            display_version: local.display_version.clone(),
                                             detail: v.detail,
                                         })
                                     })
@@ -753,7 +754,7 @@ pub fn attach_shared(
                     ui.set_detail_status(
                         format!(
                             "{} · {}\n实际领取轮次未确认，不自动使用阶段排序。",
-                            loaded.version,
+                            loaded.display_version,
                             if !finished {
                                 "正在获取腾讯海斗推荐；本地数据已显示"
                             } else if loaded

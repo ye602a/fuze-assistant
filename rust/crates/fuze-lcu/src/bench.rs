@@ -61,8 +61,19 @@ impl Lobby {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Attempt {
     Accepted,
+    Acquired,
     Stop,
     Retry,
+}
+
+/// Only the bench write uses this policy; other LCU endpoints keep their own status contract.
+pub(crate) fn response(code: u32) -> crate::Result<Attempt> {
+    match code {
+        200..=299 => Ok(Attempt::Accepted),
+        400 | 409 => Ok(Attempt::Retry),
+        429 | 500 | 502 | 503 | 504 => Ok(Attempt::Retry),
+        _ => crate::status(code).map(|_| Attempt::Accepted),
+    }
 }
 
 pub(crate) fn attempt(
@@ -72,12 +83,13 @@ pub(crate) fn attempt(
     active: &std::sync::atomic::AtomicBool,
     post: impl FnOnce(u32) -> crate::Result<Attempt>,
 ) -> crate::Result<Attempt> {
-    if active.load(std::sync::atomic::Ordering::Acquire)
-        && lobby.is_some_and(|l| l.offers(game, hero))
-    {
-        post(hero)
-    } else {
-        Ok(Attempt::Stop)
+    if !active.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(Attempt::Stop);
+    }
+    match lobby {
+        Some(l) if l.offers(game, hero) => post(hero),
+        Some(_) => Ok(Attempt::Stop),
+        None => Ok(Attempt::Retry), // Missing/temporarily disabled is not a known empty pool.
     }
 }
 #[cfg(test)]
@@ -88,6 +100,21 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    #[test]
+    fn bench_status_classification_preserves_request_errors() {
+        for code in [400, 409] {
+            assert_eq!(response(code), Ok(Attempt::Retry));
+        }
+        for code in [429, 500, 502, 503, 504] {
+            assert_eq!(response(code), Ok(Attempt::Retry));
+        }
+        for code in [200, 204] {
+            assert_eq!(response(code), Ok(Attempt::Accepted));
+        }
+        for code in [401, 403, 404, 405, 422, 501] {
+            assert!(response(code).is_err());
+        }
+    }
     #[test]
     fn locked_target_retries_until_swap_is_accepted_and_never_switches_slots() {
         let session = json!({"localPlayerCellId":1,"myTeam":[{"cellId":1,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":22},{"championId":11}]});
@@ -175,7 +202,10 @@ mod tests {
         stopped(lobby(&gone));
         session["gameId"] = 82.into();
         stopped(lobby(&session));
-        stopped(None); // left the lobby
+        assert_eq!(
+            attempt(None, 81, hero, &active, |_| panic!("unknown pool")),
+            Ok(Attempt::Retry)
+        );
         session["benchEnabled"] = false.into();
         assert!(lobby(&session).is_none());
     }

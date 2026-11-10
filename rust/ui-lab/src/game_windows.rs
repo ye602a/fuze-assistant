@@ -170,6 +170,18 @@ impl Panel {
             if let Some(h) = hwnd(self.ui.window()) {
                 unsafe {
                     self.memory.borrow().restore(h);
+                    if !self.ui.get_side_mode() {
+                        // Keep the remembered position/width, but replace the old compact height.
+                        let size = self
+                            .ui
+                            .window()
+                            .size()
+                            .to_logical(self.ui.window().scale_factor());
+                        self.ui
+                            .window()
+                            .set_size(slint::LogicalSize::new(size.width, 800.));
+                        self.memory.borrow().recover(h);
+                    }
                 }
             }
             self.initial = false;
