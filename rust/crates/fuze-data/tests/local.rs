@@ -247,12 +247,16 @@ fn champion_scope_reads_only_selected_shard_and_preserves_missing_rates_and_orig
             .unwrap();
     let stats = data.recommendations(8).unwrap();
     assert_eq!(stats[&100].win_rate, Some(0.6));
-    assert!((stats[&100].score.unwrap() - 0.384).abs() < 1e-9);
+    // The invalid third row is catalogue-only; it must not discard the two
+    // valid source ranks and force the old weighted-rate fallback.
+    assert_eq!(stats[&100].score, Some(1.));
+    assert_eq!(stats[&101].score, Some(0.));
     assert_eq!(stats[&100].region, "WORLD");
     assert_eq!(stats[&100].patch, "16.19");
     assert_eq!(stats[&101].win_rate, None);
     assert_eq!(stats[&102].win_rate, None);
     assert_eq!(stats[&102].pick_rate, None);
+    assert_eq!(stats[&102].score, None);
     assert!(data.recommendations(9).is_err());
     assert!(prepare(&roots, Locale::ZhCn, Scope::Champion(9)).is_err());
     root.write(

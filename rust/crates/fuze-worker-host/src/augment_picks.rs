@@ -29,6 +29,8 @@ pub struct Diagnostics {
 
 const FRESH_MS: u64 = 900;
 const CLOSE_MS: u64 = 2000;
+const PANDORAS_BOX: u32 = 12317;
+/// Confirmed augments still known to be owned, not the history of all choices.
 pub type Owned = Arc<Vec<(u32, String)>>;
 
 #[derive(Clone, PartialEq)]
@@ -226,7 +228,13 @@ impl Tracker {
                     // Two fresh captures spanning the existing screen-close grace, not OCR misses.
                     if at.saturating_sub(since) >= 500 {
                         let p = self.pending.take().unwrap();
-                        if !self.owned.iter().any(|c| c.0 == p.card.0) {
+                        if p.card.0 == PANDORAS_BOX {
+                            // All previous augments are replaced by unknown random
+                            // prismatics. Neither they nor this transformation are
+                            // confirmed prerequisites for later combination advice.
+                            self.owned = Owned::default();
+                            self.diagnostics.reason = Reason::None;
+                        } else if !self.owned.iter().any(|c| c.0 == p.card.0) {
                             Arc::make_mut(&mut self.owned).push(p.card);
                             self.diagnostics.reason = Reason::None;
                         }
@@ -437,6 +445,119 @@ mod tests {
             crate::augment_combos::reference(Some(&snapshot), 145, "16.22", &s.owned, 3086, 101);
         assert_eq!(combo.partners, "符文1004");
         assert_eq!(combo.statistic, "两符文搭配胜率\n65.0% · 6819 场");
+    }
+    #[test]
+    fn pandoras_box_invalidates_owned_only_after_the_existing_close_confirmation() {
+        let mut s = offer();
+        click(&mut s, 0, 200);
+        close(&mut s, 300);
+        let previous = s.owned.clone();
+        s.show(
+            &cards([PANDORAS_BOX, 2018, 3060]),
+            TitleKind::Candidate,
+            (1920, 1080),
+            1100,
+        );
+        assert!(Arc::ptr_eq(&previous, &s.owned));
+        click(&mut s, 0, 1200);
+        s.frame(Some(Evidence::Absent), 1210); // Capture began before mouse-up.
+        s.frame(Some(Evidence::Partial), 1250);
+        s.frame(Some(Evidence::Absent), 1300);
+        s.frame(Some(Evidence::Absent), 1799);
+        assert!(Arc::ptr_eq(&previous, &s.owned));
+        s.frame(Some(Evidence::Absent), 1800);
+        assert!(s.owned.is_empty());
+        assert!(s.pending.is_none());
+        assert_eq!(s.diagnostics.reason, Reason::None);
+        assert_eq!(s.diagnostics.clicks, 2);
+        assert_eq!(s.diagnostics.cancelled, 0);
+        // Readers may retain the old snapshot, but it is no longer the live set.
+        assert_eq!(previous[0].0, 1004);
+        assert!(!Arc::ptr_eq(&previous, &s.owned));
+    }
+    #[test]
+    fn unconfirmed_or_cancelled_pandoras_box_preserves_previous_owned() {
+        for interrupted in 0..5 {
+            let previous = Arc::new(vec![(1004, "符文1004".into())]);
+            let mut s = Tracker {
+                owned: previous.clone(),
+                ..Default::default()
+            };
+            s.show(
+                &cards([PANDORAS_BOX, 2018, 3060]),
+                TitleKind::Candidate,
+                (1920, 1080),
+                100,
+            );
+            if interrupted != 0 {
+                click(&mut s, 0, 200);
+            }
+            match interrupted {
+                0 => close(&mut s, 300), // Disappearance without a click.
+                1 => {
+                    s.frame(Some(Evidence::Absent), 300);
+                    s.frame(Some(Evidence::Absent), 2500); // Original 2s deadline.
+                }
+                2 => {
+                    s.frame(None, 300);
+                    close(&mut s, 400);
+                }
+                3 => {
+                    s.pointer(true, None, 300); // Foreign input interrupts the click.
+                    close(&mut s, 400);
+                }
+                _ => {
+                    s.frame(Some(Evidence::Absent), 300);
+                    s.frame(Some(Evidence::Visible), 400);
+                    close(&mut s, 500);
+                }
+            }
+            assert!(Arc::ptr_eq(&previous, &s.owned));
+            assert!(s.pending.is_none());
+        }
+    }
+    #[test]
+    fn recorder_restore_keeps_transformed_ownership_empty_until_a_new_confirmed_pick() {
+        let mut recorder = Recorder::default();
+        recorder.restore(Arc::new(vec![
+            (1004, "符文1004".into()),
+            (2018, "符文2018".into()),
+        ]));
+        {
+            let mut s = recorder.shared.lock().unwrap();
+            s.show(
+                &cards([PANDORAS_BOX, 2018, 3060]),
+                TitleKind::Candidate,
+                (1920, 1080),
+                100,
+            );
+            click(&mut s, 0, 200);
+            close(&mut s, 300);
+        }
+        recorder.cancel();
+        // Controller recovery stores owned(), including an empty set, and passes
+        // that exact snapshot to the replacement worker's Recorder::restore().
+        let saved = recorder.owned();
+        assert!(saved.is_empty());
+        let mut resumed = Recorder::default();
+        resumed.restore(saved.clone());
+        assert!(Arc::ptr_eq(&saved, &resumed.owned()));
+        assert_eq!(resumed.diagnostics().owned, 0);
+        {
+            let mut s = resumed.shared.lock().unwrap();
+            s.show(
+                &cards([1004, 2018, 3060]),
+                TitleKind::Candidate,
+                (1920, 1080),
+                1100,
+            );
+            click(&mut s, 2, 1200);
+            close(&mut s, 1300);
+        }
+        assert_eq!(&*resumed.owned(), &[(3060, "符文3060".into())]);
+        let mut restarted = Recorder::default();
+        restarted.restore(resumed.owned());
+        assert_eq!(&*restarted.owned(), &[(3060, "符文3060".into())]);
     }
     #[test]
     fn reroll_invalidates_inflight_ocr_and_does_not_record_replacement_in_old_slot() {

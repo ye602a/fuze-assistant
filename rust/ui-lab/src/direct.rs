@@ -71,7 +71,14 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 296;
+const HEIGHT: u32 = 424;
+const CARD_BOTTOM: f32 = 356.;
+const STAGE_COLUMN_WIDTH: f32 = 52.;
+const STAGE_VALUE_Y: f32 = 298.;
+const STAGE_SAMPLES_Y: f32 = 318.;
+const STAGE_SOURCE_Y: f32 = 362.;
+const STAGE_NOTE_Y: f32 = 402.;
+const STAGE_NOTE: &str = "当前轮次未确认 · 阶段参考不改变整体推荐 · 下行为场次，少样本：不足200场";
 const TITLE_WIDTH: f32 = 154.;
 const TITLE_HEIGHT: f32 = 64.;
 const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
@@ -147,7 +154,7 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [12., 15., 20., 24., 20., 22.] {
+            for size in [12., 15., 20., 24., 20., 22., 11.] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
@@ -422,11 +429,11 @@ impl Surface {
                     .cards
                     .iter()
                     .all(|c| c.score.unwrap_or(-1.) <= card.score.unwrap());
-            self.fill(target, rect(x, 34., 242., (HEIGHT - 64) as f32), PANEL);
+            self.fill(target, rect(x, 34., 242., CARD_BOTTOM - 34.), PANEL);
             self.brush
                 .SetColor(&color(if best { GOLD } else { 0x52616b }));
             target.DrawRectangle(
-                &rect(x, 34., 242., (HEIGHT - 64) as f32),
+                &rect(x, 34., 242., CARD_BOTTOM - 34.),
                 &self.brush,
                 1.,
                 None,
@@ -520,7 +527,11 @@ impl Surface {
                 self.text(
                     scene,
                     target,
-                    "暂无统计 · 点击查看效果",
+                    if scene.interactive {
+                        "暂无统计 · 点击查看效果"
+                    } else {
+                        "暂无技能选择统计"
+                    },
                     0,
                     rect(x + 14., 200., 214., 22.),
                     MUTED,
@@ -612,25 +623,75 @@ impl Surface {
                 MUTED,
             );
             self.fill(target, rect(x + 14., 182., 214., 1.), 0x34434c);
+            // This reference must remain visible when production card clicks are disabled.
+            // No column is highlighted: the current formal selection stage is still unknown.
+            self.fill(target, rect(x + 14., 274., 214., 1.), 0x34434c);
+            for stage in 0..4 {
+                let sx = x + 14. + stage as f32 * 54.;
+                self.text(
+                    scene,
+                    target,
+                    &format!("第{}次", stage + 1),
+                    0,
+                    rect(sx, 280., STAGE_COLUMN_WIDTH, 18.),
+                    MUTED,
+                );
+                self.text(
+                    scene,
+                    target,
+                    &scene.reference.values[i][stage],
+                    0,
+                    rect(sx, STAGE_VALUE_Y, STAGE_COLUMN_WIDTH, 20.),
+                    TEXT,
+                );
+                self.text(
+                    scene,
+                    target,
+                    &scene.reference.samples[i][stage],
+                    6,
+                    rect(sx, STAGE_SAMPLES_Y, STAGE_COLUMN_WIDTH, 32.),
+                    MUTED,
+                );
+            }
         }
-        self.text(
-            scene,
-            target,
-            if !scene.interactive {
-                ""
-            } else if scene
-                .cards
-                .iter()
-                .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
-            {
-                "点击卡片查看技能强化效果 · 暂无技能选择统计"
-            } else {
-                "点击卡片查看效果、统计来源与分阶段参考"
-            },
-            0,
-            rect(12., (HEIGHT - 24) as f32, 736., 20.),
-            MUTED,
-        );
+        let ordinary_cards = scene.cards.iter().any(|c| {
+            c.id.is_some_and(|id| fuze_contract::skill_choice::get(id).is_none())
+        });
+        if ordinary_cards {
+            self.text(
+                scene,
+                target,
+                &scene.reference.source,
+                0,
+                rect(12., STAGE_SOURCE_Y, 736., 36.),
+                MUTED,
+            );
+            self.text(
+                scene,
+                target,
+                STAGE_NOTE,
+                0,
+                rect(12., STAGE_NOTE_Y, 736., 18.),
+                MUTED,
+            );
+        } else if scene
+            .cards
+            .iter()
+            .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
+        {
+            self.text(
+                scene,
+                target,
+                if scene.interactive {
+                    "点击卡片查看技能强化效果 · 暂无技能选择统计"
+                } else {
+                    "技能强化选择 · 暂无技能选择统计"
+                },
+                0,
+                rect(12., STAGE_NOTE_Y, 736., 18.),
+                MUTED,
+            );
+        }
         if let Some(index) = scene.selected {
             self.fill(target, rect(9., 173. + DETAIL_OFFSET, 742., 198.), PANEL);
             self.text(
@@ -852,7 +913,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..(HEIGHT - 30) as f32).contains(&y) {
+    } else if (34. ..CARD_BOTTOM).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -1500,7 +1561,7 @@ impl HostOverlay {
     pub fn dismissed(&self) -> bool {
         self.window.state.dismissed
     }
-    pub fn render(&self, path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn pixels(&self) -> std::result::Result<image::RgbaImage, Box<dyn std::error::Error>> {
         unsafe {
             let height = HEIGHT
                 + if self.window.state.scene.selected.is_some() {
@@ -1531,9 +1592,13 @@ impl HostOverlay {
             for pixel in pixels.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
-            image::save_buffer(path, &pixels, WIDTH, height, image::ColorType::Rgba8)?;
-            Ok(())
+            image::RgbaImage::from_raw(WIDTH, height, pixels)
+                .ok_or_else(|| "overlay-review-image-size".into())
         }
+    }
+    pub fn render(&self, path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        self.pixels()?.save(path)?;
+        Ok(())
     }
     /// Synthetic hidden-window review; no input messages or production position storage.
     pub fn review_reference(
@@ -1563,20 +1628,101 @@ impl HostOverlay {
         {
             return Err("stage-reference-changed-recommendation-or-repainted".into());
         }
-        self.render(&output.join("host-cards-four-stage-reference.png"))?;
-        // Stage statistics live in card details; no input is sent to the OS.
-        unsafe {
-            handle_click(self.window.hwnd, &mut self.window.state, 100., 196.);
-        }
-        if self.window.state.scene.selected != Some(0) {
-            return Err("stage-reference-detail-route".into());
-        }
-        self.render(&output.join("host-cards-stage-samples.png"))?;
-        self.window.state.scene.select(None)?;
-        unsafe {
-            size_to_content(self.window.hwnd, false);
-        }
-        Ok(())
+        let interactive = self.window.state.scene.interactive;
+        self.window.state.scene.interactive = false;
+        let result = (|| {
+            // Exercise the production event gate on our hidden window, not handle_click().
+            // This dispatches only to our own HWND; it sends no system or game input.
+            unsafe {
+                SendMessageW(
+                    self.window.hwnd,
+                    WM_LBUTTONUP,
+                    None,
+                    Some(LPARAM(100 | (196 << 16))),
+                );
+            }
+            if self.window.state.scene.selected.is_some() {
+                return Err("passive-stage-reference-opened-details".into());
+            }
+            let scene = &self.window.state.scene;
+            let fits = |text: &str, format: usize, width: f32, height: f32| {
+                let text: Vec<_> = text.encode_utf16().collect();
+                unsafe {
+                    let layout =
+                        scene
+                            .dw
+                            .CreateTextLayout(&text, &scene.formats[format], width, 32768.)?;
+                    let mut metrics = DWRITE_TEXT_METRICS::default();
+                    layout.GetMetrics(&mut metrics)?;
+                    Ok::<_, windows::core::Error>(
+                        metrics.width <= width && metrics.height <= height,
+                    )
+                }
+            };
+            for row in &scene.reference.values {
+                for value in row {
+                    if !fits(value, 0, STAGE_COLUMN_WIDTH, 20.)? {
+                        return Err("stage-reference-value-clipped".into());
+                    }
+                }
+            }
+            for row in &scene.reference.samples {
+                for samples in row {
+                    if !fits(samples, 6, STAGE_COLUMN_WIDTH, 32.)? {
+                        return Err("stage-reference-samples-clipped".into());
+                    }
+                }
+            }
+            if !fits("9007199254740991", 6, STAGE_COLUMN_WIDTH, 32.)?
+                || !fits(&scene.reference.source, 0, 736., 36.)?
+                || !fits(STAGE_NOTE, 0, 736., 18.)?
+            {
+                return Err("stage-reference-context-clipped".into());
+            }
+            let shown = self.pixels()?;
+            let reference = self.window.state.scene.reference.clone();
+            let mut empty = (*reference).clone();
+            empty.source.clear();
+            for row in empty.values.iter_mut().chain(&mut empty.samples) {
+                for cell in row {
+                    cell.clear();
+                }
+            }
+            self.window.state.scene.reference = std::sync::Arc::new(empty);
+            let empty = self.pixels();
+            self.window.state.scene.reference = reference;
+            let empty = empty?;
+            let changed = |x: u32, y: u32, width: u32, height: u32| {
+                (y..y + height)
+                    .any(|y| (x..x + width).any(|x| shown.get_pixel(x, y) != empty.get_pixel(x, y)))
+            };
+            for (index, card) in cards.iter().enumerate() {
+                if card
+                    .id
+                    .is_none_or(|id| fuze_contract::skill_choice::get(id).is_some())
+                {
+                    continue;
+                }
+                for stage in 0..4 {
+                    let x = 23 + index as u32 * 250 + stage * 54;
+                    if !changed(x, STAGE_VALUE_Y as u32, STAGE_COLUMN_WIDTH as u32, 20)
+                        || !changed(x, STAGE_SAMPLES_Y as u32, STAGE_COLUMN_WIDTH as u32, 32)
+                    {
+                        return Err("passive-stage-reference-cell-not-painted".into());
+                    }
+                }
+            }
+            if !changed(12, STAGE_SOURCE_Y as u32, 736, 36) {
+                return Err("passive-stage-reference-source-not-painted".into());
+            }
+            shown.save(output.join("host-cards-four-stage-reference.png"))?;
+            if cards != self.window.state.scene.cards || ids != self.ids || !self.hidden() {
+                return Err("passive-stage-reference-changed-cards-or-visibility".into());
+            }
+            Ok(())
+        })();
+        self.window.state.scene.interactive = interactive;
+        result
     }
     /// Synthetic hidden-window review; no input messages or production position storage.
     pub fn review_description(
@@ -1734,8 +1880,17 @@ mod skill_tests {
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _com = Com::new()?;
         let mut scene = Scene::new()?;
+        scene.interactive = false;
         let scores = scene.cards.each_ref().map(|c| c.score);
-        let mut reference = crate::stage_cards::Comparison::default();
+        let ids = scene.cards.each_ref().map(|c| c.id);
+        let sample = reference_fixture(ids);
+        let mut reference = crate::stage_cards::compare(
+            Some(&sample),
+            4,
+            ids,
+            "16.20",
+            fuze_worker_host::stage_reference::now(),
+        );
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
             ids: vec![10],
             partners: "秘术冲拳".into(),
@@ -2177,6 +2332,7 @@ pub fn review_icons(
 pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {
     let _com = Com::new()?;
     let mut scene = Scene::new()?;
+    scene.interactive = false;
     let sample = reference_fixture([Some(1), Some(2), Some(3)]);
     scene.reference = std::sync::Arc::new(crate::stage_cards::compare(
         Some(&sample),
@@ -2237,15 +2393,19 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             }
             let original = scene.cards.clone();
             let original_icons = scene.icons.clone();
+            let original_reference = scene.reference.clone();
             for variant in [
                 "complete",
                 "partial",
                 "long-title",
                 "overflow-title",
                 "missing-data",
+                "missing-stage-data",
+                "stage-and-combo",
             ] {
                 scene.cards = original.clone();
                 scene.icons = original_icons.clone();
+                scene.reference = original_reference.clone();
                 if variant == "long-title" {
                     scene.cards[0].title = "踢踏舞".into();
                     scene.cards[1].title = "你摸不到".into();
@@ -2270,6 +2430,17 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     scene.cards[0].score = None;
                     scene.cards[0].win = "—".into();
                     scene.cards[0].pick = "—".into();
+                } else if variant == "missing-stage-data" {
+                    scene.reference = std::sync::Arc::new(Default::default());
+                } else if variant == "stage-and-combo" {
+                    let mut reference = (*original_reference).clone();
+                    reference.combos[0] = fuze_worker_host::augment_combos::Reference {
+                        ids: vec![10],
+                        partners: "秘术冲拳".into(),
+                        statistic: "两符文搭配胜率\n62.0% · 532 场".into(),
+                        detail: "合成组合参考".into(),
+                    };
+                    scene.reference = std::sync::Arc::new(reference);
                 }
                 let partial = variant == "partial";
                 let surface = Surface::new(&scene, &target)?;
@@ -2289,6 +2460,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             }
             scene.cards = original;
             scene.icons = original_icons;
+            scene.reference = original_reference;
             cases.push(serde_json::json!({"dpi":dpi,"render":crate::telemetry::samples(&timings)}));
         }
         let before = GetForegroundWindow();
