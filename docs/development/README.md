@@ -57,3 +57,5 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 本地继续复用显式指定的共享 target 目录，不为清理空间删除正在使用的编译缓存。
 
 `rust-preview` 保留为已安装客户端的固定更新地址，Release 名称统一为「FUZE 在线更新文件」。保留 Pre-release 标记以免参与最新正式版选择；页面引导普通下载到最新正式版。发布脚本分别生成在线入口和正式版说明，不从入口正文改写正式版文案。不要删除该 Release 或改名其标签来整理展示。
+
+本机编译空间可通过 FUZE_BUILD_ROOT 指定到非系统盘（仅本机配置，不写入仓库绝对路径）。构建脚本优先采用显式 TargetDir，其次 CARGO_TARGET_DIR，再使用 FUZE_BUILD_ROOT/target；设置 FUZE_BUILD_ROOT 时临时编译文件也进入其 tmp 子目录。普通 Cargo 使用隔离 CARGO_HOME 中的配置。
