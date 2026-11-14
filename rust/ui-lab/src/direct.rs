@@ -294,24 +294,45 @@ fn combo_lines(reference: &crate::stage_cards::Comparison, index: usize) -> (Str
     let combo = &reference.combos[index];
     let alternatives = reference.combo_alternatives[index];
     let count = combo.ids.len();
-    let heading =
-        if count > 0 && (count > 1 || combo.heading.chars().count() > 17 || alternatives > 0) {
-            let mut heading = if reference.current_combos[index] {
-                format!("当前搭配 · {count}项前置")
-            } else {
-                format!("后续路线 · 尚缺{count}项")
-            };
-            if alternatives > 0 {
-                heading = if reference.current_combos[index] {
-                    format!("搭配{count}前置 · 另{alternatives}条")
-                } else {
-                    format!("后续缺{count}项 · 另{alternatives}条")
-                };
-            }
-            heading
+    let heading = if count == 1 {
+        let full_name = if combo.partners.trim().is_empty() {
+            format!("强化 #{}", combo.ids[0])
         } else {
-            combo.heading.clone()
+            combo.partners.clone()
         };
+        let name = if full_name.chars().count() > 8 {
+            format!("{}…", full_name.chars().take(7).collect::<String>())
+        } else {
+            full_name
+        };
+        let prefix = if reference.current_combos[index] {
+            "搭配"
+        } else {
+            "后续"
+        };
+        let alternatives = if alternatives > 0 {
+            format!(" · 另{alternatives}条")
+        } else {
+            String::new()
+        };
+        format!("{prefix} · {name}{alternatives}")
+    } else if count > 1 {
+        let mut heading = if reference.current_combos[index] {
+            format!("当前搭配 · {count}项前置")
+        } else {
+            format!("后续路线 · 尚缺{count}项")
+        };
+        if alternatives > 0 {
+            heading = if reference.current_combos[index] {
+                format!("搭配{count}前置 · 另{alternatives}条")
+            } else {
+                format!("后续缺{count}项 · 另{alternatives}条")
+            };
+        }
+        heading
+    } else {
+        combo.heading.clone()
+    };
     let summary = if !combo.statistic.is_empty() {
         let values = combo
             .statistic
@@ -1915,6 +1936,101 @@ impl HostOverlay {
 mod skill_tests {
     use super::*;
     #[test]
+    fn reference_fixture_history_and_missing_stage_follow_live_adapter() {
+        use fuze_data::contextual_advice::{Choice, StagePattern};
+        let mut cards: [Card; 3] = std::array::from_fn(|i| Card {
+            id: Some(i as u32 + 1),
+            title: format!("合成符文{}", i + 1),
+            win: "52.0%".into(),
+            score: Some([0.9, 0.8, 0.7][i]),
+            ..Default::default()
+        });
+        let frame = reference_frame_fixture(&cards);
+        let history = frame.history.as_ref().unwrap();
+        let interval = |id| {
+            history.by_augment[&id]
+                .comparison
+                .as_ref()
+                .unwrap()
+                .interval
+                .unwrap()
+        };
+        let narrow = interval(1);
+        let small = interval(2);
+        assert!(small.upper - small.lower > 2. * (narrow.upper - narrow.lower));
+        let shown = reference_view_fixture(&cards);
+        assert!(shown
+            .history
+            .iter()
+            .all(|h| h.delta == "-8.0 pp" && h.relation == "低于英雄均值"));
+        assert!(shown.history[0].samples.contains("n=1088"));
+        assert!(shown.history[1].samples.contains("n=199 · 少样本"));
+        assert_eq!(shown.history[0].interval, "约95%区间 49.0–55.0%");
+        assert_eq!(shown.history[1].interval, "约95%区间 45.1–58.8%");
+
+        let missing = reference_view_fixture_with_source(&cards, None);
+        assert_eq!(missing.history, shown.history);
+        assert!(missing.preferred(0, Some(1)));
+        assert_eq!(missing.decisions[0].choice, Choice::Preferred);
+        assert!(missing
+            .decisions
+            .iter()
+            .all(|d| d.stage.pattern == StagePattern::Unavailable));
+        assert!(missing.values.iter().flatten().all(|value| value == "—"));
+        assert!(missing
+            .combos
+            .iter()
+            .all(|combo| combo.summary == "组合数据尚未就绪"));
+        assert!(missing.current_combos.iter().all(|current| !current));
+        assert_eq!(
+            cards.each_ref().map(|card| card.score),
+            [Some(0.9), Some(0.8), Some(0.7)]
+        );
+
+        cards[2].win = "62.0%".into();
+        let higher = reference_view_fixture_with_source(&cards, None);
+        assert_eq!(higher.history[2].delta, "+2.0 pp");
+        assert_eq!(higher.history[2].relation, "高于英雄均值");
+    }
+
+    #[test]
+    fn single_future_route_keeps_partner_name_with_alternatives_without_icons() {
+        use fuze_worker_host::{augment_combos, stage_reference::Combination};
+        let mut snapshot = reference_fixture([Some(1), None, None]);
+        snapshot.combinations = Some(
+            (0..10)
+                .map(|i| Combination {
+                    ids: vec![1, if i == 0 { 1004 } else { 2000 + i }],
+                    win: 0.62,
+                    samples: 1000 - i as u64,
+                })
+                .collect(),
+        );
+        let names = std::collections::HashMap::from([(1004, "回归基本功".into())]);
+        let evidence =
+            augment_combos::evaluate(Some(&snapshot), 4, "16.20", &[], 1, snapshot.fetched);
+        let mut reference = crate::stage_cards::Comparison::default();
+        reference.combos[0] = augment_combos::present(&evidence, &names, None);
+        reference.combo_alternatives[0] = evidence.future.len() - 1;
+        // The formatter has no icon catalogue; the actual partner must be readable
+        // before its picture has ever appeared among the player's candidates.
+        let (heading, summary) = combo_lines(&reference, 0);
+        assert_eq!(heading, "后续 · 回归基本功 · 另9条");
+        assert!(summary.contains("62.0%") && reference.combos[0].detail.contains("回归基本功"));
+        assert_eq!(reference.combos[0].ids, [1004]);
+
+        let long_name = "合成很长很长的待选符文全名";
+        let names = std::collections::HashMap::from([(1004, long_name.into())]);
+        reference.combos[0] = augment_combos::present(&evidence, &names, None);
+        let short = format!("{}…", long_name.chars().take(7).collect::<String>());
+        assert_eq!(
+            combo_lines(&reference, 0).0,
+            format!("后续 · {short} · 另9条")
+        );
+        assert!(reference.combos[0].detail.contains(long_name));
+    }
+
+    #[test]
     fn evidence_follows_only_the_accepted_frame(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut publisher =
@@ -2375,58 +2491,98 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
 }
 
 /// Synthetic data for isolated WIC/hidden-window review, never a live data fallback.
-fn reference_view_fixture(cards: &[Card; 3]) -> crate::stage_cards::Comparison {
+/// Parsing display percentages is confined to this offline fixture so the mock
+/// history describes the exact rates already drawn on the cards.
+fn reference_frame_fixture(cards: &[Card; 3]) -> Frame {
     use fuze_data::{
-        contextual_advice::{self, Candidate},
-        decision_evidence::Rate,
+        decision_evidence::{HeroReference, HistoryContext, Rate, Scope},
+        recommendations::{Evidence, Recommendation},
     };
-    let ids = cards.each_ref().map(|c| c.id);
-    let sample = reference_fixture(ids);
-    let mut view = crate::stage_cards::compare(
-        Some(&sample),
-        4,
-        ids,
-        "16.20",
-        fuze_worker_host::stage_reference::now(),
-    );
-    let candidates = std::array::from_fn(|i| Candidate {
-        id: cards[i].id,
-        score: cards[i].score,
-        stages: std::array::from_fn(|j| {
-            let row = sample.rows[j + 1]
-                .iter()
-                .find(|r| Some(r.id) == cards[i].id)?;
-            Some(Rate {
-                value: row.win,
-                games: Some(row.samples),
-                wins: None,
-            })
-        }),
-        ..Default::default()
-    });
-    view.decisions = contextual_advice::decide(&candidates);
-    let names = cards
+    let scope = Scope {
+        source: fuze_data::aramkit::SOURCE.into(),
+        patch: "16.20".into(),
+        date: "2026-10-16".into(),
+        region: "地区未标明".into(),
+    };
+    let recommendations = cards
         .iter()
-        .filter_map(|c| Some((c.id?, c.title.clone())))
+        .enumerate()
+        .filter_map(|(i, card)| {
+            let value = card.win.strip_suffix('%')?.parse::<f64>().ok()? / 100.;
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return None;
+            }
+            Some((
+                card.id?,
+                Recommendation {
+                    evidence: Evidence {
+                        games: Some(if i == 1 { 199 } else { 1088 }),
+                        win_date: scope.date.clone(),
+                        ..Default::default()
+                    },
+                    win_rate: Some(value),
+                    pick_rate: None,
+                    score: card.score,
+                    origin: scope.source.clone(),
+                    region: scope.region.clone(),
+                    patch: scope.patch.clone(),
+                },
+            ))
+        })
         .collect();
-    for i in 0..3 {
-        view.reasons[i] = crate::stage_cards::reason_text(&view.decisions[i], &names);
-        view.stage_summary[i] = crate::stage_cards::stage_text(&view.decisions[i]);
-        view.history[i] = crate::stage_cards::HistoryDisplay {
-            relation: "低于英雄均值".into(),
-            delta: format!("-{:.1} pp", 8. - i as f64),
-            samples: if i == 1 {
-                "n=199 · 少样本 · 英雄 60.0%".into()
-            } else {
-                "n=1088 · 英雄 60.0%".into()
+    let history = HistoryContext::new(
+        "16.20".into(),
+        4,
+        Some(HeroReference {
+            champion: 4,
+            rate: Rate {
+                value: 0.6,
+                games: Some(10_000),
+                wins: None,
             },
-            interval: "约95%区间 49.0–55.0%".into(),
-        };
-        view.combos[i].heading = "暂无对应组合记录".into();
-        view.combos[i].summary = "公开榜单有限，缺失记录不代表不搭配".into();
+            scope,
+        }),
+        &recommendations,
+    );
+    Frame {
+        context: 1,
+        selection_cycle: 1,
+        snapshot: fuze_contract::Snapshot {
+            schema_version: 1,
+            generation: 1,
+            sequence: 1,
+            dataset_version: "16.20".into(),
+            selection_confirmed: false,
+            actual_stage: fuze_contract::ActualStage::Unknown,
+            slots: cards.each_ref().map(|card| {
+                card.id.map_or(Slot::Unreadable, |id| Slot::Known {
+                    id,
+                    name: card.title.clone(),
+                    confidence: 1.,
+                })
+            }),
+        },
+        retained: false,
+        deadline: None,
+        cards: Default::default(),
+        scores: cards.each_ref().map(|card| card.score),
+        history: Some(std::sync::Arc::new(history)),
     }
+}
+
+fn reference_view_fixture_with_source(
+    cards: &[Card; 3],
+    source: Option<fuze_worker_host::stage_reference::Snapshot>,
+) -> crate::stage_cards::Comparison {
+    let frame = reference_frame_fixture(cards);
+    let mut view = (*crate::stage_cards::Reference::review(&frame, 4, source)).clone();
     view.source.push_str(" · 离线合成比较样例");
     view
+}
+
+fn reference_view_fixture(cards: &[Card; 3]) -> crate::stage_cards::Comparison {
+    let ids = cards.each_ref().map(|card| card.id);
+    reference_view_fixture_with_source(cards, Some(reference_fixture(ids)))
 }
 /// Narrow artwork review: public bundle, synthetic missing URL and an isolated disk cache.
 /// Real worker completion updates the same frame. No download, discovery or system input.
@@ -2701,7 +2857,8 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                         crate::stage_cards::Comparison::default().history[0].clone();
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "missing-stage-data" {
-                    scene.reference = std::sync::Arc::new(Default::default());
+                    scene.reference =
+                        std::sync::Arc::new(reference_view_fixture_with_source(&scene.cards, None));
                 } else if variant == "stage-and-combo" {
                     let mut reference = (*original_reference).clone();
                     reference.combos[0] = fuze_worker_host::augment_combos::Reference {
@@ -2759,6 +2916,15 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                         detail: "合成三项缺失前置；所有ID与缺失数均须直显。".into(),
                     };
                     reference.combo_alternatives[0] = 7;
+                    reference.combos[1] = fuze_worker_host::augment_combos::Reference {
+                        heading: "后续留意 · 回归基本功".into(),
+                        summary: "该搭配历史胜率 62.0% · 532 场".into(),
+                        ids: vec![1004],
+                        partners: "回归基本功".into(),
+                        statistic: "后续路线历史胜率\n62.0% · 532 场".into(),
+                        detail: "合成单前置路线：回归基本功；无图标时仍须保留可读名称。".into(),
+                    };
+                    reference.combo_alternatives[1] = 9;
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "mechanism-notice" {
                     scene.cards[0].id = Some(12317);

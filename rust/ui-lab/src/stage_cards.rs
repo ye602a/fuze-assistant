@@ -271,6 +271,26 @@ pub struct Reference {
     rendered: Option<Rendered>,
 }
 impl Reference {
+    /// Isolated renderer reviews inject their synthetic source through the same
+    /// adapter as live cards, without creating a service or accessing local data.
+    pub(crate) fn review(
+        frame: &Frame,
+        champion: u32,
+        snapshot: Option<Snapshot>,
+    ) -> Arc<Comparison> {
+        let mut reference = Self::new(true);
+        reference.context = Some(Context {
+            champion,
+            dataset: frame.snapshot.dataset_version.clone(),
+            prepare: false,
+        });
+        reference.patch = snapshot
+            .as_ref()
+            .map(|s| s.patch.clone())
+            .unwrap_or_default();
+        reference.snapshot = snapshot.map(Arc::new);
+        reference.cards(frame)
+    }
     /// The public preview has no active game or confirmed ownership. Reuse the
     /// same relative-choice adapter without starting a service or inventing stages.
     pub fn preview(frame: &Frame, champion: u32) -> Arc<Comparison> {
