@@ -111,6 +111,18 @@ impl Pipeline {
             data.recommendations(champion)?
         };
         stats.retain(|id, _| fuze_contract::skill_choice::get(*id).is_none());
+        let history = if recognition_only {
+            None
+        } else {
+            Some(std::sync::Arc::new(
+                fuze_data::decision_evidence::HistoryContext::new(
+                    dataset.clone(),
+                    champion,
+                    data.hero_reference(champion)?,
+                    &stats,
+                ),
+            ))
+        };
         let frames = crate::overlay_frame::Publisher::with_catalog(
             detail.augments,
             data.recognition_cards(),
@@ -118,7 +130,8 @@ impl Pipeline {
                 .iter()
                 .filter_map(|(id, r)| r.score.map(|s| (*id, s)))
                 .collect(),
-        );
+        )
+        .with_history(history);
         let overlay = if headless {
             HiddenOverlay::headless(session.generation(), dataset.clone())
         } else if persist {
@@ -474,6 +487,7 @@ impl Pipeline {
                         .iter()
                         .filter_map(|(id, r)| r.score.map(|s| (*id, s)))
                         .collect(),
+                    extra.history,
                 );
                 let _ = self.overlay.statistics(extra.statistics);
             }

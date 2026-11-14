@@ -321,14 +321,21 @@ impl Manager {
             name: cards[i].name.clone(),
             confidence: 1.,
         });
+        let recommendations = prepared.recommendations(4)?;
+        let history = std::sync::Arc::new(fuze_data::decision_evidence::HistoryContext::new(
+            prepared.identity(),
+            4,
+            prepared.hero_reference(4)?,
+            &recommendations,
+        ));
         let mut publisher = fuze_worker_host::overlay_frame::Publisher::new(
             cards,
-            prepared
-                .recommendations(4)?
+            recommendations
                 .into_iter()
                 .filter_map(|(id, r)| r.score.map(|s| (id, s)))
                 .collect(),
-        );
+        )
+        .with_history(Some(history));
         publisher.publish(
             Snapshot {
                 schema_version: 1,
@@ -344,11 +351,12 @@ impl Manager {
             None,
         );
         let mut overlay = HostOverlay::new(true).map_err(|_| "overlay-window")?;
+        let frame = publisher.current().ok_or("preview-data-unavailable")?;
         overlay
-            .preview(
-                publisher.current().ok_or("preview-data-unavailable")?,
-                self.visible,
-            )
+            .preview(frame.clone(), self.visible)
+            .map_err(|_| "overlay-window")?;
+        overlay
+            .reference(crate::stage_cards::Reference::preview(&frame, 4))
             .map_err(|_| "overlay-window")?;
         self.sample_cards = Some(overlay);
         Ok(())
@@ -421,16 +429,14 @@ impl Manager {
             cards
                 .update(frame, self.visible)
                 .map_err(|_| "overlay-window")?;
-            let dataset = status
-                .pipeline
-                .overlay
-                .as_ref()
-                .map_or("", |f| f.snapshot.dataset_version.as_str());
-            let reference = self.stages.cards(cards.ids(), dataset);
+            let Some(accepted) = cards.accepted_frame() else {
+                return Ok(());
+            };
+            let reference = self.stages.cards(&accepted);
             let matched = reference
-                .combos
+                .current_combos
                 .iter()
-                .filter(|c| !c.statistic.is_empty())
+                .filter(|current| **current)
                 .count() as u8;
             cards.reference(reference).map_err(|_| "overlay-window")?;
             if let Some(d) = &mut self.combo_diagnostics {

@@ -1,6 +1,7 @@
 //! Display-only frame after the existing retention/classification gate. No claim inference.
 use fuze_contract::Snapshot;
 use fuze_data::champion_detail::Augment;
+use fuze_data::decision_evidence::HistoryContext;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 pub fn skill_cards() -> Vec<Augment> {
     fuze_contract::skill_choice::CHOICES.iter().map(|choice| Augment {
@@ -21,13 +22,40 @@ pub fn skill_cards() -> Vec<Augment> {
 mod tests {
     use super::*;
     use fuze_contract::{skill_choice, wire::TitleKind, ActualStage, Slot};
+    fn history(date: &str, value: f64) -> Arc<HistoryContext> {
+        use fuze_data::decision_evidence::{AugmentHistory, Rate, Scope};
+        Arc::new(HistoryContext {
+            dataset: "test".into(),
+            champion: 145,
+            baseline: None,
+            by_augment: HashMap::from([(
+                3051,
+                AugmentHistory {
+                    rate: Some(Rate {
+                        value,
+                        games: Some(1000),
+                        wins: None,
+                    }),
+                    scope: Scope {
+                        source: fuze_data::aramkit::SOURCE.into(),
+                        patch: "16.22".into(),
+                        date: date.into(),
+                        region: "地区未标明".into(),
+                    },
+                    comparison: None,
+                },
+            )]),
+        })
+    }
     #[test]
-    fn background_rank_refresh_keeps_slots_claim_stage_and_retention_deadline() {
+    fn background_refresh_replaces_history_and_keeps_slots_stage_and_deadline() {
         let mut card = skill_cards()[0].clone();
         card.id = 3051;
         card.win = Some(0.55);
         card.pick = Some(0.1);
-        let mut publisher = Publisher::new(vec![card.clone()], HashMap::new());
+        let old_history = history("2026-11-11", 0.55);
+        let mut publisher = Publisher::new(vec![card.clone()], HashMap::new())
+            .with_history(Some(old_history.clone()));
         let deadline = Some(Instant::now() + std::time::Duration::from_secs(2));
         publisher.publish(
             Snapshot {
@@ -53,17 +81,36 @@ mod tests {
         );
         let before = publisher.current().unwrap();
         card.pick = Some(0.2);
-        publisher.supplement(vec![card], HashMap::from([(3051, 0.8), (3170, 1.)]));
+        card.win = Some(0.56);
+        let new_history = history("2026-11-12", 0.56);
+        publisher.supplement(
+            vec![card],
+            HashMap::from([(3051, 0.8), (3170, 1.)]),
+            Some(new_history.clone()),
+        );
         let after = publisher.current().unwrap();
         assert_eq!(before.snapshot, after.snapshot);
         assert_eq!(after.deadline, deadline);
         assert!(after.retained);
-        assert_eq!(after.cards[0].as_ref().unwrap().win, Some(0.55));
+        assert_eq!(after.cards[0].as_ref().unwrap().win, Some(0.56));
         assert_eq!(after.scores, [Some(0.8), None, None]);
         assert_eq!(after.context, before.context);
         assert_eq!(after.selection_cycle, before.selection_cycle);
+        assert!(Arc::ptr_eq(before.history.as_ref().unwrap(), &old_history));
+        assert!(Arc::ptr_eq(after.history.as_ref().unwrap(), &new_history));
+        assert_eq!(
+            after.history.as_ref().unwrap().by_augment[&3051]
+                .rate
+                .unwrap()
+                .value,
+            0.56
+        );
+        publisher.supplement(vec![], HashMap::new(), None);
+        let cleared = publisher.current().unwrap();
+        assert!(cleared.history.is_none());
+        assert_eq!(cleared.snapshot, before.snapshot);
         publisher.clear();
-        publisher.supplement(vec![], HashMap::new());
+        publisher.supplement(vec![], HashMap::new(), None);
         assert!(publisher.current().is_none());
     }
     #[test]
@@ -140,12 +187,14 @@ pub struct Frame {
     pub deadline: Option<Instant>,
     pub cards: [Option<Arc<Augment>>; 3],
     pub scores: [Option<f64>; 3],
+    pub history: Option<Arc<HistoryContext>>,
 }
 pub struct Publisher {
     context: u64,
     selection_cycle: u64,
     augments: HashMap<u32, Arc<Augment>>,
     scores: HashMap<u32, f64>,
+    history: Option<Arc<HistoryContext>>,
     current: Option<Arc<Frame>>,
 }
 impl Publisher {
@@ -176,13 +225,26 @@ impl Publisher {
             selection_cycle: 0,
             augments: augments.into_iter().map(|a| (a.id, Arc::new(a))).collect(),
             scores,
+            history: None,
             current: None,
         }
+    }
+    pub fn with_history(mut self, history: Option<Arc<HistoryContext>>) -> Self {
+        self.history = history;
+        if let Some(frame) = self.current.clone() {
+            self.publish(frame.snapshot.clone(), true, frame.retained, frame.deadline);
+        }
+        self
     }
     pub fn clear(&mut self) {
         self.current = None;
     }
-    pub fn supplement(&mut self, augments: Vec<Augment>, scores: HashMap<u32, f64>) {
+    pub fn supplement(
+        &mut self,
+        augments: Vec<Augment>,
+        scores: HashMap<u32, f64>,
+        history: Option<Arc<HistoryContext>>,
+    ) {
         self.augments.extend(
             augments
                 .into_iter()
@@ -193,6 +255,9 @@ impl Publisher {
             .into_iter()
             .filter(|(id, _)| fuze_contract::skill_choice::get(*id).is_none())
             .collect();
+        // Replace evidence together with cards/scores before publishing. An absent
+        // supplement context must clear old provenance, never retain its baseline.
+        self.history = history;
         if let Some(frame) = self.current.clone() {
             self.publish(frame.snapshot.clone(), true, frame.retained, frame.deadline);
         }
@@ -221,6 +286,7 @@ impl Publisher {
                 selection_cycle: self.selection_cycle,
                 cards: ids.map(|id| id.and_then(|id| self.augments.get(&id).cloned())),
                 scores: ids.map(|id| id.and_then(|id| self.scores.get(&id).copied())),
+                history: self.history.clone(),
                 snapshot,
                 retained,
                 deadline,
