@@ -276,9 +276,10 @@ fn parse_snapshot(
         }
     }
     let mut s = Snapshot {
-        // None is reserved for caches written before combination support. A provider
-        // without valid combinations still supplies usable single-augment statistics.
-        combinations: Some(combinations(&data["augmentCombinations"]).unwrap_or_default()),
+        // Missing/invalid combinations and legacy caches remain unavailable. Only an
+        // explicit valid array (including []) establishes that records were provided.
+        // This must not discard otherwise valid single-augment or stage statistics.
+        combinations: combinations(&data["augmentCombinations"]),
         schema: 1,
         champion: id,
         patch,
@@ -741,10 +742,32 @@ mod tests {
                 Ok(serde_json::to_vec(&value).unwrap())
             };
             let s = fetch_snapshot(21, 100, &fetch, &|| false).unwrap();
-            assert!(s.combinations.unwrap().is_empty());
+            assert!(s.combinations.is_none());
+            assert!(s.stale(101));
             assert_eq!(s.rows[0][0].win, 0.6);
             assert_eq!(s.rows[1][0].samples, 199);
         }
+    }
+    #[test]
+    fn explicit_empty_combinations_are_distinct_from_absent_provider_data() {
+        let empty = fetch_snapshot(21, 100, &fixture, &|| false).unwrap();
+        assert!(empty.combinations.as_ref().unwrap().is_empty());
+        assert!(!empty.stale(101));
+        let fetch = |path: &str| {
+            let mut value: Value = serde_json::from_slice(&fixture(path)?).unwrap();
+            if !path.ends_with("versions.json") {
+                value.as_object_mut().unwrap().remove("augmentCombinations");
+            }
+            Ok(serde_json::to_vec(&value).unwrap())
+        };
+        let absent = fetch_snapshot(21, 100, &fetch, &|| false).unwrap();
+        assert!(absent.combinations.is_none() && absent.stale(101));
+        assert!(absent.usable(21, 101));
+        assert_eq!(absent.rows[0][0].samples, empty.rows[0][0].samples);
+        assert_eq!(absent.rows[1][0].samples, empty.rows[1][0].samples);
+        let roundtrip: Snapshot =
+            serde_json::from_slice(&serde_json::to_vec(&absent).unwrap()).unwrap();
+        assert!(roundtrip.valid(101) && roundtrip.combinations.is_none());
     }
     #[test]
     fn prepare_reuses_fresh_cache_and_gameplay_never_fetches_or_promotes_missing_rows() {
@@ -824,7 +847,7 @@ mod tests {
         assert!(store.peek(22, at).is_none());
     }
     fn fixture(path: &str) -> Result<Vec<u8>> {
-        Ok(if path.ends_with("versions.json"){serde_json::json!({"latest":"16.20","versions":[{"version":"16.20","dataDate":"2026-10-15","dataPath":"data/16.20-20261015-abcdef012345"}]})}else{serde_json::json!({"champion":{"id":21},"augments":{"all":[{"id":1,"winRate":0.6,"pickRate":0.1,"sampleCount":1000}],"stages":{"1":[{"id":2,"winRate":0.8,"pickRate":0.2,"sampleCount":199},{"id":3,"winRate":0.55,"pickRate":0.3,"sampleCount":500}]}}})}.to_string().into_bytes())
+        Ok(if path.ends_with("versions.json"){serde_json::json!({"latest":"16.20","versions":[{"version":"16.20","dataDate":"2026-10-15","dataPath":"data/16.20-20261015-abcdef012345"}]})}else{serde_json::json!({"champion":{"id":21},"augmentCombinations":[],"augments":{"all":[{"id":1,"winRate":0.6,"pickRate":0.1,"sampleCount":1000}],"stages":{"1":[{"id":2,"winRate":0.8,"pickRate":0.2,"sampleCount":199},{"id":3,"winRate":0.55,"pickRate":0.3,"sampleCount":500}]}}})}.to_string().into_bytes())
     }
     #[test]
     fn refresh_keeps_visible_snapshot_but_context_change_clears_it() {

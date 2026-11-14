@@ -1,11 +1,14 @@
 //! On-demand public Mayhem supplement, shared cache; never on UI or OCR threads.
 use crate::Result;
-use fuze_data::{champion_detail::Detail, recommendations::Recommendation, tencent::Snapshot};
+use fuze_data::{
+    champion_detail::Detail, decision_evidence::HistoryContext, recommendations::Recommendation,
+    tencent::Snapshot,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 const FRESH: u64 = 6 * 3600;
@@ -157,6 +160,7 @@ pub fn fetch(id: u32, cancel: &dyn Fn() -> bool) -> Result<Snapshot> {
 pub struct Supplement {
     pub detail: Detail,
     pub statistics: HashMap<u32, Recommendation>,
+    pub history: Option<Arc<HistoryContext>>,
 }
 pub fn load(
     roots: &[fuze_data::Root],
@@ -179,9 +183,17 @@ pub fn load(
         identity,
     )?;
     data.apply_tencent(&snapshot)?;
+    let statistics = data.recommendations(id)?;
+    let history = Some(Arc::new(HistoryContext::new(
+        data.identity(),
+        id,
+        data.hero_reference(id)?,
+        &statistics,
+    )));
     Ok(Supplement {
         detail: data.champion_detail(id)?,
-        statistics: data.recommendations(id)?,
+        statistics,
+        history,
     })
 }
 pub struct Pending {

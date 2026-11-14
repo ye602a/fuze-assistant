@@ -9,9 +9,12 @@ use std::{
 };
 pub mod aramkit;
 pub mod champion_detail;
+pub mod contextual_advice;
 pub mod current_augments;
+pub mod decision_evidence;
 pub mod detail_cache;
 pub mod item_sets;
+pub mod mechanism_reference;
 pub mod recognition;
 pub mod recommendations;
 pub mod tencent;

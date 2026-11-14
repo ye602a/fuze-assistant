@@ -1,0 +1,84 @@
+{
+  "source": {
+    "provider": "ARAMKit",
+    "patch": "16.22",
+    "dataDate": "2026-11-12",
+    "dataPath": "data/16.22-20261112-bfae7c1ce948",
+    "resourcePath": "resources/16.22-8a495cc12b20",
+    "manifestUrl": "https://data.aramkit.cn/data/versions.json",
+    "url": "https://data.aramkit.cn/data/16.22-20261112-bfae7c1ce948/stats/all/champion-details/145.json",
+    "resourcesUrl": "https://data.aramkit.cn/resources/16.22-8a495cc12b20/zh-CN/resources/augments.json",
+    "retrievedAtUtc": "2026-11-14T08:24:57.165087+00:00",
+    "sha256": "b1a9d0ba549b2ed6f437cf512960fb23822eb20244a0bfb28ccac06941d3562d",
+    "resourcesSha256": "6b09a7bb91184e119e10be349bd54907b2eda0211492598872506b7f97a1a118",
+    "subset": true,
+    "sourceAugmentRows": 138,
+    "sourceCombinationRows": 10,
+    "observedOfferSet": false,
+    "notes": [
+      "历史证据局部回放；1004 为棱彩阶，1038 与 1029 为金色阶，不是实际观察到的同屏选择画面，也不验证出现池。",
+      "仅摘录此回放所需的原始字段与记录。未收录的阶段或组合不代表上游缺失；不能从这三个整体条目重新计算英雄、品质或阶段基准。",
+      "组合榜单有限；缺失组合不得按零胜率或负面证据处理。历史搭配胜率不代表本局预测或因果增益。"
+    ]
+  },
+  "champion": {
+    "id": 145,
+    "winRate": 0.4826,
+    "sampleCount": 4012969
+  },
+  "resources": [
+    { "id": 1004, "name": "回归基本功", "rarity": "prismatic" },
+    { "id": 1038, "name": "有始有终", "rarity": "gold" },
+    { "id": 1029, "name": "虚幻武器", "rarity": "gold" },
+    { "id": 3086, "name": "小蜜蜂！！！", "rarity": "gold" }
+  ],
+  "overallRows": [
+    {
+      "id": 1004,
+      "rank": 3,
+      "tier": "S",
+      "sampleCount": 238248,
+      "pickRate": 0.0914,
+      "winRate": 0.5265
+    },
+    {
+      "id": 1038,
+      "rank": 11,
+      "tier": "S",
+      "sampleCount": 91793,
+      "pickRate": 0.0352,
+      "winRate": 0.4968
+    },
+    {
+      "id": 1029,
+      "rank": 2,
+      "tier": "S",
+      "sampleCount": 532886,
+      "pickRate": 0.2044,
+      "winRate": 0.5308
+    }
+  ],
+  "combinationRows": [
+    {
+      "rank": 1,
+      "augmentIds": [1004, 3086],
+      "sampleCount": 26552,
+      "pickRate": 0.0102,
+      "winRate": 0.6505
+    },
+    {
+      "rank": 2,
+      "augmentIds": [1038, 3086],
+      "sampleCount": 5952,
+      "pickRate": 0.0023,
+      "winRate": 0.6403
+    },
+    {
+      "rank": 3,
+      "augmentIds": [1029, 3086],
+      "sampleCount": 42545,
+      "pickRate": 0.0163,
+      "winRate": 0.6276
+    }
+  ]
+}
