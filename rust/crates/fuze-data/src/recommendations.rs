@@ -69,6 +69,14 @@ fn number(v: &Value, a: &str, b: &str) -> Option<f64> {
         .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
         .filter(|v| v.is_finite())
 }
+/// A source rank/tier or a valid win rate can support ordering. Catalogue rarity,
+/// popularity and sample counts alone cannot turn missing statistics into advice.
+pub(crate) fn has_ordering_evidence(stats: &Value) -> bool {
+    number(stats, "winRate", "win_rate").is_some_and(|v| (0.0..=1.0).contains(&v))
+        || ["rank", "tier"]
+            .iter()
+            .any(|key| number(stats, key, key).is_some_and(|v| v >= 1. && v.fract() == 0.))
+}
 fn text(v: &Value, name: &str) -> String {
     v.get(name)
         .and_then(Value::as_str)
@@ -164,13 +172,17 @@ impl Prepared {
                 if s["rankSource"] == crate::tencent::SOURCE && rank.is_some() {
                     official.insert(id);
                 }
-                ordering.push((
-                    id,
-                    rank,
-                    total,
-                    number(s, "tier", "tier").filter(|v| *v >= 1. && v.fract() == 0.),
-                    pick_rate,
-                ));
+                // Keep catalogue-only rows available for recognition/display, but
+                // do not let them invalidate source ranks or acquire a score.
+                if has_ordering_evidence(s) {
+                    ordering.push((
+                        id,
+                        rank,
+                        total,
+                        number(s, "tier", "tier").filter(|v| *v >= 1. && v.fract() == 0.),
+                        pick_rate,
+                    ));
+                }
                 let row = Recommendation {
                     evidence: Evidence::from_stats(s),
                     win_rate,
@@ -195,9 +207,15 @@ impl Prepared {
         if !found {
             return Err("data-champion-missing");
         }
+        // A filtered source may retain non-contiguous ranks. Do not collapse
+        // those ranks to zero merely because fewer rows have usable evidence.
+        let rank_total = ordering
+            .iter()
+            .filter_map(|r| r.1)
+            .fold(ordering.len() as f64, f64::max);
         if !official.is_empty() {
             for row in &ordering {
-                let total = row.2.unwrap_or(ordering.len() as f64);
+                let total = row.2.unwrap_or(rank_total);
                 result.get_mut(&row.0).unwrap().score = official.contains(&row.0).then(|| {
                     if total <= 1. {
                         1.
@@ -209,9 +227,8 @@ impl Prepared {
             return Ok(result);
         }
         if !ordering.is_empty() && ordering.iter().all(|r| r.1.is_some()) {
-            let count = ordering.len() as f64;
             for row in &ordering {
-                let total = row.2.unwrap_or(count);
+                let total = row.2.unwrap_or(rank_total);
                 result.get_mut(&row.0).unwrap().score = Some(if total <= 1. {
                     1.
                 } else {
@@ -219,7 +236,8 @@ impl Prepared {
                 });
             }
         }
-        // Match the existing tier-priority path when the complete pool has no authoritative ranks.
+        // Preserve the legacy fallback when genuine statistical rows lack ranks;
+        // missing catalogue entries are excluded from this pool and its denominator.
         if !ordering.is_empty()
             && !ordering.iter().all(|r| r.1.is_some())
             && ordering.iter().any(|r| r.3.is_some())
@@ -240,5 +258,126 @@ impl Prepared {
             }
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn prepared(augments: Value) -> Prepared {
+        Prepared {
+            locale: crate::Locale::ZhCn,
+            version: "16.22.1".into(),
+            source: crate::Source::Bundled,
+            scope: crate::Scope::Champion(145),
+            documents: std::collections::BTreeMap::from([(
+                "champion-shards/145.json".into(),
+                json!({"champions":{"145":{"augments":augments}}}),
+            )]),
+            catalog: Default::default(),
+            current_augments: false,
+        }
+    }
+
+    #[test]
+    fn source_ranks_survive_missing_catalogue_stats_and_opposing_popularity() {
+        let known = json!([
+            {"id":1,"rarity":1,"stats":{"rank":1,"tier":1,"winRate":0.60,"pickRate":0.1}},
+            {"id":2,"rarity":1,"stats":{"rank":2,"tier":1,"winRate":0.53,"pickRate":0.9}}
+        ]);
+        let before = prepared(known.clone()).recommendations(145).unwrap();
+        let mut extended = known;
+        extended.as_array_mut().unwrap().extend([
+            json!({"id":3,"rarity":2,"stats":null}),
+            json!({"id":4,"stats":{}}),
+            json!({"id":5,"stats":{"pickRate":1.0,"games":999999}}),
+        ]);
+        let after = prepared(extended).recommendations(145).unwrap();
+        assert_eq!(after[&1].score, Some(1.));
+        assert_eq!(after[&2].score, Some(0.));
+        for id in [1, 2] {
+            assert_eq!(after[&id].score, before[&id].score);
+            assert_eq!(after[&id].win_rate, before[&id].win_rate);
+            assert_eq!(after[&id].evidence.rank, Some(id as u64));
+        }
+        for id in [3, 4, 5] {
+            assert_eq!(after[&id].score, None);
+        }
+    }
+
+    #[test]
+    fn no_statistics_or_source_ranks_means_no_recommendation() {
+        let data = prepared(json!([
+            {"id":1,"rarity":2,"stats":null},
+            {"id":2,"rarity":1,"stats":{}},
+            {"id":3,"stats":{"pickRate":1.0,"games":999999}},
+            {"id":4,"stats":{"winRate":1.1,"rank":0,"tier":0}}
+        ]));
+        assert!(data
+            .recommendations(145)
+            .unwrap()
+            .values()
+            .all(|r| r.score.is_none()));
+    }
+
+    #[test]
+    fn genuine_unranked_statistics_keep_legacy_tier_and_popularity_fallback() {
+        let data = prepared(json!([
+            {"id":1,"stats":{"rank":1,"tier":1,"winRate":0.6,"pickRate":0.1}},
+            {"id":2,"stats":{"tier":1,"winRate":0.55,"pickRate":0.9}},
+            {"id":3,"stats":{"tier":2}},
+            {"id":4,"stats":{"pickRate":1.0,"games":999999}}
+        ]));
+        let rows = data.recommendations(145).unwrap();
+        assert_eq!(rows[&2].score, Some(1.));
+        assert_eq!(rows[&1].score, Some(0.5));
+        assert_eq!(rows[&3].score, Some(0.));
+        assert_eq!(rows[&3].win_rate, None);
+        assert_eq!(rows[&4].score, None);
+    }
+
+    #[test]
+    fn legacy_rate_weighting_is_unchanged_without_source_ranks_or_tiers() {
+        let data = prepared(json!([
+            {"id":1,"stats":{"winRate":0.6,"pickRate":0.12}},
+            {"id":2,"stats":{"winRate":0.7,"pickRate":0.1,"games":1000}},
+            {"id":3,"stats":null}
+        ]));
+        let rows = data.recommendations(145).unwrap();
+        assert!((rows[&1].score.unwrap() - 0.384).abs() < 1e-9);
+        assert!((rows[&2].score.unwrap() - 0.64).abs() < 1e-9);
+        assert_eq!(rows[&3].score, None);
+    }
+
+    #[test]
+    fn official_ranks_still_exclude_other_ranking_sources() {
+        let data = prepared(json!([
+            {"id":1,"stats":{"rank":2,"total":5,"rankSource":crate::tencent::SOURCE}},
+            {"id":2,"stats":{"rank":4,"total":5,"rankSource":crate::tencent::SOURCE}},
+            {"id":3,"stats":{"rank":1,"tier":1,"winRate":0.99,"pickRate":1.0}},
+            {"id":4,"stats":null}
+        ]));
+        let rows = data.recommendations(145).unwrap();
+        assert_eq!(rows[&1].score, Some(0.75));
+        assert_eq!(rows[&2].score, Some(0.25));
+        assert_eq!(rows[&3].score, None);
+        assert_eq!(rows[&3].win_rate, Some(0.99));
+        assert_eq!(rows[&4].score, None);
+    }
+
+    #[test]
+    fn sparse_source_ranks_remain_distinct_without_an_explicit_total() {
+        let rows = prepared(json!([
+            {"id":1,"stats":{"rank":5}},
+            {"id":2,"stats":{"rank":8}},
+            {"id":3,"stats":null}
+        ]))
+        .recommendations(145)
+        .unwrap();
+        assert!(rows[&1].score > rows[&2].score);
+        assert_eq!(rows[&2].score, Some(0.));
+        assert_eq!(rows[&3].score, None);
     }
 }

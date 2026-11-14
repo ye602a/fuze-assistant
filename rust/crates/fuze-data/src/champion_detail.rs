@@ -486,14 +486,23 @@ fn parse(row: &Value, items: &Value, locale: Locale) -> Detail {
     let mut augments: Vec<_> = rows(&row["augments"]).collect();
     let rank = |v: &Value| v["stats"]["rank"].as_u64().filter(|v| *v > 0);
     let tier = |v: &Value| v["stats"]["tier"].as_u64().filter(|v| *v > 0);
-    let authoritative = !augments.is_empty()
-        && (augments.iter().all(|v| rank(v).is_some())
+    let evidence = |v: &Value| crate::recommendations::has_ordering_evidence(&v["stats"]);
+    let authoritative = augments.iter().any(|v| evidence(v))
+        && (augments
+            .iter()
+            .filter(|v| evidence(v))
+            .all(|v| rank(v).is_some())
             || augments
                 .iter()
                 .any(|v| v["stats"]["rankSource"] == crate::tencent::SOURCE));
     let tier_priority = !authoritative && augments.iter().any(|v| tier(v).is_some());
     augments.sort_by(|a, b| {
-        // Same full-pool precedence as 0.6.3 augment-ranking.ts; filtering never reranks.
+        // Keep unscored catalogue rows visible after the evidence-backed pool.
+        let available = evidence(b).cmp(&evidence(a));
+        if available != std::cmp::Ordering::Equal {
+            return available;
+        }
+        // Match recommendation precedence; rarity filtering never reranks.
         if authoritative {
             return rank(a)
                 .unwrap_or(u64::MAX)
@@ -623,6 +632,22 @@ mod tests {
         row["augments"][1]["stats"]["tier"] = serde_json::json!(1);
         row["augments"][1]["stats"]["pickRate"] = serde_json::json!(0.95);
         assert_eq!(parse(&row, &data, Locale::ZhCn).augments[0].id, 2);
+    }
+    #[test]
+    fn detail_source_ranks_ignore_catalogue_only_rows_and_keep_them_visible() {
+        let row = serde_json::json!({"champion":{},"augments":[
+            {"id":1,"rarity":1,"stats":{"rank":2,"tier":1,"winRate":0.53,"pickRate":0.9}},
+            {"id":2,"rarity":1,"stats":{"rank":1,"tier":1,"winRate":0.6,"pickRate":0.1}},
+            {"id":3,"rarity":2,"stats":null},
+            {"id":4,"stats":{"pickRate":1.0,"games":999999}}
+        ]});
+        let detail = parse(&row, &serde_json::json!({"data":[]}), Locale::ZhCn);
+        assert_eq!(
+            detail.augments.iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![2, 1, 3, 4]
+        );
+        assert_eq!(detail.augments[2].rarity, Some(2));
+        assert!(detail.augments[2..].iter().all(|a| a.win.is_none()));
     }
     #[test]
     fn complete_rarity_list_and_safe_guides_do_not_drop_low_ranked_augments() {

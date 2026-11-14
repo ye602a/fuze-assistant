@@ -14,6 +14,7 @@ use std::{
 pub struct Comparison {
     pub combos: [fuze_worker_host::augment_combos::Reference; 3],
     pub values: [[String; 4]; 3],
+    pub samples: [[String; 4]; 3],
     pub details: [String; 3],
     pub source: String,
 }
@@ -22,6 +23,7 @@ impl Default for Comparison {
         Self {
             combos: Default::default(),
             values: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
+            samples: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
             details: Default::default(),
             source: "阶段参考暂无缓存 · 选人及加载时准备，局内不联网".into(),
         }
@@ -63,6 +65,7 @@ pub fn compare(
                 Some(_) => "少样本".into(),
                 None => "—".into(),
             };
+            view.samples[i][j] = row.map_or_else(|| "—".into(), |r| r.samples.to_string());
             details.push(match row {
                 Some(r) if r.samples >= 200 => {
                     format!("第 {} 次：{} · {} 场", j + 1, value, r.samples)
@@ -376,6 +379,16 @@ mod tests {
         assert!(combo.combos[1].detail.is_empty() && combo.combos[2].detail.is_empty());
         assert_eq!(combo.values, single.values);
         assert!(Arc::ptr_eq(&combo, &r.cards(ids, "16.22")));
+        state.pipeline.picked = Arc::new(Vec::new());
+        r.update(&state);
+        let cleared = r.cards(ids, "16.22");
+        assert!(cleared.combos.iter().all(|c| c.detail.is_empty()));
+        assert!(!Arc::ptr_eq(&combo, &cleared));
+        assert_eq!(cleared.values, single.values);
+        assert!(Arc::ptr_eq(&cleared, &r.cards(ids, "16.22")));
+        state.pipeline.picked = Arc::new(vec![(1004, "秘术冲拳".into())]);
+        r.update(&state);
+        assert!(!r.cards(ids, "16.22").combos[0].detail.is_empty());
         state.recognition.reference = "16.23".into();
         r.update(&state);
         assert!(r.cards(ids, "16.22").combos[0].detail.is_empty());
@@ -467,8 +480,11 @@ mod tests {
         let ids = [Some(1), None, Some(9)];
         let v = compare(Some(&s), 21, ids, "zh-CN@16.19.3", 101);
         assert_eq!(v.values[0], ["55.0%", "少样本", "—", "—"]);
+        assert_eq!(v.samples[0], ["200", "199", "—", "—"]);
         assert_eq!(v.values[1], ["—"; 4]);
+        assert_eq!(v.samples[1], ["—"; 4]);
         assert_eq!(v.values[2], ["—"; 4]);
+        assert_eq!(v.samples[2], ["—"; 4]);
         assert!(v.source.contains("地区未确认") && v.source.contains("与本地补丁不同"));
         assert!(v.details[0].contains("200 场") && !v.details[0].contains("99.0%"));
         assert_eq!(
