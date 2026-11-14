@@ -10,7 +10,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+$buildRoot = $env:FUZE_BUILD_ROOT
+if (-not $buildRoot) { $buildRoot = [Environment]::GetEnvironmentVariable('FUZE_BUILD_ROOT', 'User') }
+if (-not $TargetDir) { $TargetDir = $env:CARGO_TARGET_DIR }
+if (-not $TargetDir -and $buildRoot) { $TargetDir = Join-Path $buildRoot 'target' }
 if (-not $TargetDir) { $TargetDir = Join-Path $repo 'rust/target' }
+if ($buildRoot) {
+    $buildTemp = Join-Path $buildRoot 'tmp'
+    New-Item -ItemType Directory -Force -Path $buildTemp | Out-Null
+    $env:TEMP = $buildTemp
+    $env:TMP = $buildTemp
+}
 if (-not $VcToolsDir) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
