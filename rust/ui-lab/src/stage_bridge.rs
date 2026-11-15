@@ -54,19 +54,19 @@ pub fn present(ui: &ChampionWindow, reply: &Reply) {
                 " · 与本地数据补丁不同"
             },
             if reply.issue.is_some() && reply.issue != Some("stage-loading") {
-                "刷新失败，保留缓存；仅显示样本不少于 200 的统计。"
+                "刷新失败，保留缓存 · 样本 ≥ 200 场"
             } else if empty {
-                "此阶段暂无足够样本；不会用整体统计冒充阶段胜率。"
+                "此次数样本不足"
             } else {
-                "仅显示样本不少于 200 的统计；来源与三卡整体数据独立。"
+                "样本 ≥ 200 场"
             }
         )
     } else if reply.snapshot.is_some() {
-        "阶段缓存已超过保留期限，请在选人阶段重新准备。".into()
+        "资料已过期，请在选人阶段刷新。".into()
     } else if reply.issue == Some("stage-cache-missing") {
-        "暂无此英雄的阶段缓存；对局中不下载，请在选人阶段准备。".into()
+        "请在选人阶段准备此英雄的分次统计。".into()
     } else if reply.issue == Some("stage-offline") {
-        "离线验证不查询网络，也不读取个人缓存。".into()
+        "离线验证 · 刷新统计不可用".into()
     } else if reply.issue.is_some() {
         "阶段统计暂不可用，可稍后手动重试。".into()
     } else {

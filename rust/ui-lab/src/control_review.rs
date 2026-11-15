@@ -395,11 +395,17 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     ui.set_page(1);
     a.click(ui, "刷新战绩", Some("host:history-refresh"));
     a.click(ui, "本地缓存", Some("host:history-cached"));
-    a.disabled(ui, "更多战绩");
+    a.check(
+        "更多战绩入口按需显示",
+        target(ui, "更多战绩").is_err(),
+        "no unavailable pagination action",
+    );
     s.set_history_busy(true);
     a.disabled(ui, "正在读取…");
     a.disabled(ui, "本地缓存");
+    ui.set_history_tools_open(true);
     a.click(ui, "暂停并管理", Some("host:toggle-running"));
+    ui.set_history_tools_open(false);
     s.set_history_busy(false);
     s.set_running(false);
     ui.set_page(0);
@@ -483,7 +489,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "存储管理", None);
     a.click(ui, "旧设置迁移", None);
     for (label, command) in [
-        ("检查新版", "check"),
+        ("检查更新", "check"),
         ("更新并重启", "install"),
         ("扫描本地占用", "scan"),
         ("清理可回收文件", "clean"),
@@ -511,7 +517,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
             format!("index={index}; {ev:?}"),
         );
     }
-    a.click(ui, "高级回退：自动连接失败时手动指定目录", None);
+    a.click(ui, "手动指定目录", None);
     s.set_directory("".into());
     type_text(ui, "客户端目录", "fixture-client")?;
     a.check(
@@ -520,8 +526,8 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
         "own component text events",
     );
     a.click(ui, "保存目录", Some("directory:fixture-client"));
-    a.click(ui, "清除手动回退", Some("directory:"));
-    a.click(ui, "高级回退：自动连接失败时手动指定目录", None);
+    a.click(ui, "恢复自动连接", Some("directory:"));
+    a.click(ui, "收起手动目录", None);
     a.click(ui, "重新打开局内资料", Some("host:show-reference"));
     a.click(ui, "帮助与反馈", None);
     a.click(ui, "查看最近状态", None);
@@ -533,7 +539,11 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "收起最近状态", None);
     a.click(ui, "导出脱敏反馈", Some("diagnostic:export"));
     a.click(ui, "打开日志目录", Some("diagnostic:open-logs"));
-    a.disabled(ui, "重试日志");
+    a.check(
+        "日志正常时隐藏重试",
+        target(ui, "重试日志").is_err(),
+        "retry only after a log failure",
+    );
     ui.global::<crate::DiagnosticState>().set_log_retry(true);
     a.click(ui, "重试日志", Some("diagnostic:retry-log"));
     ui.global::<crate::DiagnosticState>().set_log_retry(false);
@@ -622,7 +632,7 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "帮助与反馈", None);
     a.disabled(ui, "导出脱敏反馈");
     a.click(ui, "数据与更新", None);
-    a.click(ui, "检查新版", Some("maintenance:check"));
+    a.click(ui, "检查更新", Some("maintenance:check"));
     a.click(ui, "扫描本地占用", Some("maintenance:scan"));
     a.disabled(ui, "清理可回收文件");
     a.click(ui, "检查数据更新", Some("host:data-update"));
@@ -712,8 +722,13 @@ fn workbench(a: &mut Audit, ui: &Workbench) -> Result<()> {
     a.click(ui, "查看详情", Some("record:select:0"));
     s.set_history_selected(0);
     a.click(ui, "收起详情", Some("record:select:0"));
-    a.click(ui, "生成匿名分享预览", Some("record:share:0"));
-    a.click(ui, "导入本场旧观察记录", Some("record:import-journal:0"));
+    a.click(ui, "匿名分享预览", Some("record:share:0"));
+    a.click(ui, "导入本场观察", Some("record:import-journal:0"));
+    r.set_observations(model(vec![crate::ObservationRow {
+        title: "观察 1 · 等级 3".into(),
+        cards: "测试候选甲 | 测试候选乙 | 测试候选丙".into(),
+        ..Default::default()
+    }]));
     r.set_observation_pages(3);
     r.set_observation_page(1);
     a.click(ui, "上一组", Some("record:observation-page:-1"));

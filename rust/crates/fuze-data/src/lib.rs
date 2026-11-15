@@ -475,7 +475,7 @@ pub fn display_version(identity: &str, date: Option<&str>) -> String {
             })
     }) {
         Some(date) => format!("{label} · {date} 更新"),
-        None => format!("{label} · 更新日期未知"),
+        None => label,
     }
 }
 #[cfg(test)]
@@ -487,13 +487,10 @@ mod display_version_tests {
             super::display_version(identity, Some("2026-11-08")),
             "16.22 · 2026-11-08 更新"
         );
-        assert_eq!(
-            super::display_version(identity, None),
-            "16.22 · 更新日期未知"
-        );
+        assert_eq!(super::display_version(identity, None), "16.22");
         assert_eq!(
             super::display_version("zh-CN@16.21.5-augments16.21", None),
-            "16.21 · 更新日期未知"
+            "16.21"
         );
     }
 }

@@ -3,28 +3,37 @@ import { Theme, ActivityFill, Label, Action, Panel, SectionTitle } from "compone
 export component MaintenancePage inherits VerticalLayout {
     in property <float> entrance: 1;
     spacing: 12px;
-    Panel { height: 210px + (MaintenanceState.installable ? notes.preferred-height + 12px : 0px); entrance: root.entrance;
-        ActivityFill { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; active: MaintenanceState.updating; fraction: MaintenanceState.update-fraction; }
-        SectionTitle { x: 23px; y: 18px; height: 26px; text: "软件更新"; }
-        Label { x: 160px; y: 18px; width: parent.width - 183px; height: 26px; text: "当前版本 · " + MaintenanceState.current-version; horizontal-alignment: right; color: Theme.muted; }
-        Label { x: 23px; y: 57px; width: parent.width - 46px; height: 44px; text: MaintenanceState.update-status; wrap: word-wrap; color: Theme.muted; }
-        notes := Label { visible: MaintenanceState.installable; x: 23px; y: 108px; width: parent.width - 46px; height: self.preferred-height; wrap: word-wrap; text: MaintenanceState.update-notes; color: Theme.ivory; font-size: 12px; }
-        Action { x: 23px; y: parent.height - 94px; width: 150px; busy: MaintenanceState.busy; label: MaintenanceState.busy ? "正在处理…" : "检查新版"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("check"); } }
-        if MaintenanceState.installable: Action { x: 185px; y: parent.height - 94px; width: parent.width - 208px; label: "更新并重启"; enabled: !MaintenanceState.busy; clicked => { MaintenanceState.action("install"); } }
-        Label { x: 23px; y: parent.height - 44px; width: parent.width - 46px; height: 28px; wrap: word-wrap; text: "下载期间可继续使用，完成后自动停止识别、更新并重启。"; color: Theme.muted; font-size: 12px; }
-    }
-    if MaintenanceState.notice != "" && MaintenanceState.notice != MaintenanceState.update-status: Label { height: 46px; text: MaintenanceState.notice; wrap: word-wrap; color: Theme.yellow; }
-    Action { label: MaintenanceState.storage-open ? "收起存储管理" : "存储管理"; clicked => { MaintenanceState.storage-open = !MaintenanceState.storage-open; } }
-    if MaintenanceState.storage-open: Panel { height: 190px + MaintenanceState.storage-rows.length * 30px; entrance: root.entrance; entrance-group: 1;
-        ActivityFill { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; active: MaintenanceState.updating; fraction: MaintenanceState.update-fraction; }
-        SectionTitle { x: 23px; y: 18px; height: 26px; text: "存储管理"; }
-        Label { x: 23px; y: 55px; width: parent.width - 46px; height: 48px; wrap: word-wrap; text: MaintenanceState.storage-summary; color: Theme.muted; }
-        VerticalLayout { x: 23px; y: 112px; width: parent.width - 46px; height: MaintenanceState.storage-rows.length * 30px; spacing: 0px;
-            for row in MaintenanceState.storage-rows: Label { height: 30px; text: row; font-size: 12px; }
+    Panel { height: update-content.preferred-height + 40px; entrance: root.entrance;
+        update-content := VerticalLayout { x: 21px; y: 20px; width: parent.width - 42px; height: self.preferred-height; spacing: 14px;
+            Rectangle { height: 64px;
+                SectionTitle { x: 0px; y: 0px; height: 26px; text: "软件更新"; }
+                Label { x: 0px; y: 32px; width: parent.width - 180px; height: 32px; text: MaintenanceState.current-version; font-size: 22px; font-weight: 700; }
+                Action { x: parent.width - 150px; y: 30px; width: 150px; height: 34px; busy: MaintenanceState.busy; label: MaintenanceState.busy ? "正在处理…" : "检查更新"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("check"); } }
+            }
+            if MaintenanceState.update-status != "": Label { width: parent.width; height: self.preferred-height; text: MaintenanceState.update-status; wrap: word-wrap; color: MaintenanceState.installable ? Theme.blue : Theme.muted; font-size: 13px; }
+            if MaintenanceState.installable && MaintenanceState.update-notes != "": Rectangle {
+                height: notes.preferred-height + 24px; background: Theme.background; border-radius: 6px;
+                notes := Label { x: 12px; y: 12px; width: parent.width - 24px; height: self.preferred-height; wrap: word-wrap; text: MaintenanceState.update-notes; color: Theme.ivory; font-size: 12px; }
+            }
+            if MaintenanceState.installable: HorizontalLayout { height: 38px; spacing: 16px;
+                Action { width: 150px; horizontal-stretch: 0; primary: true; label: "更新并重启"; enabled: !MaintenanceState.busy; clicked => { MaintenanceState.action("install"); } }
+                Label { text: "下载完成后自动更新并重启。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            }
         }
-        HorizontalLayout { x: 23px; y: parent.height - 55px; width: 280px; height: 36px; spacing: 10px;
-            Action { label: "扫描本地占用"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("scan"); } }
-            Action { label: "清理可回收文件"; enabled: MaintenanceState.can-clean && !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("clean"); } }
+        if MaintenanceState.updating: ActivityFill { x: 1px; y: parent.height - 5px; width: parent.width - 2px; height: 4px; active: true; fraction: MaintenanceState.update-fraction; }
+    }
+    Action { label: MaintenanceState.storage-open ? "收起存储管理" : "存储管理"; clicked => { MaintenanceState.storage-open = !MaintenanceState.storage-open; } }
+    if MaintenanceState.storage-open: Panel { height: storage-content.preferred-height + 40px; entrance: root.entrance; entrance-group: 1;
+        storage-content := VerticalLayout { x: 21px; y: 20px; width: parent.width - 42px; height: self.preferred-height; spacing: 14px;
+            SectionTitle { height: 26px; text: "存储管理"; }
+            if MaintenanceState.storage-summary != "": Label { width: parent.width; height: self.preferred-height; wrap: word-wrap; text: MaintenanceState.storage-summary; color: Theme.muted; font-size: 12px; }
+            if MaintenanceState.storage-rows.length > 0: VerticalLayout { height: MaintenanceState.storage-rows.length * 30px; spacing: 0px;
+                for row in MaintenanceState.storage-rows: Label { height: 30px; text: row; font-size: 13px; }
+            }
+            HorizontalLayout { height: 36px; spacing: 10px;
+                Action { label: "扫描本地占用"; enabled: MaintenanceState.attached && !MaintenanceState.busy; clicked => { MaintenanceState.action("scan"); } }
+                if MaintenanceState.can-clean: Action { label: "清理可回收文件"; enabled: !MaintenanceState.busy && !HostState.running; clicked => { MaintenanceState.action("clean"); } }
+            }
         }
     }
 }

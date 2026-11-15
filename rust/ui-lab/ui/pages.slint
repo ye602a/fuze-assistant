@@ -1,7 +1,7 @@
 import { MaintenancePage } from "maintenance.slint";
 import { ComboBox, LineEdit } from "std-widgets.slint";
-import { HostState, ShellState, RecordState, DiagnosticState } from "host-state.slint";
-import { RecordDetails } from "records.slint";
+import { HostState, ShellState, RecordState, DiagnosticState, MaintenanceState } from "host-state.slint";
+import { RecordDetails, RecordLayout } from "records.slint";
 import { Theme, ActivityFill, Label, Action, Panel, SectionTitle, Toggle, Tabs } from "components.slint";
 
 export component SettingsPage inherits VerticalLayout {
@@ -14,99 +14,111 @@ export component SettingsPage inherits VerticalLayout {
     Tabs { labels: ["常用设置", "数据与更新", "帮助与反馈"]; current <=> root.section; }
     if root.section == 0: VerticalLayout { spacing: 16px;
         Panel {
-            height: HostState.preferences.length * 68px + 120px;
-            SectionTitle { x: 21px; y: 14px; height: 26px; text: "识别与显示偏好"; }
-            VerticalLayout { x: 21px; y: 48px; width: parent.width - 42px; height: parent.height - 58px; spacing: 0px;
+            height: preferences-content.preferred-height + 70px;
+            SectionTitle { x: 21px; y: 16px; height: 26px; text: "识别与显示"; }
+            preferences-content := VerticalLayout {
+                x: 21px; y: 50px; width: parent.width - 42px; height: self.preferred-height; spacing: 0px;
                 for pref in HostState.preferences: Rectangle {
-                    height: 68px;
-                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.stroke; }
-                    Label { x: 0px; y: 5px; width: parent.width - 75px; height: 24px; text: pref.title; font-size: 13px; }
-                    Label { x: 0px; y: 29px; width: parent.width - 75px; height: 30px; wrap: word-wrap; text: ShellState.attached && pref.key == "pause_hotkey" ? ShellState.hotkey-hint : ShellState.attached && pref.key == "close_to_tray" ? ShellState.tray-hint : pref.hint; color: Theme.muted; font-size: 12px; }
-                    Toggle { x: parent.width - 44px; y: 20px; label: pref.title; checked: pref.checked; enabled: HostState.connected && !HostState.busy; toggled => { HostState.preference(pref.key, !pref.checked); } }
+                    height: pref.hint == "" && pref.key != "pause_hotkey" && pref.key != "close_to_tray" ? 48px : 64px;
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.stroke; opacity: 0.45; }
+                    Label { x: 0px; y: 6px; width: parent.width - 75px; height: 24px; text: pref.title; font-size: 14px; font-weight: 600; }
+                    if pref.hint != "" || pref.key == "pause_hotkey" || pref.key == "close_to_tray": Label {
+                        x: 0px; y: 31px; width: parent.width - 75px; height: 28px; wrap: word-wrap;
+                        text: ShellState.attached && pref.key == "pause_hotkey" ? ShellState.hotkey-hint : ShellState.attached && pref.key == "close_to_tray" ? ShellState.tray-hint : pref.hint;
+                        color: Theme.muted; font-size: 12px;
+                    }
+                    Toggle { x: parent.width - 44px; y: (parent.height - self.height) / 2; label: pref.title; checked: pref.checked; enabled: HostState.connected && !HostState.busy; toggled => { HostState.preference(pref.key, !pref.checked); } }
                 }
-                Rectangle { height: 62px;
-                    Label { x: 0px; y: 13px; width: parent.width - 250px; height: 30px; text: "识别后端"; }
-                    ComboBox { accessible-label: "识别后端"; x: parent.width - 235px; y: 13px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
+                Rectangle { height: 58px;
+                    Label { x: 0px; y: 12px; width: parent.width - 250px; height: 34px; text: "识别方式"; font-weight: 600; }
+                    ComboBox { accessible-label: "识别后端"; x: parent.width - 235px; y: 12px; width: 235px; height: 34px; model: ["自动选择（GPU 优先）", "CPU", "DirectML（GPU）"]; current-index <=> HostState.backend; enabled: HostState.connected && !HostState.busy; selected(value) => { HostState.backend-changed(self.current-index); } }
                 }
             }
         }
-        Panel { height: 119px;
-            Label { x: 21px; y: 12px; height: 23px; text: "浮窗显示"; color: Theme.blue; }
-            Label { x: 21px; y: 38px; width: parent.width - 42px; height: 25px; text: "独占全屏可能遮住桌面浮窗，需要显示时可在游戏中自行选择无边框或窗口模式。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Action { x: 21px; y: 76px; width: 175px; height: 30px; label: "重新打开局内资料"; enabled: HostState.connected; clicked => { HostState.command("show-reference"); } }
+        Panel { height: 110px;
+            SectionTitle { x: 21px; y: 17px; height: 26px; text: "局内浮窗"; }
+            Action { x: parent.width - 186px; y: 17px; width: 165px; height: 32px; label: "重新打开局内资料"; enabled: HostState.connected; clicked => { HostState.command("show-reference"); } }
+            Label { x: 21px; y: 61px; width: parent.width - 42px; height: 32px; text: "浮窗被全屏游戏遮住时，请切换为无边框或窗口模式。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
         }
-        Panel { height: root.manual-open ? 418px : 236px;
-            SectionTitle { x: 21px; y: 18px; height: 28px; text: "连接与诊断"; }
-            Label { x: 21px; y: 58px; height: 24px; text: "自动识别并连接客户端"; }
-            Label { x: 21px; y: 91px; width: parent.width - 42px; height: 38px; text: "登录英雄联盟客户端后自动连接。连接失败时可手动指定客户端目录。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Label { x: 21px; y: 138px; width: parent.width - 42px; height: 20px; text: HostState.offline ? "离线预览未访问客户端" : HostState.connection-value; color: Theme.blue; font-size: 12px; }
-            Action { x: 21px; y: 174px; width: parent.width - 42px; label: "高级回退：自动连接失败时手动指定目录"; clicked => { root.manual-open = !root.manual-open; } }
-            if root.manual-open: VerticalLayout { x: 21px; y: 222px; width: parent.width - 42px; height: 176px; spacing: 12px;
-                Label { text: "填写包含 LeagueClient.exe 的客户端目录；留空则仅使用自动发现。"; color: Theme.muted; height: 30px; }
+        Panel { height: root.manual-open ? 308px : 154px;
+            SectionTitle { x: 21px; y: 17px; height: 28px; text: "客户端连接"; }
+            Label { x: 21px; y: 53px; width: parent.width - 42px; height: 24px; text: HostState.offline ? "离线预览" : HostState.connection-value; color: HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : Theme.muted; }
+            Label { x: 21px; y: 83px; width: parent.width - 42px; height: 22px; text: "打开英雄联盟客户端后自动连接。"; color: Theme.muted; font-size: 12px; }
+            Action { x: 21px; y: 114px; width: 164px; height: 30px; label: root.manual-open ? "收起手动目录" : "手动指定目录"; clicked => { root.manual-open = !root.manual-open; } }
+            if root.manual-open: VerticalLayout { x: 21px; y: 164px; width: parent.width - 42px; height: 124px; spacing: 10px;
+                Label { text: "选择包含 LeagueClient.exe 的目录；留空使用自动连接。"; color: Theme.muted; height: 24px; font-size: 12px; }
                 LineEdit { accessible-label: "客户端目录"; text <=> HostState.directory; enabled: HostState.connected && !HostState.busy; placeholder-text: "客户端目录"; height: 36px; }
-                HorizontalLayout { height: 38px; spacing: 12px;
-                    Action { busy: HostState.pending-action == "directory"; label: HostState.pending-action == "directory" ? "正在保存…" : "保存目录"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(HostState.directory); } }
-                    Action { label: "清除手动回退"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(""); } }
+                HorizontalLayout { height: 36px; spacing: 10px;
+                    Action { primary: true; busy: HostState.pending-action == "directory"; label: HostState.pending-action == "directory" ? "正在保存…" : "保存目录"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(HostState.directory); } }
+                    Action { label: "恢复自动连接"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.directory-save(""); } }
                 }
-                Label { text: "保存失败会保留原设置，不会显示连接成功。"; color: Theme.muted; height: 25px; }
             }
         }
     }
     if root.section == 1: VerticalLayout { spacing: 16px;
-        if HostState.running: Panel { height: 90px;
-            Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "软件更新会在下载完成后自动暂停识别；清理和导入仍需先暂停。"; wrap: word-wrap; color: Theme.muted; }
-            Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
+        if HostState.running && (root.migration-open || MaintenanceState.storage-open): Panel { height: 68px;
+            Label { x: 21px; y: 17px; width: parent.width - 204px; height: 34px; text: "清理文件或导入设置前，请暂停识别。"; wrap: word-wrap; color: Theme.muted; }
+            Action { x: parent.width - 165px; y: 17px; width: 144px; height: 34px; label: "暂停识别"; description: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
         }
-        Panel { height: 206px;
-            ActivityFill { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
-                active: HostState.pending-action == "data-update";
+        Panel {
+            height: 108px + (HostState.data-mismatch && HostState.data-compatibility != "" ? 44px : 0px) + (HostState.data-progress != "" ? 42px : 0px);
+            SectionTitle { x: 21px; y: 17px; height: 26px; text: "推荐数据"; }
+            if HostState.data-version != "" && HostState.data-version != "—": Label { x: 21px; y: 55px; width: parent.width - 232px; height: 30px; text: HostState.data-version; font-size: 20px; font-weight: 700; }
+            Action { x: parent.width - 191px; y: 53px; width: 170px; height: 34px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.busy; clicked => { HostState.command("data-update"); } }
+            if HostState.data-mismatch && HostState.data-compatibility != "": Label { x: 21px; y: 98px; width: parent.width - 42px; height: 36px; text: HostState.data-compatibility; wrap: word-wrap; color: Theme.yellow; font-size: 12px; }
+            if HostState.data-progress != "": Label { x: 21px; y: 98px + (HostState.data-mismatch && HostState.data-compatibility != "" ? 44px : 0px); width: parent.width - 42px; height: 34px; text: HostState.data-progress; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            if HostState.pending-action == "data-update": ActivityFill {
+                x: 1px; y: parent.height - 5px; width: parent.width - 2px; height: 4px; active: true;
                 fraction: HostState.data-total > 0 ? 1.0 * HostState.data-completed / HostState.data-total : -1;
             }
-            SectionTitle { x: 21px; y: 17px; height: 25px; text: "推荐数据"; }
-            Label { x: 21px; y: 50px; width: parent.width - 42px; height: 46px; text: HostState.data-compatibility; wrap: word-wrap; color: HostState.data-mismatch ? Theme.gold : Theme.blue; font-size: 12px; }
-            Label { x: 21px; y: 103px; width: parent.width - 42px; height: 42px; text: HostState.data-progress; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Action { x: 21px; y: 163px; width: 180px; height: 30px; busy: HostState.pending-action == "data-update"; label: HostState.pending-action == "data-update" ? "正在更新数据…" : "检查数据更新"; enabled: HostState.connected && !HostState.offline && !HostState.busy; clicked => { HostState.command("data-update"); } }
         }
         MaintenancePage { entrance: root.entrance; }
         Action { label: root.migration-open ? "收起旧设置迁移" : "旧设置迁移"; clicked => { root.migration-open = !root.migration-open; } }
         if root.migration-open: Panel { height: 130px;
             SectionTitle { x: 21px; y: 17px; height: 25px; text: "迁移旧版偏好"; }
-            Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "只读取你选择的旧配置；预览确认后导入受支持偏好，保留当前语言与启动状态。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            Label { x: 21px; y: 51px; width: parent.width - 42px; height: 27px; text: "选择旧配置，预览并确认后导入可兼容的设置。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
             Action { x: 21px; y: 88px; width: 165px; height: 30px; label: "选择旧设置并预览"; enabled: HostState.connected && !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-settings",0); } }
         }
     }
     if root.section == 2: VerticalLayout { spacing: 16px;
-        Panel { height: 326px + (DiagnosticState.open ? DiagnosticState.rows.length * 60px : 0px);
-            SectionTitle { x: 21px; y: 18px; height: 28px; text: "运行状态与反馈"; }
-            Label { x: 21px; y: 58px; width: parent.width - 42px; height: 40px; text: DiagnosticState.summary; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            HorizontalLayout { x: 21px; y: 108px; width: parent.width - 42px; height: 36px; spacing: 12px;
-                Action { label: DiagnosticState.open ? "收起最近状态" : "查看最近状态"; clicked => { DiagnosticState.open = !DiagnosticState.open; } }
-                Action { busy: DiagnosticState.busy; label: DiagnosticState.busy ? "正在导出…" : "导出脱敏反馈"; enabled: HostState.connected && !HostState.running && !HostState.busy && !DiagnosticState.busy; clicked => { DiagnosticState.action("export"); } }
-            }
-            Label { x: 21px; y: 156px; width: parent.width - 42px; height: 48px; text: DiagnosticState.log-status; wrap: word-wrap; color: DiagnosticState.log-retry ? Theme.blue : Theme.muted; font-size: 12px; }
-            HorizontalLayout { x: 21px; y: 207px; width: parent.width - 42px; height: 32px; spacing: 12px;
-                Action { label: "打开日志目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-logs"); } }
-                Action { label: "重试日志"; enabled: DiagnosticState.log-retry && !DiagnosticState.busy; clicked => { DiagnosticState.action("retry-log"); } }
-            }
-            Label { x: 21px; y: 250px; width: parent.width - 42px; height: 60px; text: "连接、画面与识别状态保存在本地。导出反馈前请暂停识别；导出的文件不会自动上传。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            if DiagnosticState.open: VerticalLayout { x: 21px; y: 318px; width: parent.width - 42px; height: DiagnosticState.rows.length * 60px;
-                for row in DiagnosticState.rows: Label { height: 60px; text: row; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
+        Panel { height: diagnostic-content.preferred-height + 40px;
+            diagnostic-content := VerticalLayout { x: 21px; y: 20px; width: parent.width - 42px; height: self.preferred-height; spacing: 14px;
+                SectionTitle { height: 26px; text: "本地诊断"; }
+                if DiagnosticState.summary != "": Label { width: parent.width; height: self.preferred-height; text: DiagnosticState.summary; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+                HorizontalLayout { height: 36px; spacing: 10px;
+                    Action { label: DiagnosticState.open ? "收起最近状态" : "查看最近状态"; clicked => { DiagnosticState.open = !DiagnosticState.open; } }
+                    Action { busy: DiagnosticState.busy; label: DiagnosticState.busy ? "正在导出…" : "导出脱敏反馈"; enabled: HostState.connected && !HostState.running && !HostState.busy && !DiagnosticState.busy; clicked => { DiagnosticState.action("export"); } }
+                    Action { label: "打开日志目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-logs"); } }
+                    if DiagnosticState.log-retry: Action { label: "重试日志"; enabled: !DiagnosticState.busy; clicked => { DiagnosticState.action("retry-log"); } }
+                }
+                if DiagnosticState.log-status != "": Label { width: parent.width; height: self.preferred-height; text: DiagnosticState.log-status; wrap: word-wrap; color: DiagnosticState.log-retry ? Theme.yellow : Theme.muted; font-size: 12px; }
+                Label { width: parent.width; height: self.preferred-height; text: HostState.running ? "导出前请暂停识别。反馈文件保存在本地，不会自动上传。" : "反馈文件保存在本地，不会自动上传。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+                if DiagnosticState.open && DiagnosticState.rows.length > 0: VerticalLayout { spacing: 8px;
+                    for row in DiagnosticState.rows: Rectangle {
+                        height: status-row.preferred-height + 20px; background: Theme.background; border-radius: 6px;
+                        status-row := Label { x: 10px; y: 10px; width: parent.width - 20px; height: self.preferred-height; text: row; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+                    }
+                }
             }
         }
-        Panel { height: 220px;
-            SectionTitle { x: 21px; y: 18px; width: parent.width - 105px; height: 28px; text: "本地识别截图"; }
-            Toggle { x: parent.width - 65px; y: 20px; label: "本次运行记录识别截图"; checked: DiagnosticState.screenshots-enabled; enabled: HostState.connected && !HostState.offline; toggled => { DiagnosticState.action("toggle-screenshots"); } }
-            Label { x: 21px; y: 54px; width: parent.width - 42px; height: 48px; text: "默认开启，仅本地保存三卡标题、按钮和识别状态，不录全屏、不自动上传。最多 1200 条 / 256 MiB，满后停止。分享前请检查图片。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            Label { x: 21px; y: 108px; width: parent.width - 42px; height: 48px; text: DiagnosticState.screenshots-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
-            HorizontalLayout { x: 21px; y: 170px; width: parent.width - 42px; height: 32px; spacing: 12px;
-                Action { label: "标记最近画面有问题"; enabled: DiagnosticState.screenshots-recent && !HostState.offline; clicked => { DiagnosticState.action("mark-screenshot"); } }
-                Action { label: "打开截图目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-screenshots"); } }
+        Panel { height: screenshots-content.preferred-height + 40px;
+            screenshots-content := VerticalLayout { x: 21px; y: 20px; width: parent.width - 42px; height: self.preferred-height; spacing: 14px;
+                Rectangle { height: 28px;
+                    SectionTitle { width: parent.width - 80px; height: 28px; text: "本地识别截图"; }
+                    Toggle { x: parent.width - 44px; y: 1px; label: "本次运行记录识别截图"; checked: DiagnosticState.screenshots-enabled; enabled: HostState.connected && !HostState.offline; toggled => { DiagnosticState.action("toggle-screenshots"); } }
+                }
+                Label { width: parent.width; height: self.preferred-height; text: "仅在本地保存三卡标题、按钮与识别状态，不录全屏、不自动上传。上限 1200 条 / 256 MiB；分享前请检查图片。"; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+                if DiagnosticState.screenshots-status != "": Label { width: parent.width; height: self.preferred-height; text: DiagnosticState.screenshots-status; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+                HorizontalLayout { height: 32px; spacing: 10px;
+                    Action { label: "标记最近画面有问题"; enabled: DiagnosticState.screenshots-recent && !HostState.offline; clicked => { DiagnosticState.action("mark-screenshot"); } }
+                    Action { label: "打开截图目录"; enabled: HostState.connected && !HostState.offline; clicked => { DiagnosticState.action("open-screenshots"); } }
+                }
             }
         }
         Action { label: root.feedback-open ? "收起公开诊断反馈" : "展开公开诊断反馈"; clicked => { root.feedback-open = !root.feedback-open; } }
-        if root.feedback-open: Panel { height: 540px + (DiagnosticState.upload-confirm ? 100px : 0px);
+        if root.feedback-open: Panel { height: 488px + (DiagnosticState.upload-notice != "" ? 52px : 0px) + (DiagnosticState.upload-confirm ? 100px : 0px);
             SectionTitle { x: 21px; y: 18px; height: 28px; text: "GitHub 公开诊断反馈"; }
-            Label { x: 21px; y: 58px; width: parent.width - 110px; height: 38px; text: "每局赛后上传 · 首次故障提前反馈"; wrap: word-wrap; }
+            Label { x: 21px; y: 58px; width: parent.width - 110px; height: 38px; text: "赛后报告 · 识别异常快照"; wrap: word-wrap; }
             Toggle { x: parent.width - 65px; y: 62px; label: "每局自动上传到公开 Issues"; checked: DiagnosticState.upload-enabled; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; toggled => { DiagnosticState.upload-action("toggle"); } }
             Label { x: 21px; y: 103px; width: parent.width - 42px; height: 40px; text: DiagnosticState.upload-tracking; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
             Label { x: 21px; y: 149px; width: parent.width - 42px; height: 54px; text: DiagnosticState.upload-status; wrap: word-wrap; color: Theme.blue; font-size: 12px; }
@@ -122,9 +134,9 @@ export component SettingsPage inherits VerticalLayout {
                 Action { label: "查看报告"; enabled: DiagnosticState.upload-has-report; clicked => { DiagnosticState.upload-action("open"); } }
             }
             Action { x: 21px; y: 359px; width: 170px; label: "删除上传令牌"; enabled: DiagnosticState.upload-ready && !DiagnosticState.upload-busy; clicked => { DiagnosticState.upload-action("remove"); } }
-            Label { x: 21px; y: 404px; width: parent.width - 42px; height: 48px; text: DiagnosticState.upload-notice; wrap: word-wrap; font-size: 12px; color: Theme.gold; }
-            Label { x: 21px; y: 461px; width: parent.width - 42px; height: 66px; text: "报告公开在 ye602a/fuze-assistant 的 Issues。仅上传状态、耗时、计数和卡位分类，不含截图、账号、路径、OCR 原文或密钥。\n上传反馈需要 GitHub Issues 读写授权。暂停后可补传最近对局的报告。"; wrap: word-wrap; font-size: 12px; color: Theme.muted; }
-            if DiagnosticState.upload-confirm: Rectangle { x: 21px; y: 535px; width: parent.width - 42px; height: 88px; background: transparent;
+            if DiagnosticState.upload-notice != "": Label { x: 21px; y: 404px; width: parent.width - 42px; height: 48px; text: DiagnosticState.upload-notice; wrap: word-wrap; font-size: 12px; color: Theme.gold; }
+            Label { x: 21px; y: 409px + (DiagnosticState.upload-notice != "" ? 52px : 0px); width: parent.width - 42px; height: 66px; text: "报告公开在 ye602a/fuze-assistant 的 Issues。仅上传状态、耗时、计数和卡位分类，不含截图、账号、路径、OCR 原文或密钥。\n上传反馈需要 GitHub Issues 读写授权。暂停后可补传最近对局的报告。"; wrap: word-wrap; font-size: 12px; color: Theme.muted; }
+            if DiagnosticState.upload-confirm: Rectangle { x: 21px; y: 483px + (DiagnosticState.upload-notice != "" ? 52px : 0px); width: parent.width - 42px; height: 88px; background: transparent;
                 Label { x: 0px; y: 0px; width: parent.width; height: 38px; text: "将从本地有限日志生成最近对局摘要并公开上传；可能不完整，不会上传原始日志。"; wrap: word-wrap; font-size: 12px; }
                 HorizontalLayout { y: 46px; width: parent.width; height: 34px; spacing: 10px;
                     Action { label: "取消"; clicked => { DiagnosticState.upload-confirm = false; } }
@@ -140,19 +152,18 @@ export component HistoryPage inherits VerticalLayout {
     in property <bool> sample: false;
     in-out property <bool> tools-open: false;
     spacing: 18px;
-    if HostState.running: Panel { height: 90px;
-        Label { x: 21px; y: 14px; width: parent.width - 212px; height: 58px; text: "识别正在运行，查看缓存无需暂停；大厅可后台刷新战绩。导入和分享仍需先暂停。"; wrap: word-wrap; color: Theme.muted; }
-        Action { x: parent.width - 165px; y: 25px; width: 144px; label: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
+    if HostState.running && (root.tools-open || HostState.history-selected >= 0): Panel { height: 68px;
+        Label { x: 21px; y: 17px; width: parent.width - 204px; height: 34px; text: "导入或分享战绩前，请暂停识别。"; wrap: word-wrap; color: Theme.muted; }
+        Action { x: parent.width - 165px; y: 17px; width: 144px; height: 34px; label: "暂停识别"; description: "暂停并管理"; enabled: HostState.connected && !HostState.busy; clicked => { HostState.command("toggle-running"); } }
     }
-    Panel { height: 192px; entrance: root.entrance;
-        SectionTitle { x: 21px; y: 18px; height: 26px; text: "海克斯大乱斗战绩"; }
-        Label { x: 21px; y: 55px; width: parent.width - 42px; height: 24px; text: "自己的海克斯对局，优先显示本地记录；区服未确认时不猜测。"; color: Theme.muted; wrap: word-wrap; }
-        HorizontalLayout { x: 21px; y: 98px; width: 330px; height: 38px; spacing: 10px;
+    Panel { height: HostState.history-note != "" ? 150px : 106px; entrance: root.entrance;
+        SectionTitle { x: 21px; y: 17px; height: 26px; text: "海克斯大乱斗"; }
+        HorizontalLayout { x: 21px; y: 56px; width: 330px; height: 34px; spacing: 10px;
             Action { primary: true; busy: HostState.history-busy; label: HostState.history-busy ? "正在读取…" : "刷新战绩"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && RecordState.import-count == 0; clicked => { HostState.command("history-refresh"); } }
             Action { label: "本地缓存"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && RecordState.import-count == 0; clicked => { HostState.command("history-cached"); } }
-            Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && HostState.history-can-more && RecordState.import-count == 0; clicked => { HostState.command("history-more"); } }
+            if HostState.history-can-more: Action { label: "更多战绩"; enabled: HostState.connected && !HostState.busy && !HostState.history-busy && !HostState.offline && RecordState.import-count == 0; clicked => { HostState.command("history-more"); } }
         }
-        Label { x: 21px; y: 144px; width: parent.width - 42px; height: 42px; text: HostState.history-note; wrap: word-wrap; color: Theme.yellow; }
+        if HostState.history-note != "": Label { x: 21px; y: 102px; width: parent.width - 42px; height: 34px; text: HostState.history-note; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
     }
     if RecordState.import-count > 0: Panel { height: 137px;
         SectionTitle { x: 21px; y: 17px; height: 25px; text: "导入预览 · 已选 " + RecordState.chosen-count + " / " + RecordState.import-count; }
@@ -166,40 +177,44 @@ export component HistoryPage inherits VerticalLayout {
         LineEdit { accessible-label: "筛选英雄"; enabled: !RecordState.busy; text <=> HostState.history-query; placeholder-text: "筛选英雄"; edited(value) => { HostState.history-filter(value, HostState.history-result); } }
         ComboBox { accessible-label: "战绩结果"; enabled: !RecordState.busy; width: 130px; model: ["全部结果", "胜利", "失败", "重开"]; current-index <=> HostState.history-result; selected(value) => { HostState.history-filter(HostState.history-query, self.current-index); } }
     }
-    if HostState.history.length == 0: Label { text: HostState.history-query != "" || HostState.history-result != 0 ? "暂无符合条件的战绩，试试清除筛选。" : HostState.offline ? "离线预览不读取个人战绩。连接客户端后，可刷新战绩或查看本地缓存。" : "暂无可显示的战绩。可刷新战绩或查看本地缓存。"; height: 52px; wrap: word-wrap; color: Theme.muted; }
+    if HostState.history.length == 0: Label { text: HostState.history-query != "" || HostState.history-result != 0 ? "调整筛选条件以查看战绩。" : HostState.offline ? "连接客户端后刷新战绩，或打开本地缓存。" : "刷新战绩，或打开本地缓存。"; height: 52px; wrap: word-wrap; color: Theme.muted; }
     for match[index] in HostState.history: Panel {
-        height: HostState.history-selected == index ? 374px + 165px + RecordState.observations.length * 90px + (RecordState.share-ready ? 623px : 0px) : 146px;
-        Rectangle { x: 21px; y: 18px; width: 48px; height: 48px; background: Theme.background; border-width: 1px; border-color: Theme.stroke;
+        height: (RecordState.import-count > 0 ? 154px : 118px) + (HostState.history-selected == index ? 196px + RecordLayout.content-height + (RecordLayout.content-height > 0px ? 12px : 0px) : 0px);
+        Rectangle { x: 0px; y: 14px; width: 3px; height: 50px; border-radius: 1.5px; background: match.won ? Theme.green : match.result == "失败" ? Theme.red : Theme.muted; }
+        Rectangle { x: 21px; y: 18px; width: 46px; height: 46px; background: Theme.background; border-width: 1px; border-color: Theme.stroke; border-radius: 4px;
             Image { source: match.icon; image-fit: contain; }
         }
-        SectionTitle { x: 82px; y: 17px; width: parent.width - 350px; height: 32px; text: match.title; }
-        Label { x: 82px; y: 51px; height: 25px; text: "海克斯大乱斗 · " + match.duration; color: Theme.muted; }
-        Label { x: parent.width - 260px; y: 23px; width: 75px; height: 30px; text: match.result; color: match.won ? Theme.green : Theme.red; font-size: 18px; }
-        Label { x: parent.width - 170px; y: 23px; width: 150px; height: 30px; text: match.kda; font-size: 20px; }
-        Label { x: 21px; y: 86px; height: 20px; text: match.date; color: Theme.muted; font-size: 12px; }
-        Action { x: parent.width - 135px; y: 100px; width: 114px; height: 30px; enabled: !RecordState.busy; label: HostState.history-selected == index ? "收起详情" : "查看详情"; clicked => { RecordState.action("select",index); } }
-        if RecordState.import-count > 0: Action { x: 21px; y: 110px; width: 110px; height: 28px; label: match.chosen ? "已选 · 点击取消" : "选择导入"; primary: match.chosen; enabled: !HostState.busy; clicked => { RecordState.action("choose",index); } }
-        if HostState.history-selected == index: Rectangle { y: 151px; height: 190px;
-            HorizontalLayout { x: 21px; y: 0px; height: 38px; width: 6 * 42px; spacing: 4px;
+        Label { x: 81px; y: 17px; width: parent.width - 380px; height: 28px; text: match.title; font-size: 16px; font-weight: 700; }
+        Label { x: 81px; y: 49px; width: parent.width - 380px; height: 22px; text: match.duration; color: Theme.muted; font-size: 12px; }
+        Rectangle { x: parent.width - 272px; y: 20px; width: 70px; height: 28px; border-radius: 5px; background: match.won ? #16362f : match.result == "失败" ? #39262d : #253340;
+            Label { width: parent.width; height: parent.height; text: match.result; color: match.won ? Theme.green : match.result == "失败" ? Theme.red : Theme.muted; font-size: 14px; font-weight: 600; horizontal-alignment: center; }
+        }
+        Label { x: parent.width - 184px; y: 15px; width: 163px; height: 32px; text: match.kda; font-size: 22px; font-weight: 700; horizontal-alignment: right; }
+        Label { x: parent.width - 184px; y: 49px; width: 163px; height: 20px; text: "击杀 / 死亡 / 助攻"; font-size: 11px; color: Theme.muted; horizontal-alignment: right; }
+        Label { x: 21px; y: 83px; width: parent.width - 180px; height: 22px; text: match.date; color: Theme.muted; font-size: 12px; }
+        Action { x: parent.width - 135px; y: 77px; width: 114px; height: 28px; enabled: !RecordState.busy; label: HostState.history-selected == index ? "收起详情" : "查看详情"; clicked => { RecordState.action("select",index); } }
+        if RecordState.import-count > 0: Action { x: 21px; y: 116px; width: 126px; height: 28px; label: match.chosen ? "已选 · 取消" : "选择导入"; primary: match.chosen; enabled: !HostState.busy; clicked => { RecordState.action("choose",index); } }
+        if HostState.history-selected == index: Rectangle { y: RecordState.import-count > 0 ? 158px : 122px; height: 188px;
+            Rectangle { x: 21px; y: 0px; width: parent.width - 42px; height: 1px; background: Theme.stroke; opacity: 0.55; }
+            HorizontalLayout { x: 21px; y: 12px; height: 38px; width: 6 * 42px; spacing: 4px;
                 for icon in match.items: Image { source: icon; width: 38px; height: 38px; image-fit: contain; }
             }
-            HorizontalLayout { x: parent.width - 205px; y: 0px; height: 38px; width: 184px; spacing: 4px;
+            HorizontalLayout { x: parent.width - 205px; y: 12px; height: 38px; width: 184px; spacing: 4px;
                 for icon in match.augments: Image { source: icon; width: 38px; height: 38px; image-fit: contain; }
             }
-            Label { x: 21px; y: 49px; width: parent.width - 42px; height: 88px; wrap: word-wrap; text: match.detail; color: Theme.muted; }
-            if RecordState.import-count == 0: HorizontalLayout { x: 21px; y: 149px; width: 370px; height: 34px; spacing: 12px;
-                Action { label: "生成匿名分享预览"; enabled: !HostState.busy && !HostState.running; clicked => { RecordState.action("share",index); } }
-                Action { label: "导入本场旧观察记录"; enabled: !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-journal",index); } }
+            if match.detail != "": Label { x: 21px; y: 58px; width: parent.width - 42px; height: 82px; wrap: word-wrap; text: match.detail; color: Theme.muted; font-size: 12px; }
+            if RecordState.import-count == 0: HorizontalLayout { x: 21px; y: 148px; width: 370px; height: 34px; spacing: 12px;
+                Action { label: "匿名分享预览"; enabled: !HostState.busy && !HostState.running; clicked => { RecordState.action("share",index); } }
+                Action { label: "导入本场观察"; enabled: !HostState.busy && !HostState.running && !HostState.offline; clicked => { RecordState.action("import-journal",index); } }
             }
         }
-        if HostState.history-selected == index: RecordDetails {
-            x: 21px; y: 356px; width: parent.width - 42px;
-            height: 165px + RecordState.observations.length * 90px + (RecordState.share-ready ? 623px : 0px);
+        if HostState.history-selected == index && RecordLayout.content-height > 0px: RecordDetails {
+            x: 21px; y: (RecordState.import-count > 0 ? 154px : 118px) + 196px; width: parent.width - 42px;
         }
     }
-    if HostState.history.length > 0: HorizontalLayout { height: 38px; spacing: 12px;
+    if HostState.history.length > 0 && HostState.history-pages > 1: HorizontalLayout { height: 36px; spacing: 12px;
         Action { label: "上一页"; enabled: !RecordState.busy && HostState.history-page > 0; clicked => { HostState.history-turn(-1); } }
-        Label { text: "第 " + (HostState.history-page + 1) + " / " + HostState.history-pages + " 页"; horizontal-alignment: center; }
+        Label { text: (HostState.history-page + 1) + " / " + HostState.history-pages; horizontal-alignment: center; color: Theme.muted; }
         Action { label: "下一页"; enabled: !RecordState.busy && HostState.history-page + 1 < HostState.history-pages; clicked => { HostState.history-turn(1); } }
     }
     Action { label: root.tools-open ? "收起战绩管理" : "战绩管理"; clicked => { root.tools-open = !root.tools-open; } }
@@ -208,14 +223,13 @@ export component HistoryPage inherits VerticalLayout {
         Action { label: RecordState.unbound-open ? "收起未绑定本地观察" : "查看未绑定本地观察"; clicked => { RecordState.unbound-action("open", RecordState.unbound-open ? 0 : 1); } }
         if RecordState.unbound-open: VerticalLayout { spacing: 10px;
             Label { height: 60px; text: RecordState.unbound-note; wrap: word-wrap; color: Theme.muted; }
-            if RecordState.unbound.length == 0: Label { height: 36px; text: "暂无未绑定的本机观察记录"; color: Theme.muted; }
-            Label { height: 42px; text: RecordState.unbound-names; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
-            for row[index] in RecordState.unbound: Panel { height: RecordState.unbound-selected == index ? 190px + RecordState.unbound-events.length * 150px : 126px;
+            if RecordState.unbound-names != "": Label { height: 42px; text: RecordState.unbound-names; wrap: word-wrap; color: Theme.muted; font-size: 12px; }
+            for row[index] in RecordState.unbound: Panel { height: RecordState.unbound-selected == index ? (RecordState.unbound-pages > 1 ? 190px : 146px) + RecordState.unbound-events.length * 150px : 126px;
                 SectionTitle { x: 21px; y: 12px; width: parent.width - 42px; height: 28px; text: row.title; font-size: 13px; }
                 Label { x: 21px; y: 47px; width: parent.width - 42px; height: 25px; text: row.hint; color: Theme.muted; font-size: 12px; }
                 Action { x: 21px; y: 81px; width: 150px; height: 32px; label: RecordState.unbound-selected == index ? "收起完整事件" : "查看完整事件"; clicked => { RecordState.unbound-action("select", index); } }
                 if RecordState.unbound-selected == index: VerticalLayout { x: 21px; y: 136px; width: parent.width - 42px; spacing: 10px;
-                    HorizontalLayout { height: 34px; spacing: 12px;
+                    if RecordState.unbound-pages > 1: HorizontalLayout { height: 34px; spacing: 12px;
                         Action { label: "上一页"; enabled: RecordState.unbound-page > 0; clicked => { RecordState.unbound-action("page", -1); } }
                         Label { text: "第 " + (RecordState.unbound-page + 1) + " / " + RecordState.unbound-pages + " 页"; horizontal-alignment: center; }
                         Action { label: "下一页"; enabled: RecordState.unbound-page + 1 < RecordState.unbound-pages; clicked => { RecordState.unbound-action("page", 1); } }
