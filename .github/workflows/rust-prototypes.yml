@@ -42,6 +42,7 @@ on:
       - 'scripts/compare-rust-shapes.mjs'
       - 'scripts/actions-validation-summary.mjs'
       - 'tests/unit/actions-validation-summary.test.mjs'
+      - '.github/actions/rust-build-cache/**'
       - '!rust/**/*.md'
       - '.github/workflows/rust-prototypes.yml'
   workflow_dispatch:
@@ -83,11 +84,9 @@ jobs:
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
       - name: Reuse Rust build dependencies
-        uses: actions/cache@v6.1.0
+        uses: ./.github/actions/rust-build-cache
         with:
-          path: rust/target/release
-          key: rust-windows-1.90-release-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: rust-windows-1.90-release-${{ hashFiles('rust/Cargo.lock') }}-
+          lane: core
       - name: Format, contracts and build
         id: build
         working-directory: rust

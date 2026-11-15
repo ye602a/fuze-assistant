@@ -1,0 +1,87 @@
+name: FUZE Rust build cache
+description: Restore compiler-specific dependencies from a trusted master cache.
+inputs:
+  lane:
+    description: Separate core, ui, or publish build identity.
+    required: true
+  lookup-only:
+    description: Check the cache without downloading it.
+    default: 'false'
+outputs:
+  cache-hit:
+    description: Whether the complete dependency key matched.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-key:
+    description: Primary key for a trusted caller to save.
+    value: ${{ steps.identity.outputs.key }}
+  cache-paths:
+    description: Exact dependency paths to reuse when saving.
+    value: ${{ steps.identity.outputs.paths }}
+runs:
+  using: composite
+  steps:
+    - name: Identify the compiler, runner image and dependencies
+      id: identity
+      shell: pwsh
+      env:
+        FUZE_CACHE_LANE: ${{ inputs.lane }}
+      run: |
+        @'
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const os = require('node:os');
+        const crypto = require('node:crypto');
+        const { execFileSync } = require('node:child_process');
+        const lane = process.env.FUZE_CACHE_LANE;
+        if (!['core', 'ui', 'publish'].includes(lane)) throw new Error('Unknown Rust cache lane');
+        const root = process.env.GITHUB_WORKSPACE;
+        const hash = values => crypto.createHash('sha256').update(JSON.stringify(values)).digest('hex').slice(0, 24);
+        const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+        const compiler = execFileSync('rustc', ['+1.90.0', '-vV'], { encoding: 'utf8' }).trim();
+        const image = [process.env.ImageOS, process.env.ImageVersion];
+        if (!root || image.some(value => !value)) throw new Error('Hosted runner image identity is missing');
+        const buildEnv = Object.entries(process.env)
+          .filter(([key]) => /^(RUSTFLAGS|RUSTDOCFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_TARGET|CARGO_PROFILE_RELEASE_|CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_|CC$|CXX$|CFLAGS$|CXXFLAGS$)/.test(key))
+          .sort(([a], [b]) => a.localeCompare(b));
+        const configFiles = ['.cargo/config', '.cargo/config.toml', 'rust/.cargo/config', 'rust/.cargo/config.toml', 'rust/rust-toolchain.toml'];
+        if (lane !== 'core') configFiles.push('rust/ui-lab/.cargo/config', 'rust/ui-lab/.cargo/config.toml');
+        if (lane === 'publish') configFiles.push('rust/vc-runtime-policy.json');
+        const config = configFiles.filter(file => fs.existsSync(path.join(root, file))).map(file => [file, read(file)]);
+        const environment = hash([image, compiler, buildEnv, config]);
+        const manifests = [];
+        function collect(directory) {
+          for (const entry of fs.readdirSync(path.join(root, directory), { withFileTypes: true })) {
+            const file = `${directory}/${entry.name}`;
+            if (entry.isDirectory() && entry.name !== 'target') collect(file);
+            else if (entry.isFile() && entry.name === 'Cargo.toml') manifests.push(file);
+          }
+        }
+        collect('rust/crates');
+        manifests.push('rust/Cargo.toml', 'rust/Cargo.lock');
+        if (lane !== 'core') manifests.push('rust/ui-lab/Cargo.toml', 'rust/ui-lab/Cargo.lock');
+        const dependencies = hash(manifests.sort().map(file => [file, read(file)]));
+        const prefix = `fuze-rust-v1-${process.env.RUNNER_OS}-${process.env.RUNNER_ARCH}-${lane}-${environment}-`;
+        const key = prefix + dependencies;
+        const slash = value => value.replaceAll('\\', '/');
+        const cargo = slash(process.env.CARGO_HOME || path.join(os.homedir(), '.cargo'));
+        const target = lane === 'ui' ? 'rust/ui-lab/target/release' : 'rust/target/release';
+        // Enumerate dependency directories: caching the release parent would let
+        // tar recurse into excluded binaries, incremental output and receipts.
+        const paths = [
+          `${cargo}/registry/index`, `${cargo}/registry/cache`, `${cargo}/registry/src`,
+          `${cargo}/git/db`, `${cargo}/git/checkouts`,
+          `${target}/.fingerprint`, `${target}/build`, `${target}/deps`,
+        ];
+        fs.appendFileSync(process.env.GITHUB_OUTPUT,
+          `key=${key}\nprefix=${prefix}\npaths<<FUZE_RUST_CACHE_PATHS\n${paths.join('\n')}\nFUZE_RUST_CACHE_PATHS\n`);
+        console.log(`Rust cache: ${lane}, ${image.join(' ')}, ${key}`);
+        '@ | node
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - name: Restore compiled dependencies
+      id: restore
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.paths }}
+        key: ${{ steps.identity.outputs.key }}
+        restore-keys: ${{ steps.identity.outputs.prefix }}
+        lookup-only: ${{ inputs.lookup-only }}
