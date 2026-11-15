@@ -9,18 +9,18 @@
 
 FUZE displays augment statistics and choice guidance in the same left-to-right order as the three cards in your game. Once an augment pick is confirmed, it becomes context for later combination references. Champion selection and item-set import are available in the same companion.
 
-![An earlier FUZE overlay layout showing three augment cards and a two-augment combination](docs/assets/homepage/hextech-popup.png)
+![FUZE native overlay with a gold preferred choice, historical win-rate bars and a current combination](docs/assets/homepage/hextech-popup.png)
 
-<p align="center"><sub>Offline preview of an earlier card layout, using fixed example values. Version 0.7.13 adds the stage comparisons and second named routes described below.</sub></p>
+<p align="center"><sub>Offline preview of the current native UI. Fixed example values do not represent current statistics.</sub></p>
 
 ## Understand the stats and the current choice
 
 | Card information | What it helps you assess |
 | --- | --- |
 | **Historical performance** | An augment's win rate and sample size for your champion, including its difference from the champion's average. |
-| **Current choice guidance** | The three available candidates and the reasons behind their priority. Falling below the champion's average does not automatically mean an augment is a poor choice. |
-| **Stage comparisons** | Statistics across four augment selections, including which other card a comparison refers to and where the direction changes. |
-| **Combination routes** | Current combinations, possible follow-up routes and a second named route, based on confirmed owned augments. Historical win rates and samples are shown when available. |
+| **Current choice guidance** | A preferred-choice badge below the title, with a matching gold title, border and win-rate bar. Falling below the champion's average does not automatically mean an augment is a poor choice. |
+| **Stage comparisons** | When evidence supports a difference, see the other card being compared and the direction at each relevant selection stage. |
+| **Combination routes** | Current combinations show available historical evidence. Follow-up guidance highlights one augment, with icons and names for up to three other targets. |
 
 When no route is available for your champion, a separate **cross-champion reference — unverified for this champion** can suggest another combination to explore. These references supply no win-rate claim for your champion and do not affect the choice ranking.
 
@@ -28,10 +28,10 @@ The overlay can be moved or closed. Key information stays on the cards; keep cho
 
 ## From champion selection to item builds
 
-<p align="center"><img src="docs/assets/homepage/champion-select.png" alt="Champion-selection preview with the allied team above the shared champion pool" width="420" /></p>
+<p align="center"><img src="docs/assets/homepage/champion-select.png" alt="Champion-selection preview showing portraits, champion titles and win rates for the allied team and shared pool" width="420" /></p>
 <p align="center"><sub>Offline application preview with example data.</sub></p>
 
-- **Compare your options.** View the allied lineup and candidate champions together. Two- and three-choice prompts follow the client's order.
+- **Compare your options.** View the allied lineup and candidate champions by their titles. Two- and three-choice prompts follow the client's order.
 - **Wait for a wanted champion.** Click the shared-pool action to start attempting a swap; click again or press **F9** to stop.
 - **Bring a build into the shop.** Choose an ARAM Mayhem build and import it into the in-game shop's **Item Sets**.
 
@@ -47,11 +47,13 @@ Open the [latest stable release](https://github.com/ye602a/fuze-assistant/releas
 
 Sign in to League of Legends, open FUZE and confirm the client connection before entering ARAM Mayhem.
 
+After installing, check for updates in Settings to get the latest online version.
+
 FUZE currently supports **Windows x64 with Simplified Chinese game text**. The app UI is also Simplified Chinese; this page is an English introduction. Screen recognition uses the **primary display**. Required VC++ DLLs are bundled. The installer is currently unsigned, and GitHub's `Source code` archives are not runnable application packages.
 
 ## Reading the references
 
-- **Historical results have limits.** Interpret win rates alongside your champion, team and playstyle. Missing records, small samples and version mismatches are indicated.
+- **Historical results have limits.** Interpret win rates alongside your champion, team and playstyle. Cards omit reference modules with missing or invalid data; small samples in displayed statistics are labeled.
 - **Stage statistics are separate from detecting the current selection.** FUZE does not yet reliably identify the actual formal augment-selection stage. A follow-up route is not a promise that its missing augments will appear.
 - **Evidence stays distinct.** Your champion's records take precedence, while cross-champion routes have their own label. [ARAMKit](https://aramkit.cn/) supplies the main champion, augment, combination and item-build data; Tencent 101 provides supplementary recommendations for available versions.
 

@@ -10,6 +10,12 @@ test('update channel explains its purpose and preserves download addresses', () 
   assert.ok(body.includes('/rust-preview/fuze-rust-preview-aaaaaaaaaaaa.zip'));
   assert.ok(body.includes(options.notes));
   assert.ok(!body.includes('Setup.exe'));
+  const online = releaseBody({...options, buildSetup:true, updateChannel:true, onlineOnly:true});
+  assert.ok(online.includes('本次仅提供程序内在线更新'));
+  assert.ok(online.includes('/releases/latest'));
+  assert.ok(!online.includes('.zip'));
+  assert.ok(!online.includes('.exe'));
+  assert.ok(online.includes(options.notes));
 });
 
 test('stable publication has its own copy and numbered assets, with optional Setup', () => {
