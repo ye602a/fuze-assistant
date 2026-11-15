@@ -24,6 +24,7 @@ on:
       - 'scripts/check-rust-private-transfer.mjs'
       - 'public/fuze.png'
       - '.github/workflows/ui-framework-lab.yml'
+      - '.github/actions/rust-build-cache/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -46,14 +47,10 @@ jobs:
         run: node scripts/check-secrets.mjs
       - name: Rust toolchain
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache/restore@v6.1.0
+      - uses: ./.github/actions/rust-build-cache
         id: rust-cache
         with:
-          path: rust/ui-lab/target
-          key: ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            ui-integration-win-1.90-${{ hashFiles('rust/ui-lab/Cargo.lock') }}-
-            ui-lab-win-1.90-
+          lane: ui
       - name: Format and build software and Skia entry points
         id: native-build
         working-directory: rust/ui-lab
@@ -134,9 +131,3 @@ jobs:
             rust/ui-lab/artifacts/host-review/host-*.png
             rust/ui-lab/artifacts/control-review/*.png
             rust/ui-lab/artifacts/motion/*.png
-      - name: Preserve compiled dependencies after runtime failures
-        if: always() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: rust/ui-lab/target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

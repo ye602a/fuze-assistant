@@ -162,7 +162,7 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
  const build=steps.findIndex(x=>x.run?.includes('./scripts/build-rust-with-evidence.ps1'))
  assert.ok(guard>=0 && guard<build)
  assert.match(steps[guard].run, /StatusCode -eq 200.*throw/)
- assert.ok(steps.some(x=>x.uses?.startsWith('actions/cache@') && x.with.path==='rust/target' && x.with['restore-keys'].startsWith('rust-preview-1.90-')))
+ assert.ok(steps.some(x=>x.uses==='./.github/actions/rust-build-cache' && x.with.lane==='publish'))
  const setup=steps.find(x=>x.run?.includes('ISCC.exe'))
  const promote=steps.find(x=>x.run?.includes('scripts/release/promote-stable.mjs'))
  for (const online_only of [false, true]) {

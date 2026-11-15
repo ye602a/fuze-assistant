@@ -56,17 +56,10 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal
-      - uses: actions/cache@v6.1.0
-        with:
-          path: rust/target
-          key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
-          restore-keys: |
-            rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-
-            rust-preview-1.90-
-      - name: Compile exact source with build receipt
+      - name: Select the reviewed MSVC toolchain
+        id: msvc
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'source-mismatch' }
           $policy = Get-Content rust/vc-runtime-policy.json -Raw | ConvertFrom-Json
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $installations = & $vswhere -all -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -88,7 +81,27 @@ jobs:
           ) | Sort-Object Version -Descending
           if (!$compatible.Count) { throw 'no-reviewed-compatible-toolchain' }
           Write-Host "Selected MSVC $($compatible[0].Version)"
-          ./scripts/build-rust-with-evidence.ps1 -Frontend slint -VcToolsDir $compatible[0].Path
+          "vc-tools-dir=$($compatible[0].Path)" >> $env:GITHUB_OUTPUT
+      - name: Reuse release build dependencies
+        id: rust-cache
+        uses: ./.github/actions/rust-build-cache
+        with:
+          lane: publish
+      - name: Compile exact source with build receipt
+        id: native-build
+        env:
+          FUZE_VC_TOOLS_DIR: ${{ steps.msvc.outputs.vc-tools-dir }}
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'source-mismatch' }
+          ./scripts/build-rust-with-evidence.ps1 -Frontend slint -VcToolsDir $env:FUZE_VC_TOOLS_DIR
+      - name: Preserve release dependencies before packaging
+        if: success() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.rust-cache.outputs.cache-paths }}
+          key: ${{ steps.rust-cache.outputs.cache-key }}
       - name: Prepare public data and self-check preview
         shell: pwsh
         run: |

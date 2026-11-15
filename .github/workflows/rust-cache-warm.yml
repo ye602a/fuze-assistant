@@ -1,0 +1,75 @@
+name: Rust dependency cache baseline
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'rust/**'
+      - '!rust/**/*.md'
+      - 'public/fuze.ico'
+      - '.github/actions/rust-build-cache/**'
+      - '.github/workflows/rust-cache-warm.yml'
+      - '.github/workflows/rust-prototypes.yml'
+      - '.github/workflows/ui-framework-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rust-cache-baseline-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  dependencies:
+    if: github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [core, ui]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Prepare the same Rust toolchain as PR checks
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+      # A source-only merge normally ends here: check existence without downloading.
+      - name: Look for the current dependency baseline
+        id: lookup
+        uses: ./.github/actions/rust-build-cache
+        with:
+          lane: ${{ matrix.lane }}
+          lookup-only: 'true'
+      - name: Restore the nearest compatible baseline when missing
+        if: steps.lookup.outputs.cache-hit != 'true'
+        id: restore
+        uses: ./.github/actions/rust-build-cache
+        with:
+          lane: ${{ matrix.lane }}
+      - name: Compile core targets without running tests or applications
+        if: matrix.lane == 'core' && steps.lookup.outputs.cache-hit != 'true' && steps.restore.outputs.cache-hit != 'true'
+        id: core-build
+        working-directory: rust
+        shell: pwsh
+        run: |
+          cargo +1.90.0 test --workspace --release --locked --no-run -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --workspace --release --locked -j 2
+          exit $LASTEXITCODE
+      - name: Compile UI targets without running tests or applications
+        if: matrix.lane == 'ui' && steps.lookup.outputs.cache-hit != 'true' && steps.restore.outputs.cache-hit != 'true'
+        id: ui-build
+        shell: pwsh
+        run: |
+          Push-Location rust/ui-lab
+          cargo +1.90.0 build --release --locked --features gpu,ui-audit -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 test --release --locked --features gpu,ui-audit --no-run -j 2 --bin fuze-ui-lab
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          cargo +1.90.0 build --manifest-path rust/ui-lab/Cargo.toml --release --locked --features gpu -j 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.90.0 build --manifest-path rust/Cargo.toml --locked --target-dir rust/ui-lab/target --release -p fuze-ocr --bin fuze-ocr-worker -j 2
+          exit $LASTEXITCODE
+      - name: Save the successful master dependency baseline
+        if: steps.lookup.outputs.cache-hit != 'true' && steps.restore.outputs.cache-hit != 'true' && (steps.core-build.outcome == 'success' || steps.ui-build.outcome == 'success')
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.restore.outputs.cache-paths }}
+          key: ${{ steps.restore.outputs.cache-key }}
