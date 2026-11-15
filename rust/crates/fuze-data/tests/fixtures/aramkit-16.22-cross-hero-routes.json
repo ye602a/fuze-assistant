@@ -1,0 +1,164 @@
+{
+  "source": {
+    "provider": "ARAMKit",
+    "patch": "16.22",
+    "dataDate": "2026-11-12",
+    "dataPath": "data/16.22-20261112-bfae7c1ce948",
+    "buildTimeUnixMs": 1794482205522,
+    "resourcePath": "resources/16.22-8a495cc12b20",
+    "manifestUrl": "https://data.aramkit.cn/data/versions.json",
+    "resourcesUrl": "https://data.aramkit.cn/resources/16.22-8a495cc12b20/zh-CN/resources/augments.json",
+    "resourcesSha256": "6b09a7bb91184e119e10be349bd54907b2eda0211492598872506b7f97a1a118",
+    "retrievedAtUtc": "2026-11-14T08:24:57.165087+00:00",
+    "subset": true,
+    "observedOfferSet": false,
+    "notes": [
+      "仅保留三个英雄榜单的8条原始组合及所需资源，不是全站173个英雄的快照，也不代表实际同屏候选。",
+      "同一搭配可见于多个英雄；索引只保留成员与来源英雄，不合并胜率或场次，不把榜单出现次数解释为选取率或出现概率。",
+      "其他英雄的记录不证明本英雄效果、出现池或机制；本英雄未收录不构成负面证据。"
+    ]
+  },
+  "resources": [
+    {
+      "id": 1004,
+      "name": "回归基本功",
+      "rarity": "prismatic"
+    },
+    {
+      "id": 1029,
+      "name": "虚幻武器",
+      "rarity": "gold"
+    },
+    {
+      "id": 1058,
+      "name": "秘术冲拳",
+      "rarity": "prismatic"
+    },
+    {
+      "id": 1388,
+      "name": "无限循环往复",
+      "rarity": "prismatic"
+    },
+    {
+      "id": 3048,
+      "name": "弹跳蜜蜂",
+      "rarity": "prismatic"
+    },
+    {
+      "id": 3060,
+      "name": "单曲红人",
+      "rarity": "gold"
+    },
+    {
+      "id": 3086,
+      "name": "小蜜蜂！！！",
+      "rarity": "gold"
+    }
+  ],
+  "heroes": [
+    {
+      "championId": 145,
+      "url": "https://data.aramkit.cn/data/16.22-20261112-bfae7c1ce948/stats/all/champion-details/145.json",
+      "sha256": "b1a9d0ba549b2ed6f437cf512960fb23822eb20244a0bfb28ccac06941d3562d",
+      "sourceCombinationRows": 10,
+      "combinationRows": [
+        {
+          "rank": 1,
+          "augmentIds": [
+            1004,
+            3086
+          ],
+          "sampleCount": 26552,
+          "pickRate": 0.0102,
+          "winRate": 0.6505
+        },
+        {
+          "rank": 3,
+          "augmentIds": [
+            1029,
+            3086
+          ],
+          "sampleCount": 42545,
+          "pickRate": 0.0163,
+          "winRate": 0.6276
+        },
+        {
+          "rank": 8,
+          "augmentIds": [
+            1388,
+            3086
+          ],
+          "sampleCount": 11475,
+          "pickRate": 0.0044,
+          "winRate": 0.6034
+        }
+      ]
+    },
+    {
+      "championId": 17,
+      "url": "https://data.aramkit.cn/data/16.22-20261112-bfae7c1ce948/stats/all/champion-details/17.json",
+      "sha256": "7c49172e3dae17fe71b716f159e549d97166143382d1e0fdc67fce22257bb62d",
+      "sourceCombinationRows": 10,
+      "combinationRows": [
+        {
+          "rank": 1,
+          "augmentIds": [
+            1029,
+            3086
+          ],
+          "sampleCount": 43884,
+          "pickRate": 0.0168,
+          "winRate": 0.6571
+        },
+        {
+          "rank": 3,
+          "augmentIds": [
+            1388,
+            3060
+          ],
+          "sampleCount": 4258,
+          "pickRate": 0.0016,
+          "winRate": 0.6581
+        },
+        {
+          "rank": 7,
+          "augmentIds": [
+            1388,
+            3086
+          ],
+          "sampleCount": 20510,
+          "pickRate": 0.0078,
+          "winRate": 0.6335
+        }
+      ]
+    },
+    {
+      "championId": 157,
+      "url": "https://data.aramkit.cn/data/16.22-20261112-bfae7c1ce948/stats/all/champion-details/157.json",
+      "sha256": "87d2f47ae0205fd53a14e44e13b6ed2d79b4b334e9c3d656988aa89eca927d23",
+      "sourceCombinationRows": 10,
+      "combinationRows": [
+        {
+          "rank": 1,
+          "augmentIds": [
+            1058,
+            3048
+          ],
+          "sampleCount": 4662,
+          "pickRate": 0.0021,
+          "winRate": 0.8233
+        },
+        {
+          "rank": 6,
+          "augmentIds": [
+            1004,
+            3048
+          ],
+          "sampleCount": 383,
+          "pickRate": 0.0002,
+          "winRate": 0.8094
+        }
+      ]
+    }
+  ]
+}

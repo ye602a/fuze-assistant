@@ -63,6 +63,28 @@ pub struct StageSummary {
     pub pattern: StagePattern,
 }
 
+/// Historical stage-by-stage evidence for one candidate against `other`.
+/// Positions are stages 1–4; missing or inconclusive evidence stays `None`.
+/// This comparison does not identify the player's actual claim stage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StageContrast {
+    pub other: u32,
+    pub orders: [Option<Ordering>; 4],
+}
+impl StageContrast {
+    pub fn is_reversal(&self) -> bool {
+        self.orders.contains(&Some(Ordering::Greater))
+            && self.orders.contains(&Some(Ordering::Less))
+    }
+
+    /// All four stages must independently support the same direction.
+    pub fn consistent_order(&self) -> Option<Ordering> {
+        self.orders[0].filter(|order| {
+            *order != Ordering::Equal && self.orders.iter().all(|value| *value == Some(*order))
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Reason {
     OverallRank,
@@ -124,6 +146,20 @@ pub fn clear_order(a: Rate, b: Rate) -> Option<std::cmp::Ordering> {
     } else {
         None
     }
+}
+
+/// Compare distinct, identified candidates using the existing evidence threshold.
+/// The adapter must supply stages with comparable provenance, as for `decide`.
+pub fn stage_contrast(a: &Candidate, b: &Candidate) -> Option<StageContrast> {
+    let (id, other) = (candidate_id(a)?, candidate_id(b)?);
+    if id == other {
+        return None;
+    }
+    let orders = std::array::from_fn(|i| clear_order(a.stages[i]?, b.stages[i]?));
+    orders
+        .iter()
+        .any(Option::is_some)
+        .then_some(StageContrast { other, orders })
 }
 
 #[derive(Clone, Debug)]
@@ -215,12 +251,9 @@ fn combination_order(
 }
 
 fn stage_order(a: &Candidate, b: &Candidate) -> (Option<std::cmp::Ordering>, bool) {
-    let orders: [Option<Ordering>; 4] =
-        std::array::from_fn(|i| clear_order(a.stages[i]?, b.stages[i]?));
-    let reversal =
-        orders.contains(&Some(Ordering::Greater)) && orders.contains(&Some(Ordering::Less));
-    let consistent = orders[0].filter(|o| orders.iter().all(|v| *v == Some(*o)));
-    (consistent, reversal)
+    stage_contrast(a, b).map_or((None, false), |contrast| {
+        (contrast.consistent_order(), contrast.is_reversal())
+    })
 }
 
 fn source_order(a: &Candidate, b: &Candidate) -> Option<Ordering> {
@@ -491,6 +524,102 @@ mod tests {
     }
 
     #[test]
+    fn stage_contrast_keeps_complete_consistency_and_card_position_symmetry() {
+        let mut original = cards();
+        for (card, value) in original.iter_mut().zip([0.6, 0.8, 0.5]) {
+            card.stages = [Some(rate(value, 10_000)); 4];
+        }
+        let expected = stage_contrast(&original[1], &original[0]).unwrap();
+        assert_eq!(expected.other, 1);
+        assert_eq!(expected.orders, [Some(Ordering::Greater); 4]);
+        assert_eq!(expected.consistent_order(), Some(Ordering::Greater));
+        assert!(!expected.is_reversal());
+        let reverse = stage_contrast(&original[0], &original[1]).unwrap();
+        assert_eq!(reverse.other, 2);
+        assert_eq!(
+            reverse.orders,
+            expected.orders.map(|o| o.map(Ordering::reverse))
+        );
+        assert_eq!(reverse.consistent_order(), Some(Ordering::Less));
+        assert!(!reverse.is_reversal());
+
+        let by_id = |result: [Decision; 3]| {
+            result
+                .into_iter()
+                .map(|d| (d.candidate_id.unwrap(), d))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let decisions = by_id(decide(&original));
+        for positions in [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ] {
+            let reordered = positions.map(|i| original[i].clone());
+            let a = reordered.iter().find(|c| c.id == Some(2)).unwrap();
+            let b = reordered.iter().find(|c| c.id == Some(1)).unwrap();
+            assert_eq!(stage_contrast(a, b), Some(expected.clone()));
+            assert_eq!(by_id(decide(&reordered)), decisions);
+        }
+    }
+
+    #[test]
+    fn stage_contrast_preserves_missing_small_and_inconclusive_periods() {
+        let mut cards = cards();
+        cards[0].stages = [Some(rate(0.8, 10_000)); 4];
+        cards[1].stages = [Some(rate(0.6, 10_000)); 4];
+        cards[0].stages[0] = Some(rate(0.8, MIN_COMPARISON_SAMPLES));
+        cards[1].stages[1] = None;
+        cards[0].stages[2] = Some(rate(0.8, MIN_COMPARISON_SAMPLES - 1));
+        cards[1].stages[3] = Some(rate(0.79, 10_000));
+        let contrast = stage_contrast(&cards[0], &cards[1]).unwrap();
+        assert_eq!(contrast.orders, [Some(Ordering::Greater), None, None, None]);
+        assert_eq!(contrast.consistent_order(), None);
+        assert!(!contrast.is_reversal());
+        cards[0].stages[0] = None;
+        assert_eq!(stage_contrast(&cards[0], &cards[1]), None);
+    }
+
+    #[test]
+    fn stage_contrast_reports_partial_reversal_without_inventing_full_support() {
+        let mut cards = cards();
+        cards[0].stages = [Some(rate(0.8, 10_000)), None, Some(rate(0.6, 10_000)), None];
+        cards[1].stages = [Some(rate(0.6, 10_000)), None, Some(rate(0.8, 10_000)), None];
+        let contrast = stage_contrast(&cards[0], &cards[1]).unwrap();
+        assert_eq!(
+            contrast.orders,
+            [Some(Ordering::Greater), None, Some(Ordering::Less), None]
+        );
+        assert!(contrast.is_reversal());
+        assert_eq!(contrast.consistent_order(), None);
+        let reverse = stage_contrast(&cards[1], &cards[0]).unwrap();
+        assert_eq!(
+            reverse.orders,
+            contrast.orders.map(|o| o.map(Ordering::reverse))
+        );
+        assert!(reverse.is_reversal());
+        let result = decide(&cards);
+        assert_eq!(preferred(&result), Some(1));
+        assert_eq!(result[0].stage.pattern, StagePattern::Reversal);
+        no_negative(&result);
+    }
+
+    #[test]
+    fn stage_contrast_requires_distinct_identified_candidates() {
+        let mut cards = cards();
+        cards[0].stages = [Some(rate(0.8, 10_000)); 4];
+        cards[1].stages = [Some(rate(0.6, 10_000)); 4];
+        for id in [None, Some(0), cards[0].id] {
+            cards[1].id = id;
+            assert_eq!(stage_contrast(&cards[0], &cards[1]), None);
+            assert_eq!(stage_contrast(&cards[1], &cards[0]), None);
+        }
+    }
+
+    #[test]
     fn missing_small_or_overlapping_stage_evidence_cannot_override() {
         let mut full = cards();
         full[0].stages = [Some(rate(0.6, 10_000)); 4];
@@ -521,6 +650,19 @@ mod tests {
         let mut cards = cards();
         cards[0].stages = [0.6, 0.6, 0.8, 0.8].map(|p| Some(rate(p, 10_000)));
         cards[1].stages = [0.8, 0.8, 0.6, 0.6].map(|p| Some(rate(p, 10_000)));
+        let contrast = stage_contrast(&cards[0], &cards[1]).unwrap();
+        assert_eq!(
+            contrast.orders,
+            [
+                Ordering::Less,
+                Ordering::Less,
+                Ordering::Greater,
+                Ordering::Greater
+            ]
+            .map(Some)
+        );
+        assert!(contrast.is_reversal());
+        assert_eq!(contrast.consistent_order(), None);
         let result = decide(&cards);
         assert_eq!(preferred(&result), Some(1));
         assert_eq!(result[0].stage.pattern, StagePattern::Reversal);
