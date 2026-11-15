@@ -20,11 +20,23 @@ use windows_sys::Win32::{
 pub struct Hero {
     pub id: u32,
     pub name: String,
+    pub title: String,
     pub icon: String,
     pub win: Option<f64>,
     pub pick: Option<f64>,
     pub games: Option<u64>,
     pub tier: Option<u64>,
+}
+impl Hero {
+    /// Compact selection cards use the localized epithet; older caches keep a name fallback.
+    pub fn display_title(&self) -> &str {
+        let title = self.title.trim();
+        if title.is_empty() {
+            &self.name
+        } else {
+            title
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
@@ -90,6 +102,17 @@ impl Catalog {
                     Hero {
                         id,
                         name: name.chars().filter(|c| !c.is_control()).collect(),
+                        title: r["title"]
+                            .as_str()
+                            .filter(|s| s.chars().count() <= 64)
+                            .map(|s| {
+                                s.chars()
+                                    .filter(|c| !c.is_control())
+                                    .collect::<String>()
+                                    .trim()
+                                    .to_owned()
+                            })
+                            .unwrap_or_default(),
                         icon: r["iconUrl"]
                             .as_str()
                             .filter(|s| s.len() < 200)
@@ -121,6 +144,7 @@ impl Catalog {
                 } else {
                     format!("英雄 {id}")
                 },
+                title: String::new(),
                 icon: String::new(),
                 win: None,
                 pick: None,
@@ -1042,7 +1066,7 @@ mod tests {
     use super::*;
     #[test]
     fn sort_missing_last_and_keep_team_order() {
-        let c=Catalog::parse(&serde_json::json!({"data":[{"id":1,"name":"A","stats":{"winRate":0.4}},{"id":2,"name":"B","stats":{"winRate":0.6}},{"id":3,"name":"C","stats":{}}]}),"test".into()).unwrap();
+        let c=Catalog::parse(&serde_json::json!({"data":[{"id":1,"name":"A","title":" 弗雷尔卓德之心\n","stats":{"winRate":0.4}},{"id":2,"name":"B","stats":{"winRate":0.6}},{"id":3,"name":"C","title":"  ","stats":{}}]}),"test".into()).unwrap();
         let mut s = Selection {
             team: [1, 0, 0, 0, 0],
             local_slot: Some(0),
@@ -1060,11 +1084,25 @@ mod tests {
         );
         assert_eq!(choices[1].win, None);
         assert_eq!(choices[1].name, "英雄 999");
+        assert_eq!(choices[1].display_title(), "英雄 999");
         assert_eq!(v.team[0].id, 1);
+        assert_eq!(v.team[0].name, "A");
+        assert_eq!(v.team[0].title, "弗雷尔卓德之心");
+        assert_eq!(v.team[0].display_title(), "弗雷尔卓德之心");
+        assert!(v.bench[0].title.is_empty());
+        assert_eq!(v.bench[0].display_title(), "B");
+        assert_eq!(v.bench[2].display_title(), "C");
         assert_eq!(
             v.bench.iter().map(|h| h.id).collect::<Vec<_>>(),
             vec![2, 1, 3]
         );
+        let too_long = Catalog::parse(
+            &serde_json::json!({"data":[{"id":4,"name":"D","title":"长".repeat(65)}]}),
+            "test".into(),
+        )
+        .unwrap();
+        assert!(too_long.heroes[&4].title.is_empty());
+        assert_eq!(too_long.heroes[&4].display_title(), "D");
     }
 
     #[test]

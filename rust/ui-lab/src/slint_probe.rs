@@ -17,13 +17,26 @@ fn champion_subset_offscreen() {
     let ui = crate::ChampionWindow::new().unwrap();
     ui.set_offline(false);
     let mut team = ui.get_team().iter().collect::<Vec<_>>();
+    // Longest current Chinese title: exercise it in the team, bench and choice
+    // layouts. No borrowed portrait or statistics for this text-only fixture.
+    team[0].id = 201;
+    team[0].name = "布隆".into();
+    team[0].title = "弗雷尔卓德之心".into();
+    team[0].icon = Default::default();
+    team[0].win = "—".into();
+    team[0].pick = "—".into();
+    team[0].games = Default::default();
     for index in [1, 3, 4] {
         team[index].id = 0;
         team[index].name = "等待选择".into();
+        team[index].title = Default::default();
         team[index].icon = Default::default();
         team[index].win = "—".into();
     }
-    let cards = ui.get_bench().iter().take(3).collect::<Vec<_>>();
+    let mut bench = ui.get_bench().iter().collect::<Vec<_>>();
+    bench[0] = team[0].clone();
+    let cards = bench.iter().take(3).cloned().collect::<Vec<_>>();
+    ui.set_bench(Rc::new(VecModel::from(bench)).into());
     ui.set_team(Rc::new(VecModel::from(team)).into());
     ui.set_local_slot(3);
     ui.set_local_id(0);

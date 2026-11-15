@@ -510,6 +510,30 @@ pub(super) unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
     IntersectClipRect(dc, 0, x(40), x(l.width), x(content_bottom(state, &l)));
     SetViewportOrgEx(dc, 0, x(40 - state.page_scroll), null_mut());
     let label = |s: &str, a, b, c, d, size, color| text(dc, s, r(a, b, c, d), x(size), color);
+    // desktop::text is single-line. Keep the shared primitive and give compact
+    // champion epithets two readable lines inside the existing card bounds.
+    let title_label = |s: &str, a: i32, b: i32, c: i32, d: i32, size: i32, color: u32| {
+        let advance = if crate::i18n::locale() == "en-US" {
+            (size + 1) / 2
+        } else {
+            size
+        };
+        let columns = ((c - a) / advance).max(1) as usize;
+        let mut lines = wrap(s, columns);
+        if lines.len() > 2 {
+            lines.truncate(2);
+            let last = &mut lines[1];
+            while last.chars().count() >= columns {
+                last.pop();
+            }
+            last.push('…');
+        }
+        let height = (d - b) / lines.len().max(1) as i32;
+        for (line, text) in lines.iter().enumerate() {
+            let top = b + line as i32 * height;
+            label(text, a, top, c, top + height, size, color);
+        }
+    };
     if !state.side {
         label("我方阵容", 16, 9, l.width - 16, 35, 14, gold);
         panel(
@@ -535,13 +559,13 @@ pub(super) unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
                 },
             );
             icon(dc, state, &h.icon, x(center - 18), x(c.top + 9), x(36));
-            label(
-                &h.name,
+            title_label(
+                h.display_title(),
                 c.left + 3,
                 c.top + 50,
                 c.right - 2,
-                c.top + 74,
-                12,
+                c.top + 80,
+                11,
                 pale,
             );
             label(
@@ -549,7 +573,7 @@ pub(super) unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
                     .map(|v| format!("{:.1}%", v * 100.))
                     .unwrap_or("—".into()),
                 c.left + 3,
-                c.top + 77,
+                c.top + 83,
                 c.right - 2,
                 c.top + 98,
                 11,
@@ -607,21 +631,21 @@ pub(super) unsafe fn draw(hwnd: HWND, dc: HDC, state: &State) {
                 },
             );
             icon(dc, state, &h.icon, x(c.left + 6), x(c.top + 6), x(24));
-            label(
-                &h.name,
+            title_label(
+                h.display_title(),
                 c.left + 34,
-                c.top + 4,
+                c.top + 2,
                 c.right - 4,
-                c.top + 31,
+                c.top + 33,
                 11,
                 pale,
             );
             label(
                 &rate(h.win, "胜率"),
                 c.left + 6,
-                c.top + 33,
+                c.top + 35,
                 c.right - 4,
-                c.top + 57,
+                c.top + 58,
                 16,
                 gold,
             );
@@ -985,6 +1009,7 @@ mod tests {
         let hero = |id| Hero {
             id,
             name: String::new(),
+            title: String::new(),
             icon: String::new(),
             win: None,
             pick: None,

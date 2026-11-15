@@ -252,6 +252,7 @@ impl Binding {
                         .map(|h| ChampionChoice {
                             id: h.id as i32,
                             name: h.name.clone().into(),
+                            title: h.title.clone().into(),
                             win: rate(h.win),
                             pick: rate(h.pick),
                             games: h.games.map(|n| n.to_string()).unwrap_or_default().into(),
