@@ -12,12 +12,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Check upload privacy
         run: node scripts/check-secrets.mjs
       - name: Rust toolchain
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6.1.0
         with:
           path: rust/target
           key: lcu-win-1.90-${{ hashFiles('rust/Cargo.lock') }}

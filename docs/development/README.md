@@ -29,10 +29,11 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 
 功能走分支和 PR。按改动选择必要验证，大阶段统一验收；文档修改不需要重复进行游戏链路测试或打包。
 
-- `rust-prototypes.yml`：Rust 核心契约、OCR、采集、回退与生命周期。
+- `rust-prototypes.yml`：Rust 核心契约、OCR、采集、回退与生命周期；测试与构建共用 release profile，只缓存 release 目录。
 - `ui-framework-lab.yml`：控件、正式宿主回调、窗口恢复、截图至生产弹窗。
 - `release-windows.yml`：新版工具与源码检查，保留原分支保护检查名称，不再打包 Electron。
-- 专项诊断工作流保留为手动入口。普通 PR 不发布安装包。
+- `rust-release-readiness.yml` 等专项诊断保留为手动入口；master PR 的 Node 契约统一由源码检查执行，核心工作流仅在手动或其他 base 时补跑。
+- 同一 PR 的旧检查在新提交到达时取消；UI 合成截图保留 3 天。普通 PR 不发布安装包。
 
 测试截图必须使用已提交夹具或自建窗口。单元测试、隐藏窗口、CI 和实战是不同证据层级。实际领取轮次未确认，不按等级或已选数推断阶段；三卡只允许完整四阶段一致或同前置组合证据参与本组判断，规则见 [情境选择](rust/CONTEXTUAL_AUGMENT_ADVICE.md)。
 
@@ -52,10 +53,14 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 
 ## 发布与编译缓存
 
-新编号版本使用 Actions 的 `Publish numbered Rust release`，仅从 master 手动运行。
+新编号版本使用 Actions 的 `Publish Rust release or online update`，仅从 master 手动运行。
 更新 `rust/app-version.txt`、Setup 版本和 `docs/RELEASE_NOTES.md` 后经 PR 合并；已发布的版本在编译前终止，不重做同版本 Setup。
 发布复用 master 范围的 Rust 缓存，不再每次建立临时打包分支。发布脚本位于 `scripts/release/`，在线更新仍使用现有公开清单和包格式。
+发布只检出一次指定提交，临时 Actions 证据仅保存 JSON 回执；可执行文件由正式产物保留。历史 v0.7.0 的一次性 Setup 重打包入口已移除，旧实现可从 Git 历史查询。
+仅在线更新时设置 `online_only=true`：只上传在线更新包、清单及回执并切换 `rust-preview` 清单，不生成 Setup、不公开上传便携 ZIP，也不创建或替换正式下载 Release。`online_only` 默认关闭；`build_setup=false` 仅表示跳过安装器，不等于仅在线更新。
 只改 Slint 界面时由 UI 流水线验证，不再触发不含 UI 的核心 workspace 全量编译；服务源码改动仍触发两条相关流水线。
 本地继续复用显式指定的共享 target 目录，不为清理空间删除正在使用的编译缓存。
+
+当前 Actions 使用支持 Node 24 的官方 action 版本，工具脚本仍使用 Node 22 LTS 的安全补丁版 22.23.5。这里的 Node 只用于开发、检查及打包，FUZE 客户端仍为 Rust。
 
 `rust-preview` 保留为已安装客户端的固定更新地址，Release 名称统一为「FUZE 在线更新文件」。保留 Pre-release 标记以免参与最新正式版选择；页面引导普通下载到最新正式版。发布脚本分别生成在线入口和正式版说明，不从入口正文改写正式版文案。不要删除该 Release 或改名其标签来整理展示。

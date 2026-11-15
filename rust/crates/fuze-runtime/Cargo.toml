@@ -7,4 +7,3 @@ publish.workspace = true
 [dependencies]
 fuze-contract = { path = "../fuze-contract" }
 serde.workspace = true
-serde_json.workspace = true

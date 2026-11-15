@@ -70,24 +70,24 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Verify no private runtime data or secrets are tracked
         id: secrets
         run: node scripts/check-secrets.mjs
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22.18.0'
+          node-version: '22.23.5'
           cache: npm
       - name: Install existing runtime dependency for offline ONNX fixtures
         run: npm ci --ignore-scripts
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt
       - name: Reuse Rust build dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
-          path: rust/target
-          key: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: rust-windows-1.90-v1-${{ hashFiles('rust/Cargo.lock') }}-
+          path: rust/target/release
+          key: rust-windows-1.90-release-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-windows-1.90-release-${{ hashFiles('rust/Cargo.lock') }}-
       - name: Format, contracts and build
         id: build
         working-directory: rust
@@ -96,7 +96,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts | Out-Null
           $env:FUZE_SHARE_FIXTURE = Join-Path (Get-Location) 'artifacts/share.png'
-          cargo +1.90.0 test --workspace --locked -j 2
+          cargo +1.90.0 test --workspace --release --locked -j 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +1.90.0 build --workspace --release --locked -j 2
           exit $LASTEXITCODE
@@ -123,8 +123,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/compare-rust-ocr.mjs
           exit $LASTEXITCODE
+      # master PRs already run this coverage in the required source-check job.
       - name: Validate workflow policy and data preparation contracts
         id: contracts
+        if: github.event_name != 'pull_request' || github.base_ref != 'master'
         run: |
           node --test tests/unit/actions-validation-summary.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -166,11 +168,12 @@ jobs:
         run: node scripts/check-rust-desktop.mjs
       - name: Scan upload content
         id: upload_scan
+        if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts != 'none'
         run: npm run security:check
       - name: Upload requested preview ZIP (not a stable installer)
         id: upload_preview
         if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts != 'none'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rust-development-preview
           path: |
@@ -180,7 +183,7 @@ jobs:
       - name: Upload requested native update bundle
         id: upload_update
         if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rust-update-bundle
           path: |
@@ -191,7 +194,7 @@ jobs:
       - name: Upload sanitized prototype reports
         id: upload_evidence
         if: always() && github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rust-prototype-evidence
           retention-days: 7
@@ -232,7 +235,7 @@ jobs:
       - name: Upload isolated test tools (not a release installer)
         id: upload_tools
         if: github.event_name == 'workflow_dispatch' && inputs.stage_acceptance && inputs.artifacts == 'full'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rust-prototype-tools
           path: rust/artifacts/tools/

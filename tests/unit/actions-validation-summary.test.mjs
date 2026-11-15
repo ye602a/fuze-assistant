@@ -57,8 +57,6 @@ test('ordinary PRs never package; milestone acceptance preserves package validat
   assert.equal(sourceChecks.jobs.build.name, 'Build Windows installer') // Existing branch-protection context.
   assert.ok(sourceChecks.jobs.build.steps.some(step => step.run === 'npm test'))
   assert.ok(sourceChecks.jobs.build.steps.every(step => !/release upload|npm run pack|package-rust/.test(step.run || '')))
-  const setup = yaml.load(readFileSync(new URL('../../.github/workflows/package-rust070-setup.yml', import.meta.url), 'utf8'))
-  assert.deepEqual(Object.keys(setup.on), ['workflow_dispatch'])
   for (const name of ['rust-prototypes']) {
     const workflow = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
     const steps = Object.values(workflow.jobs)[0].steps
@@ -70,8 +68,18 @@ test('ordinary PRs never package; milestone acceptance preserves package validat
       assert.match(step.if, /inputs.stage_acceptance/)
       assert.ok(step.with['retention-days'] <= 7)
     }
-    for (const id of ['secrets', 'build', 'contracts']) {
+    for (const id of ['secrets', 'build']) {
       assert.ok(steps.some((step) => step.id === id && !step.if), `${name}: ${id} must still run`)
+    }
+    const contracts = steps.find(step => step.id === 'contracts')
+    for (const [event, base, expected] of [
+      ['pull_request', 'master', false],
+      ['pull_request', 'stacked-feature', true],
+      ['workflow_dispatch', '', true],
+    ]) {
+      assert.equal(runInNewContext(contracts.if, {
+        github: { event_name: event, base_ref: base },
+      }), expected)
     }
     assert.equal(workflow.on.workflow_dispatch.inputs.stage_acceptance.default, false)
     const stageSteps = name === 'rust-prototypes' ? ['package', 'desktop'] : ['download', 'package', 'upload_scan', 'desktop']
@@ -95,6 +103,7 @@ test('ordinary PRs never package; milestone acceptance preserves package validat
     if (name === 'rust-prototypes') {
       assert.equal(workflow.on.workflow_dispatch.inputs.artifacts.default, 'none')
       assert.ok(steps.some((step) => step.id === 'build' && step.run.includes('cargo +1.90.0 test --workspace')))
+      assert.match(steps.find(step => step.id === 'build').run, /test --workspace --release --locked/)
       assert.ok(!steps.find((step) => step.id === 'upload_preview').with.path.includes('*.fuz'))
     } else {
       assert.equal(steps.find((step) => step.id === 'publish').if, "startsWith(github.ref, 'refs/tags/v')")
@@ -127,7 +136,7 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
   const uploads = steps.filter(step => step.uses?.startsWith('actions/upload-artifact'))
   assert.equal(uploads.length, 1)
   assert.equal(uploads[0].with.name, 'synthetic-ui-screenshots')
-  assert.equal(uploads[0].with['retention-days'], 7)
+  assert.equal(uploads[0].with['retention-days'], 3)
   assert.deepEqual(uploads[0].with.path.trim().split('\n'), [
     'rust/ui-lab/artifacts/restored-*.png',
     'rust/ui-lab/artifacts/direct/direct-*.png',
@@ -135,7 +144,7 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
     'rust/ui-lab/artifacts/control-review/*.png',
     'rust/ui-lab/artifacts/motion/*.png',
   ])
-  for (const name of ['rust-lcu-regression', 'rust-detail-startup']) {
+  for (const name of ['rust-lcu-regression', 'rust-detail-startup', 'rust-release-readiness']) {
     const focused = yaml.load(readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8'))
     assert.equal(focused.on.pull_request, undefined)
     assert.ok(Object.hasOwn(focused.on, 'workflow_dispatch'))
@@ -147,11 +156,21 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch'])
  assert.equal(workflow.jobs.preview.if, "github.ref == 'refs/heads/master'")
  assert.equal(workflow.env.SOURCE_SHA, '${{ github.sha }}')
+ assert.equal(workflow.on.workflow_dispatch.inputs.online_only.default, false)
  const steps=workflow.jobs.preview.steps
  const guard=steps.findIndex(x=>x.name?.startsWith('Require a new'))
  const build=steps.findIndex(x=>x.run?.includes('./scripts/build-rust-with-evidence.ps1'))
  assert.ok(guard>=0 && guard<build)
  assert.match(steps[guard].run, /StatusCode -eq 200.*throw/)
- assert.ok(steps.some(x=>x.uses==='actions/cache@v4' && x.with.path==='rust/target' && x.with['restore-keys'].startsWith('rust-preview-1.90-')))
+ assert.ok(steps.some(x=>x.uses?.startsWith('actions/cache@') && x.with.path==='rust/target' && x.with['restore-keys'].startsWith('rust-preview-1.90-')))
+ const setup=steps.find(x=>x.run?.includes('ISCC.exe'))
+ const promote=steps.find(x=>x.run?.includes('scripts/release/promote-stable.mjs'))
+ for (const online_only of [false, true]) {
+   for (const build_setup of [false, true]) {
+     const inputs={online_only,build_setup}
+     assert.equal(runInNewContext(setup.if,{inputs}),build_setup && !online_only)
+     assert.equal(runInNewContext(promote.if.replace(/^\$\{\{\s*|\s*\}\}$/g,''),{inputs}),!online_only)
+   }
+ }
  assert.ok(!JSON.stringify(workflow).includes('0.7.4'))
 })

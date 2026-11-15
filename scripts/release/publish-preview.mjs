@@ -4,7 +4,8 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import path from 'node:path';
-const buildSetup=process.env.FUZE_BUILD_SETUP!=='false';
+const onlineOnly=process.env.FUZE_ONLINE_ONLY==='true';
+const buildSetup=!onlineOnly&&process.env.FUZE_BUILD_SETUP!=='false';
 const version=process.env.FUZE_RELEASE_VERSION;
 if(!/^0\.7\.\d+$/.test(version||''))throw Error('Release version required');
 const source=process.env.SOURCE_SHA,revision=source?.slice(0,12),root=process.cwd();
@@ -37,9 +38,9 @@ async function upload(name,bytes){
  console.log(`Uploaded and verified: ${name}`);
 }
 const setupName=`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`,setup=buildSetup?await readFile(path.join(directory,setupName)):null;
-const evidence={source,revision,version:version,sequence:manifest.sequence,zipSha256:hash(zipBytes),setupSha256:setup?hash(setup):null,signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
+const evidence={source,revision,version:version,sequence:manifest.sequence,onlineOnly,zipSha256:hash(zipBytes),setupSha256:setup?hash(setup):null,signed:false,buildRun:Number(process.env.GITHUB_RUN_ID),buildEvidence:receipt,appLocalRuntime:crt,updateValidation:validation};
 await writeFile(path.join(directory,`build-evidence-${revision}.json`),JSON.stringify(evidence,null,2));
-for(const [file,bytes]of [[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)],[manifest.archive,fuz],[manifest.archive+'.blockmap',map],...(setup?[[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
+for(const [file,bytes]of [...(onlineOnly?[]:[[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)]]),[manifest.archive,fuz],[manifest.archive+'.blockmap',map],...(setup?[[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
 const old=preview.assets.find(a=>a.name==='rust-update.json');if(!old)throw Error('Missing current update manifest');
 const response=await fetch(old.browser_download_url,{signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Cannot read current update manifest');
 const previous=await response.json();
@@ -64,6 +65,6 @@ if(oldDescription?.digest!==`sha256:${hash(describedBytes)}`){
   throw error;
  }
 }
-const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:process.env.GITHUB_RUN_ID,buildSetup,updateChannel:true});
+const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:process.env.GITHUB_RUN_ID,buildSetup,updateChannel:true,onlineOnly});
 await request(`${api}/releases/${preview.id}`,'PATCH',{name:'FUZE 在线更新文件',body,prerelease:true,make_latest:'false'});
-console.log(JSON.stringify({published:true,source,revision,version:version,previous:previous.revision,zip:name,setup:setupName}));
+console.log(JSON.stringify({published:true,source,revision,version:version,previous:previous.revision,onlineOnly,zip:onlineOnly?null:name,setup:setup?setupName:null}));

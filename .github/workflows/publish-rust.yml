@@ -1,4 +1,4 @@
-name: Publish numbered Rust release
+name: Publish Rust release or online update
 on:
   workflow_dispatch:
     inputs:
@@ -6,6 +6,10 @@ on:
         description: Build Setup installer
         type: boolean
         default: true
+      online_only:
+        description: Only update installed clients; keep existing full downloads
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -14,7 +18,8 @@ concurrency:
 env:
   SOURCE_SHA: ${{ github.sha }}
   FUZE_UI_FRONTEND: slint
-  FUZE_BUILD_SETUP: ${{ inputs.build_setup }}
+  FUZE_BUILD_SETUP: ${{ inputs.build_setup && !inputs.online_only }}
+  FUZE_ONLINE_ONLY: ${{ inputs.online_only }}
   FUZE_RELEASE_CHANNEL: stable
 jobs:
   preview:
@@ -22,14 +27,10 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Retain delivery helpers outside source checkout
-        shell: pwsh
-        run: Copy-Item scripts/release (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers') -Recurse
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Require a new application version before building Setup
+      - name: Require a new application version before building
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
@@ -38,18 +39,24 @@ jobs:
           if ($version -notmatch '^0\.7\.\d+$') { throw 'invalid-release-version' }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
           $response = Invoke-WebRequest -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/rust-v$version" -Headers $headers -SkipHttpErrorCheck
-          if ($response.StatusCode -eq 200) { throw 'Version already published; no rebuild of Setup. Bump app version for a numbered release.' }
+          if ($response.StatusCode -eq 200) { throw 'Version already published. Bump app version before building.' }
           if ($response.StatusCode -ne 404) { throw "Release lookup failed: $($response.StatusCode)" }
+          $preview = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/rust-preview" -Headers $headers
+          $description = @($preview.assets | Where-Object name -eq 'rust-update-v2.json')
+          if ($description.Count -ne 1) { throw 'Current online update description missing' }
+          $current = Invoke-RestMethod -Uri $description[0].browser_download_url
+          if ($current.version -notmatch '^0\.7\.\d+$') { throw 'Current online update version invalid' }
+          if ([version]$version -le [version]$current.version) { throw 'Version already available online. Bump app version before building.' }
           "FUZE_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22.18.0'
+          node-version: '22.23.5'
           cache: npm
       - name: Install existing build dependencies
         run: npm ci --ignore-scripts
       - name: Prepare Rust
         run: rustup toolchain install 1.90.0 --profile minimal
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6.1.0
         with:
           path: rust/target
           key: rust-preview-1.90-${{ hashFiles('rust/Cargo.lock', 'rust/ui-lab/Cargo.lock', 'rust/vc-runtime-policy.json') }}-${{ env.SOURCE_SHA }}
@@ -96,14 +103,14 @@ jobs:
           $revision = $env:SOURCE_SHA.Substring(0,12)
           node scripts/bundle-rust-crt.mjs "rust/artifacts/preview/fuze-rust-preview-$revision" (Join-Path $env:RUNNER_TEMP 'fuze-crt/dlls')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/finalize-preview.mjs')
+          node scripts/release/finalize-preview.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/package-rust-update.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-rust-update.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Wrap the same payload in unsigned Setup
-        if: inputs.build_setup
+        if: inputs.build_setup && !inputs.online_only
         shell: pwsh
         run: |
           $revision = $env:SOURCE_SHA.Substring(0,12)
@@ -117,23 +124,20 @@ jobs:
       - name: Publish verified files then switch preview manifest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/publish-preview.mjs')
+        run: node scripts/release/publish-preview.mjs
       - name: Preserve build receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: preview-build-evidence
           retention-days: 7
           path: |
-            rust/target/release/fuze-rust-host.exe
-            rust/target/release/fuze-ocr-worker.exe
-            rust/target/release/fuze-update.exe
-            rust/target/release/fuze-ui-lab.exe
             rust/target/release/fuze-build-evidence.json
             rust/artifacts/update-validation.json
             rust/artifacts/preview/preview-validation.json
             rust/artifacts/preview/build-evidence-*.json
       - name: Update latest stable Release with the same verified payload
+        if: ${{ !inputs.online_only }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node (Join-Path $env:RUNNER_TEMP 'fuze-release-helpers/promote-stable.mjs')
+        run: node scripts/release/promote-stable.mjs

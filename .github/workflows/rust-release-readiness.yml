@@ -1,21 +1,7 @@
+# Focused manual diagnostic; ordinary PR coverage is in FUZE source checks.
 name: Rust release readiness contracts
 on:
-  pull_request:
-    paths:
-      - 'scripts/rust-release-readiness.mjs'
-      - 'scripts/check-rust-release-readiness.mjs'
-      - 'scripts/inspect-rust-release-windows.ps1'
-      - 'tests/unit/rust-release-readiness.test.mjs'
-      - 'rust/vc-runtime-policy.json'
-      - 'scripts/rust-runtime-contract.mjs'
-      - 'scripts/build-rust-with-evidence.ps1'
-      - 'scripts/install-rust-prerequisites.ps1'
-      - 'scripts/package-rust-preview.mjs'
-      - 'scripts/rust-bundle-policy.mjs'
-      - 'tests/unit/rust-runtime-contract.test.mjs'
-      - 'tests/unit/rust-runtime-bootstrap.ps1'
-      - 'tests/unit/rust-bundle-policy.test.mjs'
-      - '.github/workflows/rust-release-readiness.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -23,10 +9,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22.18.0'
+          node-version: '22.23.5'
       # Pure Node and Windows metadata checks on non-executable synthetic PE files only.
       - name: Static dependency and signature policy contracts
         run: node --test tests/unit/rust-release-readiness.test.mjs tests/unit/rust-runtime-contract.test.mjs tests/unit/rust-bundle-policy.test.mjs
