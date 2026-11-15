@@ -75,25 +75,72 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
+// The expanded offline inspector retains its established geometry. Production
+// cards derive their smaller height from the modules that actually exist.
 const HEIGHT: u32 = 440;
-const CARD_BOTTOM: f32 = 372.;
-const STAGE_COLUMN_WIDTH: f32 = 52.;
-const COMBO_MEMBER_WIDTH: f32 = 32.;
-const STAGE_VALUE_Y: f32 = 273.;
-const STAGE_SAMPLES_Y: f32 = 291.;
-const STAGE_SOURCE_Y: f32 = 378.;
-const STAGE_NOTE_Y: f32 = 418.;
-const STAGE_NOTE: &str =
-    "当前轮次未确认 · 下行为场次，*少于200场 · 情境比较至少500场 · 区间仅描述抽样误差";
 const TITLE_WIDTH: f32 = 154.;
 const TITLE_HEIGHT: f32 = 64.;
-const DETAIL_OFFSET: f32 = (HEIGHT - 170) as f32;
 const DETAIL_HEIGHT: u32 = 210;
 const BG: u32 = 0x07131e;
 const PANEL: u32 = 0x101e2a;
 const GOLD: u32 = 0xc8aa6e;
 const TEXT: u32 = 0xf0e6d2;
 const MUTED: u32 = 0xa9bdc6;
+const QUIET: u32 = 0x728995;
+const LINE: u32 = 0x293d4b;
+const CYAN: u32 = 0x82c7c2;
+const LAVENDER: u32 = 0xb2aad3;
+
+#[derive(Clone, Copy, Debug)]
+struct CardLayout {
+    history: Option<f32>,
+    stage: Option<f32>,
+    routes: f32,
+    notice: Option<f32>,
+    bottom: f32,
+}
+
+fn choice_badge(choice: fuze_data::contextual_advice::Choice) -> Option<(&'static str, u32, u32)> {
+    use fuze_data::contextual_advice::Choice;
+    match choice {
+        Choice::Preferred => Some(("本组优先", GOLD, 0x302b21)),
+        Choice::Conditional => Some(("留意搭配", CYAN, 0x142d35)),
+        Choice::NotAdvised => Some(("优先考虑其他卡", 0xc3a28d, 0x2b2525)),
+        // A normal alternative or absent evidence does not need a repeated label.
+        Choice::Optional | Choice::Insufficient => None,
+    }
+}
+
+fn concise_reason(
+    reference: &crate::stage_cards::Comparison,
+    index: usize,
+    id: Option<u32>,
+) -> &'static str {
+    use fuze_data::contextual_advice::{Choice, Reason};
+    let Some(decision) = reference.decision(index, id) else {
+        return "";
+    };
+    if decision.choice != Choice::Preferred {
+        return "";
+    }
+    match decision.reason {
+        Reason::OverallRank => "来源推荐靠前",
+        Reason::StageAdvantage { .. } => "四次选择均占优",
+        Reason::ComboAdvantage { .. } => "已选搭配占优",
+        Reason::ConflictingEvidence => "按整体参考选择",
+        _ => "",
+    }
+}
+
+fn sample_count(n: u64) -> String {
+    if n >= 100_000_000 {
+        format!("{:.1}亿场", n as f64 / 100_000_000.)
+    } else if n >= 10_000 {
+        format!("{:.1}万场", n as f64 / 10_000.)
+    } else {
+        format!("{n}场")
+    }
+}
 fn rect(x: f32, y: f32, w: f32, h: f32) -> D2D_RECT_F {
     D2D_RECT_F {
         left: x,
@@ -160,11 +207,13 @@ impl Scene {
             let factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
-            for size in [12., 15., 20., 24., 20., 22., 11., 9.5] {
+            for size in [
+                12., 15., 20., 30., 20., 20., 11., 10., 12., 12., 11., 10., 13.,
+            ] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
-                    if formats.len() == 5 {
+                    if matches!(formats.len(), 3 | 5 | 8 | 9 | 10 | 12) {
                         DWRITE_FONT_WEIGHT_SEMI_BOLD
                     } else {
                         DWRITE_FONT_WEIGHT_NORMAL
@@ -178,6 +227,17 @@ impl Scene {
                 formats.push(format);
             }
             formats[4].SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            formats[11].SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            formats[12].SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            formats[9].SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+            let route_ellipsis = dw.CreateEllipsisTrimmingSign(&formats[9])?;
+            formats[9].SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    ..Default::default()
+                },
+                &route_ellipsis,
+            )?;
             let ellipsis = dw.CreateEllipsisTrimmingSign(&formats[5])?;
             formats[5].SetTrimming(
                 &DWRITE_TRIMMING {
@@ -212,7 +272,7 @@ impl Scene {
                     description: "离线说明示例。此处仅说明候选强化的效果，不表示玩家已领取。"
                         .into(),
                 }),
-                caption: "历史表现与本组选择 · 离线样例".into(),
+                caption: "离线样例".into(),
                 image_cache: Default::default(),
                 icon_urls: Default::default(),
                 dw,
@@ -222,6 +282,76 @@ impl Scene {
                 max_scroll: 0.,
             })
         }
+    }
+    fn card_layout(&self, index: usize) -> CardLayout {
+        let card = &self.cards[index];
+        if card.id.is_none() {
+            return CardLayout {
+                history: None,
+                stage: None,
+                routes: 136.,
+                notice: None,
+                bottom: 160.,
+            };
+        }
+        if card.id.and_then(fuze_contract::skill_choice::get).is_some() {
+            return CardLayout {
+                history: None,
+                stage: None,
+                routes: 136.,
+                notice: None,
+                bottom: 212.,
+            };
+        }
+        let mut cursor = 136.;
+        let history = self.reference.history[index]
+            .rate
+            .is_some()
+            .then_some(cursor);
+        if history.is_some() {
+            cursor += 80.;
+        }
+        let stage = self.reference.stage_contrast[index].as_ref().map(|_| {
+            let top = cursor + 8.;
+            cursor = top + 34.;
+            top
+        });
+        let routes = cursor + 8.;
+        cursor += self.reference.routes[index].len().min(2) as f32 * 52.;
+        let notice = self.reference.mechanisms[index].as_ref().map(|_| {
+            let top = cursor + 8.;
+            cursor = top + 36.;
+            top
+        });
+        CardLayout {
+            history,
+            stage,
+            routes,
+            notice,
+            bottom: cursor + 14.,
+        }
+    }
+    fn card_bottom(&self) -> f32 {
+        (0..3)
+            .map(|i| self.card_layout(i).bottom)
+            .fold(160., f32::max)
+    }
+    fn base_height(&self) -> u32 {
+        let natural = (self.card_bottom()
+            + if self.reference.footer.is_empty() {
+                10.
+            } else {
+                30.
+            })
+        .ceil() as u32;
+        if self.selected.is_some() {
+            natural.max(HEIGHT)
+        } else {
+            natural
+        }
+    }
+    fn detail_offset(&self) -> f32 {
+        self.base_height() as f32 - 170.
     }
     fn select(&mut self, index: Option<usize>) -> Result<()> {
         self.selected = None;
@@ -277,97 +407,10 @@ impl Scene {
         Ok(())
     }
 }
-fn decision_reason(reference: &crate::stage_cards::Comparison, index: usize) -> String {
-    reference.mechanisms[index].as_ref().map_or_else(
-        || reference.reasons[index].clone(),
-        |notice| {
-            format!(
-                "{}\n{}",
-                reference.reasons[index].lines().next().unwrap_or(""),
-                notice.summary
-            )
-        },
-    )
-}
-
-fn combo_lines(reference: &crate::stage_cards::Comparison, index: usize) -> (String, String) {
-    if let Some(route) = &reference.cross_hero[index] {
-        return (route.heading.clone(), route.summary.clone());
-    }
-    let combo = &reference.combos[index];
-    let alternatives = reference.combo_alternatives[index];
-    let count = combo.ids.len();
-    let heading = if count == 1 {
-        let full_name = if combo.partners.trim().is_empty() {
-            format!("强化 #{}", combo.ids[0])
-        } else {
-            combo.partners.clone()
-        };
-        let name = if full_name.chars().count() > 8 {
-            format!("{}…", full_name.chars().take(7).collect::<String>())
-        } else {
-            full_name
-        };
-        let prefix = if reference.current_combos[index] {
-            "搭配"
-        } else {
-            "后续"
-        };
-        let alternatives = if alternatives > 0 {
-            format!(" · 另{alternatives}条")
-        } else {
-            String::new()
-        };
-        format!("{prefix} · {name}{alternatives}")
-    } else if count > 1 {
-        let mut heading = if reference.current_combos[index] {
-            format!("当前搭配 · {count}项前置")
-        } else {
-            format!("后续路线 · 尚缺{count}项")
-        };
-        if alternatives > 0 {
-            heading = if reference.current_combos[index] {
-                format!("搭配{count}前置 · 另{alternatives}条")
-            } else {
-                format!("后续缺{count}项 · 另{alternatives}条")
-            };
-        }
-        heading
-    } else {
-        combo.heading.clone()
-    };
-    let summary = if !combo.statistic.is_empty() {
-        let values = combo
-            .statistic
-            .lines()
-            .last()
-            .unwrap_or("")
-            .replace(" 场", "场")
-            .replace(" · 少样本", "*");
-        format!("历史 {values}")
-    } else if combo.summary == "公开榜单有限，缺失记录不代表不搭配" {
-        "榜单有限；无记录不代表不搭配".into()
-    } else if combo.summary == "公开榜单暂无此符文的后续路线记录" {
-        "榜单暂无该符文后续记录".into()
-    } else {
-        combo.summary.clone()
-    };
-    (heading, summary)
-}
-
-fn combo_secondary(reference: &crate::stage_cards::Comparison, index: usize) -> &str {
-    reference.cross_hero[index]
-        .as_ref()
-        .map_or(reference.combo_secondary[index].as_str(), |route| {
-            route.secondary.as_str()
-        })
-}
-
 // Formats and decoded image are cached; only target-dependent resources are recreated.
 struct Surface {
     brush: ID2D1SolidColorBrush,
     icons: Vec<ID2D1Bitmap>,
-    combo_icons: Vec<Vec<Option<ID2D1Bitmap>>>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
@@ -403,34 +446,31 @@ impl Surface {
             .iter()
             .map(&bitmap)
             .collect::<Result<Vec<_>>>()?;
-        let combo_icons = scene
-            .reference
-            .combos
-            .iter()
-            .map(|combo| {
-                combo
-                    .ids
-                    .iter()
-                    .map(|id| {
-                        scene
-                            .icon_urls
-                            .get(id)
-                            .and_then(|url| scene.image_cache.get(url))
-                            .map(&bitmap)
-                            .transpose()
-                    })
-                    .collect::<Result<Vec<_>>>()
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self {
-            brush,
-            icons,
-            combo_icons,
-        })
+        Ok(Self { brush, icons })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
         self.brush.SetColor(&color(rgb));
         target.FillRectangle(&area, &self.brush);
+    }
+    unsafe fn rounded(
+        &self,
+        target: &ID2D1RenderTarget,
+        area: D2D_RECT_F,
+        radius: f32,
+        fill: u32,
+        border: Option<u32>,
+    ) {
+        let shape = D2D1_ROUNDED_RECT {
+            rect: area,
+            radiusX: radius,
+            radiusY: radius,
+        };
+        self.brush.SetColor(&color(fill));
+        target.FillRoundedRectangle(&shape, &self.brush);
+        if let Some(border) = border {
+            self.brush.SetColor(&color(border));
+            target.DrawRoundedRectangle(&shape, &self.brush, 1., None);
+        }
     }
     unsafe fn text(
         &self,
@@ -467,7 +507,7 @@ impl Surface {
         self.text(
             scene,
             target,
-            "FUZE  海克斯推荐",
+            "FUZE  ·  本次强化",
             0,
             rect(12., 5., 175., 22.),
             GOLD,
@@ -496,38 +536,29 @@ impl Surface {
             1.,
             None,
         );
+        let card_bottom = scene.card_bottom();
         for (i, card) in scene.cards.iter().enumerate() {
             let x = 9. + i as f32 * 250.;
             let best = scene.reference.preferred(i, card.id);
-            self.fill(target, rect(x, 34., 242., CARD_BOTTOM - 34.), PANEL);
-            self.brush
-                .SetColor(&color(if best { GOLD } else { 0x52616b }));
-            target.DrawRectangle(
-                &rect(x, 34., 242., CARD_BOTTOM - 34.),
-                &self.brush,
-                1.,
-                None,
+            let layout = scene.card_layout(i);
+            self.rounded(
+                target,
+                rect(x, 34., 242., card_bottom - 34.),
+                6.,
+                if best { 0x17232b } else { PANEL },
+                Some(if best { GOLD } else { LINE }),
             );
+            if best {
+                self.fill(target, rect(x + 15., 34., 42., 2.), GOLD);
+            }
             if (partial && i == 1) || card.id.is_none() {
-                self.text(
-                    scene,
-                    target,
-                    "此位置暂不可读",
-                    1,
-                    rect(x + 14., 66., 214., 26.),
-                    GOLD,
-                );
-                self.text(
-                    scene,
-                    target,
-                    "保留此卡位，等待重新识别。\n可能被遮挡或正在刷新。",
-                    0,
-                    rect(x + 14., 104., 214., 56.),
-                    MUTED,
-                );
+                // Preserve the game card's position without a paragraph of absence states.
+                self.rounded(target, rect(x + 14., 50., 44., 44.), 8., 0x14242e, None);
+                self.rounded(target, rect(x + 74., 57., 112., 7.), 3., LINE, None);
+                self.rounded(target, rect(x + 74., 75., 76., 6.), 3., 0x20313d, None);
                 continue;
             }
-            self.fill(target, rect(x + 14., 50., 48., 48.), 0x07131e);
+            self.rounded(target, rect(x + 14., 50., 48., 48.), 8., BG, Some(LINE));
             if scene.icons[i].width() > 1 {
                 target.DrawBitmap(
                     &self.icons[i],
@@ -537,37 +568,30 @@ impl Surface {
                     None,
                 );
             } else {
-                self.brush.SetColor(&color(GOLD));
+                // Quiet geometric fallback; a missing picture is not useful copy.
+                self.brush.SetColor(&color(QUIET));
                 let points = [
-                    (x + 38., 57.),
-                    (x + 50., 69.),
-                    (x + 38., 81.),
-                    (x + 26., 69.),
-                    (x + 38., 57.),
+                    (x + 38., 59.),
+                    (x + 51., 73.),
+                    (x + 38., 87.),
+                    (x + 25., 73.),
+                    (x + 38., 59.),
                 ];
-                for p in points.windows(2) {
+                for pair in points.windows(2) {
                     target.DrawLine(
                         windows_numerics::Vector2 {
-                            X: p[0].0,
-                            Y: p[0].1,
+                            X: pair[0].0,
+                            Y: pair[0].1,
                         },
                         windows_numerics::Vector2 {
-                            X: p[1].0,
-                            Y: p[1].1,
+                            X: pair[1].0,
+                            Y: pair[1].1,
                         },
                         &self.brush,
                         1.,
                         None,
                     );
                 }
-                self.text(
-                    scene,
-                    target,
-                    "暂无图标",
-                    0,
-                    rect(x + 14., 83., 52., 18.),
-                    MUTED,
-                );
             }
             self.text(
                 scene,
@@ -582,219 +606,297 @@ impl Surface {
                     scene,
                     target,
                     &format!("强化 {} 技能", choice.key),
-                    2,
-                    rect(x + 14., 116., 214., 28.),
-                    TEXT,
+                    8,
+                    rect(x + 14., 115., 214., 22.),
+                    CYAN,
                 );
                 self.text(
                     scene,
                     target,
                     "+20 技能急速\n+10% 伤害、治疗及护盾",
                     0,
-                    rect(x + 14., 151., 214., 40.),
-                    MUTED,
-                );
-                self.text(
-                    scene,
-                    target,
-                    if scene.interactive {
-                        "暂无统计 · 点击查看效果"
-                    } else {
-                        "暂无技能选择统计"
-                    },
-                    0,
-                    rect(x + 14., 200., 214., 22.),
-                    MUTED,
+                    rect(x + 14., 151., 214., 42.),
+                    TEXT,
                 );
                 continue;
             }
+            if let Some((label, foreground, background)) = scene
+                .reference
+                .decision(i, card.id)
+                .and_then(|decision| choice_badge(decision.choice))
+            {
+                let width = label.chars().count() as f32 * 12. + 18.;
+                self.rounded(
+                    target,
+                    rect(x + 14., 108., width, 22.),
+                    4.,
+                    background,
+                    None,
+                );
+                self.text(
+                    scene,
+                    target,
+                    label,
+                    8,
+                    rect(x + 23., 110., width - 16., 20.),
+                    foreground,
+                );
+                let reason = concise_reason(&scene.reference, i, card.id);
+                self.text(
+                    scene,
+                    target,
+                    reason,
+                    6,
+                    rect(x + width + 22., 112., 206. - width, 18.),
+                    MUTED,
+                );
+            }
             let history = &scene.reference.history[i];
-            for (j, label) in ["历史胜率", history.relation.as_str()].iter().enumerate() {
-                let sx = x + 14. + j as f32 * 116.;
-                self.text(scene, target, label, 6, rect(sx, 108., 98., 18.), MUTED);
+            if let Some(y) = layout.history {
                 self.text(
                     scene,
                     target,
-                    if j == 0 { &card.win } else { &history.delta },
-                    if j == 0 { 3 } else { 1 },
-                    rect(sx, 125., 98., 30.),
-                    if j == 0 { TEXT } else { MUTED },
-                );
-            }
-            self.text(
-                scene,
-                target,
-                &history.samples,
-                6,
-                rect(x + 14., 156., 214., 16.),
-                MUTED,
-            );
-            self.text(
-                scene,
-                target,
-                &history.interval,
-                6,
-                rect(x + 14., 172., 214., 16.),
-                MUTED,
-            );
-            self.fill(target, rect(x + 14., 189., 214., 1.), 0x34434c);
-            self.text(
-                scene,
-                target,
-                scene
-                    .reference
-                    .decision(i, card.id)
-                    .map_or("证据不足", |d| d.choice.label()),
-                1,
-                rect(x + 14., 191., 214., 20.),
-                if best { GOLD } else { TEXT },
-            );
-            self.text(
-                scene,
-                target,
-                &decision_reason(&scene.reference, i),
-                6,
-                rect(x + 14., 211., 214., 30.),
-                MUTED,
-            );
-            self.text(
-                scene,
-                target,
-                &scene.reference.stage_summary[i],
-                6,
-                rect(x + 14., 241., 214., 16.),
-                MUTED,
-            );
-            // This reference must remain visible when production card clicks are disabled.
-            // No column is highlighted: the current formal selection stage is still unknown.
-            for stage in 0..4 {
-                let sx = x + 14. + stage as f32 * 54.;
-                self.text(
-                    scene,
-                    target,
-                    &format!("第{}次", stage + 1),
+                    "历史胜率",
                     6,
-                    rect(sx, 257., STAGE_COLUMN_WIDTH, 16.),
+                    rect(x + 14., y, 80., 17.),
                     MUTED,
                 );
-                self.text(
-                    scene,
-                    target,
-                    &scene.reference.values[i][stage],
-                    0,
-                    rect(sx, STAGE_VALUE_Y, STAGE_COLUMN_WIDTH, 18.),
-                    TEXT,
-                );
-                self.text(
-                    scene,
-                    target,
-                    &scene.reference.samples[i][stage],
-                    6,
-                    rect(sx, STAGE_SAMPLES_Y, STAGE_COLUMN_WIDTH, 30.),
-                    MUTED,
-                );
-            }
-            self.fill(target, rect(x + 14., 321., 214., 1.), 0x34434c);
-            let (heading, summary) = combo_lines(&scene.reference, i);
-            let icons = &self.combo_icons[i];
-            let icon_width = icons.len() as f32 * COMBO_MEMBER_WIDTH;
-            self.text(
-                scene,
-                target,
-                &heading,
-                6,
-                rect(x + 14., 323., 214. - icon_width, 16.),
-                TEXT,
-            );
-            for (j, icon) in icons.iter().enumerate() {
-                let member_x = x + 228. - icon_width + j as f32 * COMBO_MEMBER_WIDTH;
-                let area = rect(member_x + 8., 323., 16., 16.);
-                self.fill(target, area, 0x152631);
-                if let Some(icon) = icon {
-                    target.DrawBitmap(
-                        icon,
-                        Some(&area),
-                        1.,
-                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                        None,
-                    );
-                    self.brush.SetColor(&color(0x52636d));
-                    target.DrawRectangle(&area, &self.brush, 1., None);
-                } else {
-                    let id = scene.reference.combos[i].ids[j].to_string();
+                if let Some(n) = history.rate.and_then(|rate| rate.games) {
+                    let samples = if n < 200 {
+                        format!("{} · 少样本", sample_count(n))
+                    } else {
+                        sample_count(n)
+                    };
                     self.text(
                         scene,
                         target,
-                        &id,
+                        &samples,
+                        11,
+                        rect(x + 96., y + 1., 132., 17.),
+                        if n < 200 { 0xbba68c } else { QUIET },
+                    );
+                }
+                let win = history
+                    .rate
+                    .map(|rate| format!("{:.1}%", rate.value * 100.))
+                    .unwrap_or_default();
+                self.text(
+                    scene,
+                    target,
+                    &win,
+                    3,
+                    rect(x + 14., y + 16., 112., 40.),
+                    TEXT,
+                );
+                if let (Some(hero), Some(delta)) = (history.hero_rate, history.delta_points) {
+                    self.text(
+                        scene,
+                        target,
+                        &format!("英雄均值 {:.1}%", hero * 100.),
                         7,
-                        rect(member_x, 323., COMBO_MEMBER_WIDTH, 16.),
+                        rect(x + 128., y + 19., 100., 16.),
+                        MUTED,
+                    );
+                    // A descriptive historical difference stays neutral, including negatives.
+                    self.text(
+                        scene,
+                        target,
+                        &format!("{delta:+.1} 个百分点"),
+                        6,
+                        rect(x + 128., y + 37., 100., 18.),
                         MUTED,
                     );
                 }
+                if let Some(rate) = history.rate {
+                    self.rounded(target, rect(x + 14., y + 65., 214., 4.), 2., 0x273946, None);
+                    if rate.value > 0. {
+                        self.rounded(
+                            target,
+                            rect(x + 14., y + 65., 214. * rate.value as f32, 4.),
+                            2.,
+                            0x7797a4,
+                            None,
+                        );
+                    }
+                    if let Some(hero) = history.hero_rate {
+                        self.fill(
+                            target,
+                            rect(x + 14. + 214. * hero as f32 - 1., y + 62., 2., 10.),
+                            0xc4ced0,
+                        );
+                    }
+                }
             }
-            self.text(
-                scene,
-                target,
-                &summary,
-                6,
-                rect(x + 14., 339., 214., 16.),
-                MUTED,
-            );
-            self.text(
-                scene,
-                target,
-                combo_secondary(&scene.reference, i),
-                6,
-                rect(x + 14., 355., 214., 16.),
-                MUTED,
-            );
-        }
-        let ordinary_cards = scene.cards.iter().any(|c| {
-            c.id.is_some_and(|id| fuze_contract::skill_choice::get(id).is_none())
-        });
-        if ordinary_cards {
-            self.text(
-                scene,
-                target,
-                &scene.reference.source,
-                0,
-                rect(12., STAGE_SOURCE_Y, 736., 36.),
-                MUTED,
-            );
-            self.text(
-                scene,
-                target,
-                STAGE_NOTE,
-                0,
-                rect(12., STAGE_NOTE_Y, 736., 18.),
-                MUTED,
-            );
-        } else if scene
-            .cards
-            .iter()
-            .any(|c| c.id.and_then(fuze_contract::skill_choice::get).is_some())
-        {
-            self.text(
-                scene,
-                target,
-                if scene.interactive {
-                    "点击卡片查看技能强化效果 · 暂无技能选择统计"
+            if let (Some(y), Some(stage)) = (layout.stage, &scene.reference.stage_contrast[i]) {
+                use std::cmp::Ordering;
+                self.rounded(target, rect(x + 14., y, 214., 34.), 5., 0x0c1a25, None);
+                self.text(
+                    scene,
+                    target,
+                    "分次对比",
+                    7,
+                    rect(x + 22., y + 1., 62., 15.),
+                    QUIET,
+                );
+                self.text(
+                    scene,
+                    target,
+                    &format!("对{}卡", ["左", "中", "右"][stage.other_slot]),
+                    6,
+                    rect(x + 22., y + 16., 62., 16.),
+                    MUTED,
+                );
+                for (index, direction) in stage.orders.iter().enumerate() {
+                    let Some(direction) =
+                        direction.filter(|direction| *direction != Ordering::Equal)
+                    else {
+                        continue;
+                    };
+                    let cx = x + 91. + index as f32 * 32.;
+                    let up = direction == Ordering::Greater;
+                    let tint = if up { CYAN } else { 0xb29b87 };
+                    self.rounded(
+                        target,
+                        rect(cx, y + 6., 28., 22.),
+                        4.,
+                        if up { 0x173236 } else { 0x2b2928 },
+                        None,
+                    );
+                    self.text(
+                        scene,
+                        target,
+                        &(index + 1).to_string(),
+                        7,
+                        rect(cx + 5., y + 9., 10., 16.),
+                        tint,
+                    );
+                    self.brush.SetColor(&color(tint));
+                    let center = cx + 20.;
+                    let arrow_y = y + if up { 12. } else { 20. };
+                    let wing_y = arrow_y + if up { 4. } else { -4. };
+                    for wing in [center - 3., center + 3.] {
+                        target.DrawLine(
+                            windows_numerics::Vector2 { X: wing, Y: wing_y },
+                            windows_numerics::Vector2 {
+                                X: center,
+                                Y: arrow_y,
+                            },
+                            &self.brush,
+                            1.5,
+                            None,
+                        );
+                    }
+                    target.DrawLine(
+                        windows_numerics::Vector2 {
+                            X: center,
+                            Y: y + 12.,
+                        },
+                        windows_numerics::Vector2 {
+                            X: center,
+                            Y: y + 21.,
+                        },
+                        &self.brush,
+                        1.5,
+                        None,
+                    );
+                }
+            }
+            for (row, route) in scene.reference.routes[i].iter().take(2).enumerate() {
+                use crate::stage_cards::RouteKind;
+                let y = layout.routes + row as f32 * 52.;
+                let (label, tint, background, border) = match route.kind {
+                    RouteKind::Current => ("当前搭配", CYAN, 0x11282f, 0x2a454d),
+                    RouteKind::Future => ("后续留意", 0x95b9d6, 0x112331, 0x2a4054),
+                    RouteKind::CrossHero => ("跨英雄参考", LAVENDER, 0x211f31, 0x3a3450),
+                };
+                self.rounded(
+                    target,
+                    rect(x + 14., y, 214., 44.),
+                    5.,
+                    background,
+                    Some(border),
+                );
+                self.fill(target, rect(x + 14., y + 9., 2., 26.), tint);
+                let has_rate = route.rate.is_some() && route.kind != RouteKind::CrossHero;
+                let label = if route
+                    .rate
+                    .filter(|_| has_rate)
+                    .and_then(|rate| rate.games)
+                    .is_some_and(|n| n < 200)
+                {
+                    format!("{label} · 少样本")
                 } else {
-                    "技能强化选择 · 暂无技能选择统计"
-                },
-                0,
-                rect(12., STAGE_NOTE_Y, 736., 18.),
-                MUTED,
+                    label.to_string()
+                };
+                self.text(
+                    scene,
+                    target,
+                    &label,
+                    7,
+                    rect(x + 24., y + 4., 134., 16.),
+                    tint,
+                );
+                self.text(
+                    scene,
+                    target,
+                    &route.partners,
+                    9,
+                    rect(x + 24., y + 21., if has_rate { 136. } else { 192. }, 19.),
+                    TEXT,
+                );
+                if let Some(rate) = route.rate.filter(|_| has_rate) {
+                    self.text(
+                        scene,
+                        target,
+                        &format!("{:.1}%", rate.value * 100.),
+                        12,
+                        rect(x + 164., y + 3., 54., 20.),
+                        tint,
+                    );
+                    if let Some(n) = rate.games {
+                        let sample = sample_count(n);
+                        self.text(
+                            scene,
+                            target,
+                            &sample,
+                            11,
+                            rect(x + 158., y + 23., 60., 17.),
+                            MUTED,
+                        );
+                    }
+                }
+            }
+            if let (Some(y), Some(notice)) = (layout.notice, &scene.reference.mechanisms[i]) {
+                self.rounded(target, rect(x + 14., y, 214., 36.), 4., 0x30291f, None);
+                self.text(
+                    scene,
+                    target,
+                    &notice.summary,
+                    6,
+                    rect(x + 23., y + 3., 196., 31.),
+                    0xd2b683,
+                );
+            }
+        }
+        if !scene.reference.footer.is_empty() {
+            self.text(
+                scene,
+                target,
+                &scene.reference.footer,
+                7,
+                rect(14., card_bottom + 8., 732., 17.),
+                QUIET,
             );
         }
         if let Some(index) = scene.selected {
-            self.fill(target, rect(9., 173. + DETAIL_OFFSET, 742., 198.), PANEL);
+            let detail_offset = scene.detail_offset();
+            self.fill(target, rect(9., 173. + detail_offset, 742., 198.), PANEL);
             self.text(
                 scene,
                 target,
                 &scene.cards[index].title,
                 1,
-                rect(20., 183. + DETAIL_OFFSET, 500., 24.),
+                rect(20., 183. + detail_offset, 500., 24.),
                 GOLD,
             );
             self.text(
@@ -806,11 +908,11 @@ impl Surface {
                     "再点卡片收起"
                 },
                 0,
-                rect(530., 185. + DETAIL_OFFSET, 210., 20.),
+                rect(530., 185. + detail_offset, 210., 20.),
                 MUTED,
             );
             target.PushAxisAlignedClip(
-                &rect(20., 214. + DETAIL_OFFSET, 720., 136.),
+                &rect(20., 214. + detail_offset, 720., 136.),
                 D2D1_ANTIALIAS_MODE_ALIASED,
             );
             if let Some(layout) = &scene.detail {
@@ -818,7 +920,7 @@ impl Surface {
                 target.DrawTextLayout(
                     windows_numerics::Vector2 {
                         X: 20.,
-                        Y: 214. + DETAIL_OFFSET - scene.scroll,
+                        Y: 214. + detail_offset - scene.scroll,
                     },
                     layout,
                     &self.brush,
@@ -832,7 +934,7 @@ impl Surface {
                     target,
                     "上移",
                     0,
-                    rect(619., 352. + DETAIL_OFFSET, 50., 20.),
+                    rect(619., 352. + detail_offset, 50., 20.),
                     if scene.scroll > 0. { GOLD } else { MUTED },
                 );
                 self.text(
@@ -840,19 +942,19 @@ impl Surface {
                     target,
                     "下移",
                     0,
-                    rect(689., 352. + DETAIL_OFFSET, 50., 20.),
+                    rect(689., 352. + detail_offset, 50., 20.),
                     if scene.scroll < scene.max_scroll {
                         GOLD
                     } else {
                         MUTED
                     },
                 );
-                self.fill(target, rect(741., 214. + DETAIL_OFFSET, 3., 136.), 0x24343e);
+                self.fill(target, rect(741., 214. + detail_offset, 3., 136.), 0x24343e);
                 self.fill(
                     target,
                     rect(
                         741.,
-                        214. + DETAIL_OFFSET + scene.scroll / scene.max_scroll * 108.,
+                        214. + detail_offset + scene.scroll / scene.max_scroll * 108.,
                         3.,
                         28.,
                     ),
@@ -958,7 +1060,7 @@ unsafe fn logical_point(hwnd: HWND, lp: LPARAM) -> (f32, f32) {
         (((lp.0 >> 16) & 0xffff) as u16 as i16) as f32 / scale,
     )
 }
-unsafe fn size_to_content(hwnd: HWND, expanded: bool) {
+unsafe fn size_to_content(hwnd: HWND, base_height: u32, expanded: bool) {
     let mut r = RECT::default();
     if GetWindowRect(hwnd, &mut r).is_err() {
         return;
@@ -976,7 +1078,7 @@ unsafe fn size_to_content(hwnd: HWND, expanded: bool) {
         return;
     }
     let area = monitor.rcWork;
-    let height = HEIGHT + if expanded { DETAIL_HEIGHT } else { 0 };
+    let height = base_height + if expanded { DETAIL_HEIGHT } else { 0 };
     let scale = (GetDpiForWindow(hwnd).max(96) as f32 / 96.)
         .min((area.right - area.left).max(1) as f32 / WIDTH as f32)
         .min((area.bottom - area.top).max(1) as f32 / height as f32);
@@ -1002,13 +1104,13 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
             let _ = DestroyWindow(hwnd);
         }
     } else if state.scene.selected.is_some()
-        && (350. + DETAIL_OFFSET..373. + DETAIL_OFFSET).contains(&y)
+        && (350. + state.scene.detail_offset()..373. + state.scene.detail_offset()).contains(&y)
         && (609. ..749.).contains(&x)
     {
         let delta = if x < 679. { -100. } else { 100. };
         state.scene.scroll = (state.scene.scroll + delta).clamp(0., state.scene.max_scroll);
         let _ = InvalidateRect(Some(hwnd), None, false);
-    } else if (34. ..CARD_BOTTOM).contains(&y) {
+    } else if (34. ..state.scene.card_bottom()).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
         if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
             let selected = if state.scene.selected == Some(index as usize) {
@@ -1020,7 +1122,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
                 state.error = true;
             }
             let expanded = state.scene.selected.is_some();
-            size_to_content(hwnd, expanded);
+            size_to_content(hwnd, state.scene.base_height(), expanded);
         }
     }
 }
@@ -1050,7 +1152,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
         WM_EXITSIZEMOVE => {
             state.position_dirty = true;
             let expanded = state.scene.selected.is_some();
-            size_to_content(hwnd, expanded);
+            size_to_content(hwnd, state.scene.base_height(), expanded);
             LRESULT(0)
         }
         WM_DISPLAYCHANGE => {
@@ -1107,7 +1209,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 area.bottom - area.top,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             );
-            size_to_content(hwnd, expanded);
+            size_to_content(hwnd, state.scene.base_height(), expanded);
             let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         }
@@ -1216,11 +1318,11 @@ impl OwnWindow {
                 40,
                 40,
                 (WIDTH as f32 * scale) as i32,
-                (HEIGHT as f32 * scale) as i32,
+                (window.state.scene.base_height() as f32 * scale) as i32,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )?;
             window.memory.restore(hwnd.0);
-            size_to_content(hwnd, false);
+            size_to_content(hwnd, window.state.scene.base_height(), false);
             Ok(window)
         }
     }
@@ -1229,7 +1331,8 @@ impl Drop for OwnWindow {
     fn drop(&mut self) {
         unsafe {
             if IsWindow(Some(self.hwnd)).as_bool() {
-                self.memory.remember_fixed(self.hwnd.0, WIDTH, HEIGHT);
+                self.memory
+                    .remember_fixed(self.hwnd.0, WIDTH, self.state.scene.base_height());
                 let _ = DestroyWindow(self.hwnd);
             }
         }
@@ -1273,6 +1376,7 @@ impl HostOverlay {
         if std::sync::Arc::ptr_eq(&scene.reference, &view) || *scene.reference == *view {
             return Ok(());
         }
+        let previous_height = scene.base_height();
         scene.reference = view;
         scene.select(scene.selected)?;
         self.window.state.surface = None;
@@ -1282,6 +1386,13 @@ impl HostOverlay {
         }
         self.revisions += 1;
         unsafe {
+            if previous_height != self.window.state.scene.base_height() {
+                size_to_content(
+                    self.window.hwnd,
+                    self.window.state.scene.base_height(),
+                    self.window.state.scene.selected.is_some(),
+                );
+            }
             let _ = InvalidateRect(Some(self.window.hwnd), None, false);
         }
         self.request_art();
@@ -1322,14 +1433,20 @@ impl HostOverlay {
         unsafe {
             if self.window.state.recover {
                 self.window.state.recover = false;
-                size_to_content(self.window.hwnd, self.window.state.scene.selected.is_some());
+                size_to_content(
+                    self.window.hwnd,
+                    self.window.state.scene.base_height(),
+                    self.window.state.scene.selected.is_some(),
+                );
                 self.window.state.position_dirty = true;
             }
             if self.window.state.position_dirty {
                 self.window.state.position_dirty = false;
-                self.window
-                    .memory
-                    .remember_fixed(self.window.hwnd.0, WIDTH, HEIGHT);
+                self.window.memory.remember_fixed(
+                    self.window.hwnd.0,
+                    WIDTH,
+                    self.window.state.scene.base_height(),
+                );
             }
         }
         !self.window.memory.failed()
@@ -1350,12 +1467,17 @@ impl HostOverlay {
             self.ids = [None; 3];
             self.window.state.scene.select(None)?;
             unsafe {
-                size_to_content(self.window.hwnd, false);
+                size_to_content(
+                    self.window.hwnd,
+                    self.window.state.scene.base_height(),
+                    false,
+                );
                 KillTimer(Some(self.window.hwnd), 73).ok();
                 let _ = ShowWindow(self.window.hwnd, SW_HIDE);
             }
             return Ok(true);
         };
+        let previous_height = self.window.state.scene.base_height();
         let same = self.last_accepted.as_deref() == Some(&frame);
         if same && self.frame.is_some() {
             let should_show = visible
@@ -1395,9 +1517,6 @@ impl HostOverlay {
                 self.window.state.dismissed = false;
                 self.window.state.scene.reference = std::sync::Arc::new(Default::default());
                 self.window.state.scene.select(None)?;
-                unsafe {
-                    size_to_content(self.window.hwnd, false);
-                }
             } else if !self.gate.as_mut().unwrap().accept(&frame.snapshot) {
                 return Ok(false);
             }
@@ -1415,9 +1534,6 @@ impl HostOverlay {
                 self.ids = ids;
                 self.window.state.scene.reference = std::sync::Arc::new(Default::default());
                 self.window.state.scene.select(None)?;
-                unsafe {
-                    size_to_content(self.window.hwnd, false);
-                }
             }
             let skill_choice = frame
                 .snapshot
@@ -1429,7 +1545,7 @@ impl HostOverlay {
             } else if skill_choice {
                 "五杀摇滚 · 技能强化"
             } else if self.preview_mode {
-                "历史表现与本组选择 · 公开数据样例"
+                "公开数据样例"
             } else if frame.retained {
                 "刷新或遮挡中 · 暂留上次结果"
             } else if frame
@@ -1438,9 +1554,9 @@ impl HostOverlay {
                 .flatten()
                 .any(|a| a.provenance.contains("腾讯101推荐"))
             {
-                "腾讯101整体参考 · 本组选择"
+                "腾讯101参考"
             } else {
-                "历史表现与本组选择 · 候选强化"
+                ""
             }
             .to_string();
             let scene = &mut self.window.state.scene;
@@ -1490,6 +1606,13 @@ impl HostOverlay {
         self.window.state.deadline = frame.deadline;
         let expired = frame.deadline.is_some_and(|t| Instant::now() >= t);
         unsafe {
+            if previous_height != self.window.state.scene.base_height() {
+                size_to_content(
+                    self.window.hwnd,
+                    self.window.state.scene.base_height(),
+                    self.window.state.scene.selected.is_some(),
+                );
+            }
             KillTimer(Some(self.window.hwnd), 73).ok();
             let mut show = visible && !expired && !self.window.state.dismissed;
             if show {
@@ -1664,13 +1787,20 @@ impl HostOverlay {
         self.window.state.dismissed
     }
     fn pixels(&self) -> std::result::Result<image::RgbaImage, Box<dyn std::error::Error>> {
-        unsafe {
-            let height = HEIGHT
+        self.pixels_at_height(
+            self.window.state.scene.base_height()
                 + if self.window.state.scene.selected.is_some() {
                     DETAIL_HEIGHT
                 } else {
                     0
-                };
+                },
+        )
+    }
+    fn pixels_at_height(
+        &self,
+        height: u32,
+    ) -> std::result::Result<image::RgbaImage, Box<dyn std::error::Error>> {
+        unsafe {
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let bitmap = imaging.CreateBitmap(
@@ -1756,83 +1886,44 @@ impl HostOverlay {
             if self.window.state.scene.selected.is_some() {
                 return Err("passive-stage-reference-opened-details".into());
             }
-            let scene = &self.window.state.scene;
-            let fits = |text: &str, format: usize, width: f32, height: f32| {
-                let text: Vec<_> = text.encode_utf16().collect();
-                unsafe {
-                    let layout =
-                        scene
-                            .dw
-                            .CreateTextLayout(&text, &scene.formats[format], width, 32768.)?;
-                    let mut metrics = DWRITE_TEXT_METRICS::default();
-                    layout.GetMetrics(&mut metrics)?;
-                    Ok::<_, windows::core::Error>(
-                        metrics.width <= width && metrics.height <= height,
-                    )
-                }
-            };
-            for row in &scene.reference.values {
-                for value in row {
-                    if !fits(value, 0, STAGE_COLUMN_WIDTH, 18.)? {
-                        return Err("stage-reference-value-clipped".into());
-                    }
-                }
-            }
-            for row in &scene.reference.samples {
-                for samples in row {
-                    if !fits(samples, 6, STAGE_COLUMN_WIDTH, 30.)? {
-                        return Err("stage-reference-samples-clipped".into());
-                    }
-                }
-            }
-            for i in 0..3 {
-                let history = &scene.reference.history[i];
-                let (heading, summary) = combo_lines(&scene.reference, i);
-                if !fits(&history.delta, 1, 98., 30.)?
-                    || !fits(&history.samples, 6, 214., 16.)?
-                    || !fits(&history.interval, 6, 214., 16.)?
-                    || !fits(&decision_reason(&scene.reference, i), 6, 214., 30.)?
-                    || !fits(&scene.reference.stage_summary[i], 6, 214., 16.)?
-                    || !fits(combo_secondary(&scene.reference, i), 6, 214., 16.)?
-                    || !fits(
-                        &heading,
-                        6,
-                        214. - scene.reference.combos[i].ids.len() as f32 * COMBO_MEMBER_WIDTH,
-                        16.,
-                    )?
-                    || !fits(&summary, 6, 214., 16.)?
-                {
-                    return Err("contextual-reference-text-clipped".into());
-                }
-            }
-            if !fits("9007199254740991", 6, STAGE_COLUMN_WIDTH, 30.)?
-                || !fits(&scene.reference.source, 0, 736., 36.)?
-                || !fits(STAGE_NOTE, 0, 736., 18.)?
-            {
-                return Err("stage-reference-context-clipped".into());
-            }
+            review_visible_reference_layout(&self.window.state.scene)?;
             let shown = self.pixels()?;
             let reference = self.window.state.scene.reference.clone();
-            let mut empty = (*reference).clone();
-            empty.source.clear();
-            empty.history = Default::default();
-            empty.reasons = Default::default();
-            empty.stage_summary = Default::default();
-            empty.combos = Default::default();
-            empty.cross_hero = Default::default();
-            empty.combo_secondary = Default::default();
-            for row in empty.values.iter_mut().chain(&mut empty.samples) {
-                for cell in row {
-                    cell.clear();
+            let layouts =
+                std::array::from_fn::<_, 3, _>(|i| self.window.state.scene.card_layout(i));
+            let card_bottom = self.window.state.scene.card_bottom();
+            let has_footer = !reference.footer.is_empty();
+            let mut contrasting = (*reference).clone();
+            for history in &mut contrasting.history {
+                if let Some(rate) = &mut history.rate {
+                    rate.value = if rate.value == 0. { 1. } else { 0. };
                 }
             }
-            self.window.state.scene.reference = std::sync::Arc::new(empty);
-            let empty = self.pixels();
-            self.window.state.scene.reference = reference;
-            let empty = empty?;
+            for route in contrasting.routes.iter_mut().flatten() {
+                route.partners = "绘制对照伙伴".into();
+                if let Some(rate) = &mut route.rate {
+                    rate.value = if rate.value == 0. { 1. } else { 0. };
+                }
+            }
+            if has_footer {
+                contrasting.footer = "离线绘制对照".into();
+            }
+            self.window.state.scene.reference = std::sync::Arc::new(contrasting);
+            // Change only visible content. Module presence, layout and card
+            // backgrounds stay identical, so resizing cannot satisfy the check.
+            if self.window.state.scene.base_height() != shown.height()
+                || (0..3)
+                    .any(|i| self.window.state.scene.card_layout(i).bottom != layouts[i].bottom)
+            {
+                return Err("reference-content-comparison-changed-layout".into());
+            }
+            let contrasted = self.pixels_at_height(shown.height());
+            self.window.state.scene.reference = reference.clone();
+            let contrasted = contrasted?;
             let changed = |x: u32, y: u32, width: u32, height: u32| {
-                (y..y + height)
-                    .any(|y| (x..x + width).any(|x| shown.get_pixel(x, y) != empty.get_pixel(x, y)))
+                (y..y + height).any(|y| {
+                    (x..x + width).any(|x| shown.get_pixel(x, y) != contrasted.get_pixel(x, y))
+                })
             };
             for (index, card) in cards.iter().enumerate() {
                 if card
@@ -1841,36 +1932,93 @@ impl HostOverlay {
                 {
                     continue;
                 }
-                for stage in 0..4 {
-                    let x = 23 + index as u32 * 250 + stage * 54;
-                    if !changed(x, STAGE_VALUE_Y as u32, STAGE_COLUMN_WIDTH as u32, 18)
-                        || !changed(x, STAGE_SAMPLES_Y as u32, STAGE_COLUMN_WIDTH as u32, 30)
-                    {
-                        return Err("passive-stage-reference-cell-not-painted".into());
-                    }
-                }
                 let x = 23 + index as u32 * 250;
-                for (left, top, width, height) in [
-                    (x + 116, 125, 98, 30),
-                    (x, 156, 214, 32),
-                    (x, 211, 214, 30),
-                    (x, 241, 214, 16),
-                    (x, 323, 214, 32),
-                ] {
-                    if !changed(left, top, width, height) {
-                        return Err("passive-contextual-reference-not-painted".into());
+                if let Some(y) = layouts[index].history {
+                    if !changed(x, y as u32 + 16, 112, 40) {
+                        return Err("passive-history-reference-not-painted".into());
                     }
                 }
-                if !combo_secondary(&self.window.state.scene.reference, index).is_empty()
-                    && !changed(x, 355, 214, 16)
-                {
-                    return Err("passive-secondary-route-not-painted".into());
+                for row in 0..reference.routes[index].len().min(2) {
+                    if !changed(
+                        x + 10,
+                        layouts[index].routes as u32 + row as u32 * 52 + 21,
+                        192,
+                        19,
+                    ) {
+                        return Err("passive-route-reference-not-painted".into());
+                    }
                 }
             }
-            if !changed(12, STAGE_SOURCE_Y as u32, 736, 36) {
-                return Err("passive-stage-reference-source-not-painted".into());
+            if has_footer && !changed(14, card_bottom as u32 + 8, 732, 17) {
+                return Err("passive-reference-footer-not-painted".into());
             }
             shown.save(output.join("host-cards-four-stage-reference.png"))?;
+
+            // The live adapter supplies meaningful stage directions from an
+            // explicit synthetic comparison; raw four-column data is not drawn.
+            let contrast =
+                reference_view_fixture_with_source(&cards, Some(reference_contrast_fixture(ids)));
+            let contrast_layouts = contrast.stage_contrast.clone();
+            self.window.state.scene.reference = std::sync::Arc::new(contrast.clone());
+            review_visible_reference_layout(&self.window.state.scene)?;
+            let contrast_image = self.pixels()?;
+            let positions =
+                std::array::from_fn::<_, 3, _>(|i| self.window.state.scene.card_layout(i));
+            let mut reversed = contrast;
+            for stage in reversed.stage_contrast.iter_mut().flatten() {
+                for direction in stage.orders.iter_mut().flatten() {
+                    *direction = direction.reverse();
+                }
+            }
+            self.window.state.scene.reference = std::sync::Arc::new(reversed);
+            if self.window.state.scene.base_height() != contrast_image.height() {
+                return Err("stage-direction-comparison-changed-layout".into());
+            }
+            let reversed = self.pixels_at_height(contrast_image.height())?;
+            for (index, contrast) in contrast_layouts.iter().enumerate() {
+                if contrast.is_none() {
+                    continue;
+                }
+                let y = positions[index]
+                    .stage
+                    .ok_or("stage-reference-layout-missing")? as u32;
+                let x = 100 + index as u32 * 250;
+                if !(y + 6..y + 28).any(|y| {
+                    (x..x + 124).any(|x| contrast_image.get_pixel(x, y) != reversed.get_pixel(x, y))
+                }) {
+                    return Err("passive-stage-directions-not-painted".into());
+                }
+            }
+            contrast_image.save(output.join("host-cards-stage-contrast.png"))?;
+
+            let mut missing = reference_view_fixture_with_source(&cards, None);
+            if missing.stage_contrast.iter().any(Option::is_some)
+                || missing.routes.iter().any(|routes| !routes.is_empty())
+                || missing.stage_rates.iter().flatten().any(Option::is_some)
+            {
+                return Err("missing-reference-created-module".into());
+            }
+            self.window.state.scene.reference = std::sync::Arc::new(missing.clone());
+            if (0..3).any(|i| self.window.state.scene.card_layout(i).stage.is_some()) {
+                return Err("missing-reference-reserved-stage-space".into());
+            }
+            let missing_image = self.pixels()?;
+            // Legacy diagnostics and absence messages remain available offline;
+            // none may leak back into the passive production card.
+            missing.source = "阶段未就绪 · 组合未就绪".into();
+            missing.reasons = std::array::from_fn(|_| "缺少统计，测试不应绘制".into());
+            missing.stage_summary = std::array::from_fn(|_| "阶段资料未就绪".into());
+            missing.values = std::array::from_fn(|_| std::array::from_fn(|_| "99.9%".into()));
+            missing.samples = std::array::from_fn(|_| std::array::from_fn(|_| "123456".into()));
+            for history in &mut missing.history {
+                history.interval = "约95%区间：样本量未提供".into();
+            }
+            self.window.state.scene.reference = std::sync::Arc::new(missing);
+            if missing_image != self.pixels()? {
+                return Err("missing-reference-placeholder-painted".into());
+            }
+            missing_image.save(output.join("host-cards-missing-reference.png"))?;
+            self.window.state.scene.reference = reference;
             if cards != self.window.state.scene.cards || ids != self.ids || !self.hidden() {
                 return Err("passive-stage-reference-changed-cards-or-visibility".into());
             }
@@ -1925,15 +2073,20 @@ impl HostOverlay {
             return Err("description-scroll-missing".into());
         }
         unsafe {
-            size_to_content(self.window.hwnd, true);
+            size_to_content(
+                self.window.hwnd,
+                self.window.state.scene.base_height(),
+                true,
+            );
         }
         self.render(&output.join("host-cards-description-top.png"))?;
+        let detail_offset = self.window.state.scene.detail_offset();
         unsafe {
             handle_click(
                 self.window.hwnd,
                 &mut self.window.state,
                 710.,
-                360. + DETAIL_OFFSET,
+                360. + detail_offset,
             );
         }
         if self.window.state.scene.scroll <= 0. {
@@ -1944,7 +2097,7 @@ impl HostOverlay {
                 self.window.hwnd,
                 &mut self.window.state,
                 640.,
-                360. + DETAIL_OFFSET,
+                360. + detail_offset,
             );
         }
         if self.window.state.scene.scroll != 0. {
@@ -1961,7 +2114,11 @@ impl HostOverlay {
         self.window.state.scene.cards[0].description = original;
         self.window.state.scene.select(None)?;
         unsafe {
-            size_to_content(self.window.hwnd, false);
+            size_to_content(
+                self.window.hwnd,
+                self.window.state.scene.base_height(),
+                false,
+            );
         }
         if !self.hidden() {
             return Err("review-window-visible".into());
@@ -2006,9 +2163,11 @@ mod skill_tests {
         assert!(shown
             .history
             .iter()
-            .all(|h| h.delta == "-8.0 pp" && h.relation == "低于英雄均值"));
-        assert!(shown.history[0].samples.contains("n=1088"));
-        assert!(shown.history[1].samples.contains("n=199 · 少样本"));
+            .all(|h| h.delta == "-8.0 个百分点" && h.relation == "低于英雄均值"));
+        assert_eq!(shown.history[0].samples, "1088 场");
+        assert_eq!(shown.history[1].samples, "199 场 · 少样本");
+        assert_eq!(shown.history[0].rate.unwrap().games, Some(1088));
+        assert_eq!(shown.history[0].hero_rate, Some(0.6));
         assert_eq!(shown.history[0].interval, "约95%区间 49.0–55.0%");
         assert_eq!(shown.history[1].interval, "约95%区间 45.1–58.8%");
 
@@ -2026,6 +2185,9 @@ mod skill_tests {
             .iter()
             .all(|combo| combo.summary == "组合数据尚未就绪"));
         assert!(missing.current_combos.iter().all(|current| !current));
+        assert!(missing.routes.iter().all(Vec::is_empty));
+        assert!(missing.stage_contrast.iter().all(Option::is_none));
+        assert!(missing.stage_rates.iter().flatten().all(Option::is_none));
         assert_eq!(
             cards.each_ref().map(|card| card.score),
             [Some(0.9), Some(0.8), Some(0.7)]
@@ -2033,13 +2195,13 @@ mod skill_tests {
 
         cards[2].win = "62.0%".into();
         let higher = reference_view_fixture_with_source(&cards, None);
-        assert_eq!(higher.history[2].delta, "+2.0 pp");
+        assert_eq!(higher.history[2].delta, "+2.0 个百分点");
         assert_eq!(higher.history[2].relation, "高于英雄均值");
     }
 
     #[test]
     fn single_future_route_keeps_partner_name_with_alternatives_without_icons() {
-        use fuze_worker_host::{augment_combos, stage_reference::Combination};
+        use fuze_worker_host::stage_reference::Combination;
         let mut snapshot = reference_fixture([Some(1), None, None]);
         snapshot.combinations = Some(
             (0..10)
@@ -2050,27 +2212,35 @@ mod skill_tests {
                 })
                 .collect(),
         );
-        let names = std::collections::HashMap::from([(1004, "回归基本功".into())]);
-        let evidence =
-            augment_combos::evaluate(Some(&snapshot), 4, "16.20", &[], 1, snapshot.fetched);
-        let mut reference = crate::stage_cards::Comparison::default();
-        reference.combos[0] = augment_combos::present(&evidence, &names, None);
-        reference.combo_alternatives[0] = evidence.future.len() - 1;
-        // The formatter has no icon catalogue; the actual partner must be readable
-        // before its picture has ever appeared among the player's candidates.
-        let (heading, summary) = combo_lines(&reference, 0);
-        assert_eq!(heading, "后续 · 回归基本功 · 另9条");
-        assert!(summary.contains("62.0%") && reference.combos[0].detail.contains("回归基本功"));
-        assert_eq!(reference.combos[0].ids, [1004]);
+        let mut cards = [
+            Card {
+                id: Some(1),
+                title: "合成候选".into(),
+                win: "52.0%".into(),
+                ..Default::default()
+            },
+            Card {
+                id: Some(1004),
+                title: "回归基本功".into(),
+                ..Default::default()
+            },
+            Card::default(),
+        ];
+        // The live display adapter needs no icon catalogue to retain a real
+        // partner name. Another offered card is still missing, not owned.
+        let reference = reference_view_fixture_with_source(&cards, Some(snapshot.clone()));
+        let route = &reference.routes[0][0];
+        assert_eq!(route.kind, crate::stage_cards::RouteKind::Future);
+        assert_eq!(route.ids, [1004]);
+        assert_eq!(route.partners, "回归基本功");
+        assert_eq!(route.rate.unwrap().value, 0.62);
+        assert_eq!(reference.combo_alternatives[0], 9);
 
         let long_name = "合成很长很长的待选符文全名";
-        let names = std::collections::HashMap::from([(1004, long_name.into())]);
-        reference.combos[0] = augment_combos::present(&evidence, &names, None);
-        let short = format!("{}…", long_name.chars().take(7).collect::<String>());
-        assert_eq!(
-            combo_lines(&reference, 0).0,
-            format!("后续 · {short} · 另9条")
-        );
+        cards[1].title = long_name.into();
+        let reference = reference_view_fixture_with_source(&cards, Some(snapshot));
+        let short = format!("{}…", long_name.chars().take(11).collect::<String>());
+        assert_eq!(reference.routes[0][0].partners, short);
         assert!(reference.combos[0].detail.contains(long_name));
     }
 
@@ -2156,6 +2326,7 @@ mod skill_tests {
             reference.reasons[i] = crate::stage_cards::reason_text(&reference.decisions[i], &names);
             reference.stage_summary[i] = crate::stage_cards::stage_text(&reference.decisions[i]);
         }
+        reference_candidate_stages(&mut reference, &candidates);
         assert_eq!(reference.decisions[1].choice, Choice::Preferred);
         assert!(!reference.preferred(0, scene.cards[0].id));
         assert!(reference.preferred(1, scene.cards[1].id));
@@ -2164,9 +2335,10 @@ mod skill_tests {
         unsafe {
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let height = scene.base_height();
             let bitmap = imaging.CreateBitmap(
                 WIDTH,
-                HEIGHT,
+                height,
                 &GUID_WICPixelFormat32bppPBGRA,
                 WICBitmapCacheOnLoad,
             )?;
@@ -2175,7 +2347,7 @@ mod skill_tests {
             let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
             let pixels = |scene: &Scene| -> Result<Vec<u8>> {
                 Surface::new(scene, &target)?.draw(scene, &target, false)?;
-                let mut pixels = vec![0; (WIDTH * HEIGHT * 4) as usize];
+                let mut pixels = vec![0; (WIDTH * height * 4) as usize];
                 bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
                 Ok(pixels)
             };
@@ -2187,7 +2359,7 @@ mod skill_tests {
             changed.decisions[1].candidate_id = Some(99999);
             scene.reference = std::sync::Arc::new(changed);
             let mismatched = pixels(&scene)?;
-            assert!((35..355).any(|y| {
+            assert!((35..scene.card_bottom() as u32).any(|y| {
                 let pixel = ((y * WIDTH + 259) * 4) as usize;
                 expected[pixel..pixel + 4] != mismatched[pixel..pixel + 4]
             }));
@@ -2255,13 +2427,7 @@ mod skill_tests {
         let scores = scene.cards.each_ref().map(|c| c.score);
         let ids = scene.cards.each_ref().map(|c| c.id);
         let sample = reference_fixture(ids);
-        let mut reference = crate::stage_cards::compare(
-            Some(&sample),
-            4,
-            ids,
-            "16.20",
-            fuze_worker_host::stage_reference::now(),
-        );
+        let mut reference = reference_view_fixture_with_source(&scene.cards, Some(sample));
         reference.combos[0] = fuze_worker_host::augment_combos::Reference {
             heading: "当前搭配 · 秘术冲拳".into(),
             summary: "搭配历史胜率 65.0% · 6819 场".into(),
@@ -2279,6 +2445,18 @@ mod skill_tests {
             detail: "合成少样本组合".into(),
         };
         reference.current_combos = [true, false, true];
+        reference.routes[0] = vec![reference_route_fixture(
+            crate::stage_cards::RouteKind::Current,
+            &[10],
+            "秘术冲拳",
+            Some((0.65, 6819)),
+        )];
+        reference.routes[2] = vec![reference_route_fixture(
+            crate::stage_cards::RouteKind::Current,
+            &[10, 11, 12],
+            "已选符文甲等3项",
+            Some((0.42, 120)),
+        )];
         scene.reference = std::sync::Arc::new(reference);
         for (i, id) in [10, 11, 12].into_iter().enumerate() {
             let url = format!("fixture-{id}");
@@ -2287,30 +2465,14 @@ mod skill_tests {
         }
         assert!(scene.selected.is_none() && scene.detail.is_none());
         assert_eq!(scene.cards.each_ref().map(|c| c.score), scores);
+        review_visible_reference_layout(&scene)?;
         unsafe {
-            for i in [0, 2] {
-                let (title, summary) = combo_lines(&scene.reference, i);
-                let width = 214. - scene.reference.combos[i].ids.len() as f32 * COMBO_MEMBER_WIDTH;
-                let text: Vec<_> = title.encode_utf16().collect();
-                let layout = scene
-                    .dw
-                    .CreateTextLayout(&text, &scene.formats[6], width, 32768.)?;
-                let mut metrics = DWRITE_TEXT_METRICS::default();
-                layout.GetMetrics(&mut metrics)?;
-                assert!(metrics.width <= width && metrics.height <= 16.);
-                let text: Vec<_> = summary.encode_utf16().collect();
-                let layout = scene
-                    .dw
-                    .CreateTextLayout(&text, &scene.formats[6], 214., 32768.)?;
-                layout.GetMetrics(&mut metrics)?;
-                assert_eq!(metrics.lineCount, 1);
-                assert!(metrics.height <= 16.);
-            }
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let height = scene.base_height();
             let bitmap = imaging.CreateBitmap(
                 WIDTH,
-                HEIGHT,
+                height,
                 &GUID_WICPixelFormat32bppPBGRA,
                 WICBitmapCacheOnLoad,
             )?;
@@ -2318,15 +2480,36 @@ mod skill_tests {
             props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
             let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
             let surface = Surface::new(&scene, &target)?;
-            assert_eq!(
-                surface.combo_icons.iter().map(Vec::len).collect::<Vec<_>>(),
-                vec![1, 0, 3]
-            );
-            assert!(surface.combo_icons.iter().flatten().all(Option::is_some));
             surface.draw(&scene, &target, false)?;
+            let mut shown = vec![0; (WIDTH * height * 4) as usize];
+            bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut shown)?;
+            let layouts = [scene.card_layout(0), scene.card_layout(2)];
+            let original = scene.reference.clone();
+            let mut contrasting = (*original).clone();
+            for route in contrasting.routes.iter_mut().flatten() {
+                route.partners = "绘制对照伙伴".into();
+                if let Some(rate) = &mut route.rate {
+                    rate.value = if rate.value == 0. { 1. } else { 0. };
+                }
+            }
+            scene.reference = std::sync::Arc::new(contrasting);
+            assert_eq!(scene.base_height(), height);
+            Surface::new(&scene, &target)?.draw(&scene, &target, false)?;
+            let mut contrasted = vec![0; shown.len()];
+            bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut contrasted)?;
+            for (i, layout) in [0, 2].into_iter().zip(layouts) {
+                assert!(
+                    (layout.routes as u32 + 21..layout.routes as u32 + 40).any(|y| {
+                        (33 + i * 250..225 + i * 250).any(|x| {
+                            let pixel = ((y * WIDTH + x) * 4) as usize;
+                            shown[pixel..pixel + 4] != contrasted[pixel..pixel + 4]
+                        })
+                    })
+                );
+            }
+            scene.reference = original;
             if let Some(path) = std::env::var_os("FUZE_COMBO_REVIEW") {
-                let mut pixels = vec![0; (WIDTH * HEIGHT * 4) as usize];
-                bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+                let mut pixels = shown.clone();
                 for pixel in pixels.chunks_exact_mut(4) {
                     pixel.swap(0, 2);
                 }
@@ -2334,15 +2517,16 @@ mod skill_tests {
                     Path::new(&path),
                     &pixels,
                     WIDTH,
-                    HEIGHT,
+                    height,
                     image::ColorType::Rgba8,
                 )?;
             }
             scene.image_cache.remove("fixture-12");
             let missing = Surface::new(&scene, &target)?;
-            assert!(missing.combo_icons[2][2].is_none());
-            assert!(missing.combo_icons[2][0].is_some());
             missing.draw(&scene, &target, false)?;
+            let mut without_icons = vec![0; shown.len()];
+            bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut without_icons)?;
+            assert_eq!(shown, without_icons);
         }
         Ok(())
     }
@@ -2386,6 +2570,7 @@ mod skill_tests {
         );
         let mut scene = Scene::new()?;
         scene.cards = frame_cards(&publisher.current().unwrap());
+        scene.reference = crate::stage_cards::Reference::preview(&publisher.current().unwrap(), 4);
         assert_eq!(scene.cards[0].samples, "胜率样本 · 423 场");
         assert_eq!(scene.cards[1].samples, "胜率样本数未提供");
         assert_eq!(scene.cards[2].samples, "暂无胜率统计");
@@ -2400,7 +2585,7 @@ mod skill_tests {
         unsafe {
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-            let height = HEIGHT + DETAIL_HEIGHT;
+            let height = scene.base_height() + DETAIL_HEIGHT;
             let bitmap = imaging.CreateBitmap(
                 WIDTH,
                 height,
@@ -2471,7 +2656,7 @@ mod skill_tests {
         unsafe {
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-            let height = HEIGHT + DETAIL_HEIGHT;
+            let height = scene.base_height() + DETAIL_HEIGHT;
             let bitmap = imaging.CreateBitmap(
                 WIDTH,
                 height,
@@ -2498,6 +2683,209 @@ mod skill_tests {
             }
         }
         Ok(())
+    }
+}
+
+/// Review only the text and typed modules actually painted on passive cards.
+/// Partner names intentionally use one-line ellipsis; numerical labels do not.
+fn review_visible_reference_layout(
+    scene: &Scene,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let fits = |text: &str, format: usize, width: f32, height: f32, ellipsis: bool| {
+        let text: Vec<_> = text.encode_utf16().collect();
+        unsafe {
+            let layout = scene
+                .dw
+                .CreateTextLayout(&text, &scene.formats[format], width, 32768.)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            Ok::<_, windows::core::Error>(
+                metrics.height <= height
+                    && (ellipsis || metrics.width <= width)
+                    && (!ellipsis || metrics.lineCount <= 1),
+            )
+        }
+    };
+    for (i, card) in scene.cards.iter().enumerate() {
+        if card
+            .id
+            .is_none_or(|id| fuze_contract::skill_choice::get(id).is_some())
+        {
+            continue;
+        }
+        let layout = scene.card_layout(i);
+        let history = &scene.reference.history[i];
+        if let Some((label, _, _)) = scene
+            .reference
+            .decision(i, card.id)
+            .and_then(|decision| choice_badge(decision.choice))
+        {
+            let width = label.chars().count() as f32 * 12. + 18.;
+            if !fits(label, 8, width - 16., 20., false)?
+                || !fits(
+                    concise_reason(&scene.reference, i, card.id),
+                    6,
+                    206. - width,
+                    18.,
+                    false,
+                )?
+            {
+                return Err(format!("choice-label-clipped:{i}").into());
+            }
+        }
+        if let Some(y) = layout.history {
+            let rate = history.rate.ok_or("history-layout-without-typed-rate")?;
+            let win = format!("{:.1}%", rate.value * 100.);
+            if !fits(&win, 3, 112., 40., false)? || y + 72. > layout.bottom {
+                return Err(format!("history-value-clipped:{i}").into());
+            }
+            if let Some(n) = history.rate.and_then(|rate| rate.games) {
+                let samples = if n < 200 {
+                    format!("{} · 少样本", sample_count(n))
+                } else {
+                    sample_count(n)
+                };
+                if !fits(&samples, 11, 132., 17., false)? {
+                    return Err(format!("history-samples-clipped:{i}").into());
+                }
+            }
+            if let (Some(hero), Some(delta)) = (history.hero_rate, history.delta_points) {
+                if !fits(
+                    &format!("英雄均值 {:.1}%", hero * 100.),
+                    7,
+                    100.,
+                    16.,
+                    false,
+                )? || !fits(&format!("{delta:+.1} 个百分点"), 6, 100., 18., false)?
+                {
+                    return Err(format!("history-baseline-clipped:{i}").into());
+                }
+            }
+        }
+        if let Some(stage) = &scene.reference.stage_contrast[i] {
+            let y = layout.stage.ok_or("stage-layout-missing")?;
+            if stage.other_slot >= 3 || stage.other_slot == i || y + 34. > layout.bottom {
+                return Err(format!("stage-layout-invalid:{i}").into());
+            }
+            if !fits("分次对比", 7, 62., 15., false)?
+                || !fits(
+                    &format!("对{}卡", ["左", "中", "右"][stage.other_slot]),
+                    6,
+                    62.,
+                    16.,
+                    false,
+                )?
+            {
+                return Err(format!("stage-label-clipped:{i}").into());
+            }
+        } else if layout.stage.is_some() {
+            return Err("empty-stage-reserved-space".into());
+        }
+        for (row, route) in scene.reference.routes[i].iter().take(2).enumerate() {
+            use crate::stage_cards::RouteKind;
+            let label = match route.kind {
+                RouteKind::Current => "当前搭配",
+                RouteKind::Future => "后续留意",
+                RouteKind::CrossHero => "跨英雄参考",
+            };
+            let rate = route.rate.filter(|_| route.kind != RouteKind::CrossHero);
+            let label = if rate.and_then(|rate| rate.games).is_some_and(|n| n < 200) {
+                format!("{label} · 少样本")
+            } else {
+                label.into()
+            };
+            if route.ids.is_empty()
+                || route.partners.trim().is_empty()
+                || !fits(&label, 7, 124., 16., false)?
+                || !fits(
+                    &route.partners,
+                    9,
+                    if rate.is_some() { 136. } else { 192. },
+                    19.,
+                    true,
+                )?
+                || layout.routes + row as f32 * 52. + 44. > layout.bottom
+            {
+                return Err(format!("route-label-clipped:{i}:{row}").into());
+            }
+            if let Some(rate) = rate {
+                if !fits(&format!("{:.1}%", rate.value * 100.), 12, 54., 20., false)? {
+                    return Err(format!("route-value-clipped:{i}:{row}").into());
+                }
+                if let Some(n) = rate.games {
+                    let samples = sample_count(n);
+                    if !fits(&samples, 11, 60., 17., false)? {
+                        return Err(format!("route-samples-clipped:{i}:{row}").into());
+                    }
+                }
+            }
+        }
+        if let Some(notice) = &scene.reference.mechanisms[i] {
+            if !fits(&notice.summary, 6, 196., 31., false)?
+                || layout.notice.is_none_or(|y| y + 36. > layout.bottom)
+            {
+                return Err(format!("mechanism-notice-clipped:{i}").into());
+            }
+        }
+        if layout.bottom > scene.card_bottom() {
+            return Err("card-module-outside-panel".into());
+        }
+    }
+    if !scene.reference.footer.is_empty()
+        && (!fits(&scene.reference.footer, 7, 732., 17., false)?
+            || scene.card_bottom() + 25. > scene.base_height() as f32)
+    {
+        return Err("reference-footer-clipped".into());
+    }
+    Ok(())
+}
+
+fn reference_route_fixture(
+    kind: crate::stage_cards::RouteKind,
+    ids: &[u32],
+    partners: &str,
+    statistic: Option<(f64, u64)>,
+) -> crate::stage_cards::RouteDisplay {
+    crate::stage_cards::RouteDisplay {
+        kind,
+        ids: ids.to_vec(),
+        partners: partners.into(),
+        rate: statistic.map(|(value, games)| fuze_data::decision_evidence::Rate {
+            value,
+            games: Some(games),
+            wins: None,
+        }),
+    }
+}
+
+/// Populate offline stage graphics from the same typed candidate evidence used
+/// by the existing decision, never by parsing a formatted percentage or reason.
+fn reference_candidate_stages(
+    reference: &mut crate::stage_cards::Comparison,
+    candidates: &[fuze_data::contextual_advice::Candidate; 3],
+) {
+    use fuze_data::contextual_advice::{self, Reason};
+    for i in 0..3 {
+        reference.stage_rates[i] = candidates[i].stages;
+        let requested = match reference.decisions[i].reason {
+            Reason::StageAdvantage { other } | Reason::StageAlternative { other } => Some(other),
+            _ => None,
+        };
+        reference.stage_contrast[i] = candidates
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != i)
+            .filter_map(|(other_slot, candidate)| {
+                contextual_advice::stage_contrast(&candidates[i], candidate).map(|contrast| {
+                    (
+                        requested == Some(contrast.other),
+                        other_slot,
+                        contrast.orders,
+                    )
+                })
+            })
+            .max_by_key(|(requested, _, _)| *requested)
+            .map(|(_, other_slot, orders)| crate::stage_cards::StageDisplay { other_slot, orders });
     }
 }
 
@@ -2532,6 +2920,27 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
         fetched: fuze_worker_host::stage_reference::now(),
         rows,
     }
+}
+
+fn reference_contrast_fixture(
+    ids: [Option<u32>; 3],
+) -> fuze_worker_host::stage_reference::Snapshot {
+    let mut source = reference_fixture(ids);
+    for stage in 1..=4 {
+        for (i, row) in source.rows[stage].iter_mut().enumerate() {
+            row.win = if i == 0 {
+                if stage <= 2 {
+                    0.8
+                } else {
+                    0.4
+                }
+            } else {
+                0.6
+            };
+            row.samples = 10_000;
+        }
+    }
+    source
 }
 
 /// Synthetic data for isolated WIC/hidden-window review, never a live data fallback.
@@ -2903,9 +3312,22 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     reference.history[0] =
                         crate::stage_cards::Comparison::default().history[0].clone();
                     scene.reference = std::sync::Arc::new(reference);
+                    if scene.card_layout(0).history.is_some() {
+                        return Err("missing-history-fixture-reserved-module".into());
+                    }
                 } else if variant == "missing-stage-data" {
                     scene.reference =
                         std::sync::Arc::new(reference_view_fixture_with_source(&scene.cards, None));
+                    if scene.reference.stage_contrast.iter().any(Option::is_some)
+                        || scene
+                            .reference
+                            .routes
+                            .iter()
+                            .any(|routes| !routes.is_empty())
+                        || (0..3).any(|i| scene.card_layout(i).stage.is_some())
+                    {
+                        return Err("missing-stage-fixture-has-empty-module".into());
+                    }
                 } else if variant == "stage-and-combo" {
                     let mut reference = (*original_reference).clone();
                     reference.combos[0] = fuze_worker_host::augment_combos::Reference {
@@ -2917,6 +3339,12 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                         detail: "合成组合参考".into(),
                     };
                     reference.current_combos[0] = true;
+                    reference.routes[0] = vec![reference_route_fixture(
+                        crate::stage_cards::RouteKind::Current,
+                        &[10],
+                        "秘术冲拳",
+                        Some((0.62, 532)),
+                    )];
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "context-override" {
                     use fuze_data::{
@@ -2951,6 +3379,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                             std::array::from_fn(|_| format!("{:.1}%", [60., 80., 40.][i]));
                         reference.samples[i] = std::array::from_fn(|_| "10000".into());
                     }
+                    reference_candidate_stages(&mut reference, &candidates);
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "future-route" {
                     let mut reference = (*original_reference).clone();
@@ -2974,23 +3403,37 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     reference.combo_alternatives[1] = 9;
                     reference.combo_secondary[0] = "另后续 · 小蜜蜂！！！".into();
                     reference.combo_secondary[1] = "另后续 · 无限循环往复".into();
+                    reference.routes[0] = vec![
+                        reference_route_fixture(
+                            crate::stage_cards::RouteKind::Future,
+                            &[1004, 1011, 12317],
+                            "很长的待选符文甲等3项",
+                            Some((0.42, 120)),
+                        ),
+                        reference_route_fixture(
+                            crate::stage_cards::RouteKind::Future,
+                            &[3086],
+                            "小蜜蜂！！！",
+                            None,
+                        ),
+                    ];
+                    reference.routes[1] = vec![
+                        reference_route_fixture(
+                            crate::stage_cards::RouteKind::Future,
+                            &[1004],
+                            "回归基本功",
+                            Some((0.62, 532)),
+                        ),
+                        reference_route_fixture(
+                            crate::stage_cards::RouteKind::Future,
+                            &[1388],
+                            "无限循环往复",
+                            None,
+                        ),
+                    ];
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "stage-contrast" {
-                    let mut source = reference_fixture(scene.cards.each_ref().map(|c| c.id));
-                    for stage in 1..=4 {
-                        for (i, row) in source.rows[stage].iter_mut().enumerate() {
-                            row.win = if i == 0 {
-                                if stage <= 2 {
-                                    0.8
-                                } else {
-                                    0.4
-                                }
-                            } else {
-                                0.6
-                            };
-                            row.samples = 10_000;
-                        }
-                    }
+                    let source = reference_contrast_fixture(scene.cards.each_ref().map(|c| c.id));
                     scene.reference = std::sync::Arc::new(reference_view_fixture_with_source(
                         &scene.cards,
                         Some(source),
@@ -3047,6 +3490,34 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     reference.cross_hero[0] = Some(fuze_worker_host::cross_hero_routes::present(
                         &evidence, &names,
                     ));
+                    reference.routes[0] = evidence
+                        .routes
+                        .iter()
+                        .take(2)
+                        .map(|route| {
+                            let ids = if route.missing.is_empty() {
+                                &route.required
+                            } else {
+                                &route.missing
+                            };
+                            let partners = ids
+                                .iter()
+                                .map(|id| {
+                                    names
+                                        .get(id)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("强化 #{id}"))
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" + ");
+                            reference_route_fixture(
+                                crate::stage_cards::RouteKind::CrossHero,
+                                ids,
+                                &partners,
+                                None,
+                            )
+                        })
+                        .collect();
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "mechanism-notice" {
                     scene.cards[0].id = Some(12317);
@@ -3064,39 +3535,19 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     }
                     scene.reference = std::sync::Arc::new(reference);
                 }
-                // Measure unconstrained text before drawing: clipping must not make
-                // long reasons, exact samples or a three-member route appear to fit.
-                for i in 0..3 {
-                    if scene.cards[i].id.is_none() {
-                        continue;
-                    }
-                    let (heading, summary) = combo_lines(&scene.reference, i);
-                    for (text, width, height) in [
-                        (decision_reason(&scene.reference, i), 214., 30.),
-                        (scene.reference.stage_summary[i].clone(), 214., 16.),
-                        (scene.reference.history[i].samples.clone(), 214., 16.),
-                        (scene.reference.history[i].interval.clone(), 214., 16.),
-                        (
-                            heading,
-                            214. - scene.reference.combos[i].ids.len() as f32 * COMBO_MEMBER_WIDTH,
-                            16.,
-                        ),
-                        (summary, 214., 16.),
-                        (combo_secondary(&scene.reference, i).into(), 214., 16.),
-                    ] {
-                        let text: Vec<_> = text.encode_utf16().collect();
-                        let layout =
-                            scene
-                                .dw
-                                .CreateTextLayout(&text, &scene.formats[6], width, 32768.)?;
-                        let mut metrics = DWRITE_TEXT_METRICS::default();
-                        layout.GetMetrics(&mut metrics)?;
-                        if metrics.width > width || metrics.height > height {
-                            return Err(format!("contextual-layout-clipped:{variant}:{i}").into());
-                        }
-                    }
-                }
+                // Review visible labels and numbers, not the legacy diagnostics
+                // deliberately omitted from the production card.
+                review_visible_reference_layout(&scene)
+                    .map_err(|error| format!("contextual-layout:{variant}:{error}"))?;
                 let partial = variant == "partial";
+                let height = scene.base_height() * dpi / 96;
+                let bitmap = imaging.CreateBitmap(
+                    width,
+                    height,
+                    &GUID_WICPixelFormat32bppPBGRA,
+                    WICBitmapCacheOnLoad,
+                )?;
+                let target = scene.factory.CreateWicBitmapRenderTarget(&bitmap, &props)?;
                 let surface = Surface::new(&scene, &target)?;
                 surface.draw(&scene, &target, partial)?;
                 let mut pixels = vec![0u8; (width * height * 4) as usize];
@@ -3156,7 +3607,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
             return Err("hidden window invariant failed".into());
         }
         Ok(
-            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","title_corpus_checked":names.len(),"max_title_height":max_title_height,"title_font_size":22,"cases":cases,"corners":corners,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
+            serde_json::json!({"offscreen_renderer":"wic_software_directwrite","title_corpus_checked":names.len(),"max_title_height":max_title_height,"title_font_size":20,"cases":cases,"corners":corners,"native_hidden":{"backend":native.state.backend,"render":crate::telemetry::samples(&timings),"noactivate_toolwindow_topmost":flags,"visible":visible,"foreground_unchanged_observed":foreground_unchanged,"idle_wall_ms":start.elapsed().as_secs_f64()*1000.,"idle_process_cpu_ms":cpu_delta,"idle_paints":native.state.paints-paints,"resource_recreation":true},"real_device_loss_verified":false,"live_overlay_verified":false}),
         )
     }
 }
