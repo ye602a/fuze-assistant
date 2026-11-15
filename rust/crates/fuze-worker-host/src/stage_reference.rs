@@ -333,6 +333,7 @@ pub struct Reply {
     /// Independent cross-hero catalogue routes; never hero-specific statistics.
     pub routes: Option<Arc<fuze_data::combination_routes::Index>>,
     pub names: Arc<HashMap<u32, String>>,
+    pub icons: Arc<HashMap<u32, String>>,
     pub cached: bool,
     pub issue: Option<&'static str>,
     pub serial: u64,
@@ -766,6 +767,13 @@ impl Service {
                             data.catalog()
                                 .iter()
                                 .map(|(name, id)| (*id, name.clone()))
+                                .collect(),
+                        );
+                        reply.icons = Arc::new(
+                            data.recognition_cards()
+                                .into_iter()
+                                .filter(|card| !card.icon.is_empty())
+                                .map(|card| (card.id, card.icon))
                                 .collect(),
                         );
                         let preparing = matches!(req.access, Access::Prepare | Access::Refresh);

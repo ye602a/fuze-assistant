@@ -223,6 +223,7 @@ pub fn stage(ui: &crate::ChampionWindow, output: &Path) -> Result<(), Box<dyn st
             rows,
         })),
         names: Arc::new([(1, "巨像的勇气".into()), (2, "尖端发明家".into())].into()),
+        icons: Default::default(),
         cached: true,
         issue: Some("stage-network"),
         serial: 1,

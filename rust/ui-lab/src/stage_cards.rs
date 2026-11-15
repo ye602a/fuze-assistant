@@ -53,6 +53,14 @@ pub struct RouteDisplay {
     pub rate: Option<Rate>,
 }
 
+/// A missing partner to watch for, not a scored or completed combination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RouteTarget {
+    pub id: u32,
+    pub name: String,
+    pub icon: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
     pub decisions: [Decision; 3],
@@ -63,6 +71,8 @@ pub struct Comparison {
     pub stage_rates: [[Option<Rate>; 4]; 3],
     pub stage_contrast: [Option<StageDisplay>; 3],
     pub routes: [Vec<RouteDisplay>; 3],
+    /// Existing future-route order: first target, then at most three other targets.
+    pub future_targets: [Vec<RouteTarget>; 3],
     /// One source line only when every visible numeric/route module shares this scope.
     pub footer: String,
     pub mechanisms: [Option<fuze_data::mechanism_reference::Notice>; 3],
@@ -87,6 +97,7 @@ impl Default for Comparison {
             stage_rates: Default::default(),
             stage_contrast: Default::default(),
             routes: Default::default(),
+            future_targets: Default::default(),
             footer: String::new(),
             mechanisms: Default::default(),
             combos: Default::default(),
@@ -442,6 +453,40 @@ fn display_routes(
         .collect()
 }
 
+fn display_future_targets(
+    evidence: &fuze_worker_host::augment_combos::CandidateEvidence,
+    names: &HashMap<u32, String>,
+    icons: &HashMap<u32, String>,
+) -> Vec<RouteTarget> {
+    if !matches!(
+        evidence.source,
+        fuze_worker_host::augment_combos::SourceState::Ready { .. }
+    ) {
+        return Vec::new();
+    }
+    let mut targets: Vec<RouteTarget> = Vec::with_capacity(4);
+    // evaluate already orders by fewer missing partners, greater support and
+    // stable member IDs. Keep that order without promoting observed win rates.
+    for id in evidence.future.iter().flat_map(|row| &row.missing) {
+        if targets.iter().any(|target| target.id == *id) {
+            continue;
+        }
+        targets.push(RouteTarget {
+            id: *id,
+            name: names
+                .get(id)
+                .filter(|name| !name.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("强化 #{id}")),
+            icon: icons.get(id).cloned().unwrap_or_default(),
+        });
+        if targets.len() == 4 {
+            break;
+        }
+    }
+    targets
+}
+
 /// Production cards cannot open details, so a second real route must have a name.
 fn secondary_route(
     evidence: &fuze_worker_host::augment_combos::CandidateEvidence,
@@ -509,6 +554,7 @@ fn shared_footer(
             }
         }
         let hero_reference = view.stage_rates[i].iter().any(Option::is_some)
+            || !view.future_targets[i].is_empty()
             || view.routes[i]
                 .iter()
                 .any(|r| r.kind != RouteKind::CrossHero);
@@ -580,6 +626,7 @@ pub struct Reference {
     snapshot: Option<Arc<Snapshot>>,
     routes: Option<Arc<fuze_data::combination_routes::Index>>,
     names: Arc<HashMap<u32, String>>,
+    icons: Arc<HashMap<u32, String>>,
     rendered: Option<Rendered>,
 }
 impl Reference {
@@ -635,6 +682,7 @@ impl Reference {
             snapshot: None,
             routes: None,
             names: Default::default(),
+            icons: Default::default(),
             rendered: None,
         }
     }
@@ -688,6 +736,7 @@ impl Reference {
             self.snapshot = None;
             self.routes = None;
             self.names = Default::default();
+            self.icons = Default::default();
             self.rendered = None;
         }
         let Some(context) = &self.context else { return };
@@ -705,6 +754,10 @@ impl Reference {
             }
             if !same_arc(Some(&self.names), Some(&reply.names)) {
                 self.names = reply.names.clone();
+                self.rendered = None;
+            }
+            if !same_arc(Some(&self.icons), Some(&reply.icons)) {
+                self.icons = reply.icons.clone();
                 self.rendered = None;
             }
             if let Some(s) = reply.snapshot.filter(|s| s.usable(context.champion, at)) {
@@ -811,6 +864,15 @@ impl Reference {
             .as_deref()
             .filter(|h| h.champion == champion && h.dataset == dataset);
         let mut names = (*self.names).clone();
+        let mut icons = (*self.icons).clone();
+        icons.extend(
+            frame
+                .cards
+                .iter()
+                .flatten()
+                .filter(|card| !card.icon.is_empty())
+                .map(|card| (card.id, card.icon.clone())),
+        );
         names.extend(self.owned.iter().cloned());
         for slot in &frame.snapshot.slots {
             if let fuze_contract::Slot::Known { id, name, .. } = slot {
@@ -946,6 +1008,7 @@ impl Reference {
                 fuze_worker_host::augment_combos::present(e, &names, decision.reason.required());
             view.combo_secondary[i] = secondary_route(e, decision.reason.required(), &names);
             view.routes[i] = display_routes(e, decision.reason.required(), &names);
+            view.future_targets[i] = display_future_targets(e, &names, &icons);
             // This reference cannot enter Candidate, HistoryContext, or Decision. Keep
             // the hero record/state intact, including the absence of usable statistics.
             if e.current.is_empty()

@@ -96,14 +96,23 @@ struct CardLayout {
     history: Option<f32>,
     stage: Option<f32>,
     routes: f32,
+    future: f32,
     notice: Option<f32>,
     bottom: f32,
+}
+
+struct FutureItemLayout {
+    index: usize,
+    x: f32,
+    y: f32,
+    width: f32,
+    separator: bool,
 }
 
 fn choice_badge(choice: fuze_data::contextual_advice::Choice) -> Option<(&'static str, u32, u32)> {
     use fuze_data::contextual_advice::Choice;
     match choice {
-        Choice::Preferred => Some(("本组优先", GOLD, 0x302b21)),
+        Choice::Preferred => Some(("本组优选", GOLD, 0x302b21)),
         Choice::Conditional => Some(("留意搭配", CYAN, 0x142d35)),
         Choice::NotAdvised => Some(("优先考虑其他卡", 0xc3a28d, 0x2b2525)),
         // A normal alternative or absent evidence does not need a repeated label.
@@ -124,10 +133,8 @@ fn concise_reason(
         return "";
     }
     match decision.reason {
-        Reason::OverallRank => "来源推荐靠前",
         Reason::StageAdvantage { .. } => "四次选择均占优",
         Reason::ComboAdvantage { .. } => "已选搭配占优",
-        Reason::ConflictingEvidence => "按整体参考选择",
         _ => "",
     }
 }
@@ -190,6 +197,7 @@ struct Scene {
     reference: std::sync::Arc<crate::stage_cards::Comparison>,
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
+    title_metrics: std::cell::RefCell<[Option<(String, f32)>; 3]>,
     icons: Vec<image::RgbaImage>,
     cards: [Card; 3],
     caption: String,
@@ -208,12 +216,12 @@ impl Scene {
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut formats = Vec::new();
             for size in [
-                12., 15., 20., 30., 20., 20., 11., 10., 12., 12., 11., 10., 13.,
+                12., 15., 20., 30., 20., 20., 11., 10., 12., 12., 11., 10., 13., 10.,
             ] {
                 let format = dw.CreateTextFormat(
                     w!("Microsoft YaHei UI"),
                     None,
-                    if matches!(formats.len(), 3 | 5 | 8 | 9 | 10 | 12) {
+                    if matches!(formats.len(), 3 | 5 | 8 | 9 | 10 | 12 | 13) {
                         DWRITE_FONT_WEIGHT_SEMI_BOLD
                     } else {
                         DWRITE_FONT_WEIGHT_NORMAL
@@ -238,6 +246,15 @@ impl Scene {
                 },
                 &route_ellipsis,
             )?;
+            formats[13].SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+            let small_ellipsis = dw.CreateEllipsisTrimmingSign(&formats[13])?;
+            formats[13].SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    ..Default::default()
+                },
+                &small_ellipsis,
+            )?;
             let ellipsis = dw.CreateEllipsisTrimmingSign(&formats[5])?;
             formats[5].SetTrimming(
                 &DWRITE_TRIMMING {
@@ -259,6 +276,7 @@ impl Scene {
                 reference: std::sync::Arc::new(Default::default()),
                 factory,
                 formats,
+                title_metrics: Default::default(),
                 icons,
                 cards: std::array::from_fn(|i| Card {
                     id: Some(i as u32 + 1),
@@ -283,6 +301,92 @@ impl Scene {
             })
         }
     }
+    fn title_height(&self, index: usize) -> f32 {
+        let title = &self.cards[index].title;
+        let mut cached = self.title_metrics.borrow_mut();
+        if let Some((name, height)) = &cached[index] {
+            if name == title {
+                return *height;
+            }
+        }
+        let height = (|| -> Result<f32> {
+            unsafe {
+                let text: Vec<_> = title.encode_utf16().collect();
+                let layout =
+                    self.dw
+                        .CreateTextLayout(&text, &self.formats[5], TITLE_WIDTH, TITLE_HEIGHT)?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                Ok(metrics.height.ceil().clamp(24., TITLE_HEIGHT))
+            }
+        })()
+        .unwrap_or(TITLE_HEIGHT);
+        cached[index] = Some((title.clone(), height));
+        height
+    }
+    fn badge_y(&self, index: usize) -> f32 {
+        50. + self.title_height(index) + 4.
+    }
+    fn header_bottom(&self) -> f32 {
+        (0..3)
+            .map(|i| {
+                let title_bottom = 50. + self.title_height(i);
+                if self
+                    .reference
+                    .decision(i, self.cards[i].id)
+                    .and_then(|d| choice_badge(d.choice))
+                    .is_some()
+                {
+                    (self.badge_y(i) + 22.).max(98.)
+                } else {
+                    title_bottom.max(98.)
+                }
+            })
+            .fold(98., f32::max)
+    }
+    fn future_secondary_layout(&self, index: usize) -> (Vec<FutureItemLayout>, f32) {
+        let mut items = Vec::new();
+        let (mut x, mut y) = (0., 0.);
+        for (index, target) in self.reference.future_targets[index]
+            .iter()
+            .enumerate()
+            .skip(1)
+            .take(3)
+        {
+            let width = (|| -> Result<f32> {
+                unsafe {
+                    let text: Vec<_> = target.name.encode_utf16().collect();
+                    let layout = self
+                        .dw
+                        .CreateTextLayout(&text, &self.formats[13], 10000., 32.)?;
+                    let mut metrics = DWRITE_TEXT_METRICS::default();
+                    layout.GetMetrics(&mut metrics)?;
+                    Ok(metrics.width.ceil())
+                }
+            })()
+            .unwrap_or(176.)
+            .min(176.)
+                + 18.;
+            if x > 0. && x + 10. + width > 194. {
+                x = 0.;
+                y += 22.;
+            }
+            let separator = x > 0.;
+            if separator {
+                x += 10.;
+            }
+            items.push(FutureItemLayout {
+                index,
+                x,
+                y,
+                width,
+                separator,
+            });
+            x += width;
+        }
+        let height = if items.is_empty() { 0. } else { 28. + y };
+        (items, height)
+    }
     fn card_layout(&self, index: usize) -> CardLayout {
         let card = &self.cards[index];
         if card.id.is_none() {
@@ -290,6 +394,7 @@ impl Scene {
                 history: None,
                 stage: None,
                 routes: 136.,
+                future: 136.,
                 notice: None,
                 bottom: 160.,
             };
@@ -299,11 +404,12 @@ impl Scene {
                 history: None,
                 stage: None,
                 routes: 136.,
+                future: 136.,
                 notice: None,
                 bottom: 212.,
             };
         }
-        let mut cursor = 136.;
+        let mut cursor = self.header_bottom() + 12.;
         let history = self.reference.history[index]
             .rate
             .is_some()
@@ -317,7 +423,20 @@ impl Scene {
             top
         });
         let routes = cursor + 8.;
-        cursor += self.reference.routes[index].len().min(2) as f32 * 52.;
+        cursor += self.reference.routes[index]
+            .iter()
+            .filter(|r| r.kind != crate::stage_cards::RouteKind::Future)
+            .take(2)
+            .count() as f32
+            * 52.;
+        let future = cursor + 8.;
+        if !self.reference.future_targets[index].is_empty() {
+            cursor += 52.;
+            let (_, height) = self.future_secondary_layout(index);
+            if height > 0. {
+                cursor += height + 8.;
+            }
+        }
         let notice = self.reference.mechanisms[index].as_ref().map(|_| {
             let top = cursor + 8.;
             cursor = top + 36.;
@@ -327,6 +446,7 @@ impl Scene {
             history,
             stage,
             routes,
+            future,
             notice,
             bottom: cursor + 14.,
         }
@@ -411,6 +531,7 @@ impl Scene {
 struct Surface {
     brush: ID2D1SolidColorBrush,
     icons: Vec<ID2D1Bitmap>,
+    route_icons: std::collections::HashMap<String, ID2D1Bitmap>,
 }
 impl Surface {
     unsafe fn new(scene: &Scene, target: &ID2D1RenderTarget) -> Result<Self> {
@@ -446,7 +567,24 @@ impl Surface {
             .iter()
             .map(&bitmap)
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self { brush, icons })
+        let mut route_icons = std::collections::HashMap::new();
+        for route in scene.reference.future_targets.iter().flatten() {
+            if route.icon.is_empty() || route_icons.contains_key(&route.icon) {
+                continue;
+            }
+            if let Some(image) = scene.image_cache.get(&route.icon) {
+                route_icons.insert(route.icon.clone(), bitmap(image)?);
+            } else if let Some(image) = crate::public_art::bytes(&route.icon)
+                .and_then(|bytes| image::load_from_memory(bytes).ok())
+            {
+                route_icons.insert(route.icon.clone(), bitmap(&image.into_rgba8())?);
+            }
+        }
+        Ok(Self {
+            brush,
+            icons,
+            route_icons,
+        })
     }
     unsafe fn fill(&self, target: &ID2D1RenderTarget, area: D2D_RECT_F, rgb: u32) {
         self.brush.SetColor(&color(rgb));
@@ -491,6 +629,19 @@ impl Surface {
             D2D1_DRAW_TEXT_OPTIONS_CLIP,
             DWRITE_MEASURING_MODE_NATURAL,
         );
+    }
+    unsafe fn route_icon(&self, target: &ID2D1RenderTarget, url: &str, x: f32, y: f32, size: f32) {
+        if let Some(icon) = self.route_icons.get(url) {
+            target.DrawBitmap(
+                icon,
+                Some(&rect(x, y, size, size)),
+                1.,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        } else {
+            self.rounded(target, rect(x, y, size, size), 3., 0x203442, Some(LINE));
+        }
     }
     unsafe fn draw(&self, scene: &Scene, target: &ID2D1RenderTarget, partial: bool) -> Result<()> {
         target.BeginDraw();
@@ -598,8 +749,8 @@ impl Surface {
                 target,
                 &card.title,
                 5,
-                rect(x + 74., 43., TITLE_WIDTH, TITLE_HEIGHT),
-                TEXT,
+                rect(x + 74., 50., TITLE_WIDTH, TITLE_HEIGHT),
+                if best { GOLD } else { TEXT },
             );
             if let Some(choice) = card.id.and_then(fuze_contract::skill_choice::get) {
                 self.text(
@@ -626,9 +777,10 @@ impl Surface {
                 .and_then(|decision| choice_badge(decision.choice))
             {
                 let width = label.chars().count() as f32 * 12. + 18.;
+                let badge_y = scene.badge_y(i);
                 self.rounded(
                     target,
-                    rect(x + 14., 108., width, 22.),
+                    rect(x + 74., badge_y, width, 22.),
                     4.,
                     background,
                     None,
@@ -638,7 +790,7 @@ impl Surface {
                     target,
                     label,
                     8,
-                    rect(x + 23., 110., width - 16., 20.),
+                    rect(x + 83., badge_y + 2., width - 16., 20.),
                     foreground,
                 );
                 let reason = concise_reason(&scene.reference, i, card.id);
@@ -647,7 +799,7 @@ impl Surface {
                     target,
                     reason,
                     6,
-                    rect(x + width + 22., 112., 206. - width, 18.),
+                    rect(x + 80. + width, badge_y + 3., TITLE_WIDTH - width - 6., 18.),
                     MUTED,
                 );
             }
@@ -714,7 +866,7 @@ impl Surface {
                             target,
                             rect(x + 14., y + 65., 214. * rate.value as f32, 4.),
                             2.,
-                            0x7797a4,
+                            if best { GOLD } else { 0x7797a4 },
                             None,
                         );
                     }
@@ -801,7 +953,12 @@ impl Surface {
                     );
                 }
             }
-            for (row, route) in scene.reference.routes[i].iter().take(2).enumerate() {
+            for (row, route) in scene.reference.routes[i]
+                .iter()
+                .filter(|r| r.kind != crate::stage_cards::RouteKind::Future)
+                .take(2)
+                .enumerate()
+            {
                 use crate::stage_cards::RouteKind;
                 let y = layout.routes + row as f32 * 52.;
                 let (label, tint, background, border) = match route.kind {
@@ -861,6 +1018,70 @@ impl Surface {
                             &sample,
                             11,
                             rect(x + 158., y + 23., 60., 17.),
+                            MUTED,
+                        );
+                    }
+                }
+            }
+            let targets = &scene.reference.future_targets[i];
+            if let Some(primary) = targets.first() {
+                let y = layout.future;
+                self.rounded(
+                    target,
+                    rect(x + 14., y, 214., 44.),
+                    5.,
+                    0x112331,
+                    Some(0x2a4054),
+                );
+                self.fill(target, rect(x + 14., y + 9., 2., 26.), 0x95b9d6);
+                self.text(
+                    scene,
+                    target,
+                    "后续留意",
+                    7,
+                    rect(x + 24., y + 4., 194., 16.),
+                    0x95b9d6,
+                );
+                self.route_icon(target, &primary.icon, x + 24., y + 22., 18.);
+                self.text(
+                    scene,
+                    target,
+                    &primary.name,
+                    9,
+                    rect(x + 48., y + 21., 170., 19.),
+                    TEXT,
+                );
+                let (items, height) = scene.future_secondary_layout(i);
+                if height > 0. {
+                    let y = y + 52.;
+                    self.rounded(
+                        target,
+                        rect(x + 14., y, 214., height),
+                        5.,
+                        0x0e1e2b,
+                        Some(0x2a4054),
+                    );
+                    for item in items {
+                        let route = &targets[item.index];
+                        let left = x + 24. + item.x;
+                        let top = y + item.y;
+                        if item.separator {
+                            self.text(
+                                scene,
+                                target,
+                                "|",
+                                7,
+                                rect(left - 8., top + 5., 6., 18.),
+                                QUIET,
+                            );
+                        }
+                        self.route_icon(target, &route.icon, left, top + 7., 14.);
+                        self.text(
+                            scene,
+                            target,
+                            &route.name,
+                            13,
+                            rect(left + 18., top + 5., item.width - 18., 18.),
                             MUTED,
                         );
                     }
@@ -1378,6 +1599,20 @@ impl HostOverlay {
         }
         let previous_height = scene.base_height();
         scene.reference = view;
+        for route in scene.reference.future_targets.iter().flatten() {
+            if !route.icon.is_empty() && !scene.image_cache.contains_key(&route.icon) {
+                if let Some(image) = crate::public_art::bytes(&route.icon)
+                    .and_then(|bytes| image::load_from_memory(bytes).ok())
+                {
+                    if scene.image_cache.len() >= 128 {
+                        scene.image_cache.clear();
+                    }
+                    scene
+                        .image_cache
+                        .insert(route.icon.clone(), image.into_rgba8());
+                }
+            }
+        }
         scene.select(scene.selected)?;
         self.window.state.surface = None;
         if let Some(target) = &self.window.state.target {
@@ -1670,6 +1905,14 @@ impl HostOverlay {
                 }
             }
         }
+        for route in scene.reference.future_targets.iter().flatten() {
+            if !route.icon.is_empty()
+                && !scene.image_cache.contains_key(&route.icon)
+                && !urls.contains(&route.icon)
+            {
+                urls.push(route.icon.clone());
+            }
+        }
         if self.frame.is_none() || urls.is_empty() {
             self.art = None;
             self.art_request = None;
@@ -1905,6 +2148,13 @@ impl HostOverlay {
                     rate.value = if rate.value == 0. { 1. } else { 0. };
                 }
             }
+            for target in contrasting
+                .future_targets
+                .iter_mut()
+                .filter_map(|targets| targets.first_mut())
+            {
+                target.name = "绘制对照伙伴".into();
+            }
             if has_footer {
                 contrasting.footer = "离线绘制对照".into();
             }
@@ -1938,7 +2188,12 @@ impl HostOverlay {
                         return Err("passive-history-reference-not-painted".into());
                     }
                 }
-                for row in 0..reference.routes[index].len().min(2) {
+                for row in 0..reference.routes[index]
+                    .iter()
+                    .filter(|r| r.kind != crate::stage_cards::RouteKind::Future)
+                    .take(2)
+                    .count()
+                {
                     if !changed(
                         x + 10,
                         layouts[index].routes as u32 + row as u32 * 52 + 21,
@@ -1947,6 +2202,11 @@ impl HostOverlay {
                     ) {
                         return Err("passive-route-reference-not-painted".into());
                     }
+                }
+                if !reference.future_targets[index].is_empty()
+                    && !changed(x + 34, layouts[index].future as u32 + 21, 170, 19)
+                {
+                    return Err("passive-future-reference-not-painted".into());
                 }
             }
             if has_footer && !changed(14, card_bottom as u32 + 8, 732, 17) {
@@ -2725,7 +2985,7 @@ fn review_visible_reference_layout(
                 || !fits(
                     concise_reason(&scene.reference, i, card.id),
                     6,
-                    206. - width,
+                    TITLE_WIDTH - width - 6.,
                     18.,
                     false,
                 )?
@@ -2781,7 +3041,12 @@ fn review_visible_reference_layout(
         } else if layout.stage.is_some() {
             return Err("empty-stage-reserved-space".into());
         }
-        for (row, route) in scene.reference.routes[i].iter().take(2).enumerate() {
+        for (row, route) in scene.reference.routes[i]
+            .iter()
+            .filter(|r| r.kind != crate::stage_cards::RouteKind::Future)
+            .take(2)
+            .enumerate()
+        {
             use crate::stage_cards::RouteKind;
             let label = match route.kind {
                 RouteKind::Current => "当前搭配",
@@ -2818,6 +3083,26 @@ fn review_visible_reference_layout(
                         return Err(format!("route-samples-clipped:{i}:{row}").into());
                     }
                 }
+            }
+        }
+        if let Some(primary) = scene.reference.future_targets[i].first() {
+            if !fits(&primary.name, 9, 170., 19., true)? || layout.future + 44. > layout.bottom {
+                return Err(format!("future-primary-clipped:{i}").into());
+            }
+            let (items, height) = scene.future_secondary_layout(i);
+            for item in items {
+                if !fits(
+                    &scene.reference.future_targets[i][item.index].name,
+                    13,
+                    item.width - 18.,
+                    18.,
+                    true,
+                )? {
+                    return Err(format!("future-target-clipped:{i}").into());
+                }
+            }
+            if height > 0. && layout.future + 52. + height > layout.bottom {
+                return Err(format!("future-secondary-clipped:{i}").into());
             }
         }
         if let Some(notice) = &scene.reference.mechanisms[i] {
@@ -3430,6 +3715,30 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                             "无限循环往复",
                             None,
                         ),
+                    ];
+                    let future_target = |id, name: &str| crate::stage_cards::RouteTarget {
+                        id,
+                        name: name.into(),
+                        icon: match id {
+                            1004 => {
+                                "https://cdn.dtodo.cn/hextech/augment-icons/backtobasics_large.png"
+                            }
+                            1011 => {
+                                "https://cdn.dtodo.cn/hextech/augment-icons/canttouchthis_large.png"
+                            }
+                            _ => "",
+                        }
+                        .into(),
+                    };
+                    reference.future_targets[0] = vec![
+                        future_target(1004, "回归基本功"),
+                        future_target(1011, "你摸不到"),
+                        future_target(12317, "潘朵拉的盒子"),
+                        future_target(3086, "小蜜蜂！！！"),
+                    ];
+                    reference.future_targets[1] = vec![
+                        future_target(1004, "回归基本功"),
+                        future_target(1388, "无限循环往复"),
                     ];
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "stage-contrast" {
