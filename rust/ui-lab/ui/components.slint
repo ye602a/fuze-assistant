@@ -1,9 +1,9 @@
 // Incumbent blue/gold palette with a consistent Lucide icon family.
 export global Theme {
-    out property <color> background: #07131e;
-    out property <color> surface: #101e2a;
-    out property <color> stroke: #30424d;
-    out property <color> muted: #a1adb4;
+    out property <color> background: #0a141c;
+    out property <color> surface: #14212c;
+    out property <color> stroke: #2d414e;
+    out property <color> muted: #9bafb9;
     out property <color> gold: #c8aa6e;
     out property <color> ivory: #f0e6d2;
     out property <color> blue: #69bce6;
@@ -89,7 +89,8 @@ export component StatusSurface inherits Rectangle {
         Rectangle { x: 0px; y: 0px; width: root.width; height: root.height; background: @linear-gradient(110deg, root.target, #0d1b28); }
     }
     ActivityFill { width: root.width; height: root.height; active: root.active; }
-    Rectangle { background: transparent; border-width: 1px; border-color: root.accent; }
+    Rectangle { background: transparent; border-width: 1px; border-color: Theme.stroke; border-radius: 8px; }
+    Rectangle { x: 0px; y: 23px; width: 3px; height: parent.height - 46px; background: root.accent; }
     @children
 }
 
@@ -134,6 +135,7 @@ export component Action inherits Rectangle {
     in property <string> label;
     in property <string> description: root.label;
     in property <bool> primary: false;
+    in property <bool> selected: false;
     in property <bool> enabled: true;
     in property <bool> quiet: false;
     in property <bool> busy: false;
@@ -142,13 +144,13 @@ export component Action inherits Rectangle {
     private property <bool> down: root.enabled && (touch.pressed || root.key-down);
     private property <bool> key-down: false;
     changed enabled => { if !root.enabled { root.key-down = false; } }
-    background: root.quiet ? (root.down ? #324654 : touch.has-hover && root.enabled ? #263340 : transparent) : root.primary ? (root.down ? #ad915b : touch.has-hover && root.enabled ? #e5cc99 : Theme.gold) : (root.down ? #304952 : touch.has-hover && root.enabled ? #243742 : #122432);
+    background: root.quiet ? (root.down ? #324654 : touch.has-hover && root.enabled ? #263340 : root.selected ? #292b25 : transparent) : root.primary ? (root.down ? #ad915b : touch.has-hover && root.enabled ? #e5cc99 : Theme.gold) : (root.down ? #304952 : touch.has-hover && root.enabled ? #243742 : #122432);
     border-width: 1px; border-color: focus.has-focus ? Theme.blue : root.quiet ? transparent : root.primary ? #e1c68c : touch.has-hover && root.enabled ? #89703f : #46535a;
     animate background, border-color { duration: root.down ? 0ms : UiMotion.quick; easing: ease-out; }
-    border-radius: 2px; opacity: root.enabled || root.busy ? 1 : 0.55;
+    border-radius: 5px; opacity: root.enabled || root.busy ? 1 : 0.55;
     accessible-role: button; accessible-label: root.description; forward-focus: focus;
     if root.icon-only: Image { x: (parent.width - 18px)/2; y: (parent.height - 18px)/2; width: 18px; height: 18px; source: root.icon; colorize: root.primary ? #1a2025 : #dcc794; image-fit: contain; }
-    if !root.icon-only: Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 13px; color: root.primary ? #1a2025 : root.busy ? Theme.blue : #dcc794; horizontal-alignment: center; }
+    if !root.icon-only: Label { x: 5px; y: root.down ? 1px : 0px; width: parent.width - 10px; height: parent.height; text: root.label; font-size: 13px; font-weight: root.primary || root.selected ? 600 : 400; color: root.primary ? #1a2025 : root.busy ? Theme.blue : root.selected ? Theme.gold : Theme.ivory; horizontal-alignment: center; }
     touch := TouchArea { x: 0px; y: 0px; enabled: root.enabled && !root.busy; clicked => { focus.focus(); root.clicked(); } }
     focus := FocusScope { focus-on-click: false; enabled: root.enabled && !root.busy; key-pressed(event) => {
         if event.text == " " || event.text == "\n" { root.key-down = true; root.clicked(); return accept; } return reject;
@@ -190,10 +192,10 @@ export component Tabs inherits Rectangle {
     private property <length> cell: root.width / max(1, root.labels.length);
     height: 42px;
     background: Theme.surface;
-    border-width: 1px; border-color: Theme.stroke;
+    border-width: 1px; border-color: Theme.stroke; border-radius: 7px;
     HorizontalLayout { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 4px; spacing: 0px;
         for title[index] in root.labels: Action {
-            label: title; quiet: true; min-width: 0px;
+            label: title; quiet: true; min-width: 0px; selected: root.current == index;
             clicked => { root.current = index; }
         }
     }
@@ -205,11 +207,10 @@ export component Panel inherits Rectangle {
     in property <float> entrance: 1;
     in property <int> entrance-group: 0;
     opacity: UiMotion.reveal(root.entrance, root.entrance-group);
-    background: Theme.surface; border-width: 1px; border-color: Theme.stroke;
-    Rectangle { x: 0px; y: 0px; height: 1px; background: #45535a; }
+    background: Theme.surface; border-width: 1px; border-color: Theme.stroke; border-radius: 8px;
     @children
 }
-export component SectionTitle inherits Label { color: #e5d2a6; font-size: 15px; }
+export component SectionTitle inherits Label { color: Theme.ivory; font-size: 15px; font-weight: 600; }
 export component Navigation inherits Rectangle {
     in property <bool> enabled: true;
     in property <image> icon;
@@ -240,14 +241,12 @@ export component Module inherits Rectangle {
     in property <string> value;
     in property <string> detail;
     in property <color> tone: Theme.blue;
-    in property <bool> compact: false;
-    background: #0c1b28; border-width: 1px; border-color: Theme.stroke;
-    Rectangle { x: 0px; y: 0px; height: 2px; background: root.tone; }
-    Image { x: 15px; y: 19px; width: 27px; height: 27px; source: root.icon; image-fit: contain; }
-    Label { x: root.compact ? 51px : 15px; y: root.compact ? 10px : 55px; width: parent.width - self.x - 12px; height: 20px; text: root.label; color: #aab9c1; font-size: 12px; }
-    Rectangle { x: root.compact ? 51px : 15px; y: root.compact ? 43px : 87px; width: 6px; height: 6px; border-radius: 3px; background: root.tone; }
-    Label { x: root.compact ? 64px : 28px; y: root.compact ? 33px : 77px; width: parent.width - self.x - 10px; height: 24px; text: root.value; color: root.tone; font-size: 13px; font-weight: 600; }
-    Label { x: root.compact ? 51px : 15px; y: root.compact ? 60px : 105px; width: parent.width - self.x - 12px; height: 34px; text: root.detail; color: #a1b3bf; font-size: 12px; wrap: word-wrap; }
+    background: Theme.surface; border-width: 1px; border-color: Theme.stroke; border-radius: 8px;
+    Image { x: 15px; y: 15px; width: 21px; height: 21px; source: root.icon; image-fit: contain; opacity: 0.7; }
+    Label { x: 46px; y: 15px; width: parent.width - 62px; height: 20px; text: root.label; color: Theme.muted; font-size: 12px; }
+    Rectangle { x: 16px; y: 55px; width: 5px; height: 5px; border-radius: 3px; background: root.tone; }
+    Label { x: 30px; y: 44px; width: parent.width - 45px; height: 26px; text: root.value; color: root.tone; font-size: 13px; font-weight: 600; }
+    if root.detail != "": Label { x: 16px; y: 77px; width: parent.width - 32px; height: 34px; text: root.detail; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
 }
 export component Disclosure inherits Panel {
     in property <string> label;
@@ -292,7 +291,7 @@ export component NoticeBar inherits Rectangle {
     in property <string> message;
     in property <bool> enabled: true;
     callback dismissed;
-    height: 52px; background: #102431; border-width: 1px; border-color: #385361;
+    height: 52px; background: #102431; border-width: 1px; border-color: #385361; border-radius: 6px;
     Image { x: 12px; y: 18px; width: 16px; height: 16px; source: @image-url("assets/info.svg"); colorize: Theme.blue; }
     changed message => { notice-scroll.viewport-y = 0px; }
     notice-scroll := Flickable { x: 38px; y: 7px; width: parent.width - 90px; height: 38px;

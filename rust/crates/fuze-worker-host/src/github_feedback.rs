@@ -113,7 +113,7 @@ impl Report {
         }
         let safe = serde_json::to_string_pretty(self).map_err(|_| "feedback-invalid")?;
         let status = match self.end {
-            End::Fault => "局中故障快照，赛后会更新",
+            End::Fault => "局中状态快照，赛后会更新",
             End::PostGame => "已观察到赛后阶段",
             End::LeftMatch => "已离开对局，未观察到结算阶段",
             End::AppStopped => "助手退出，记录不完整",

@@ -48,7 +48,7 @@ export global MaintenanceState {
     in-out property <string> release-label: "版本 / 渠道未确认";
     in-out property <string> current-version: "未打包开发构建";
     in-out property <string> update-notes;
-    in-out property <string> update-status: "尚未检查更新";
+    in-out property <string> update-status;
     in-out property <string> storage-summary: "尚未扫描。暂停识别后可查看本地占用。";
     in-out property <[string]> storage-rows;
     callback action(string);
@@ -83,7 +83,7 @@ export global RecordState {
 }
 export struct DetailRow { icon-url: string, title: string, description: string, win: string, pick: string, rarity: int, tier: string, icon: image }
 export struct BuildRow { text: string, icons: [image], skills: [string] }
-export struct SlotRow { name: string, hint: string }
+export struct SlotRow { name: string, hint: string, known: bool }
 export global ShellState {
     in-out property <bool> attached: false;
     in-out property <bool> tray-available: false;
@@ -95,6 +95,7 @@ export global ShellState {
 }
 export global HostState {
     in-out property <[SlotRow]> slots;
+    in-out property <bool> has-recent: false;
     in-out property <[string]> resources: ["—", "—", "—", "—"];
     in-out property <string> sampled: "等待首次采样";
     in-out property <string> schedule: "无法确认等级时恢复基础检测；等级不是实际领取轮次。";
@@ -105,11 +106,11 @@ export global HostState {
     // Explicit host transaction; separate from background notices and maintenance.
     in-out property <string> pending-action;
     in-out property <string> notice;
-    in-out property <string> data-progress: "尚未检查数据更新";
+    in-out property <string> data-progress;
     in-out property <int> data-completed: 0;
     in-out property <int> data-total: 0;
-    in-out property <string> data-compatibility: "版本匹配：未确认";
-    in-out property <bool> data-mismatch: true;
+    in-out property <string> data-compatibility;
+    in-out property <bool> data-mismatch: false;
     in-out property <string> data-version: "—";
     in-out property <[PreferenceRow]> preferences;
     in-out property <int> backend: 0;
@@ -121,7 +122,7 @@ export global HostState {
     in-out property <int> history-selected: -1;
     in-out property <int> history-page: 0;
     in-out property <int> history-pages: 1;
-    in-out property <string> history-note: "未读取账号与缓存";
+    in-out property <string> history-note;
     in-out property <bool> history-busy: false;
     in-out property <bool> history-can-more: false;
     in-out property <bool> status-active: false;

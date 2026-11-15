@@ -661,7 +661,7 @@ pub fn attach_shared(
                 ui.set_augments(Default::default());
                 ui.set_build_lines(Default::default());
                 ui.set_detail_failed(false);
-                ui.set_detail_status("正在读取本地英雄数据…".into());
+                ui.set_detail_status("正在读取英雄资料…".into());
                 ui.set_scroll_y(-ui.get_detail_offset().min(ui.get_scroll_limit()));
                 service.request(id as u32, retry);
                 reload.restart();
@@ -754,17 +754,17 @@ pub fn attach_shared(
                     ui.set_detail_champion(loaded.id as i32);
                     ui.set_detail_status(
                         format!(
-                            "{} · {}\n实际领取轮次未确认，不自动使用阶段排序。",
+                            "{} · {}",
                             loaded.display_version,
                             if !finished {
-                                "正在获取腾讯海斗推荐；本地数据已显示"
+                                "正在更新腾讯推荐"
                             } else if loaded
                                 .detail
                                 .augments
                                 .iter()
                                 .any(|a| a.provenance.contains("腾讯101推荐"))
                             {
-                                "腾讯101推荐排名 · 胜率保留原样本来源"
+                                "腾讯101推荐排名"
                             } else {
                                 "整体胜率参考"
                             }

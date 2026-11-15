@@ -41,7 +41,7 @@ pub fn present(s: &Status, offline: bool) -> View {
         health: 0,
         busy: false,
         title: "等待英雄联盟客户端",
-        hint: "登录后自动连接，通信成功后显示游戏阶段。",
+        hint: "打开并登录英雄联盟客户端后自动连接。",
         connection: "未连接",
         phase: "等待客户端",
         connection_tone: 0,
@@ -91,7 +91,7 @@ pub fn present(s: &Status, offline: bool) -> View {
     if !running {
         v.health = 2;
         v.title = "识别已暂停";
-        v.hint = "继续识别后恢复客户端监听与对局识别。";
+        v.hint = "";
         v.capture = "已暂停";
         v.capture_tone = 2;
         v.ocr = "已暂停";
@@ -99,8 +99,8 @@ pub fn present(s: &Status, offline: bool) -> View {
         return v;
     }
     if offline {
-        v.title = "隔离宿主 · 等待对局样例";
-        v.hint = "使用固定样例，不访问游戏或个人数据。";
+        v.title = "等待对局 · 离线样例";
+        v.hint = "";
         return v;
     }
     v.busy = !matches!(s.connection, Some(State::Connected(_)))
@@ -116,25 +116,25 @@ pub fn present(s: &Status, offline: bool) -> View {
     match phase {
         Phase::ClientReady => {
             v.title = "已连接 · 等待对局";
-            v.hint = "客户端通信正常，进入对局后才会开始截图识别。";
+            v.hint = "";
         }
         Phase::ChampSelect => {
             v.title = "已连接 · 正在选择英雄";
-            v.hint = "英雄详情跟随阵容变化；此阶段不截图识别海克斯。";
+            v.hint = "";
         }
         Phase::Loading => {
             v.title = "正在加载 · 准备识别";
-            v.hint = "加载阶段预热识别引擎，进入对局后开始截图。";
+            v.hint = "";
             v.ocr = "正在准备";
         }
         Phase::PostGame => {
             v.title = "对局已结束 · 等待下一局";
-            v.hint = "本局截图与识别已停止。";
+            v.hint = "";
             v.capture_hint = "赛后不继续截图";
         }
         Phase::InProgress => {
             v.title = "对局中 · 等待海克斯";
-            v.hint = "按等级与选择画面调度识别，未出现海克斯时待命正常。";
+            v.hint = "";
         }
         _ => {}
     }
@@ -143,9 +143,13 @@ pub fn present(s: &Status, offline: bool) -> View {
             v.ocr = if matches!(backend, fuze_contract::wire::ActiveBackend::Cpu) {
                 "CPU 已就绪"
             } else {
-                "DirectML 已就绪"
+                "GPU 已就绪"
             };
-            v.ocr_hint = "识别引擎已初始化";
+            v.ocr_hint = if matches!(backend, fuze_contract::wire::ActiveBackend::Cpu) {
+                "CPU"
+            } else {
+                "DirectML"
+            };
             v.ocr_tone = 1;
         }
     }
@@ -162,32 +166,28 @@ pub fn present(s: &Status, offline: bool) -> View {
         };
         v.capture_tone = if fresh { 1 } else { 0 };
         if s.pipeline.capture == "waiting-selection" {
-            v.capture = "轻量画面检查";
+            v.capture = "等待强化选择";
             v.capture_hint = "未确认强化选择界面，跳过 OCR";
         }
         if s.pipeline.recent.is_some() {
             v.health = if partial { 2 } else { 1 };
             v.title = if partial {
-                "部分卡位暂不可读"
+                "识别结果待补全"
             } else {
                 "海克斯推荐已更新"
             };
-            v.hint = if partial {
-                "可能遮挡或正在刷新；保留实际卡位与上次可用结果。"
-            } else {
-                "保持实际卡位顺序，推荐继续使用整体胜率。"
-            };
+            v.hint = "";
         }
         if s.pipeline.capture == "waiting-selection" && s.pipeline.overlay.is_none() {
             v.health = 0;
             v.title = "对局中 · 等待强化选择";
-            v.hint = "轻量检查选择界面；确认出现后才进行中文识别。";
+            v.hint = "";
         }
     }
     if active && waiting_window {
         v.health = 2;
         v.title = "等待游戏画面";
-        v.hint = "已连接客户端，正在等待对应游戏窗口。";
+        v.hint = "游戏窗口就绪后自动继续。";
         v.capture = "等待游戏窗口";
         v.capture_hint = "客户端连接成功不代表画面已获取";
         v.capture_tone = 2;
@@ -200,7 +200,7 @@ pub fn present(s: &Status, offline: bool) -> View {
     if failed {
         v.health = 3;
         v.title = "识别异常 · 等待恢复";
-        v.hint = "识别链路暂不可用，原有设置与数据继续保留。";
+        v.hint = "服务正在重试，可在运行详情中查看原因。";
         if s.pipeline
             .error
             .is_some_and(|e| e.starts_with("capture") || e.starts_with("game-window"))
@@ -220,47 +220,35 @@ fn connection_error(error: Error) -> (&'static str, &'static str, &'static str) 
     match error {
         Error::Discovery => (
             "无法取得客户端连接信息",
-            "自动发现正在重试；可在偏好设置检查游戏目录回退。",
+            "正在重试；也可在设置中指定客户端目录。",
             "LCU-DISCOVERY",
         ),
         Error::AuthInput => (
             "客户端连接信息无效",
-            "正在重新发现连接信息；无需填写或发送临时密码。",
+            "正在重新获取连接信息。",
             "LCU-CREDENTIALS",
         ),
         Error::AmbiguousClient => (
             "检测到多个客户端",
-            "无法可靠确认当前客户端，暂不连接；设置和本地记录仍可查看。",
+            "请关闭多余客户端后重试。",
             "LCU-MULTIPLE",
         ),
-        Error::Unauthorized => (
-            "客户端认证失败",
-            "客户端拒绝了临时凭据，正在重新发现并重试。",
-            "LCU-AUTH",
-        ),
+        Error::Unauthorized => ("客户端认证失败", "正在重新连接客户端。", "LCU-AUTH"),
         Error::NotFound => (
             "客户端接口暂不可用",
             "暂时无法获取游戏状态，正在重试。",
             "LCU-NOT-FOUND",
         ),
-        Error::HttpStatus => (
-            "客户端响应异常",
-            "客户端返回非成功状态，正在重试；未判定连接成功。",
-            "LCU-HTTP",
-        ),
-        Error::InvalidPhase => (
-            "游戏阶段尚未确认",
-            "返回内容未通过阶段校验，正在重试；设置仍可使用。",
-            "LCU-PHASE",
-        ),
+        Error::HttpStatus => ("客户端响应异常", "客户端响应异常，正在重试。", "LCU-HTTP"),
+        Error::InvalidPhase => ("游戏阶段尚未确认", "正在重新读取游戏状态。", "LCU-PHASE"),
         Error::ResponseLimit => (
             "客户端响应超出限制",
-            "未读取超限响应，正在重试；设置仍可使用。",
+            "响应内容过大，正在重试。",
             "LCU-LIMIT",
         ),
         Error::Transport => (
             "客户端通信失败",
-            "本机连接或安全握手未完成，正在重试；设置仍可使用。",
+            "正在重试，请确认客户端已登录。",
             "LCU-TRANSPORT",
         ),
     }

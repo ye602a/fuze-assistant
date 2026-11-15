@@ -78,8 +78,8 @@ pub(crate) fn submitted(ui: &Workbench, result: Result<(), &'static str>, action
             match action {
                 "pause" => "正在暂停识别…",
                 "resume" => "正在恢复自动识别…",
-                "directory" => "正在校验并保存目录；连接结果仍以客户端状态为准…",
-                "data-update" => "正在更新推荐数据与字典；旧数据继续保留…",
+                "directory" => "正在保存客户端目录…",
+                "data-update" => "正在更新推荐数据…",
                 "history" => "正在读取战绩，请稍候…",
                 _ => "正在保存并应用设置…",
             }
@@ -94,67 +94,62 @@ fn rows(p: &Preferences) -> ModelRc<PreferenceRow> {
         (
             "automatic",
             "自动识别强化符文",
-            "仅在对局阶段检测，空闲时停止截图。",
+            "进入对局后自动识别。",
             p.automatic,
         ),
         (
             "level_gate",
-            "按强化等级节省识别开销",
-            "等级不可读时恢复基础检测，不据此推断领取轮次。",
+            "节能识别",
+            "等待强化期间降低检测频率。",
             p.level_gate,
         ),
         (
             "augment_overlay",
             "顶部三卡推荐",
-            "按实际卡位显示，暂不可读时保留位置和提示。",
+            "强化选择时显示三张卡的参考。",
             p.augment_overlay,
         ),
         (
             "augment_side_panel",
             "局内海克斯侧栏",
-            "按需查看强化符文池，不自动操作游戏。",
+            "查看当前英雄的强化符文池。",
             p.augment_side_panel,
         ),
         (
             "champ_select",
             "选人英雄详情",
-            "五人阵容在顶部，可选英雄按胜率网格一览。",
+            "选人时显示阵容、候选英雄与出装。",
             p.champ_select,
         ),
-        (
-            "champ_topmost",
-            "选人阶段窗口置顶",
-            "仅影响助手窗口。",
-            p.champ_topmost,
-        ),
+        ("champ_topmost", "选人阶段窗口置顶", "", p.champ_topmost),
         (
             "close_to_tray",
             "最小化时收入托盘",
-            "点击 X 始终询问；关闭此项后最小化到任务栏。",
+            "关闭后最小化到任务栏。",
             p.close_to_tray,
         ),
         (
             "icon_downloads",
             "补充缺失图标",
-            "优先本地缓存，按需下载公开图片。",
+            "按需下载未缓存的图标。",
             p.icon_downloads,
         ),
         (
             "auto_item_sets",
             "自动导入装备方案（本次运行）",
-            "开启即允许选人时导入本人所选路线，重启后关闭；保留个人方案。",
+            "选人时导入所选路线；重启后关闭，保留个人方案。",
             p.auto_item_sets,
         ),
         (
             "pause_hotkey",
             "暂停快捷键",
-            "Ctrl + Shift + F8；不向游戏发送按键。",
+            "Ctrl + Shift + F8",
             p.pause_hotkey,
         ),
         (
             "local_records",
             "保存本地观察记录",
-            "观察到的卡片不作为已领取，按账号隔离保存。",
+            "记录出现过的候选卡片，按账号分别保存。",
             p.local_records,
         ),
     ];
@@ -224,25 +219,16 @@ fn history(ui: &Workbench, view: &fuze_worker_host::account_history::View, page:
     } else if view.error.is_some() {
         let error = fuze_worker_host::account_history::error_label(view.error);
         if view.cached && !view.rows.is_empty() {
-            format!("{error}。保留列表仅作本地参考，不代表当前账号已验证。").into()
+            format!("{error}。当前显示本地缓存。").into()
         } else {
             error.into()
         }
     } else if view.pending > 0 {
-        format!(
-            "导入预览 · {} 项 · 尚未写入，请选择后确认或取消。",
-            view.pending
-        )
-        .into()
+        format!("导入预览 · {} 项，请选择后确认。", view.pending).into()
     } else if view.cached {
-        "显示本地缓存，未据此确认当前登录账号。".into()
+        "本地缓存 · 当前登录账号尚未确认".into()
     } else {
-        let source = match view.source.as_str() {
-            "sgp" => "官方战绩接口",
-            "lcu" => "本地客户端接口",
-            _ => "已验证来源",
-        };
-        format!("已读取战绩 · {source}；观察记录不等于实际领取。").into()
+        "".into()
     });
     state.set_history(
         Rc::new(VecModel::from(
@@ -436,7 +422,7 @@ pub fn attach_recovered(
                 if result.is_ok() {
                     let state = ui.global::<HostState>();
                     state.set_history_busy(true);
-                    state.set_history_note("正在后台读取战绩；不改变识别开关，原列表保留。".into());
+                    state.set_history_note("正在读取战绩…".into());
                     state.set_notice("正在后台读取战绩…".into());
                 }
                 notice(&ui, result);
@@ -569,10 +555,10 @@ pub fn attach_recovered(
                 let message = match action.as_str() {
                     "pause" | "resume" if !offline && next.preferences.automatic != (action == "resume") => "识别状态已切换，但未能保存，下次启动可能恢复旧状态。",
                     "pause" => "识别已暂停。",
-                    "resume" => "自动识别已恢复；正在等待客户端与对局状态。",
+                    "resume" => "自动识别已恢复。",
                     "history" => "",
                     _ if offline => "设置已在隔离会话中应用；未写入稳定版设置。",
-                    _ => next.notice.unwrap_or("操作已结束，请查看当前模块状态。"),
+                    _ => next.notice.unwrap_or(""),
                 };
                 state.set_notice(if action == "history" { state.get_history_note() } else { message.into() });
             } else if old
@@ -592,7 +578,7 @@ pub fn attach_recovered(
             }
             ui.set_paused(next.mode == 0);
             state.set_running(next.mode == 1);
-            state.set_data_progress(if next.data_progress.message.is_empty() { "尚未检查数据更新".into() } else { next.data_progress.message.clone().into() });
+            state.set_data_progress(next.data_progress.message.clone().into());
             state.set_data_completed(next.data_progress.completed as i32);
             state.set_data_total(next.data_progress.total as i32);
             if old.as_ref().is_none_or(|s| s.available != next.available || s.data_label != next.data_label || s.recognition.reference != next.recognition.reference) {
@@ -601,13 +587,16 @@ pub fn attach_recovered(
                 state.set_data_mismatch(mismatch);
                 state.set_data_version(next.data_label.clone().into());
             }
+            state.set_has_recent(
+                (offline || matches!(next.connection, Some(fuze_lcu::reconnect::State::Connected(fuze_runtime::session::Phase::InProgress))))
+                    && next.pipeline.recent.as_ref().is_some_and(|slots| slots.iter().any(|slot| matches!(slot, fuze_contract::Slot::Known { .. })))
+            );
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
                 state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {
-                    let (name, hint) = match next.pipeline.recent.as_ref().map(|slots| &slots[i]) {
-                        Some(fuze_contract::Slot::Known { name, .. }) => (name.clone(), next.pipeline.recent_tiers[i].map(|v| format!("梯队 T{v} · 整体胜率参考")).unwrap_or_else(|| "暂无评级 · 整体胜率参考".into())),
-                        Some(fuze_contract::Slot::Unreadable) => ("此位置暂不可读".into(), "可能遮挡或正在刷新，保留卡位".into()),
-                        None => ("等待海克斯出现".into(), "未进入强化选择时，这里为空是正常现象。".into()),
-                    }; crate::SlotRow { name: name.into(), hint: hint.into() }
+                    let (name, hint, known) = match next.pipeline.recent.as_ref().map(|slots| &slots[i]) {
+                        Some(fuze_contract::Slot::Known { name, .. }) => (name.clone(), next.pipeline.recent_tiers[i].map(|v| format!("梯队 T{v}")).unwrap_or_default(), true),
+                        _ => (String::new(), String::new(), false),
+                    }; crate::SlotRow { name: name.into(), hint: hint.into(), known }
                 }).collect::<Vec<_>>())).into());
             }
             if old.as_ref().is_none_or(|s| s.resources != next.resources || s.pipeline.analyses != next.pipeline.analyses || s.pipeline.analysis_ms != next.pipeline.analysis_ms) {

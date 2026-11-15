@@ -280,10 +280,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         save("settings-controls")?;
                         #[cfg(feature = "ui-audit")]
                         {
-                            crate::control_review::hit(
-                                &ui,
-                                "高级回退：自动连接失败时手动指定目录",
-                            )?;
+                            crate::control_review::hit(&ui, "手动指定目录")?;
                             crate::control_review::type_text(
                                 &ui,
                                 "客户端目录",
@@ -574,7 +571,7 @@ pub fn run(data: &Path, output: &Path) -> Result<serde_json::Value, Box<dyn std:
                         }
                         ui.set_scroll_y(-610.);
                         save("records-observations")?;
-                        control(&ui, "生成匿名分享预览", || {
+                        control(&ui, "匿名分享预览", || {
                             record.invoke_action("share".into(), 0)
                         })?;
                         if !session.busy() || session.set_running(true).is_ok() {

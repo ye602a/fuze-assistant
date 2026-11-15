@@ -38,10 +38,17 @@ export component Workbench inherits Window {
     private property <string> record-notice: RecordState.notice;
     private property <string> shell-notice: ShellState.notice;
     private property <string> maintenance-notice: MaintenanceState.notice;
-    changed host-notice => { if root.host-notice != "" { root.feedback = root.host-notice; } }
-    changed record-notice => { if root.record-notice != "" { root.feedback = root.record-notice; } }
-    changed shell-notice => { if root.shell-notice != "" { root.feedback = root.shell-notice; } }
-    changed maintenance-notice => { if root.maintenance-notice != "" { root.feedback = root.maintenance-notice; } }
+    private property <int> feedback-owner: 0;
+    // Clearing a completed operation must not leave its old progress text visible,
+    // or dismiss a newer message from another service.
+    function update-feedback(message: string, owner: int) {
+        if message != "" { root.feedback = message; root.feedback-owner = owner; }
+        else if root.feedback-owner == owner { root.feedback = ""; root.feedback-owner = 0; }
+    }
+    changed host-notice => { root.update-feedback(root.host-notice, 1); }
+    changed record-notice => { root.update-feedback(root.record-notice, 2); }
+    changed shell-notice => { root.update-feedback(root.shell-notice, 3); }
+    changed maintenance-notice => { root.update-feedback(root.maintenance-notice, 4); }
     in-out property <length> scroll-y <=> scroll.viewport-y;
     callback query-edited(string);
     callback cycle-health;
@@ -54,7 +61,9 @@ export component Workbench inherits Window {
     private property <length> rail-width: root.narrow ? 158px : 184px;
     private property <length> inset: root.narrow ? 20px : 30px;
     private property <color> tone: root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : root.health == 1 ? Theme.green : root.health == 2 ? Theme.yellow : Theme.red;
-    private property <color> tone-background: root.paused ? #49391b : root.health == 0 ? #12324b : root.health == 1 ? #123d34 : root.health == 2 ? #49391b : #4b222b;
+    private property <color> tone-background: root.paused ? #27251f : root.health == 0 ? #142532 : root.health == 1 ? #142a27 : root.health == 2 ? #27251f : #2c2029;
+    private property <string> status-hint: HostState.connected ? HostState.status-hint : root.health == 3 ? "正在重新连接客户端。" : "";
+    private property <bool> has-cards: HostState.connected ? HostState.has-recent : !root.paused && (root.health == 1 || root.health == 2);
     out property <float> content-bottom: (content.y + content.height) / 1px;
     out property <float> content-width: content.width / 1px;
     out property <float> module-width: (body.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2px : 4px);
@@ -94,59 +103,72 @@ export component Workbench inherits Window {
                 x: root.inset; y: 24px; width: scroll.width - 2 * root.inset - 10px;
                 spacing: 16px;
                 Rectangle {
-                    height: 66px;
-                    Label { x: 0px; y: 0px; height: 36px; text: root.page == 0 ? "你的对局工作台" : root.page == 1 ? "战绩查询" : "按你的习惯设置"; font-size: 25px; font-weight: 700; }
-                    Label { x: 0px; y: 40px; height: 24px; width: parent.width; text: root.page == 0 ? "连接、识别与推荐，进度一目了然。" : root.page == 1 ? "查看对局结果与本地观察记录。" : "设置即时保存，按你的习惯调整。"; color: Theme.muted; }
+                    height: 40px;
+                    Label { x: 0px; y: 0px; height: 36px; text: root.page == 0 ? "对局概览" : root.page == 1 ? "战绩查询" : "偏好设置"; font-size: 25px; font-weight: 700; }
                 }
                 if root.page == 0: VerticalLayout {
                     spacing: 16px;
                     StatusSurface {
-                        height: 156px; active: HostState.status-active; accent: root.tone; fill: root.tone-background;
-                        Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 1px; border-color: #091724; background: transparent; }
-                        Rectangle { y: 0px; x: 24px; width: 52px; height: 3px; background: root.tone; }
-                        Image { x: 28px; y: 30px; width: 8px; height: 8px; source: @image-url("assets/diamond.svg"); colorize: root.tone; }
-                        Label { x: 44px; y: 22px; height: 24px; text: "实时状态"; color: Theme.gold; font-size: 12px; letter-spacing: 2px; }
-                        Label { x: 27px; y: 47px; width: parent.width - 170px; height: 36px; text: HostState.connected ? HostState.status-title : root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "识别正常 · 推荐已就绪" : root.health == 2 ? "部分卡位暂不可读" : "连接失败 · 等待重试"; color: root.tone; font-size: 22px; font-weight: 700; }
-                        Label { x: 27px; y: 88px; width: parent.width - 170px; height: 28px; text: HostState.connected ? HostState.status-hint : root.paused ? "已暂停识别。继续后恢复自动识别。" : root.health == 0 ? "客户端通信正常。进入对局后才会开始截图识别。" : root.health == 2 ? "保留卡位，等待下一次识别；可能被遮挡或正在刷新。" : root.health == 3 ? "暂时无法连接客户端，等待重连。" : "已展示识别结果。仅作推荐，不自动选择。"; color: #bacbd0; wrap: word-wrap; }
-                        Action { x: parent.width - 130px; y: 63px; width: 103px; primary: true; label: root.paused ? "继续识别" : "暂停识别"; enabled: !HostState.busy; clicked => { if HostState.connected { HostState.command("toggle-running"); } else { root.paused = !root.paused; } } }
+                        height: root.status-hint == "" ? 106px : 132px; active: HostState.status-active; accent: root.tone; fill: root.tone-background;
+                        Rectangle { x: 25px; y: 27px; width: 6px; height: 6px; border-radius: 3px; background: root.tone; }
+                        Label { x: 41px; y: 18px; height: 24px; text: "当前状态"; color: Theme.muted; font-size: 12px; }
+                        Label { x: 24px; y: 47px; width: parent.width - 170px; height: 36px; text: HostState.connected ? HostState.status-title : root.paused ? "识别已暂停" : root.health == 0 ? "已连接 · 等待对局" : root.health == 1 ? "海克斯推荐已更新" : root.health == 2 ? "识别结果待补全" : "连接失败 · 等待重试"; color: Theme.ivory; font-size: 22px; font-weight: 700; }
+                        if root.status-hint != "": Label { x: 24px; y: 87px; width: parent.width - 170px; height: 29px; text: root.status-hint; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                        Action { x: parent.width - 132px; y: (parent.height - self.height) / 2; width: 108px; primary: root.paused; label: root.paused ? "继续识别" : "暂停识别"; enabled: !HostState.busy; clicked => { if HostState.connected { HostState.command("toggle-running"); } else { root.paused = !root.paused; } } }
                     }
                     VerticalLayout {
                         spacing: 3px;
                         module-grid := Rectangle {
                             opacity: UiMotion.reveal(page-entrance.progress, 1);
-                            height: root.narrow ? 220px : 145px;
+                            height: root.narrow ? 188px : 88px;
                             for item[index] in [
-                                {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "已连接", hint: HostState.connected ? HostState.connection-hint : root.health == 3 ? "等待客户端重连" : "已连接 · 固定预览状态", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
-                                {label: "游戏画面", value: HostState.connected ? HostState.capture-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", hint: HostState.connected ? HostState.capture-hint : "预览不捕获屏幕或游戏", icon: @image-url("assets/capture.svg"), tone: HostState.connected ? (HostState.capture-tone == 3 ? Theme.red : HostState.capture-tone == 2 ? Theme.yellow : HostState.capture-tone == 1 ? Theme.green : Theme.blue) : root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
-                                {label: "中文识别", value: HostState.connected ? HostState.ocr-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : root.health == 2 ? "部分卡位暂不可读" : "识别结果已就绪", hint: HostState.connected ? HostState.ocr-hint : "预览不启动识别引擎", icon: @image-url("assets/recognition.svg"), tone: HostState.connected ? (HostState.ocr-tone == 3 ? Theme.red : HostState.ocr-tone == 2 ? Theme.yellow : HostState.ocr-tone == 1 ? Theme.green : Theme.blue) : root.paused || root.health == 2 ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
-                                {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20.1 · 示例", hint: "英雄整体胜率", icon: @image-url("assets/data.svg"), tone: HostState.connected && HostState.data-version == "—" ? Theme.yellow : Theme.green}
+                                {label: "客户端连接", value: HostState.connected ? HostState.connection-value : root.health == 3 ? "连接异常" : "已连接", icon: @image-url("assets/network.svg"), tone: HostState.connected ? (HostState.connection-tone == 3 ? Theme.red : HostState.connection-tone == 2 ? Theme.yellow : HostState.connection-tone == 1 ? Theme.green : Theme.blue) : root.health == 3 ? Theme.red : Theme.green},
+                                {label: "游戏画面", value: HostState.connected ? HostState.capture-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "画面已获取", icon: @image-url("assets/capture.svg"), tone: HostState.connected ? (HostState.capture-tone == 3 ? Theme.red : HostState.capture-tone == 2 ? Theme.yellow : HostState.capture-tone == 1 ? Theme.green : Theme.blue) : root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "符文识别", value: HostState.connected ? HostState.ocr-value : root.paused ? "已暂停" : root.health == 0 ? "正常待命" : "已就绪", icon: @image-url("assets/recognition.svg"), tone: HostState.connected ? (HostState.ocr-tone == 3 ? Theme.red : HostState.ocr-tone == 2 ? Theme.yellow : HostState.ocr-tone == 1 ? Theme.green : Theme.blue) : root.paused ? Theme.yellow : root.health == 0 ? Theme.blue : Theme.green},
+                                {label: "推荐数据", value: HostState.connected ? HostState.data-version : "16.20 · 示例", icon: @image-url("assets/data.svg"), tone: HostState.connected && HostState.data-mismatch ? Theme.yellow : Theme.green}
                             ]: Module {
                                 x: mod(index, root.narrow ? 2 : 4) * (self.width + 12px);
-                                y: root.narrow && index >= 2 ? 116px : 0px;
+                                y: root.narrow && index >= 2 ? 100px : 0px;
                                 width: (parent.width - (root.narrow ? 12px : 36px)) / (root.narrow ? 2 : 4);
-                                height: root.narrow ? 104px : 145px;
-                                label: item.label; value: item.value; detail: item.hint; icon: item.icon; tone: item.tone; compact: root.narrow;
+                                height: 88px;
+                                label: item.label; value: item.value; icon: item.icon; tone: item.tone;
                             }
                         }
                     }
-                    Panel {
-                        height: 224px;
+                    if root.has-cards: Panel {
+                        height: 172px;
                         entrance: page-entrance.progress; entrance-group: 2;
-                        SectionTitle { x: 21px; y: 18px; height: 25px; text: "本局最近识别"; }
-                        Label { x: 21px; y: 46px; height: 21px; text: "只有实际识别出的强化符文才会出现在这里。"; color: Theme.muted; font-size: 12px; }
+                        SectionTitle { x: 21px; y: 16px; height: 25px; text: "最近识别"; }
                         HorizontalLayout {
-                            x: 21px; y: 78px; width: parent.width - 42px; height: 126px; spacing: 13px;
+                            x: 21px; y: 53px; width: parent.width - 42px; height: 100px; spacing: 12px;
                             for name[index] in ["裁决使", "超凡邪恶", "神射法师"]: Rectangle {
-                                background: #091724; border-width: 1px; border-color: #3f4c54;
-                                Label { x: 15px; y: 13px; height: 20px; text: "选项 " + (index + 1); color: #91a6b2; font-size: 12px; }
-                                Image { x: 14px; y: 44px; width: 32px; height: 32px; source: @image-url("assets/rune.svg"); }
-                                Label { x: 55px; y: 45px; width: parent.width - 65px; height: 28px; text: HostState.connected ? HostState.slots[index].name : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "此位置暂不可读" : name) : "等待海克斯出现"; color: #b4c0c5; font-size: 13px; }
-                                Label { x: 14px; y: 82px; width: parent.width - 28px; height: 36px; wrap: word-wrap; text: HostState.connected ? HostState.slots[index].hint : root.health == 1 || root.health == 2 ? (root.health == 2 && index == 1 ? "可能遮挡或正在刷新，保留卡位" : "梯队 T2 · 固定预览，非实际领取") : "未进入强化选择时，这里为空是正常现象。"; color: #a1b3bf; font-size: 12px; }
+                                property <bool> known: HostState.connected ? HostState.slots[index].known : !(root.health == 2 && index == 1);
+                                background: Theme.background; border-width: 1px; border-color: Theme.stroke; border-radius: 6px;
+                                Label { x: 14px; y: 11px; height: 18px; text: index == 0 ? "左侧" : index == 1 ? "中间" : "右侧"; color: Theme.muted; font-size: 11px; }
+                                if self.known: Image { x: 14px; y: 40px; width: 26px; height: 26px; source: @image-url("assets/rune.svg"); opacity: 0.8; }
+                                if self.known: Label { x: 50px; y: 38px; width: parent.width - 62px; height: 28px; text: HostState.connected ? HostState.slots[index].name : name; font-size: 14px; font-weight: 600; }
+                                if !self.known: Rectangle { x: 14px; y: 51px; width: 44px; height: 3px; border-radius: 2px; background: Theme.stroke; }
+                                if self.known: Label { x: 50px; y: 68px; width: parent.width - 62px; height: 18px; text: HostState.connected ? HostState.slots[index].hint : "梯队 T2 · 样例"; color: Theme.muted; font-size: 11px; }
                             }
                         }
                     }
-                    Action { label: root.runtime-open ? "收起运行详情" : "查看运行详情"; clicked => { root.runtime-open = !root.runtime-open; } }
+                    Rectangle { height: 36px;
+                        Action { x: 0px; y: 0px; width: 150px; label: root.runtime-open ? "收起运行详情" : "查看运行详情"; clicked => { root.runtime-open = !root.runtime-open; } }
+                    }
                     if root.runtime-open: VerticalLayout { spacing: 12px;
+                        Panel { height: 150px;
+                            SectionTitle { x: 21px; y: 16px; height: 25px; text: "运行详情"; }
+                            VerticalLayout { x: 21px; y: 51px; width: parent.width - 42px; height: 80px; spacing: 6px;
+                                for row in [
+                                    {label: "连接", text: HostState.connection-hint},
+                                    {label: "画面", text: HostState.capture-hint},
+                                    {label: "识别", text: HostState.ocr-hint}
+                                ]: HorizontalLayout { spacing: 12px;
+                                    Label { width: 55px; text: row.label; color: Theme.muted; font-size: 12px; }
+                                    Label { text: row.text; color: Theme.muted; font-size: 12px; }
+                                }
+                            }
+                        }
                         Panel {
                             height: 166px;
                             SectionTitle { x: 21px; y: 17px; height: 26px; text: "运行开销"; }
@@ -176,16 +198,11 @@ export component Workbench inherits Window {
         Scrollbar { x: parent.width - 13px; y: 6px; height: scroll.height - 12px; content-height: scroll.viewport-height - 12px; offset <=> scroll.viewport-y; }
     }
     }
-    if root.feedback == "": Rectangle {
-        x: root.rail-width + root.inset; y: root.height - 58px; width: root.width - self.x - root.inset - 10px; height: 52px;
-        Label { x: 0px; width: parent.width - 190px; height: parent.height; horizontal-alignment: left; text: HostState.offline ? "状态更新 · 离线预览" : "状态来自本机运行服务"; color: Theme.muted; font-size: 12px; }
-        Label { x: parent.width - 190px; width: 190px; height: parent.height; text: "符择 · 中文版"; horizontal-alignment: right; color: Theme.muted; font-size: 12px; }
-    }
     if root.feedback != "": NoticeBar {
         x: root.rail-width + root.inset; y: root.height - 58px; width: root.width - self.x - root.inset - 10px;
         message: root.feedback;
         enabled: !root.quit-open && MaintenanceState.confirmation == "" && RecordState.confirmation == "";
-        dismissed => { HostState.notice = ""; RecordState.notice = ""; ShellState.notice = ""; MaintenanceState.notice = ""; root.feedback = ""; }
+        dismissed => { HostState.notice = ""; RecordState.notice = ""; ShellState.notice = ""; MaintenanceState.notice = ""; root.feedback = ""; root.feedback-owner = 0; }
     }
     changed quit-open => { if root.quit-open { cancel-exit.focus(); } else { content-focus.focus(); } }
     Rectangle { x: 0px; y: 0px; visible: root.quit-open;
