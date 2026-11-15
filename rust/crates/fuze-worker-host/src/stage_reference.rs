@@ -294,6 +294,7 @@ fn parse_snapshot(
     s.normalize();
     Ok(s)
 }
+#[cfg(test)]
 pub(crate) fn local_snapshot(
     roots: &[fuze_data::Root],
     locale: fuze_data::Locale,
@@ -301,6 +302,13 @@ pub(crate) fn local_snapshot(
     at: u64,
 ) -> Result<Option<Snapshot>> {
     let data = fuze_data::prepare(roots, locale, fuze_data::Scope::Champion(id))?;
+    snapshot_from_prepared(&data, id, at)
+}
+fn snapshot_from_prepared(
+    data: &fuze_data::Prepared,
+    id: u32,
+    at: u64,
+) -> Result<Option<Snapshot>> {
     if data
         .document("manifest.json")
         .is_none_or(|v| v["source"] != fuze_data::aramkit::SOURCE)
@@ -322,6 +330,8 @@ pub(crate) fn local_snapshot(
 #[derive(Clone, Default)]
 pub struct Reply {
     pub snapshot: Option<Arc<Snapshot>>,
+    /// Independent cross-hero catalogue routes; never hero-specific statistics.
+    pub routes: Option<Arc<fuze_data::combination_routes::Index>>,
     pub names: Arc<HashMap<u32, String>>,
     pub cached: bool,
     pub issue: Option<&'static str>,
@@ -355,6 +365,7 @@ pub struct Service {
 /// UI peeks never block on IO; entering gameplay revokes pending network work.
 pub struct Store {
     cache: Mutex<Option<Cache>>,
+    routes: Mutex<Option<RoutesCache>>,
     network: AtomicBool,
     network_epoch: AtomicU64,
 }
@@ -362,6 +373,7 @@ impl Default for Store {
     fn default() -> Self {
         Self {
             cache: Mutex::new(None),
+            routes: Mutex::new(None),
             network: AtomicBool::new(true),
             network_epoch: AtomicU64::new(0),
         }
@@ -383,6 +395,124 @@ impl Store {
             .find(|s| s.usable(id, at))
             .cloned()
     }
+
+    fn routes_for(
+        &self,
+        roots: &[fuze_data::Root],
+        data: &fuze_data::Prepared,
+        access: Access,
+        cancel: &dyn Fn() -> bool,
+    ) -> Option<Arc<fuze_data::combination_routes::Index>> {
+        let key = RoutesKey {
+            dataset: data.identity(),
+            source: data.source(),
+            roots: roots.iter().map(|r| (r.path.clone(), r.source)).collect(),
+            manifest: data.document("manifest.json")?.clone(),
+        };
+        let mut cache = self.routes.lock().ok()?;
+        cached_routes(
+            &mut cache,
+            key,
+            matches!(access, Access::Prepare | Access::Refresh)
+                && self.network.load(Ordering::Acquire),
+            cancel,
+            || prepare_routes(roots, data, cancel),
+        )
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct RoutesKey {
+    dataset: String,
+    source: fuze_data::Source,
+    roots: Vec<(PathBuf, fuze_data::Source)>,
+    manifest: Value,
+}
+struct RoutesCache {
+    key: RoutesKey,
+    /// None remembers a missing/unsupported local index for this immutable batch.
+    index: Option<Arc<fuze_data::combination_routes::Index>>,
+}
+
+fn cached_routes(
+    cache: &mut Option<RoutesCache>,
+    key: RoutesKey,
+    prepare: bool,
+    cancel: &dyn Fn() -> bool,
+    load: impl FnOnce() -> Option<fuze_data::combination_routes::Index>,
+) -> Option<Arc<fuze_data::combination_routes::Index>> {
+    if cancel() {
+        return None;
+    }
+    if let Some(old) = cache.as_ref().filter(|old| old.key == key) {
+        return old.index.clone();
+    }
+    if !prepare {
+        return None;
+    }
+    let index = load()
+        .filter(|index| index.dataset == key.dataset)
+        .map(Arc::new);
+    if cancel() {
+        return None;
+    }
+    *cache = Some(RoutesCache {
+        key,
+        index: index.clone(),
+    });
+    index
+}
+
+/// Reuse the already prepared consumer identity. Only a single matching root can
+/// supply Full; incomplete roots cannot silently fall back to another source.
+fn prepare_routes(
+    roots: &[fuze_data::Root],
+    data: &fuze_data::Prepared,
+    cancel: &dyn Fn() -> bool,
+) -> Option<fuze_data::combination_routes::Index> {
+    let manifest = data.document("manifest.json")?;
+    if manifest["source"] != fuze_data::aramkit::SOURCE || cancel() {
+        return None;
+    }
+    let identity = data.identity();
+    for root in roots.iter().filter(|r| r.source == data.source()) {
+        if cancel() {
+            return None;
+        }
+        let root = std::slice::from_ref(root);
+        let Ok(probe) = fuze_data::current_augments::prepare_identity(
+            root,
+            data.locale(),
+            data.scope(),
+            &identity,
+        ) else {
+            continue;
+        };
+        if probe.document("manifest.json") != Some(manifest)
+            || probe.document("augments.json") != data.document("augments.json")
+        {
+            continue;
+        }
+        if cancel() {
+            return None;
+        }
+        let full = fuze_data::current_augments::prepare_identity(
+            root,
+            data.locale(),
+            fuze_data::Scope::Full,
+            &identity,
+        )
+        .ok()?;
+        if cancel()
+            || full.source() != data.source()
+            || full.document("manifest.json") != Some(manifest)
+            || full.document("augments.json") != data.document("augments.json")
+        {
+            return None;
+        }
+        return fuze_data::combination_routes::from_prepared(&full);
+    }
+    None
 }
 struct Cache {
     entries: VecDeque<Arc<Snapshot>>,
@@ -545,6 +675,7 @@ impl Service {
                         continue;
                     };
                     drop(s);
+                    let prepare_epoch = store.network_epoch.load(Ordering::Acquire);
                     let cancel = || {
                         lock.lock()
                             .map(|s| s.stop || s.generation != seen)
@@ -555,8 +686,16 @@ impl Service {
                     }
                     // A full ARAMKit update already contains these exact stage/combination rows.
                     // Prefer the local bundle rather than fetching the same hero a second time.
-                    let local = local_snapshot(&roots, req.locale, req.id, now());
-                    let mut reply = if let Ok(Some(snapshot)) = local {
+                    let prepared =
+                        fuze_data::prepare(&roots, req.locale, fuze_data::Scope::Champion(req.id))
+                            .ok();
+                    let local = prepared.as_ref().and_then(|data| {
+                        snapshot_from_prepared(data, req.id, now()).ok().flatten()
+                    });
+                    let mut reply = if let Some(snapshot) = local {
+                        if cancel() {
+                            continue;
+                        }
                         let snapshot = Arc::new(snapshot);
                         if let Ok(mut holder) = store.cache.lock() {
                             let cache = holder.get_or_insert_with(|| Cache::new(None));
@@ -617,14 +756,31 @@ impl Service {
                     if cancel() {
                         continue;
                     }
-                    if let Ok(data) = fuze_data::prepare(&roots, req.locale, fuze_data::Scope::Ocr)
-                    {
+                    // The Champion preparation already includes the OCR catalogue.
+                    // Reuse its identity and source for both names and optional routes.
+                    let prepared = prepared.or_else(|| {
+                        fuze_data::prepare(&roots, req.locale, fuze_data::Scope::Ocr).ok()
+                    });
+                    if let Some(data) = prepared {
                         reply.names = Arc::new(
                             data.catalog()
                                 .iter()
                                 .map(|(name, id)| (*id, name.clone()))
                                 .collect(),
                         );
+                        let preparing = matches!(req.access, Access::Prepare | Access::Refresh);
+                        let routes_cancelled = || {
+                            cancel()
+                                || preparing
+                                    && (!store.network.load(Ordering::Acquire)
+                                        || store.network_epoch.load(Ordering::Acquire)
+                                            != prepare_epoch)
+                        };
+                        reply.routes =
+                            store.routes_for(&roots, &data, req.access, &routes_cancelled);
+                        if routes_cancelled() {
+                            reply.routes = None;
+                        }
                     }
                     let Ok(mut s) = lock.lock() else { return };
                     if !s.stop && s.generation == seen {
@@ -686,6 +842,251 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn routes_key() -> RoutesKey {
+        RoutesKey {
+            dataset: "zh-CN@16.22.1".into(),
+            source: fuze_data::Source::Cache,
+            roots: vec![(PathBuf::from("fixture"), fuze_data::Source::Cache)],
+            manifest: serde_json::json!({"source":"ARAMKit","dataVersion":"16.22.1"}),
+        }
+    }
+    fn routes_index() -> fuze_data::combination_routes::Index {
+        fuze_data::combination_routes::Index {
+            dataset: "zh-CN@16.22.1".into(),
+            patch: "16.22".into(),
+            date: "2026-11-12".into(),
+            data_path: "data/16.22-20261112-bfae7c1ce948".into(),
+            rows: vec![fuze_data::combination_routes::Route {
+                members: vec![1004, 3086],
+                champions: vec![17, 145],
+            }],
+            champions: 2,
+        }
+    }
+    #[test]
+    fn route_cache_reuses_one_identity_and_remembers_absent_data_without_gameplay_scan() {
+        let mut cache = None;
+        let key = routes_key();
+        assert!(
+            cached_routes(&mut cache, key.clone(), false, &|| false, || {
+                panic!("CacheOnly must not load Full")
+            })
+            .is_none()
+        );
+        let first = cached_routes(&mut cache, key.clone(), true, &|| false, || {
+            Some(routes_index())
+        })
+        .unwrap();
+        for prepare in [false, true] {
+            let next = cached_routes(&mut cache, key.clone(), prepare, &|| false, || {
+                panic!("same identity must not rescan")
+            })
+            .unwrap();
+            assert!(Arc::ptr_eq(&first, &next));
+        }
+        for change in 0..4 {
+            let mut changed = key.clone();
+            match change {
+                0 => changed.dataset = "zh-CN@16.22.2".into(),
+                1 => changed.source = fuze_data::Source::Bundled,
+                2 => changed.roots[0].0 = PathBuf::from("other-root"),
+                _ => changed.manifest["dataDate"] = serde_json::json!("2026-11-13"),
+            }
+            assert!(cached_routes(&mut cache, changed, false, &|| false, || {
+                panic!("a new gameplay context must not build or borrow old routes")
+            })
+            .is_none());
+        }
+        let mut missing = key.clone();
+        missing.dataset = "zh-CN@16.22.2".into();
+        assert!(cached_routes(&mut cache, missing.clone(), true, &|| false, || None).is_none());
+        assert!(cached_routes(&mut cache, missing, true, &|| false, || {
+            panic!("unsupported batch must be remembered")
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn cancelled_route_build_never_publishes_or_replaces_previous_identity() {
+        let mut cache = None;
+        let key = routes_key();
+        let previous = cached_routes(&mut cache, key.clone(), true, &|| false, || {
+            Some(routes_index())
+        })
+        .unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut next = key.clone();
+        next.dataset = "zh-CN@16.22.2".into();
+        let result = cached_routes(
+            &mut cache,
+            next.clone(),
+            true,
+            &|| cancelled.load(Ordering::Acquire),
+            || {
+                cancelled.store(true, Ordering::Release);
+                let mut index = routes_index();
+                index.dataset = next.dataset.clone();
+                Some(index)
+            },
+        );
+        assert!(result.is_none());
+        assert!(cache
+            .as_ref()
+            .is_some_and(|c| c.key == key && Arc::ptr_eq(c.index.as_ref().unwrap(), &previous)));
+        assert!(cached_routes(&mut cache, key, true, &|| true, || {
+            panic!("cancelled preparation must not start")
+        })
+        .is_none());
+    }
+
+    struct RoutesBundle(PathBuf);
+    impl RoutesBundle {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "fuze-stage-routes-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let bundle = Self(root);
+            let mut documents = std::collections::BTreeMap::new();
+            documents.insert(
+                "augments.json".to_string(),
+                serde_json::json!({"data":[
+                    {"id":1004,"name":"珠光护手","rarity":1},
+                    {"id":3086,"name":"蛋白粉奶昔","rarity":1}
+                ]}),
+            );
+            documents.insert("champions.json".into(), serde_json::json!({"data":[]}));
+            documents.insert("items.json".into(), serde_json::json!({"data":[]}));
+            documents.insert(
+                "champion-shards/index.json".into(),
+                serde_json::json!({"shards":[
+                    {"path":"champion-shards/17.json","championIds":[17]},
+                    {"path":"champion-shards/145.json","championIds":[145]}
+                ]}),
+            );
+            for id in [17, 145] {
+                documents.insert(format!("champion-shards/{id}.json"), serde_json::json!({
+                    "champions":{id.to_string():{
+                        "champion":{"id":id},
+                        "aramkitReference":{
+                            "patch":"16.22","date":"2026-11-12",
+                            "dataPath":"data/16.22-20261112-bfae7c1ce948",
+                            "augments":{"all":[{"id":1004,"winRate":0.52,"pickRate":0.1,"sampleCount":1000}],"stages":{}},
+                            "augmentCombinations":[{"augmentIds":[1004,3086],"winRate":0.64,"sampleCount":1000}]
+                        }
+                    }}
+                }));
+            }
+            let files: Vec<_> = documents
+                .keys()
+                .map(|path| serde_json::json!({"path":path}))
+                .collect();
+            documents.insert(
+                "manifest.json".into(),
+                serde_json::json!({
+                    "source":"ARAMKit","locale":"zh-CN","dataVersion":"16.22.1",
+                    "gamePatch":"16.22","dataDate":"2026-11-12",
+                    "dataPath":"data/16.22-20261112-bfae7c1ce948","files":files
+                }),
+            );
+            for (path, value) in documents {
+                let path = bundle.0.join("versions/16.22.1").join(path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            std::fs::write(
+                bundle.0.join("current.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "schemaVersion":3,"dataVersion":"16.22.1","locale":"zh-CN"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            bundle
+        }
+        fn root(&self) -> fuze_data::Root {
+            fuze_data::Root {
+                path: self.0.clone(),
+                source: fuze_data::Source::Cache,
+            }
+        }
+    }
+    impl Drop for RoutesBundle {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn local_route_preparation_is_optional_and_cache_only_reuses_it_after_gameplay_starts() {
+        let bundle = RoutesBundle::new();
+        let roots = vec![bundle.root()];
+        let data = fuze_data::prepare(
+            &roots,
+            fuze_data::Locale::ZhCn,
+            fuze_data::Scope::Champion(145),
+        )
+        .unwrap();
+        let store = Store::default();
+        let hero = snapshot_from_prepared(&data, 145, now()).unwrap().unwrap();
+        assert_eq!(hero.combinations.as_ref().unwrap()[0].win, 0.64);
+        assert!(store
+            .routes_for(&roots, &data, Access::CacheOnly, &|| false)
+            .is_none());
+        let routes = store
+            .routes_for(&roots, &data, Access::Prepare, &|| false)
+            .unwrap();
+        assert_eq!(routes.rows[0].champions, [17, 145]);
+        // A Full re-read would now fail; the already built identity remains usable.
+        std::fs::remove_file(bundle.0.join("versions/16.22.1/champion-shards/17.json")).unwrap();
+        store.allow_network(false);
+        let cached = store
+            .routes_for(&roots, &data, Access::CacheOnly, &|| false)
+            .unwrap();
+        assert!(Arc::ptr_eq(&routes, &cached));
+        assert_eq!(
+            snapshot_from_prepared(&data, 145, now())
+                .unwrap()
+                .unwrap()
+                .rows[0][0]
+                .win,
+            0.52
+        );
+        let untouched = Store::default();
+        untouched.allow_network(false);
+        assert!(untouched
+            .routes_for(&roots, &data, Access::Prepare, &|| false)
+            .is_none());
+    }
+
+    #[test]
+    fn full_routes_do_not_fall_back_to_a_different_root_than_the_matching_local_bundle() {
+        let first = RoutesBundle::new();
+        let second = RoutesBundle::new();
+        std::fs::remove_file(first.0.join("versions/16.22.1/champion-shards/17.json")).unwrap();
+        let roots = vec![first.root(), second.root()];
+        let data = fuze_data::prepare(
+            &roots,
+            fuze_data::Locale::ZhCn,
+            fuze_data::Scope::Champion(145),
+        )
+        .unwrap();
+        assert!(snapshot_from_prepared(&data, 145, now()).unwrap().is_some());
+        assert!(prepare_routes(&roots, &data, &|| false).is_none());
+        assert!(fuze_data::current_augments::prepare_identity(
+            &roots,
+            fuze_data::Locale::ZhCn,
+            fuze_data::Scope::Full,
+            &data.identity()
+        )
+        .is_ok());
+    }
+
     #[test]
     fn same_download_parses_combinations_and_legacy_cache_remains_readable() {
         let payload = serde_json::json!([

@@ -9,6 +9,7 @@ use std::{
 };
 pub mod aramkit;
 pub mod champion_detail;
+pub mod combination_routes;
 pub mod contextual_advice;
 pub mod current_augments;
 pub mod decision_evidence;

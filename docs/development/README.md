@@ -36,6 +36,8 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 
 测试截图必须使用已提交夹具或自建窗口。单元测试、隐藏窗口、CI 和实战是不同证据层级。实际领取轮次未确认，不按等级或已选数推断阶段；三卡只允许完整四阶段一致或同前置组合证据参与本组判断，规则见 [情境选择](rust/CONTEXTUAL_AUGMENT_ADVICE.md)。
 
+跨英雄有限榜单只补充路线线索，不混入英雄统计或排序；具体阶段对手、第二条可见路线与缓存准备边界见 [第三批路线覆盖](rust/COMBINATION_ROUTE_COVERAGE.md)。
+
 ## 资料索引
 
 - [迁移清单](rust/PLAN.md)、[接口契约](rust/CONTRACT.md)、[验收标准](rust/ACCEPTANCE.md)

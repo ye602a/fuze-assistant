@@ -211,6 +211,7 @@ pub fn stage(ui: &crate::ChampionWindow, output: &Path) -> Result<(), Box<dyn st
         },
     ];
     let reply = Reply {
+        routes: None,
         snapshot: Some(Arc::new(Snapshot {
             combinations: Some(Vec::new()),
             schema: 1,

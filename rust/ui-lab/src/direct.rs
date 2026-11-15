@@ -75,14 +75,14 @@ use windows::{
     },
 };
 const WIDTH: u32 = 760;
-const HEIGHT: u32 = 424;
-const CARD_BOTTOM: f32 = 356.;
+const HEIGHT: u32 = 440;
+const CARD_BOTTOM: f32 = 372.;
 const STAGE_COLUMN_WIDTH: f32 = 52.;
 const COMBO_MEMBER_WIDTH: f32 = 32.;
 const STAGE_VALUE_Y: f32 = 273.;
 const STAGE_SAMPLES_Y: f32 = 291.;
-const STAGE_SOURCE_Y: f32 = 362.;
-const STAGE_NOTE_Y: f32 = 402.;
+const STAGE_SOURCE_Y: f32 = 378.;
+const STAGE_NOTE_Y: f32 = 418.;
 const STAGE_NOTE: &str =
     "当前轮次未确认 · 下行为场次，*少于200场 · 情境比较至少500场 · 区间仅描述抽样误差";
 const TITLE_WIDTH: f32 = 154.;
@@ -291,6 +291,9 @@ fn decision_reason(reference: &crate::stage_cards::Comparison, index: usize) -> 
 }
 
 fn combo_lines(reference: &crate::stage_cards::Comparison, index: usize) -> (String, String) {
+    if let Some(route) = &reference.cross_hero[index] {
+        return (route.heading.clone(), route.summary.clone());
+    }
     let combo = &reference.combos[index];
     let alternatives = reference.combo_alternatives[index];
     let count = combo.ids.len();
@@ -350,6 +353,14 @@ fn combo_lines(reference: &crate::stage_cards::Comparison, index: usize) -> (Str
         combo.summary.clone()
     };
     (heading, summary)
+}
+
+fn combo_secondary(reference: &crate::stage_cards::Comparison, index: usize) -> &str {
+    reference.cross_hero[index]
+        .as_ref()
+        .map_or(reference.combo_secondary[index].as_str(), |route| {
+            route.secondary.as_str()
+        })
 }
 
 // Formats and decoded image are cached; only target-dependent resources are recreated.
@@ -727,6 +738,14 @@ impl Surface {
                 &summary,
                 6,
                 rect(x + 14., 339., 214., 16.),
+                MUTED,
+            );
+            self.text(
+                scene,
+                target,
+                combo_secondary(&scene.reference, i),
+                6,
+                rect(x + 14., 355., 214., 16.),
                 MUTED,
             );
         }
@@ -1693,7 +1712,24 @@ impl HostOverlay {
         }
         let cards = self.window.state.scene.cards.clone();
         let ids = self.ids;
-        let view = std::sync::Arc::new(reference_view_fixture(&cards));
+        let mut source = reference_fixture(ids);
+        if let [Some(a), Some(b), Some(c)] = ids {
+            if a != b && a != c && b != c {
+                source.combinations = Some(vec![
+                    fuze_worker_host::stage_reference::Combination {
+                        ids: vec![a, b],
+                        win: 0.62,
+                        samples: 1000,
+                    },
+                    fuze_worker_host::stage_reference::Combination {
+                        ids: vec![a, c],
+                        win: 0.61,
+                        samples: 900,
+                    },
+                ]);
+            }
+        }
+        let view = std::sync::Arc::new(reference_view_fixture_with_source(&cards, Some(source)));
         self.reference(view.clone())?;
         let revisions = self.revisions;
         self.reference(view)?;
@@ -1757,6 +1793,7 @@ impl HostOverlay {
                     || !fits(&history.interval, 6, 214., 16.)?
                     || !fits(&decision_reason(&scene.reference, i), 6, 214., 30.)?
                     || !fits(&scene.reference.stage_summary[i], 6, 214., 16.)?
+                    || !fits(combo_secondary(&scene.reference, i), 6, 214., 16.)?
                     || !fits(
                         &heading,
                         6,
@@ -1782,6 +1819,8 @@ impl HostOverlay {
             empty.reasons = Default::default();
             empty.stage_summary = Default::default();
             empty.combos = Default::default();
+            empty.cross_hero = Default::default();
+            empty.combo_secondary = Default::default();
             for row in empty.values.iter_mut().chain(&mut empty.samples) {
                 for cell in row {
                     cell.clear();
@@ -1821,6 +1860,11 @@ impl HostOverlay {
                     if !changed(left, top, width, height) {
                         return Err("passive-contextual-reference-not-painted".into());
                     }
+                }
+                if !combo_secondary(&self.window.state.scene.reference, index).is_empty()
+                    && !changed(x, 355, 214, 16)
+                {
+                    return Err("passive-secondary-route-not-painted".into());
                 }
             }
             if !changed(12, STAGE_SOURCE_Y as u32, 736, 36) {
@@ -2820,6 +2864,9 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                 "stage-and-combo",
                 "context-override",
                 "future-route",
+                "stage-contrast",
+                "cross-hero-route",
+                "cross-hero-long-route",
                 "mechanism-notice",
             ] {
                 scene.cards = original.clone();
@@ -2925,6 +2972,81 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                         detail: "合成单前置路线：回归基本功；无图标时仍须保留可读名称。".into(),
                     };
                     reference.combo_alternatives[1] = 9;
+                    reference.combo_secondary[0] = "另后续 · 小蜜蜂！！！".into();
+                    reference.combo_secondary[1] = "另后续 · 无限循环往复".into();
+                    scene.reference = std::sync::Arc::new(reference);
+                } else if variant == "stage-contrast" {
+                    let mut source = reference_fixture(scene.cards.each_ref().map(|c| c.id));
+                    for stage in 1..=4 {
+                        for (i, row) in source.rows[stage].iter_mut().enumerate() {
+                            row.win = if i == 0 {
+                                if stage <= 2 {
+                                    0.8
+                                } else {
+                                    0.4
+                                }
+                            } else {
+                                0.6
+                            };
+                            row.samples = 10_000;
+                        }
+                    }
+                    scene.reference = std::sync::Arc::new(reference_view_fixture_with_source(
+                        &scene.cards,
+                        Some(source),
+                    ));
+                } else if variant == "cross-hero-route" || variant == "cross-hero-long-route" {
+                    use fuze_data::combination_routes::{Index, Route};
+                    let mut reference = (*original_reference).clone();
+                    let candidate = scene.cards[0].id.ok_or("route-fixture-id")?;
+                    let mut index = Index {
+                        dataset: "16.20".into(),
+                        patch: "16.20".into(),
+                        date: "2026-10-16".into(),
+                        data_path: "data/16.20-20261016-000000000000".into(),
+                        champions: 2,
+                        rows: vec![
+                            Route {
+                                members: vec![candidate, 1004],
+                                champions: vec![17, 157],
+                            },
+                            Route {
+                                members: vec![candidate, 1388],
+                                champions: vec![17],
+                            },
+                        ],
+                    };
+                    let mut names = std::collections::HashMap::from([
+                        (1004, "回归基本功".into()),
+                        (1388, "无限循环往复".into()),
+                    ]);
+                    if variant == "cross-hero-long-route" {
+                        index.rows = vec![
+                            Route {
+                                members: vec![candidate, 90001, 90002, 90003],
+                                champions: vec![17],
+                            },
+                            Route {
+                                members: vec![candidate, 90004, 90005, 90006],
+                                champions: vec![157],
+                            },
+                        ];
+                        for id in 90001..=90006 {
+                            names.insert(id, format!("非常长的合成强化目标名称{id}"));
+                        }
+                    }
+                    let evidence = fuze_worker_host::cross_hero_routes::evaluate(
+                        Some(&index),
+                        4,
+                        "16.20",
+                        "16.20",
+                        &[],
+                        candidate,
+                    )
+                    .ok_or("route-fixture-evidence")?;
+                    reference.cross_hero[0] = Some(fuze_worker_host::cross_hero_routes::present(
+                        &evidence, &names,
+                    ));
                     scene.reference = std::sync::Arc::new(reference);
                 } else if variant == "mechanism-notice" {
                     scene.cards[0].id = Some(12317);
@@ -2960,6 +3082,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                             16.,
                         ),
                         (summary, 214., 16.),
+                        (combo_secondary(&scene.reference, i).into(), 214., 16.),
                     ] {
                         let text: Vec<_> = text.encode_utf16().collect();
                         let layout =

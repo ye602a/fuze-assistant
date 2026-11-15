@@ -14,6 +14,14 @@
 
 接口不需要 LCU 凭据。不会读取 lockfile、进程参数或游戏内存，也不会连接远程站点、截图、操控游戏或启用回放 API。
 
+## 公开事件来源复核（2026-11-15）
+
+Overwolf 官方普通 LoL 文档的 [`augments` → Info Updates](https://dev.overwolf.com/ow-native/live-game-data-gep/supported-games/league-of-legends/#augments) 已列出 ARAM Mayhem 的可选强化 `augments` 和最近领取强化 `picked_augment`，两者标记自 GEP 299.0 提供。因此不能继续把这两个信号视为仅适用于 Arena。官方[更新记录](https://dev.overwolf.com/ow-native/support/changelog-archive/ow-changelog/)的 Version 299.0.7 记载为 ARAM Mayhem 新增这两项更新，Version 299.0.8 记载修复 Arena 与 ARAM Mayhem 的相应更新。
+
+这些说明确认了候选与最近领取事件的公开能力，但没有在上述章节中确认正式第 1–4 次领取的身份、额外领取的区分或重连恢复保证。仅累计 `picked_augment` 次数仍不能确认实际领取轮次。Overwolf 的事件能力也不能证明本机 Live Client Data 提供同名字段，两个来源需要分别验证。
+
+本项目没有接入 Overwolf SDK 或新增相关请求；`ActualStage` 继续保持 `Unknown`。历史四阶段的逐项对照不代表已经识别当前领取阶段，也不改变本检查入口的验证边界。
+
 ## 如何解释结果
 
 「响应成功」仅表示 HTTP 200 且 JSON 可解析，**不表示字段语义正确或轮次确认**。`actualStage` 始终为 null，界面始终显示尚未确认。即使出现 `augmentStage: 2`，也仅是未经验证的候选线索。
