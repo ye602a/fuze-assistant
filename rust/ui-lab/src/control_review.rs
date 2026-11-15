@@ -871,17 +871,24 @@ fn champion(a: &mut Audit, ui: &ChampionWindow) -> Result<()> {
         ..Default::default()
     }]));
     use slint::Model;
+    let hero_label = |hero: &crate::ChampionChoice| {
+        if hero.title.is_empty() {
+            hero.name.to_string()
+        } else {
+            format!("{}（{}）", hero.title, hero.name)
+        }
+    };
     for hero in ui.get_team().iter() {
         a.click(
             ui,
-            &format!("查看{}", hero.name),
+            &format!("查看{}", hero_label(&hero)),
             Some(&format!("inspect:{}", hero.id)),
         );
     }
     for hero in ui.get_bench().iter() {
         a.click(
             ui,
-            &format!("{}，胜率 {}", hero.name, hero.win),
+            &format!("{}，胜率 {}", hero_label(&hero), hero.win),
             Some(&format!("inspect:{}", hero.id)),
         );
     }

@@ -1176,6 +1176,7 @@ mod tests {
             team: vec![Hero {
                 id: 145,
                 name: "合成英雄".into(),
+                title: String::new(),
                 icon: String::new(),
                 win: None,
                 pick: None,
@@ -1259,6 +1260,7 @@ mod tests {
             team: vec![Hero {
                 id,
                 name: "合成英雄".into(),
+                title: String::new(),
                 icon: String::new(),
                 win: None,
                 pick: None,
