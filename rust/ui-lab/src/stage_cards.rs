@@ -18,10 +18,39 @@ use std::{
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HistoryDisplay {
+    /// Native graph inputs. Proportions remain 0..=1; differences are percentage points.
+    pub rate: Option<Rate>,
+    pub hero_rate: Option<f64>,
+    pub delta_points: Option<f64>,
     pub relation: String,
     pub delta: String,
     pub samples: String,
     pub interval: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StageDisplay {
+    pub other_slot: usize,
+    /// Existing per-stage comparisons. None is no direction, never the current stage.
+    pub orders: [Option<std::cmp::Ordering>; 4],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteKind {
+    Current,
+    Future,
+    CrossHero,
+}
+
+/// Only observed routes enter this display model. Missing data has no card row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RouteDisplay {
+    pub kind: RouteKind,
+    /// Current partners, or just the missing partners of a future route.
+    pub ids: Vec<u32>,
+    pub partners: String,
+    /// Other heroes' routes never supply a rate for the current hero.
+    pub rate: Option<Rate>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +59,12 @@ pub struct Comparison {
     pub reasons: [String; 3],
     pub stage_summary: [String; 3],
     pub history: [HistoryDisplay; 3],
+    /// Only rows satisfying the existing batch/patch gates are drawn as stage charts.
+    pub stage_rates: [[Option<Rate>; 4]; 3],
+    pub stage_contrast: [Option<StageDisplay>; 3],
+    pub routes: [Vec<RouteDisplay>; 3],
+    /// One source line only when every visible numeric/route module shares this scope.
+    pub footer: String,
     pub mechanisms: [Option<fuze_data::mechanism_reference::Notice>; 3],
     pub combos: [fuze_worker_host::augment_combos::Reference; 3],
     /// Other champions' observed routes are display-only and never become hero evidence.
@@ -46,14 +81,13 @@ impl Default for Comparison {
     fn default() -> Self {
         Self {
             decisions: Default::default(),
-            reasons: std::array::from_fn(|_| "尚缺可比较的历史证据".into()),
-            stage_summary: std::array::from_fn(|_| "阶段资料未就绪".into()),
-            history: std::array::from_fn(|_| HistoryDisplay {
-                relation: "较英雄均值".into(),
-                delta: "不可比较".into(),
-                samples: "样本量未提供 · 英雄均值未就绪".into(),
-                interval: "约95%区间：样本量未提供".into(),
-            }),
+            reasons: Default::default(),
+            stage_summary: Default::default(),
+            history: Default::default(),
+            stage_rates: Default::default(),
+            stage_contrast: Default::default(),
+            routes: Default::default(),
+            footer: String::new(),
             mechanisms: Default::default(),
             combos: Default::default(),
             cross_hero: Default::default(),
@@ -128,6 +162,13 @@ pub fn compare(
                 None => format!("第 {} 次：暂无统计", j + 1),
             });
             view.values[i][j] = value;
+            view.stage_rates[i][j] = row.filter(|_| s.patch_matches(dataset)).and_then(|r| {
+                display_rate(Some(Rate {
+                    value: r.win,
+                    games: Some(r.samples),
+                    wins: None,
+                }))
+            });
         }
         view.details[i] = format!(
             "\n\n{}\n{}\n四次正式选择的历史参考，当前轮次未确认；缺失阶段不算优势证据。",
@@ -135,7 +176,17 @@ pub fn compare(
             details.join("\n")
         );
     }
+    if view.stage_rates.iter().flatten().any(Option::is_some) {
+        view.footer = display_scope(fuze_data::aramkit::SOURCE, &s.patch, &s.date)
+            .map_or_else(String::new, |(source, patch, date)| {
+                format!("{source} · {patch} · {date}")
+            });
+    }
     view
+}
+
+fn display_rate(rate: Option<Rate>) -> Option<Rate> {
+    rate.filter(|r| r.value.is_finite() && (0.0..=1.0).contains(&r.value))
 }
 
 fn historical(
@@ -143,37 +194,38 @@ fn historical(
     baseline: Option<&HeroReference>,
     fallback: Option<Rate>,
 ) -> HistoryDisplay {
-    let rate = row.and_then(|r| r.rate).or(fallback);
-    let comparison = row.and_then(|r| r.comparison.as_ref());
-    let delta = comparison.map_or_else(
-        || "不可比较".into(),
-        |h| format!("{:+.1} pp", h.delta * 100.),
-    );
+    let rate = display_rate(row.and_then(|r| r.rate).or(fallback));
+    let comparison = row
+        .and_then(|r| r.comparison.as_ref())
+        .filter(|h| h.delta.is_finite() && (-1.0..=1.0).contains(&h.delta));
+    let delta_points = comparison.map(|h| h.delta * 100.);
+    let delta = delta_points.map_or_else(String::new, |value| format!("{value:+.1} 个百分点"));
     let relation = comparison
-        .map_or("较英雄均值", |h| match h.relation {
+        .map_or("", |h| match h.relation {
             decision_evidence::Relation::Higher => "高于英雄均值",
             decision_evidence::Relation::Near => "接近英雄均值",
             decision_evidence::Relation::Lower => "低于英雄均值",
         })
         .into();
-    let samples = rate.and_then(|r| r.games).map_or_else(
-        || "样本量未提供".into(),
-        |n| format!("n={n}{}", if n < 200 { " · 少样本" } else { "" }),
-    );
-    let hero = baseline.filter(|_| comparison.is_some()).map_or_else(
-        || "均值不可比较".into(),
-        |b| format!("英雄 {:.1}%", b.rate.value * 100.),
-    );
+    let samples = rate.and_then(|r| r.games).map_or_else(String::new, |n| {
+        format!("{n} 场{}", if n < 200 { " · 少样本" } else { "" })
+    });
+    let hero_rate = baseline
+        .filter(|_| comparison.is_some())
+        .and_then(|b| display_rate(Some(b.rate)))
+        .map(|r| r.value);
     let interval = rate
         .and_then(|r| decision_evidence::interval95(r.value, r.games?))
-        .map_or_else(
-            || "约95%区间：样本量未提供".into(),
-            |r| format!("约95%区间 {:.1}–{:.1}%", r.lower * 100., r.upper * 100.),
-        );
+        .map_or_else(String::new, |r| {
+            format!("约95%区间 {:.1}–{:.1}%", r.lower * 100., r.upper * 100.)
+        });
     HistoryDisplay {
+        rate,
+        hero_rate,
+        delta_points,
         relation,
         delta,
-        samples: format!("{samples} · {hero}"),
+        samples,
         interval,
     }
 }
@@ -190,45 +242,33 @@ fn short_name(id: u32, names: &HashMap<u32, String>) -> String {
 }
 
 pub(crate) fn reason_text(decision: &Decision, names: &HashMap<u32, String>) -> String {
-    match &decision.reason {
-        Reason::OverallRank if decision.choice == Choice::Preferred => {
-            "本组三项整体参考中居前\n英雄均值差不作为否决条件".into()
+    let other_name = |id| {
+        let name = short_name(id, names);
+        if name.chars().count() > 8 {
+            format!("{}…", name.chars().take(7).collect::<String>())
+        } else {
+            name
         }
-        Reason::OverallRank => "整体历史表现可参考\n暂无明确情境优势".into(),
-        Reason::StageAdvantage { other } => format!(
-            "四阶段均优于 {}\n同批次、完整阶段证据",
-            short_name(*other, names)
-        ),
-        Reason::StageAlternative { other } => format!(
-            "四阶段均弱于 {}\n本轮可优先考虑该卡",
-            short_name(*other, names)
-        ),
-        Reason::ComboAdvantage { other, required } => format!(
-            "同{}项前置优于 {}\n依据下方已成立的搭配",
-            required.len(),
-            short_name(*other, names)
-        ),
-        Reason::ComboAlternative { other, required } => format!(
-            "同{}项前置弱于 {}\n本轮可优先考虑该卡",
-            required.len(),
-            short_name(*other, names)
-        ),
-        Reason::FutureOnly => "只有尚未成立的后续路线\n未来是否出现尚未确认".into(),
-        Reason::PartialOffer => "候选未完整识别\n暂不指定本组优先".into(),
-        Reason::ComparableTie => "本组证据未拉开差异\n暂不指定唯一优先".into(),
-        Reason::ConflictingEvidence => "情境证据相互冲突\n仍按整体参考顺序".into(),
-        Reason::MissingEvidence => "尚缺可比较的历史证据\n缺失记录不等于不搭配".into(),
+    };
+    match &decision.reason {
+        Reason::OverallRank if decision.choice == Choice::Preferred => "整体参考靠前".into(),
+        Reason::OverallRank => String::new(),
+        Reason::StageAdvantage { other } => format!("四次均优于{}", other_name(*other)),
+        Reason::StageAlternative { other } => format!("四次均弱于{}", other_name(*other)),
+        Reason::ComboAdvantage { other, .. } => format!("同搭配优于{}", other_name(*other)),
+        Reason::ComboAlternative { other, .. } => format!("同搭配弱于{}", other_name(*other)),
+        Reason::FutureOnly => "可规划后续搭配".into(),
+        Reason::ComparableTie => "本组表现接近".into(),
+        Reason::ConflictingEvidence => "参考存在分歧 · 沿用整体排序".into(),
+        Reason::PartialOffer | Reason::MissingEvidence => String::new(),
     }
 }
 
 pub(crate) fn stage_text(decision: &Decision) -> String {
     match decision.stage.pattern {
-        StagePattern::Unavailable => "阶段资料未就绪".into(),
-        StagePattern::Partial => format!("阶段资料不全 · 已报 {}/4", decision.stage.reported),
-        StagePattern::LowSample => format!("阶段支持不足 · ≥500场 {}/4", decision.stage.supported),
-        StagePattern::NoClearOrder => "四阶段齐全 · 未分出明确顺序".into(),
-        StagePattern::Consistent => "四阶段一致 · 当前轮次未确认".into(),
-        StagePattern::Reversal => "阶段表现反转 · 不按当前轮次猜测".into(),
+        StagePattern::Consistent => "四次选择表现一致".into(),
+        StagePattern::Reversal => "不同选择次数表现有差异".into(),
+        _ => String::new(),
     }
 }
 
@@ -239,7 +279,7 @@ fn stage_comparison(
     index: usize,
     decision: &Decision,
     names: &HashMap<u32, String>,
-) -> Option<(String, String)> {
+) -> Option<(String, String, StageDisplay)> {
     use std::cmp::Ordering;
     let requested = match decision.reason {
         Reason::StageAdvantage { other } | Reason::StageAlternative { other } => Some(other),
@@ -307,7 +347,14 @@ fn stage_comparison(
             }
         )).collect::<Vec<_>>().join("\n")
     );
-    Some((summary, detail))
+    Some((
+        summary,
+        detail,
+        StageDisplay {
+            other_slot: *other_slot,
+            orders: contrast.orders,
+        },
+    ))
 }
 
 fn compact_partners(ids: &[u32], names: &HashMap<u32, String>) -> String {
@@ -335,12 +382,10 @@ fn compact_partners(ids: &[u32], names: &HashMap<u32, String>) -> String {
     }
 }
 
-/// Production cards cannot open details, so a second real route must have a name.
-fn secondary_route(
-    evidence: &fuze_worker_host::augment_combos::CandidateEvidence,
+fn route_rows<'a>(
+    evidence: &'a fuze_worker_host::augment_combos::CandidateEvidence,
     chosen: Option<&[u32]>,
-    names: &HashMap<u32, String>,
-) -> String {
+) -> [Option<&'a fuze_worker_host::augment_combos::ComboEvidence>; 2] {
     let chosen = chosen.map(|ids| {
         let mut ids = ids.to_vec();
         ids.sort_unstable();
@@ -353,21 +398,143 @@ fn secondary_route(
         .or_else(|| evidence.current.first())
         .or_else(|| evidence.future.first());
     let Some(primary) = primary else {
-        return String::new();
+        return [None, None];
     };
-    evidence
+    let secondary = evidence
         .current
         .iter()
         .chain(&evidence.future)
-        .find(|row| row.members != primary.members)
-        .map_or_else(String::new, |row| {
-            let (prefix, ids) = if row.missing.is_empty() {
-                ("另搭配", &row.required)
+        .find(|row| row.members != primary.members);
+    [Some(primary), secondary]
+}
+
+fn display_routes(
+    evidence: &fuze_worker_host::augment_combos::CandidateEvidence,
+    chosen: Option<&[u32]>,
+    names: &HashMap<u32, String>,
+) -> Vec<RouteDisplay> {
+    if !matches!(
+        evidence.source,
+        fuze_worker_host::augment_combos::SourceState::Ready { .. }
+    ) {
+        return Vec::new();
+    }
+    route_rows(evidence, chosen)
+        .into_iter()
+        .flatten()
+        .map(|row| {
+            let (kind, ids) = if row.missing.is_empty() {
+                (RouteKind::Current, &row.required)
             } else {
-                ("另后续", &row.missing)
+                (RouteKind::Future, &row.missing)
             };
-            format!("{prefix} · {}", compact_partners(ids, names))
+            RouteDisplay {
+                kind,
+                ids: ids.clone(),
+                partners: compact_partners(ids, names),
+                rate: display_rate(Some(Rate {
+                    value: row.win,
+                    games: Some(row.samples),
+                    wins: None,
+                })),
+            }
         })
+        .collect()
+}
+
+/// Production cards cannot open details, so a second real route must have a name.
+fn secondary_route(
+    evidence: &fuze_worker_host::augment_combos::CandidateEvidence,
+    chosen: Option<&[u32]>,
+    names: &HashMap<u32, String>,
+) -> String {
+    route_rows(evidence, chosen)[1].map_or_else(String::new, |row| {
+        let (prefix, ids) = if row.missing.is_empty() {
+            ("另搭配", &row.required)
+        } else {
+            ("另后续", &row.missing)
+        };
+        format!("{prefix} · {}", compact_partners(ids, names))
+    })
+}
+
+fn display_scope(source: &str, patch: &str, date: &str) -> Option<(String, String, String)> {
+    let known = |value: &str| {
+        let value = value.trim();
+        !value.is_empty()
+            && !value.eq_ignore_ascii_case("unknown")
+            && !matches!(value, "未知" | "未提供" | "未确认" | "—")
+    };
+    let date_bytes = date.as_bytes();
+    let dated = date_bytes.len() == 10
+        && date_bytes.iter().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    if !known(source) || fuze_data::recognition::patch(patch).is_none() || !dated {
+        return None;
+    }
+    Some((source.into(), patch.into(), date.into()))
+}
+
+fn shared_footer(
+    view: &Comparison,
+    ids: [Option<u32>; 3],
+    history: Option<&HistoryContext>,
+    snapshot: Option<&Snapshot>,
+    routes: Option<&fuze_data::combination_routes::Index>,
+) -> String {
+    let mut common = None;
+    let mut accept = |source: &str, patch: &str, date: &str| {
+        let Some(scope) = display_scope(source, patch, date) else {
+            return false;
+        };
+        if let Some(existing) = &common {
+            *existing == scope
+        } else {
+            common = Some(scope);
+            true
+        }
+    };
+    for (i, id) in ids.into_iter().enumerate() {
+        if view.history[i].rate.is_some() {
+            let Some(row) = history.and_then(|h| id.and_then(|id| h.by_augment.get(&id))) else {
+                return String::new();
+            };
+            if !accept(&row.scope.source, &row.scope.patch, &row.scope.date) {
+                return String::new();
+            }
+        }
+        let hero_reference = view.stage_rates[i].iter().any(Option::is_some)
+            || view.routes[i]
+                .iter()
+                .any(|r| r.kind != RouteKind::CrossHero);
+        if hero_reference {
+            let Some(snapshot) = snapshot else {
+                return String::new();
+            };
+            if !accept(fuze_data::aramkit::SOURCE, &snapshot.patch, &snapshot.date) {
+                return String::new();
+            }
+        }
+        if view.routes[i]
+            .iter()
+            .any(|r| r.kind == RouteKind::CrossHero)
+        {
+            let Some(routes) = routes else {
+                return String::new();
+            };
+            if !accept(fuze_data::aramkit::SOURCE, &routes.patch, &routes.date) {
+                return String::new();
+            }
+        }
+    }
+    common.map_or_else(String::new, |(source, patch, date)| {
+        format!("{source} · {patch} · {date}")
+    })
 }
 
 fn same_arc<T: PartialEq>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
@@ -723,6 +890,9 @@ impl Reference {
             candidate
         });
         view.decisions = contextual_advice::decide(&candidates);
+        view.stage_rates = candidates
+            .each_ref()
+            .map(|candidate| candidate.stages.map(display_rate));
         let dataset_patch =
             |value: &str| fuze_data::recognition::patch(value.rsplit('@').next().unwrap_or(value));
         // recognition::patch normalizes both 16.x and 26.x to the 2026 family;
@@ -749,19 +919,23 @@ impl Reference {
             });
             view.stage_summary[i] = if usable && !eligible[i] {
                 withheld = true;
-                if history
-                    .and_then(|h| ids[i].and_then(|id| h.by_augment.get(&id)))
-                    .is_none()
-                {
-                    "历史口径未确认 · 仅作参考".into()
-                } else {
-                    "异批次/版本 · 仅作历史参考".into()
-                }
+                view.details[i].push_str(
+                    if history
+                        .and_then(|h| ids[i].and_then(|id| h.by_augment.get(&id)))
+                        .is_none()
+                    {
+                        "\n历史口径未确认，阶段参考不参与当前比较。"
+                    } else {
+                        "\n异批次/版本，阶段参考不参与当前比较。"
+                    },
+                );
+                String::new()
             } else {
                 stage_comparison(&candidates, i, decision, &names).map_or_else(
                     || stage_text(decision),
-                    |(summary, detail)| {
+                    |(summary, detail, contrast)| {
                         view.details[i].push_str(&detail);
+                        view.stage_contrast[i] = Some(contrast);
                         summary
                     },
                 )
@@ -771,6 +945,7 @@ impl Reference {
             view.combos[i] =
                 fuze_worker_host::augment_combos::present(e, &names, decision.reason.required());
             view.combo_secondary[i] = secondary_route(e, decision.reason.required(), &names);
+            view.routes[i] = display_routes(e, decision.reason.required(), &names);
             // This reference cannot enter Candidate, HistoryContext, or Decision. Keep
             // the hero record/state intact, including the absence of usable statistics.
             if e.current.is_empty()
@@ -790,7 +965,27 @@ impl Reference {
                     &self.owned,
                     e.candidate,
                 )
-                .map(|reference| fuze_worker_host::cross_hero_routes::present(&reference, &names));
+                .map(|reference| {
+                    view.routes[i] = reference
+                        .routes
+                        .iter()
+                        .take(2)
+                        .map(|row| {
+                            let ids = if row.missing.is_empty() {
+                                &row.required
+                            } else {
+                                &row.missing
+                            };
+                            RouteDisplay {
+                                kind: RouteKind::CrossHero,
+                                ids: ids.clone(),
+                                partners: compact_partners(ids, &names),
+                                rate: None,
+                            }
+                        })
+                        .collect();
+                    fuze_worker_host::cross_hero_routes::present(&reference, &names)
+                });
                 if let Some(reference) = &view.cross_hero[i] {
                     view.details[i].push_str(&format!("\n\n{}", reference.detail));
                 }
@@ -810,6 +1005,15 @@ impl Reference {
             };
             view.details[i].push_str(&format!("\n\n{}\n{}{}\n英雄均值差只描述历史，不是选择该符文的因果收益。约95%区间为该符文单项胜率的近似抽样区间。",
                 decision.choice.label(), view.reasons[i], other));
+            let h = &view.history[i];
+            for line in [&h.relation, &h.delta, &h.samples, &h.interval] {
+                if !line.is_empty() {
+                    view.details[i].push_str(&format!("\n{line}"));
+                }
+            }
+            if let Some(hero) = h.hero_rate {
+                view.details[i].push_str(&format!("\n英雄整体胜率 {:.1}%", hero * 100.));
+            }
             if let Some(notice) = &view.mechanisms[i] {
                 view.details[i].push_str(&format!("\n\n{}\n{}", notice.heading, notice.detail));
             }
@@ -847,6 +1051,13 @@ impl Reference {
                 );
             }
         }
+        view.footer = shared_footer(
+            &view,
+            ids,
+            history,
+            self.snapshot.as_deref(),
+            self.routes.as_deref(),
+        );
         let view = Arc::new(view);
         self.rendered = Some(Rendered {
             champion,
@@ -897,6 +1108,59 @@ mod tests {
             history: None,
         }
     }
+    #[test]
+    fn absent_evidence_produces_no_visible_history_stage_or_route_modules() {
+        let mut reference = Reference::new(true);
+        let frame = frame([Some(1), Some(2), Some(3)], "16.22");
+        let view = reference.cards(&frame);
+        assert!(view.history.iter().all(|history| {
+            history.rate.is_none()
+                && history.hero_rate.is_none()
+                && history.delta_points.is_none()
+                && history.relation.is_empty()
+                && history.delta.is_empty()
+                && history.samples.is_empty()
+                && history.interval.is_empty()
+        }));
+        assert!(view.reasons.iter().all(String::is_empty));
+        assert!(view.stage_summary.iter().all(String::is_empty));
+        assert!(view.stage_rates.iter().flatten().all(Option::is_none));
+        assert!(view.stage_contrast.iter().all(Option::is_none));
+        assert!(view.routes.iter().all(Vec::is_empty));
+        assert!(view.footer.is_empty());
+        // Original diagnostic state is retained, but it is not a visible route.
+        assert!(view.combos[0].summary.contains("尚未就绪"));
+    }
+
+    #[test]
+    fn one_reported_rate_does_not_invent_baseline_samples_or_intervals() {
+        let shown = historical(
+            None,
+            None,
+            Some(Rate {
+                value: 0.55,
+                games: None,
+                wins: None,
+            }),
+        );
+        assert_eq!(shown.rate.unwrap().value, 0.55);
+        assert!(shown.hero_rate.is_none() && shown.delta_points.is_none());
+        assert!(shown.delta.is_empty() && shown.relation.is_empty());
+        assert!(shown.samples.is_empty() && shown.interval.is_empty());
+        assert_eq!(
+            historical(
+                None,
+                None,
+                Some(Rate {
+                    value: f64::NAN,
+                    games: Some(500),
+                    wins: None
+                })
+            ),
+            HistoryDisplay::default()
+        );
+    }
+
     #[test]
     fn automatic_status_updates_combo_cards_without_actions_or_changing_single_rates() {
         use fuze_worker_host::{
@@ -1166,15 +1430,25 @@ mod tests {
             view.decisions[1].reason,
             Reason::StageAdvantage { .. }
         ));
-        assert!(view.history.iter().all(|h| h.delta == "-15.0 pp"));
+        assert!(view.history.iter().all(|h| h.delta == "-15.0 个百分点"));
         assert!(view.history.iter().all(|h| h.relation == "低于英雄均值"));
         assert!(
-            view.history[1].samples.contains("n=10000")
-                && view.history[1].samples.contains("70.0%")
+            view.history[1].samples == "10000 场"
+                && view.history[1].hero_rate == Some(0.7)
+                && view.details[1].contains("英雄整体胜率 70.0%")
         );
         assert!(view.history[1].interval.contains("约95%"));
         assert!(view.reasons[1].contains("符文"));
         assert_eq!(view.stage_summary[1], "对左卡：四次均优");
+        assert_eq!(view.stage_rates[1][0].unwrap().value, 0.8);
+        assert_eq!(view.history[1].rate.unwrap().value, 0.55);
+        assert_eq!(view.history[1].delta_points, Some(-15.));
+        assert_eq!(view.stage_contrast[1].as_ref().unwrap().other_slot, 0);
+        assert_eq!(
+            view.stage_contrast[1].as_ref().unwrap().orders,
+            [Some(std::cmp::Ordering::Greater); 4]
+        );
+        assert_eq!(view.footer, "ARAMKit · 16.22 · 2026-11-06");
         assert_eq!(
             frame.snapshot.actual_stage,
             fuze_contract::ActualStage::Unknown
@@ -1187,7 +1461,7 @@ mod tests {
         let overall = reference.cards_at(&frame, at);
         assert!(overall.preferred(0, Some(1)));
         assert_eq!(overall.decisions[0].reason, Reason::OverallRank);
-        assert_eq!(overall.history[0].delta, "-15.0 pp");
+        assert_eq!(overall.history[0].delta, "-15.0 个百分点");
         let preview = Reference::preview(&frame, 145);
         assert!(preview.preferred(0, Some(1)) && preview.current_combos == [false; 3]);
         assert_eq!(preview.history[0].relation, "低于英雄均值");
@@ -1204,8 +1478,29 @@ mod tests {
         comparison.interval = decision_evidence::interval95(0.695, 10_000);
         let near = reference.cards_at(&near, at);
         assert_eq!(near.history[0].relation, "接近英雄均值");
-        assert_eq!(near.history[0].delta, "-0.5 pp");
+        assert_eq!(near.history[0].delta, "-0.5 个百分点");
         assert!(near.preferred(0, Some(1)));
+    }
+
+    #[test]
+    fn footer_only_names_metadata_shared_by_all_visible_modules() {
+        let (mut reference, mut frame, at) = contextual_fixture();
+        assert!(!reference.cards_at(&frame, at).footer.is_empty());
+        Arc::make_mut(frame.history.as_mut().unwrap())
+            .by_augment
+            .get_mut(&1)
+            .unwrap()
+            .scope
+            .date = "2026-11-05".into();
+        let mixed = reference.cards_at(&frame, at);
+        assert!(mixed.footer.is_empty());
+        assert!(mixed.stage_rates[0].iter().all(Option::is_none));
+        assert!(mixed.stage_contrast[0].is_none());
+        assert!(mixed.stage_rates[1].iter().any(Option::is_some));
+        assert!(display_scope("ARAMKit", "16.22", "日期未知").is_none());
+        assert!(display_scope("", "16.22", "2026-11-06").is_none());
+        assert!(display_scope(" unknown ", "16.22", "2026-11-06").is_none());
+        assert!(display_scope("UNKNOWN", "16.22", "2026-11-06").is_none());
     }
 
     #[test]
@@ -1225,9 +1520,13 @@ mod tests {
         assert!(!Arc::ptr_eq(&first, &mixed));
         assert!(mixed.preferred(0, Some(1)) && !mixed.preferred(1, Some(2)));
         assert_eq!(mixed.values, first.values); // Original reference remains inspectable.
-        assert_eq!(mixed.history[0].delta, "不可比较");
+        assert!(mixed.history[0].delta.is_empty());
+        assert!(mixed.history[0].delta_points.is_none());
+        assert!(mixed.stage_rates.iter().flatten().all(Option::is_none));
+        assert!(mixed.stage_contrast.iter().all(Option::is_none));
         assert!(mixed.source.contains("不参与本组判断"));
-        assert!(mixed.stage_summary[0].contains("异批次/版本"));
+        assert!(mixed.stage_summary[0].is_empty());
+        assert!(mixed.details[0].contains("异批次/版本"));
         assert!(Arc::ptr_eq(&mixed, &reference.cards_at(&frame, at)));
         frame.scores[2] = Some(1.);
         let reordered = reference.cards_at(&frame, at);
@@ -1238,6 +1537,9 @@ mod tests {
         assert!(expired.source.contains("已过期"));
         assert!(expired.combos[0].summary.contains("已过期"));
         assert_eq!(expired.values, Comparison::default().values);
+        assert!(expired.stage_rates.iter().flatten().all(Option::is_none));
+        assert!(expired.stage_contrast.iter().all(Option::is_none));
+        assert!(expired.routes.iter().all(Vec::is_empty));
     }
 
     #[test]
@@ -1324,6 +1626,16 @@ mod tests {
         let view = reference.cards_at(&frame, at);
         assert_eq!(view.stage_summary[0], "对中卡：1/2优 · 3/4弱");
         assert!(view.details[0].contains("阶段对照对象：符文2（中卡）"));
+        assert_eq!(view.stage_contrast[0].as_ref().unwrap().other_slot, 1);
+        assert_eq!(
+            view.stage_contrast[0].as_ref().unwrap().orders,
+            [
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Less)
+            ]
+        );
         assert_eq!(view.decisions[0].reason, Reason::OverallRank);
         assert_eq!(
             frame.snapshot.actual_stage,
@@ -1334,11 +1646,14 @@ mod tests {
         let moved = reference.cards_at(&frame, at);
         assert_eq!(moved.stage_summary[0], "对右卡：1/2优 · 3/4弱");
         assert!(moved.details[0].contains("阶段对照对象：符文2（右卡）"));
+        assert_eq!(moved.stage_contrast[0].as_ref().unwrap().other_slot, 2);
         // A missing batch identity must not turn the same visible rates into a comparison.
         frame.history = None;
         let unknown = reference.cards_at(&frame, at);
-        assert!(unknown.stage_summary[0].contains("口径未确认"));
-        assert!(!unknown.stage_summary[0].contains("异批次"));
+        assert!(unknown.stage_summary[0].is_empty());
+        assert!(unknown.details[0].contains("口径未确认"));
+        assert!(!unknown.details[0].contains("异批次"));
+        assert!(unknown.stage_rates.iter().flatten().all(Option::is_none));
         assert!(!unknown.details[0].contains("阶段对照对象"));
     }
 
@@ -1386,13 +1701,25 @@ mod tests {
             secondary_route(&evidence, Some(&[11]), &names),
             "另搭配 · 小蜜蜂！！！"
         );
+        let typed = display_routes(&evidence, Some(&[11]), &names);
+        assert_eq!(typed.len(), 2);
+        assert_eq!(typed[0].kind, RouteKind::Current);
+        assert_eq!(typed[0].ids, [11]);
+        assert_eq!(typed[0].rate.unwrap().value, 0.8);
+        assert_eq!(typed[1].ids, [10]);
         evidence.current.truncate(1);
         assert_eq!(
             secondary_route(&evidence, None, &names),
             "另后续 · 无限循环往复"
         );
+        let typed = display_routes(&evidence, None, &names);
+        assert_eq!(typed[1].kind, RouteKind::Future);
+        assert_eq!(typed[1].ids, [12]);
+        assert_eq!(typed[1].partners, "无限循环往复");
         evidence.future.clear();
         assert!(secondary_route(&evidence, None, &names).is_empty());
+        evidence.source = augment_combos::SourceState::Expired;
+        assert!(display_routes(&evidence, None, &names).is_empty());
     }
 
     #[test]
@@ -1431,6 +1758,11 @@ mod tests {
         assert!(route.summary.contains("待本英雄验证"));
         assert!(route.secondary.contains("无限循环往复"));
         assert!(!route.summary.contains('%'));
+        assert_eq!(after.routes[0].len(), 2);
+        assert!(after.routes[0]
+            .iter()
+            .all(|r| r.kind == RouteKind::CrossHero && r.rate.is_none()));
+        assert_eq!(after.routes[0][0].partners, "回归基本功");
         assert!(after.cross_hero[1].is_none()); // Current hero is never its own fallback.
         assert_eq!(before.decisions, after.decisions);
         assert_eq!(before.history, after.history);
