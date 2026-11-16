@@ -1,8 +1,10 @@
 import {releaseBody} from './release-body.mjs';
+import {retainedDownloads} from './retained-downloads.mjs';
 import {readFile} from 'node:fs/promises';
 // Publish the already verified binaries without rebuilding or changing the legacy update endpoint.
 import {createHash} from 'node:crypto';
-const buildSetup=process.env.FUZE_BUILD_SETUP!=='false';
+const onlineOnly=process.env.FUZE_ONLINE_ONLY==='true';
+const buildSetup=!onlineOnly&&process.env.FUZE_BUILD_SETUP!=='false';
 const api='https://api.github.com/repos/ye602a/fuze-assistant';
 const source=process.env.SOURCE_SHA, revision=source.slice(0,12);
 const version=process.env.FUZE_RELEASE_VERSION, tag=`rust-v${version}`;
@@ -26,17 +28,26 @@ async function download(name){
 }
 const [receiptBytes,zip,setup]=await Promise.all([
  download(`build-evidence-${revision}.json`),
- download(`fuze-rust-preview-${revision}.zip`),
+ onlineOnly?Promise.resolve(null):download(`fuze-rust-preview-${revision}.zip`),
  buildSetup?download(`FUZE-Setup-${version}-preview-${revision}-windows-x64.exe`):Promise.resolve(null),
 ]);
 const receipt=JSON.parse(receiptBytes);
-if(receipt.source!==source||receipt.version!==version||!receipt.buildEvidence.sourceClean||!receipt.updateValidation.package_verified||hash(zip)!==receipt.zipSha256||(setup?hash(setup)!==receipt.setupSha256:receipt.setupSha256!==null))throw Error('Build receipt mismatch');
+if(receipt.source!==source||receipt.version!==version||Boolean(receipt.onlineOnly)!==onlineOnly||!receipt.buildEvidence.completed||!receipt.buildEvidence.sourceClean||!receipt.updateValidation.package_verified||(!onlineOnly&&hash(zip)!==receipt.zipSha256)||(setup?hash(setup)!==receipt.setupSha256:receipt.setupSha256!==null))throw Error('Build receipt mismatch');
+let retained;
+if(onlineOnly){
+ const [legacyBytes,descriptionBytes]=await Promise.all([download('rust-update.json'),download('rust-update-v2.json')]);
+ const manifest=JSON.parse(legacyBytes),description=JSON.parse(descriptionBytes);
+ if(description.version!==version||manifest.revision!==revision||manifest.sequence!==receipt.sequence||manifest.archive!==`Fuze-Rust-${revision}.fuz`||JSON.stringify(description.manifest)!==JSON.stringify(manifest))throw Error('Published online identity mismatch');
+ const [archive,blockmap]=await Promise.all([download(manifest.archive),download(manifest.archive+'.blockmap')]);
+ if(archive.length!==manifest.size||createHash('sha512').update(archive).digest('hex')!==manifest.sha512||hash(blockmap)!==manifest.blockmap_sha256)throw Error('Published online integrity mismatch');
+ retained=await retainedDownloads(request,api);
+}
 const zipName=`FUZE-${version}-windows-x64.zip`,setupName=`FUZE-Setup-${version}-windows-x64.exe`;
-const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:receipt.buildRun,buildSetup});
+const body=releaseBody({version,source,notes:await readFile('docs/RELEASE_NOTES.md','utf8'),buildRun:receipt.buildRun,buildSetup,onlineOnly,retained});
 let release=await request(`${api}/releases/tags/${tag}`,'GET',undefined,false,true);
 if(!release)release=await request(`${api}/releases`,'POST',{tag_name:tag,target_commitish:source,name:`FUZE v${version}`,body,draft:true,prerelease:false});
 if(release.target_commitish!==source)throw Error('Unexpected existing release source');
-for(const [name,bytes] of [[zipName,zip],...(setup?[[setupName,setup]]:[]),[zipName+'.sha256',Buffer.from(`${hash(zip)}  ${zipName}\n`)],...(setup?[[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,receiptBytes]]){
+for(const [name,bytes] of [...(onlineOnly?[]:[[zipName,zip],[zipName+'.sha256',Buffer.from(`${hash(zip)}  ${zipName}\n`)]]),...(setup?[[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,receiptBytes]]){
  let asset=release.assets.find(a=>a.name===name);
  if(asset?.digest!==`sha256:${hash(bytes)}`){
   const uploaded=await request(`https://uploads.github.com/repos/ye602a/fuze-assistant/releases/${release.id}/assets?name=${encodeURIComponent(name+'.pending-'+revision)}`,'POST',bytes,true);

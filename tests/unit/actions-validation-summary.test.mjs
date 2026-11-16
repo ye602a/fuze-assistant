@@ -169,7 +169,7 @@ test('Rust integration covers new PR bases without silently skipping jobs or pac
    for (const build_setup of [false, true]) {
      const inputs={online_only,build_setup}
      assert.equal(runInNewContext(setup.if,{inputs}),build_setup && !online_only)
-     assert.equal(runInNewContext(promote.if.replace(/^\$\{\{\s*|\s*\}\}$/g,''),{inputs}),!online_only)
+     assert.equal(promote.if, undefined, 'both publication modes must update Latest after success')
    }
  }
  assert.ok(!JSON.stringify(workflow).includes('0.7.4'))
