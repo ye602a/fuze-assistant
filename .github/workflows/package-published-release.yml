@@ -1,0 +1,58 @@
+name: Package existing release downloads
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published online version to package
+        required: true
+        default: '0.7.15'
+permissions:
+  contents: write
+concurrency:
+  group: fuze-preview-publication
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.ref == 'refs/heads/master'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      FUZE_RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22.23.5'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify published update and prepare identical player files
+        run: node scripts/release/package-published-release.mjs prepare
+      - name: Build Setup from verified player files
+        shell: pwsh
+        run: |
+          $output = [IO.Path]::GetFullPath('rust/artifacts/repackage')
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DAppRelease=$env:FUZE_RELEASE_VERSION" "/DPayload=$output/payload" "/DOutput=$output" "$output/rust-setup.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $output "FUZE-Setup-$env:FUZE_RELEASE_VERSION-windows-x64.exe"
+          if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'NotSigned') { throw 'unexpected-signature-state' }
+      - name: Verify Setup installation and portable ZIP contents
+        shell: pwsh
+        run: |
+          $output = [IO.Path]::GetFullPath('rust/artifacts/repackage')
+          $installed = Join-Path $env:RUNNER_TEMP 'fuze-setup-verification'
+          $portable = Join-Path $env:RUNNER_TEMP 'fuze-zip-verification'
+          $exe = Join-Path $output "FUZE-Setup-$env:FUZE_RELEASE_VERSION-windows-x64.exe"
+          $process = Start-Process -FilePath $exe -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS', "/DIR=`"$installed`"") -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw 'setup-verification-failed' }
+          Expand-Archive -LiteralPath (Join-Path $output "FUZE-$env:FUZE_RELEASE_VERSION-windows-x64.zip") -DestinationPath $portable
+          $payload = Join-Path $output 'payload'
+          foreach ($file in Get-ChildItem -LiteralPath $payload -File -Recurse) {
+            $relative = [IO.Path]::GetRelativePath($payload, $file.FullName)
+            $expected = (Get-FileHash -LiteralPath $file.FullName).Hash
+            foreach ($root in @($installed, $portable)) {
+              if ((Get-FileHash -LiteralPath (Join-Path $root $relative)).Hash -ne $expected) { throw "package-file-mismatch: $relative" }
+            }
+          }
+      - name: Upload complete downloads and update Latest
+        run: node scripts/release/package-published-release.mjs publish
