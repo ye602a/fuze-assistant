@@ -41,6 +41,10 @@ if(process.argv[2]==='prepare'){
  zip.writeZip(path.join(out,`FUZE-${version}-windows-x64.zip`));
  const installer=await fetch(`https://raw.githubusercontent.com/ye602a/fuze-assistant/${receipt.source}/installer/rust-setup.iss`);
  if(!installer.ok)throw Error('Missing installer source');await writeFile(path.join(out,'rust-setup.iss'),await installer.text());
+ const language=await fetch(`https://raw.githubusercontent.com/ye602a/fuze-assistant/${receipt.source}/installer/languages/ChineseSimplified.isl`);
+ if(!language.ok)throw Error('Missing installer language');
+ await mkdir(path.join(out,'languages'),{recursive:true});
+ await writeFile(path.join(out,'languages/ChineseSimplified.isl'),await language.text());
  await writeFile(path.join(out,'context.json'),JSON.stringify({receipt,description,previewAssets:snapshot(preview.assets)}));
  console.log(JSON.stringify({prepared:true,version,source:receipt.source,files:entries.length,binariesVerified:true}));
 }else if(process.argv[2]==='publish'){
