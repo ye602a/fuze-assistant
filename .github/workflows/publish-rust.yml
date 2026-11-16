@@ -149,8 +149,7 @@ jobs:
             rust/artifacts/update-validation.json
             rust/artifacts/preview/preview-validation.json
             rust/artifacts/preview/build-evidence-*.json
-      - name: Update latest stable Release with the same verified payload
-        if: ${{ !inputs.online_only }}
+      - name: Publish numbered Release and mark Latest
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release/promote-stable.mjs

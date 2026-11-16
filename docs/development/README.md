@@ -57,7 +57,7 @@ Rust 构建需 Rust 1.90.0 MSVC、C++ 编译工具和 Windows SDK。以 [Rust �
 更新 `rust/app-version.txt`、Setup 版本和 `docs/RELEASE_NOTES.md` 后经 PR 合并；已发布的版本在编译前终止，不重做同版本 Setup。
 发布复用 master 范围的 Rust 缓存，不再每次建立临时打包分支。发布脚本位于 `scripts/release/`，在线更新仍使用现有公开清单和包格式。
 发布只检出一次指定提交，临时 Actions 证据仅保存 JSON 回执；可执行文件由正式产物保留。历史 v0.7.0 的一次性 Setup 重打包入口已移除，旧实现可从 Git 历史查询。
-仅在线更新时设置 `online_only=true`：只上传在线更新包、清单及回执并切换 `rust-preview` 清单，不生成 Setup、不公开上传便携 ZIP，也不创建或替换正式下载 Release。`online_only` 默认关闭；`build_setup=false` 仅表示跳过安装器，不等于仅在线更新。
+仅在线更新时设置 `online_only=true`：上传在线更新包、清单及回执并切换 `rust-preview` 清单，不生成 Setup、不公开上传新的便携 ZIP。随后仍创建编号正式 Release，标题统一为 `FUZE v版本号`，标为 Latest 并上传构建回执；正文链接保留的完整 ZIP 和 Setup，明确其实际版本及安装后更新方式。查找完整下载时遍历正式发布，不能假定上一条 Latest 含有安装包；旧 Release 和附件均保持原样。公开清单、更新包和回执验证失败时不推进 Latest。`online_only` 默认关闭；`build_setup=false` 仅表示跳过安装器，不等于仅在线更新。
 只改 Slint 界面时由 UI 流水线验证，不再触发不含 UI 的核心 workspace 全量编译；服务源码改动仍触发两条相关流水线。
 本地继续复用显式指定的共享 target 目录，不为清理空间删除正在使用的编译缓存。
 

@@ -1,6 +1,6 @@
 const repository = 'https://github.com/ye602a/fuze-assistant';
 
-export function releaseBody({version, source, notes, buildRun, buildSetup, updateChannel = false, onlineOnly = false}) {
+export function releaseBody({version, source, notes, buildRun, buildSetup, updateChannel = false, onlineOnly = false, retained}) {
   const revision = source.slice(0, 12);
   const base = `${repository}/releases/download/${updateChannel ? 'rust-preview' : `rust-v${version}`}/`;
   const zip = updateChannel ? `fuze-rust-preview-${revision}.zip` : `FUZE-${version}-windows-x64.zip`;
@@ -13,7 +13,7 @@ export function releaseBody({version, source, notes, buildRun, buildSetup, updat
 这里的 Pre-release 标记用于保留在线更新入口，不代表另一个测试版本。当前提供 **${version}** 的在线更新文件。`
     : `## FUZE v${version}`;
   const downloads = onlineOnly
-    ? '本次仅提供程序内在线更新。请在 FUZE「设置 → 数据与更新」中检查并安装；本轮不提供新的 Setup 或便携包。'
+    ? `本次仅提供程序内在线更新。请在 FUZE「设置 → 数据与更新」中检查并安装；本轮不提供新的 Setup 或便携包。${!updateChannel && retained ? `\n\n首次安装请使用以下保留的完整下载，安装后在程序内更新至 ${version}：\n\n${retained.setup ? `- [下载安装包（${retained.setup.version}）](${retained.setup.url})\n` : ''}- [下载便携 ZIP（${retained.zip.version}）](${retained.zip.url})` : ''}`
     : `${buildSetup ? `- [下载安装包（Setup.exe）](${base}${setup})` : '可在 FUZE 设置中检查更新并安装。'}
 - [下载便携 ZIP](${base}${zip})
 
