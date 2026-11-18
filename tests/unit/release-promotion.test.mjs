@@ -23,8 +23,14 @@ async function mockGitHub() {
  const json=(x,status=200)=>new Response(JSON.stringify(x),{status});
  globalThis.fetch=async (url,options={})=>{
   const u=new URL(url),method=options.method||'GET',body=options.body;
-  if(u.hostname==='files.test') {assert.equal(method,'GET'); assert.ok(files.has(u.pathname.slice(1)));return new Response(files.get(u.pathname.slice(1)));}
+  if(u.hostname==='files.test') {assert.equal(method,'GET'); assert.ok(files.has(u.pathname.slice(1)));if(mode==='stale-name' && u.pathname==='/rust-update.json')return new Response('previous manifest');return new Response(files.get(u.pathname.slice(1)));}
   const p=u.pathname.replace('/repos/ye602a/fuze-assistant','');
+  if(method==='GET' && p.startsWith('/releases/assets/')){
+   assert.equal(options.headers.Accept,'application/octet-stream');
+   const asset=assets.find(a=>p==='/releases/assets/'+a.id);
+   assert.ok(asset);
+   return new Response(mode==='bad-asset' && asset.name==='rust-update.json' ? Buffer.alloc(asset.size) : files.get(asset.name));
+  }
   if(method==='GET'&&p==='/releases/tags/rust-preview')return json(preview);
   if(method==='GET'&&p==='/releases'&&u.search)return json([{tag_name:'rust-v0.7.15',assets:[]},{tag_name:'rust-v0.7.13',assets:oldAssets}]);
   if(method==='GET'&&p==='/releases/tags/rust-v0.7.16')return release?json(release):json({},404);
@@ -46,10 +52,11 @@ async function mockGitHub() {
  });
 }
 
-for(const mode of ['online','retry','full','full-no-setup','corrupt','wrong-version'])test(`promotion: ${mode}`,()=>{
+for(const mode of ['online','stale-name','bad-asset','retry','full','full-no-setup','corrupt','wrong-version'])test(`promotion: ${mode}`,()=>{
  const preload=`data:text/javascript,${encodeURIComponent(`await (${mockGitHub.toString()})();`)}`;
  const r=spawnSync(process.execPath,['--import',preload,'scripts/release/promote-stable.mjs'],{cwd:new URL('../../',import.meta.url),env:{...process.env,TEST_MODE:mode},encoding:'utf8'});
- if(['corrupt','wrong-version'].includes(mode)){assert.notEqual(r.status,0);assert.match(r.stderr,/Published online (identity|integrity) mismatch/);}
+ if(mode==='bad-asset'){assert.notEqual(r.status,0);assert.match(r.stderr,/Digest mismatch rust-update.json/);}
+ else if(['corrupt','wrong-version'].includes(mode)){assert.notEqual(r.status,0);assert.match(r.stderr,/Published online (identity|integrity) mismatch/);}
  else assert.equal(r.status,0,r.stderr);
 });
 

@@ -1,3 +1,4 @@
+import {downloadReleaseAsset} from './download-release-asset.mjs';
 import {releaseBody} from './release-body.mjs';
 import {retainedDownloads} from './retained-downloads.mjs';
 import {readFile} from 'node:fs/promises';
@@ -20,11 +21,7 @@ if(preview.draft||!preview.prerelease)throw Error('Unexpected update endpoint st
 async function download(name){
  const asset=preview.assets.find(a=>a.name===name);
  if(!asset)throw Error('Missing '+name);
- const r=await fetch(asset.browser_download_url,{signal:AbortSignal.timeout(180000)});
- if(!r.ok)throw Error('Download HTTP '+r.status);
- const bytes=Buffer.from(await r.arrayBuffer());
- if(bytes.length!==asset.size||asset.digest!==`sha256:${hash(bytes)}`)throw Error('Digest mismatch '+name);
- return bytes;
+ return downloadReleaseAsset(api,asset,180000);
 }
 const [receiptBytes,zip,setup]=await Promise.all([
  download(`build-evidence-${revision}.json`),
