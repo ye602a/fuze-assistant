@@ -50,6 +50,7 @@ export component Workbench inherits Window {
     changed shell-notice => { root.update-feedback(root.shell-notice, 3); }
     changed maintenance-notice => { root.update-feedback(root.maintenance-notice, 4); }
     in-out property <length> scroll-y <=> scroll.viewport-y;
+    callback refresh-bench;
     callback query-edited(string);
     callback cycle-health;
     callback minimize;

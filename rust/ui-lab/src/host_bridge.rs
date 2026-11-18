@@ -302,7 +302,15 @@ pub fn attach_recovered(
         !offline,
     )));
     let unbound = crate::unbound_bridge::attach(ui, roots);
-    let session = Rc::new(Session::start_with_recovery(config, offline, start_paused)?);
+    let weak = ui.as_weak();
+    let session = Rc::new(Session::start_with_bench_events(
+        config,
+        offline,
+        start_paused,
+        Some(std::sync::Arc::new(move || {
+            let _ = weak.upgrade_in_event_loop(|ui| ui.invoke_refresh_bench());
+        })),
+    )?);
     let diagnostics = crate::diagnostic_bridge::attach(ui, session.clone());
     let feedback =
         crate::feedback_bridge::attach(ui, session.clone(), diagnostics.clone(), offline);
@@ -475,7 +483,19 @@ pub fn attach_recovered(
         }
     });
     let previous = RefCell::new(None::<Status>);
-    let bench = RefCell::new(None::<crate::bench_strip::Strip>);
+    if !offline {
+        let bench = RefCell::new(None);
+        let weak = ui.as_weak();
+        let service = session.clone();
+        ui.on_refresh_bench(move || {
+            if let Some(ui) = weak.upgrade() {
+                notice(
+                    &ui,
+                    crate::bench_strip::sync(&mut bench.borrow_mut(), &service),
+                );
+            }
+        });
+    }
     let weak = ui.as_weak();
     let service = session.clone();
     let timer = slint::Timer::default();
@@ -510,13 +530,10 @@ pub fn attach_recovered(
             };
             let completed = state.get_busy() && !engine_busy;
             state.set_busy(engine_busy || (!action.is_empty() && !operation_completed));
+            // Also reconcile preference changes and freshness expiry when LCU is silent.
+            if !offline { ui.invoke_refresh_bench(); }
             if previous.borrow().as_ref() == Some(&next) && !completed && !history_completed {
                 return;
-            }
-            if !offline {
-                if let Err(error) = crate::bench_strip::sync(&mut bench.borrow_mut(), &service, &next) {
-                    notice(&ui, Err(error));
-                }
             }
             let old = previous.borrow();
             if let Err(error)=popup.borrow_mut().update(&next){notice(&ui,Err(error));}

@@ -105,16 +105,6 @@ impl Pointer {
         self.pressed.take().filter(|id| Some(*id) == hero)
     }
 }
-// Accepted requests remain pending; only the observed champion confirms success.
-fn observed_outcome(hero: u32, own: Option<u32>, lobby: Lobby, task: GrabOutcome) -> GrabOutcome {
-    if own == Some(hero) {
-        GrabOutcome::Acquired
-    } else if !lobby.offers(lobby.game, hero) {
-        GrabOutcome::Unavailable
-    } else {
-        task
-    }
-}
 fn outcome_hint(outcome: GrabOutcome) -> &'static str {
     match outcome {
         GrabOutcome::Running => "按 F9 停止",
@@ -125,57 +115,24 @@ fn outcome_hint(outcome: GrabOutcome) -> &'static str {
     }
 }
 
-fn keep_waiting(
-    connection: Option<fuze_lcu::reconnect::State>,
-    enabled: bool,
-    active: bool,
-) -> bool {
-    use fuze_lcu::reconnect::State;
-    use fuze_runtime::session::Phase;
-    enabled
-        && active
-        && !matches!(
-            connection,
-            Some(
-                State::Paused
-                    | State::Connected(
-                        Phase::ClientReady | Phase::Loading | Phase::InProgress | Phase::PostGame
-                    )
-            )
-        )
-}
-
-pub fn sync(
-    strip: &mut Option<Strip>,
-    session: &Rc<Session>,
-    status: &fuze_worker_host::desktop::Status,
-) -> Result<(), &'static str> {
-    use fuze_lcu::reconnect::State::Connected;
-    use fuze_runtime::session::Phase::ChampSelect;
-    let lobby = status.bench_lobby.filter(|_| {
-        status.mode == 1
-            && status.preferences.champ_select
-            && matches!(status.connection, Some(Connected(ChampSelect)))
-    });
-    let Some(lobby) = lobby else {
-        if !keep_waiting(
-            status.connection,
-            status.mode == 1 && status.preferences.champ_select,
-            strip
+pub fn sync(strip: &mut Option<Strip>, session: &Rc<Session>) -> Result<(), &'static str> {
+    use fuze_worker_host::controller::BenchDisplay;
+    let lobby = match session.bench_display() {
+        BenchDisplay::Ready(lobby) => lobby,
+        BenchDisplay::Waiting
+            if strip
                 .as_ref()
-                .is_some_and(|s| s.state.active.borrow().is_some()),
-        ) {
-            *strip = None;
+                .is_some_and(|s| s.state.active.borrow().is_some()) =>
+        {
+            return Ok(())
         }
-        return Ok(());
+        _ => {
+            *strip = None;
+            return Ok(());
+        }
     };
-    let own = status
-        .selection
-        .as_ref()
-        .and_then(|v| v.team.get(v.local_slot?))
-        .map(|h| h.id);
     if let Some(current) = strip.as_ref().filter(|s| s.same_session(lobby)) {
-        current.update(lobby, own);
+        current.update(lobby);
     } else {
         *strip = None;
         *strip = Some(Strip::new(session.clone(), lobby)?);
@@ -195,8 +152,6 @@ struct State {
     geometry: Cell<Option<(i32, i32, i32)>>,
     active: RefCell<Option<(u32, Arc<BenchGrab>)>>,
     pointer: Cell<Pointer>,
-    own: Cell<Option<u32>>,
-    requested: Cell<Option<u32>>,
     hint: Cell<&'static str>,
     hint_until: Cell<Option<Instant>>,
     motion: Cell<Option<Instant>>,
@@ -212,8 +167,6 @@ impl Strip {
             geometry: Cell::default(),
             active: RefCell::default(),
             pointer: Cell::default(),
-            own: Cell::default(),
-            requested: Cell::default(),
             hint: Cell::new(""),
             hint_until: Cell::default(),
             motion: Cell::default(),
@@ -260,8 +213,7 @@ impl Strip {
     fn same_session(&self, l: Lobby) -> bool {
         self.state.lobby.get().game == l.game && self.state.lobby.get().ux_pid == l.ux_pid
     }
-    fn update(&self, l: Lobby, own: Option<u32>) {
-        self.state.own.set(own);
+    fn update(&self, l: Lobby) {
         unsafe {
             if self.state.lobby.replace(l) != l {
                 self.state.pointer.set(Pointer::default());
@@ -295,7 +247,6 @@ impl State {
         self.pointer.set(Pointer::default());
         self.motion.set(None);
         self.arrow_offset.set(0);
-        self.requested.set(None);
         self.hint.set("");
         self.hint_until.set(None);
         InvalidateRect(hwnd, null(), 0);
@@ -307,26 +258,22 @@ impl State {
         self.repaint(hwnd);
     }
     unsafe fn feedback(&self, hwnd: HWND) {
-        let finished = self.active.borrow().as_ref().and_then(|(hero, task)| {
-            let outcome = observed_outcome(*hero, self.own.get(), self.lobby.get(), task.outcome());
-            if outcome == GrabOutcome::Running {
-                return None;
-            }
-            Some((*hero, outcome))
-        });
-        if let Some((hero, outcome)) = finished {
-            if outcome == GrabOutcome::Requested {
-                // Keep the target and its stop control visible until the read-only
-                // champion state confirms the accepted request.
-                if self.requested.get() != Some(hero) {
-                    self.requested.set(Some(hero));
-                    self.hint.set(outcome_hint(outcome));
-                    self.hint_until.set(None);
+        let outcome = self
+            .active
+            .borrow()
+            .as_ref()
+            .map(|(_, task)| task.outcome());
+        match outcome {
+            Some(GrabOutcome::Requested) => {
+                let hint = outcome_hint(GrabOutcome::Requested);
+                if self.hint.replace(hint) != hint {
                     self.repaint(hwnd);
                 }
-            } else {
+            }
+            Some(GrabOutcome::Running) | None => {}
+            Some(done) => {
                 self.stop(hwnd);
-                self.notice(hwnd, outcome_hint(outcome));
+                self.notice(hwnd, outcome_hint(done));
             }
         }
         if self
@@ -629,61 +576,6 @@ unsafe fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn temporary_status_loss_keeps_target_but_exit_and_user_disable_remove_it() {
-        use fuze_lcu::reconnect::State;
-        use fuze_runtime::session::Phase;
-        for connection in [
-            None,
-            Some(State::Waiting),
-            Some(State::Retry(fuze_lcu::Error::Transport)),
-            Some(State::Retry(fuze_lcu::Error::Unauthorized)),
-            Some(State::Connected(Phase::Disconnected)),
-            Some(State::Connected(Phase::ChampSelect)),
-        ] {
-            assert!(keep_waiting(connection, true, true));
-            assert!(!keep_waiting(connection, false, true));
-            assert!(!keep_waiting(connection, true, false));
-        }
-        for connection in [
-            State::Paused,
-            State::Connected(Phase::Loading),
-            State::Connected(Phase::ClientReady),
-            State::Connected(Phase::InProgress),
-            State::Connected(Phase::PostGame),
-        ] {
-            assert!(!keep_waiting(Some(connection), true, true));
-        }
-    }
-    #[test]
-    fn accepted_request_waits_for_observed_champion_and_detects_target_loss() {
-        let mut lobby = Lobby {
-            slots: [11, 22, 0, 0, 0, 0, 0, 0, 0, 0],
-            game: 1,
-            ux_pid: 1,
-        };
-        assert_eq!(
-            observed_outcome(11, Some(9), lobby, GrabOutcome::Requested),
-            GrabOutcome::Requested
-        );
-        assert_eq!(
-            observed_outcome(11, Some(9), lobby, GrabOutcome::Running),
-            GrabOutcome::Running
-        );
-        lobby.slots[0] = 33;
-        assert_eq!(
-            observed_outcome(11, Some(9), lobby, GrabOutcome::Requested),
-            GrabOutcome::Unavailable
-        );
-        assert_eq!(
-            observed_outcome(11, Some(11), lobby, GrabOutcome::Requested),
-            GrabOutcome::Acquired
-        );
-        assert_eq!(
-            observed_outcome(22, Some(9), lobby, GrabOutcome::Stopped),
-            GrabOutcome::Stopped
-        );
-    }
     #[test]
     fn arrow_tracks_target_id_and_portraits_remain_click_through() {
         let slots = [11, 22, 33, 0, 0, 0, 0, 0, 0, 0];
