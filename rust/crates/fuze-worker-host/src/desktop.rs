@@ -101,7 +101,6 @@ pub struct Status {
     pub preferences: crate::preferences::Preferences,
     pub selection: Option<crate::champ_select::View>,
     pub playing: Option<crate::champ_select::View>,
-    pub bench_lobby: Option<fuze_lcu::bench::Lobby>,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -128,7 +127,6 @@ impl Default for Status {
             preferences: Default::default(),
             selection: None,
             playing: None,
-            bench_lobby: None,
         }
     }
 }
@@ -189,7 +187,12 @@ impl Shared {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
 }
-fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
+fn engine(
+    mut config: Config,
+    shared: Arc<Shared>,
+    fixture: bool,
+    bench_changed: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
     let cache = std::env::var_os("LOCALAPPDATA")
         .map(|p| std::path::PathBuf::from(p).join("FuzeRustPreview/client-data"));
     if !fixture {
@@ -511,6 +514,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                 status.connection = None;
                 status.pipeline = controller.status();
                 status.selection = None;
+                status.playing = None;
             }
         } else if desired == EXPORT {
             controller.suspend();
@@ -803,6 +807,7 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                         Some(std::path::PathBuf::from(&preferences.manual_directory))
                     },
                     preferences.local_records,
+                    bench_changed.clone(),
                 ) {
                     Ok(m) => {
                         if let Ok(mut control) = shared.monitor.lock() {
@@ -832,9 +837,8 @@ fn engine(mut config: Config, shared: Arc<Shared>, fixture: bool) {
                     s.connection = m.state();
                     s.verified_time = m.verified_age().map(crate::resources::clock_ago);
                     s.pipeline = controller.status();
-                    s.bench_lobby = preferences.champ_select.then(|| m.bench_lobby()).flatten();
                     s.selection = champions.selection();
-                    s.playing = m.playing_champion().and_then(|id| champions.playing(id));
+                    champions.refresh_playing(&mut s.playing, m.playing_champion());
                     // Only change interface language after that locale's catalogue is ready.
                     if let Some(identity) = champions.identity() {
                         if let Some(locale) = identity.split('@').next() {
@@ -2761,7 +2765,7 @@ pub fn run(config: Config, smoke: bool, managed: bool) -> Result<()> {
     let worker_shared = shared.clone();
     let worker = thread::Builder::new()
         .name("fuze-desktop-control".into())
-        .spawn(move || engine(config, worker_shared, smoke))
+        .spawn(move || engine(config, worker_shared, smoke, None))
         .map_err(|_| "desktop-thread")?;
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

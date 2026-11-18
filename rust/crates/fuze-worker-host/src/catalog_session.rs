@@ -58,8 +58,19 @@ impl Session {
     pub fn selection(&self) -> Option<View> {
         self.view.clone()
     }
-    pub fn playing(&self, champion: u32) -> Option<View> {
-        self.catalog.as_ref().map(|c| c.playing(champion))
+    pub fn refresh_playing(&self, playing: &mut Option<View>, champion: Option<u32>) {
+        let (Some(catalog), Some(id)) = (&self.catalog, champion) else {
+            *playing = None;
+            return;
+        };
+        // Catalog::playing puts the local hero in slot zero. The catalogue identity includes the locale.
+        if playing
+            .as_ref()
+            .is_some_and(|view| view.team[0].id == id && view.version == catalog.identity())
+        {
+            return;
+        }
+        *playing = Some(catalog.playing(id));
     }
 }
 
@@ -85,11 +96,14 @@ mod tests {
         // Stable context and pause/resume reuse the in-memory catalogue, even without roots.
         state.clear_selection();
         state.refresh(&[], Some(Locale::ZhCn), Some(selection));
-        assert_eq!(state.playing(1).unwrap().version, "zh-CN@1.0");
+        let mut playing = None;
+        state.refresh_playing(&mut playing, Some(1));
+        assert_eq!(playing.as_ref().unwrap().version, "zh-CN@1.0");
         state.refresh(&roots, None, Some(selection));
         assert!(state.identity().is_none());
         assert!(state.selection().is_none());
-        assert!(state.playing(1).is_none());
+        state.refresh_playing(&mut playing, Some(1));
+        assert!(playing.is_none());
         state.refresh(&roots, Some(Locale::EnUs), Some(selection));
         assert_eq!(state.selection().unwrap().version, "en-US@2.0");
         fixture.dataset("en-US", "3.0", true);
@@ -103,5 +117,37 @@ mod tests {
         state.retry = Instant::now();
         state.refresh(&roots, Some(Locale::ZhTw), Some(selection));
         assert_eq!(state.identity(), Some("zh-TW@4.0"));
+    }
+
+    #[test]
+    fn playing_view_is_reused_until_the_hero_or_catalogue_changes() {
+        let fixture = crate::preferences::locale_tests::Fixture::new();
+        fixture.dataset("zh-CN", "1.0", true);
+        let roots = fixture.config().roots;
+        let mut session = Session::new();
+        let mut playing = None;
+        session.refresh(&roots, Some(Locale::ZhCn), None);
+        session.refresh_playing(&mut playing, Some(1));
+        let first_team = playing.as_ref().unwrap().team.as_ptr();
+        session.refresh(&roots, Some(Locale::ZhCn), None);
+        session.refresh_playing(&mut playing, Some(1));
+        assert_eq!(playing.as_ref().unwrap().team.as_ptr(), first_team);
+
+        session.refresh_playing(&mut playing, Some(2));
+        assert_eq!(playing.as_ref().unwrap().team[0].id, 2);
+        fixture.dataset("zh-CN", "2.0", true);
+        session.invalidate();
+        session.refresh(&roots, Some(Locale::ZhCn), None);
+        session.refresh_playing(&mut playing, Some(2));
+        assert_eq!(playing.as_ref().unwrap().version, "zh-CN@2.0");
+
+        fixture.dataset("en-US", "2.0", true);
+        session.refresh(&roots, Some(Locale::EnUs), None);
+        session.refresh_playing(&mut playing, Some(2));
+        assert_eq!(playing.as_ref().unwrap().version, "en-US@2.0");
+        session.refresh_playing(&mut playing, None);
+        assert!(playing.is_none());
+        session.refresh_playing(&mut playing, Some(1));
+        assert_eq!(playing.unwrap().team[0].id, 1);
     }
 }

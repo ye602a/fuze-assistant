@@ -16,6 +16,14 @@ impl Session {
     }
     /// A recovered UI must not resume capture before the player explicitly continues.
     pub fn start_with_recovery(config: Config, offline: bool, start_paused: bool) -> Result<Self> {
+        Self::start_with_bench_events(config, offline, start_paused, None)
+    }
+    pub fn start_with_bench_events(
+        config: Config,
+        offline: bool,
+        start_paused: bool,
+        bench_changed: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> Result<Self> {
         let shared = Arc::new(Shared {
             data_requested: AtomicBool::new(false),
             data_busy: AtomicBool::new(false),
@@ -43,7 +51,7 @@ impl Session {
         let owned = shared.clone();
         let worker = thread::Builder::new()
             .name("fuze-frontend-engine".into())
-            .spawn(move || engine(config, owned, offline))
+            .spawn(move || engine(config, owned, offline, bench_changed))
             .map_err(|_| "frontend-thread")?;
         Ok(Self {
             shared,
@@ -57,11 +65,23 @@ impl Session {
     pub fn snapshot(&self) -> Status {
         self.shared.status()
     }
+    fn bench_monitor(&self) -> Option<MonitorControl> {
+        if !self.shared.status.lock().ok()?.preferences.champ_select {
+            return None;
+        }
+        self.shared.monitor.lock().ok()?.clone()
+    }
+    pub fn bench_display(&self) -> crate::controller::BenchDisplay {
+        self.bench_monitor()
+            .map_or(crate::controller::BenchDisplay::Hidden, |m| {
+                m.bench_display()
+            })
+    }
     pub fn grab_bench(&self, game: u64, hero: u32) -> Option<Arc<crate::controller::BenchGrab>> {
         if self.offline || self.shared.desired.load(Ordering::Acquire) != RUNNING {
             return None;
         }
-        self.shared.monitor.lock().ok()?.as_ref()?.grab(game, hero)
+        self.bench_monitor()?.grab(game, hero)
     }
     pub fn screenshot_status(&self) -> (bool, bool, String) {
         self.shared.screenshots.status()
@@ -339,9 +359,8 @@ impl Drop for Session {
 #[cfg(test)]
 mod locale_tests {
     use super::*;
-    #[test]
-    fn history_reads_keep_recognition_mode_and_pause_exit_available() {
-        // No engine, client discovery, disk access or worker: exercise the real command gate.
+    // No engine, client discovery, disk access or worker.
+    fn running_session() -> Session {
         let shared = Arc::new(Shared {
             data_requested: AtomicBool::new(false),
             data_busy: AtomicBool::new(false),
@@ -367,13 +386,60 @@ mod locale_tests {
             import_selection: Mutex::new(None),
             export: Mutex::new(None),
         });
-        let session = Session {
-            shared: shared.clone(),
+        Session {
+            shared,
             worker: None,
             offline: false,
             maintenance: AtomicBool::new(false),
             last_probe: Mutex::new(None),
-        };
+        }
+    }
+
+    #[test]
+    fn bench_uses_the_live_monitor_without_waiting_for_the_desktop_snapshot() {
+        use crate::controller::BenchDisplay;
+        use fuze_runtime::session::Phase;
+        let session = running_session();
+        let monitor = Monitor::review();
+        *session.shared.monitor.lock().unwrap() = Some(monitor.control());
+        let mut ctx = fuze_lcu::context::parse(
+            Phase::ChampSelect,
+            br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#,
+            br#"{"localPlayerCellId":0,"myTeam":[{"cellId":0,"championId":2}],"benchEnabled":true,"benchChampions":[{"championId":11}]}"#,
+        ).unwrap();
+        let lobby = ctx.bench_lobby.as_mut().unwrap();
+        lobby.ux_pid = 42;
+        let ready = BenchDisplay::Ready(*lobby);
+        monitor.review_publish(ctx);
+        assert!(session.snapshot().selection.is_none());
+        assert!(session.snapshot().connection.is_none());
+        assert_eq!(session.bench_display(), ready);
+        let task = session.grab_bench(9, 11).unwrap();
+        session
+            .shared
+            .status
+            .lock()
+            .unwrap()
+            .preferences
+            .champ_select = false;
+        assert_eq!(session.bench_display(), BenchDisplay::Hidden);
+        assert!(session.grab_bench(9, 11).is_none());
+        session.set_running(false).unwrap();
+        session
+            .shared
+            .status
+            .lock()
+            .unwrap()
+            .preferences
+            .champ_select = true;
+        assert_eq!(session.bench_display(), BenchDisplay::Hidden);
+        assert_eq!(task.outcome(), crate::controller::GrabOutcome::Stopped);
+    }
+
+    #[test]
+    fn history_reads_keep_recognition_mode_and_pause_exit_available() {
+        let session = running_session();
+        let shared = &session.shared;
         session.refresh_history(false).unwrap();
         assert!(session.history_busy());
         assert!(!session.busy());

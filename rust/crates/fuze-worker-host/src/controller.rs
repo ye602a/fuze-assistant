@@ -106,6 +106,13 @@ struct Grab {
     hero: u32,
     task: Arc<BenchGrab>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BenchDisplay {
+    Hidden,
+    Waiting,
+    Ready(fuze_lcu::bench::Lobby),
+}
+
 struct Observation {
     grab: Option<Grab>,
     journal: Option<crate::local_records::Binding>,
@@ -118,6 +125,25 @@ struct Observation {
     cancellation: Option<fuze_native_overlay::native::Cancellation>,
 }
 impl Observation {
+    fn bench_display(&self) -> BenchDisplay {
+        use fuze_lcu::reconnect::State;
+        match self.state {
+            State::Connected(Phase::ChampSelect)
+                if self.updated.elapsed() < Duration::from_secs(8) =>
+            {
+                self.context
+                    .and_then(|c| c.bench_lobby)
+                    .filter(|l| l.ux_pid != 0)
+                    .map_or(BenchDisplay::Waiting, BenchDisplay::Ready)
+            }
+            State::Paused
+            | State::Connected(
+                Phase::ClientReady | Phase::Loading | Phase::InProgress | Phase::PostGame,
+            ) => BenchDisplay::Hidden,
+            _ => BenchDisplay::Waiting,
+        }
+    }
+
     fn set_locale(&mut self, locale: Option<fuze_lcu::locale::Locale>) {
         if self.locale != locale {
             self.locale = locale;
@@ -178,6 +204,35 @@ pub struct MonitorControl {
     latest: Arc<Mutex<Observation>>,
 }
 impl MonitorControl {
+    fn update_observation(
+        &self,
+        notify: Option<&(dyn Fn() + Send + Sync)>,
+        update: impl FnOnce(&mut Observation),
+    ) {
+        let Ok(mut latest) = self.latest.lock() else {
+            return;
+        };
+        if !self.enabled.load(Ordering::Acquire) {
+            return;
+        }
+        let before = latest.bench_display();
+        update(&mut latest);
+        if before != latest.bench_display() {
+            // The UI reads the latest observation when it handles the notification.
+            drop(latest);
+            if let Some(notify) = notify {
+                notify();
+            }
+        }
+    }
+
+    pub(crate) fn bench_display(&self) -> BenchDisplay {
+        self.latest
+            .lock()
+            .map(|s| s.bench_display())
+            .unwrap_or(BenchDisplay::Waiting)
+    }
+
     pub(crate) fn diagnostic_context(&self) -> (u64, bool) {
         self.latest
             .lock()
@@ -294,18 +349,6 @@ impl Monitor {
             fuze_lcu::locale::Locale::EnUs => fuze_data::Locale::EnUs,
         })
     }
-    pub fn bench_lobby(&self) -> Option<fuze_lcu::bench::Lobby> {
-        let s = self.latest.lock().ok()?;
-        if s.updated.elapsed() >= Duration::from_secs(8)
-            || !matches!(
-                s.state,
-                fuze_lcu::reconnect::State::Connected(Phase::ChampSelect)
-            )
-        {
-            return None;
-        }
-        s.context?.bench_lobby.filter(|l| l.ux_pid != 0)
-    }
     pub fn selection(&self) -> Option<fuze_lcu::context::Selection> {
         let latest = self.latest.lock().ok()?;
         if latest.updated.elapsed() >= Duration::from_secs(8)
@@ -344,12 +387,13 @@ impl Monitor {
         Self::start_with_fallback(initial, None)
     }
     pub fn start_with_fallback(initial: bool, manual: Option<PathBuf>) -> Result<Self> {
-        Self::start_with_records(initial, manual, false)
+        Self::start_with_records(initial, manual, false, None)
     }
     pub(crate) fn start_with_records(
         initial: bool,
         manual: Option<PathBuf>,
         records: bool,
+        bench_changed: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Result<Self> {
         let latest = Arc::new(Mutex::new(Observation {
             grab: None,
@@ -369,7 +413,8 @@ impl Monitor {
             latest: latest.clone(),
         };
         let stop = Arc::new(AtomicBool::new(false));
-        let (shared, stopped) = (latest.clone(), stop.clone());
+        let observer = control.clone();
+        let stopped = stop.clone();
         let thread = thread::Builder::new()
             .name("fuze-lcu-control".into())
             .spawn(move || {
@@ -410,10 +455,7 @@ impl Monitor {
                                 crate::local_records::Binding::from_owner(&owner, id).ok()
                             });
                         }
-                        if let Ok(mut latest) = shared.lock() {
-                            if !enabled.load(Ordering::Acquire) {
-                                continue;
-                            }
+                        observer.update_observation(bench_changed.as_deref(), |latest| {
                             latest.journal = journal.clone();
                             latest.set_locale(locale);
                             latest.publish(context, root);
@@ -421,9 +463,9 @@ impl Monitor {
                                 latest.updated = verified;
                             }
                             latest.state = state;
-                        }
+                        });
                     }
-                    let grab = shared.lock().ok().and_then(|mut s| {
+                    let grab = observer.latest.lock().ok().and_then(|mut s| {
                         if s.grab
                             .as_ref()
                             .is_some_and(|g| !g.task.active.load(Ordering::Acquire))
@@ -1184,6 +1226,62 @@ mod tests {
         assert_eq!(task.apply_result(Ok(Attempt::Accepted)), None);
         assert_eq!(task.outcome(), GrabOutcome::Stopped);
     }
+    #[test]
+    fn late_pick_notifies_with_the_current_pool_before_the_desktop_tick() {
+        use fuze_lcu::reconnect::State;
+        let monitor = Monitor::review();
+        let observer = monitor.control();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let notify = || tx.send(observer.bench_display()).unwrap();
+        let flow = br#"{"phase":"ChampSelect","gameData":{"gameId":9,"queue":{"id":2400}}}"#;
+        let mut session = serde_json::json!({
+            "localPlayerCellId": 0, "myTeam": [{"cellId":0,"championId":0},{"cellId":1,"championId":0}],
+            "timer": {"phase":"BAN_PICK"}, "benchEnabled":true, "benchChampions":[{"championId":11}]
+        });
+        let publish = |session: &serde_json::Value| {
+            let mut ctx = fuze_lcu::context::parse(
+                Phase::ChampSelect,
+                flow,
+                &serde_json::to_vec(session).unwrap(),
+            )
+            .unwrap();
+            if let Some(lobby) = &mut ctx.bench_lobby {
+                lobby.ux_pid = 42;
+            }
+            observer.update_observation(Some(&notify), |s| {
+                s.publish(Some(ctx), None);
+                s.state = State::Connected(Phase::ChampSelect);
+            });
+        };
+        publish(&session);
+        assert!(rx.try_recv().is_err());
+        session["myTeam"][0]["championId"] = 2.into();
+        publish(&session);
+        let BenchDisplay::Ready(lobby) = rx.try_recv().unwrap() else {
+            panic!("missing bench")
+        };
+        assert!(lobby.offers(9, 11));
+        publish(&session);
+        assert!(rx.try_recv().is_err());
+        session["benchChampions"][0]["championId"] = 22.into();
+        publish(&session);
+        assert!(
+            matches!(rx.try_recv(), Ok(BenchDisplay::Ready(l)) if l.offers(9, 22) && !l.offers(9, 11))
+        );
+        observer.update_observation(Some(&notify), |s| s.updated -= Duration::from_secs(9));
+        assert_eq!(rx.try_recv().unwrap(), BenchDisplay::Waiting);
+        publish(&session);
+        assert!(matches!(rx.try_recv(), Ok(BenchDisplay::Ready(_))));
+        observer.update_observation(Some(&notify), |s| {
+            s.state = State::Connected(Phase::Loading)
+        });
+        assert_eq!(rx.try_recv().unwrap(), BenchDisplay::Hidden);
+        observer.enable(false);
+        publish(&session);
+        assert_eq!(observer.bench_display(), BenchDisplay::Hidden);
+        assert!(rx.try_recv().is_err());
+    }
+
     #[test]
     fn bench_grab_survives_missing_context_and_still_stops_on_confirmed_exit() {
         let monitor = Monitor::review();
