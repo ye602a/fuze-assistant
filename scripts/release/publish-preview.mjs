@@ -1,3 +1,4 @@
+import {downloadReleaseAsset} from './download-release-asset.mjs';
 import {releaseBody} from './release-body.mjs';
 import {verifyBinaries} from './verify-binaries.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
@@ -42,8 +43,7 @@ const evidence={source,revision,version:version,sequence:manifest.sequence,onlin
 await writeFile(path.join(directory,`build-evidence-${revision}.json`),JSON.stringify(evidence,null,2));
 for(const [file,bytes]of [...(onlineOnly?[]:[[name,zipBytes],[name+'.sha256',Buffer.from(`${hash(zipBytes)}  ${name}\n`)]]),[manifest.archive,fuz],[manifest.archive+'.blockmap',map],...(setup?[[setupName,setup],[setupName+'.sha256',Buffer.from(`${hash(setup)}  ${setupName}\n`)]]:[]),[`build-evidence-${revision}.json`,Buffer.from(JSON.stringify(evidence,null,2))]])await upload(file,bytes);
 const old=preview.assets.find(a=>a.name==='rust-update.json');if(!old)throw Error('Missing current update manifest');
-const response=await fetch(old.browser_download_url,{signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Cannot read current update manifest');
-const previous=await response.json();
+const previous=JSON.parse(await downloadReleaseAsset(api,old,60000));
 if(previous.revision!==revision){
  if(previous.sequence>=manifest.sequence)throw Error('Non-monotonic update');
  const backup=`rust-update-before-${revision}.json`;if(preview.assets.some(a=>a.name===backup))throw Error('Manifest backup collision');
