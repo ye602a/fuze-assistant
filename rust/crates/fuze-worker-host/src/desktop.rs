@@ -514,6 +514,7 @@ fn engine(
                 status.connection = None;
                 status.pipeline = controller.status();
                 status.selection = None;
+                status.playing = None;
             }
         } else if desired == EXPORT {
             controller.suspend();
@@ -837,7 +838,7 @@ fn engine(
                     s.verified_time = m.verified_age().map(crate::resources::clock_ago);
                     s.pipeline = controller.status();
                     s.selection = champions.selection();
-                    s.playing = m.playing_champion().and_then(|id| champions.playing(id));
+                    champions.refresh_playing(&mut s.playing, m.playing_champion());
                     // Only change interface language after that locale's catalogue is ready.
                     if let Some(identity) = champions.identity() {
                         if let Some(locale) = identity.split('@').next() {
