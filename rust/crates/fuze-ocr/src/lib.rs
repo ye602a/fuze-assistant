@@ -47,9 +47,9 @@ pub struct Recognizer {
 }
 #[derive(Serialize)]
 pub struct FrameResult {
-    pub slots: [Slot; 3],
+    pub slots: fuze_contract::CardSlots<Slot>,
     pub title_kind: fuze_contract::wire::TitleKind,
-    pub title_reads: [fuze_contract::wire::TitleRead; 3],
+    pub title_reads: fuze_contract::CardSlots<fuze_contract::wire::TitleRead>,
     pub elapsed_ms: f64,
     pub selection_confirmed: bool,
 }
@@ -411,7 +411,7 @@ impl Recognizer {
         &mut self,
         atlas: &fuze_contract::titles::Atlas<'_>,
     ) -> Result<FrameResult> {
-        self.recognize_crops(|i| {
+        self.recognize_crops(atlas.layout, |i| {
             RgbImage::from_raw(atlas.title_width, atlas.title_height, atlas.rgb_slot(i)?)
                 .ok_or_else(|| "invalid-title-buffer".into())
         })
@@ -423,27 +423,33 @@ impl Recognizer {
         mut crop: impl FnMut(u32, u32, u32, u32) -> Result<RgbImage>,
     ) -> Result<FrameResult> {
         let regions = fuze_contract::titles::regions(w, h)?;
-        self.recognize_crops(|i| {
+        self.recognize_crops(fuze_contract::Layout::Three, |i| {
             let r = regions[i];
             crop(r.x, r.y, r.width, r.height)
         })
     }
     fn recognize_crops(
         &mut self,
+        layout: fuze_contract::Layout,
         mut crop: impl FnMut(usize) -> Result<RgbImage>,
     ) -> Result<FrameResult> {
         let started = Instant::now();
-        let mut slots = [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable];
-        let mut shards = [false; 3];
-        let mut title_reads = [fuze_contract::wire::TitleRead::Unknown; 3];
+        use fuze_contract::{CardSlots, Layout};
+        let mut slots = CardSlots::from_fn(layout, |_| Slot::Unreadable);
+        let mut shards = CardSlots::from_fn(layout, |_| false);
+        let mut title_reads =
+            CardSlots::from_fn(layout, |_| fuze_contract::wire::TitleRead::Unknown);
         // One recognition pass per card; locate its title inside the bounded envelope.
         for (i, slot) in slots.iter_mut().enumerate() {
             let (name, confidence) = self.recognize_crop(trim_title_padding(crop(i)?))?;
-            let shard_name = selection::shard_title(&name, 1.0);
+            let shard_name = layout == Layout::Three && selection::shard_title(&name, 1.0);
             shards[i] = shard_name && confidence.is_finite() && confidence >= 0.9;
             if shard_name {
                 title_reads[i] = fuze_contract::wire::TitleRead::StatShard;
-            } else if let Some(choice) = fuze_contract::skill_choice::read(&name, confidence) {
+            } else if let Some(choice) = (layout == Layout::Three)
+                .then(|| fuze_contract::skill_choice::read(&name, confidence))
+                .flatten()
+            {
                 *slot = choice;
                 title_reads[i] = fuze_contract::wire::TitleRead::Exact;
             } else {
@@ -451,7 +457,7 @@ impl Recognizer {
             }
         }
         Ok(FrameResult {
-            title_kind: selection::classify(&slots, shards),
+            title_kind: selection::classify(&slots, &shards),
             title_reads,
             slots,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,

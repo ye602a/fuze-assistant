@@ -325,11 +325,7 @@ mod tests {
     fn authentication_and_phase_override_stale_cards() {
         let mut s = Status::default();
         s.mode = 1;
-        s.pipeline.recent = Some(std::sync::Arc::new([
-            fuze_contract::Slot::Unreadable,
-            fuze_contract::Slot::Unreadable,
-            fuze_contract::Slot::Unreadable,
-        ]));
+        s.pipeline.recent = Some(std::sync::Arc::new(Default::default()));
         s.connection = Some(State::Retry(Error::Unauthorized));
         let v = present(&s, false);
         assert_eq!(v.health, 3);

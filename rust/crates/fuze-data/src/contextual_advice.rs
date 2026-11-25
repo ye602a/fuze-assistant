@@ -274,8 +274,8 @@ fn edge(i: usize, j: usize, order: Ordering, basis: Basis) -> Edge {
     }
 }
 
-fn cycle(edges: &[Edge]) -> bool {
-    let mut remaining = vec![0, 1, 2];
+fn cycle(edges: &[Edge], count: usize) -> bool {
+    let mut remaining: Vec<_> = (0..count).collect();
     while !remaining.is_empty() {
         let next = remaining.iter().copied().find(|i| {
             !edges
@@ -301,9 +301,9 @@ fn specificity(basis: &Basis) -> (u8, usize) {
 /// A preferred choice must directly beat BOTH alternatives; different prerequisite
 /// groups cannot create that evidence transitively. Conflicts/cycles fall back to
 /// the unchanged source order, with no negative contextual recommendation.
-pub fn decide(cards: &[Candidate; 3]) -> [Decision; 3] {
-    let groups: [CombinationGroups; 3] = std::array::from_fn(|i| combination_groups(&cards[i]));
-    let mut out: [Decision; 3] = std::array::from_fn(|i| {
+pub fn decide<const N: usize>(cards: &[Candidate; N]) -> [Decision; N] {
+    let groups: [CombinationGroups; N] = std::array::from_fn(|i| combination_groups(&cards[i]));
+    let mut out: [Decision; N] = std::array::from_fn(|i| {
         let c = &cards[i];
         let reported = c
             .stages
@@ -351,12 +351,12 @@ pub fn decide(cards: &[Candidate; 3]) -> [Decision; 3] {
         }
     });
     let complete = cards.iter().all(|c| candidate_id(c).is_some())
-        && (0..3).all(|i| (i + 1..3).all(|j| cards[i].id != cards[j].id));
+        && (0..N).all(|i| (i + 1..N).all(|j| cards[i].id != cards[j].id));
     let mut edges = Vec::new();
     let mut source_edges = Vec::new();
     let mut conflict = false;
-    for i in 0..3 {
-        for j in i + 1..3 {
+    for i in 0..N {
+        for j in i + 1..N {
             if candidate_id(&cards[i]).is_none()
                 || candidate_id(&cards[j]).is_none()
                 || cards[i].id == cards[j].id
@@ -387,12 +387,12 @@ pub fn decide(cards: &[Candidate; 3]) -> [Decision; 3] {
             }
         }
     }
-    conflict |= cycle(&edges);
+    conflict |= cycle(&edges, N);
     if conflict {
         edges = source_edges;
     }
-    let winner = (0..3).find(|i| {
-        complete && (0..3).all(|j| j == *i || edges.iter().any(|e| e.winner == *i && e.loser == j))
+    let winner = (0..N).find(|i| {
+        complete && (0..N).all(|j| j == *i || edges.iter().any(|e| e.winner == *i && e.loser == j))
     });
     if let Some(winner) = winner {
         let explaining = edges
@@ -434,15 +434,15 @@ pub fn decide(cards: &[Candidate; 3]) -> [Decision; 3] {
             out[e.loser].reason = reason;
         }
         if conflict {
-            for i in 0..3 {
+            for i in 0..N {
                 out[i].reason = Reason::ConflictingEvidence;
             }
         }
     } else {
-        // Without three valid source scores, absence of an edge is missing evidence,
+        // Without valid source scores for the whole offer, absence of an edge is missing evidence,
         // not an assertion that two reported rates or source ranks are equivalent.
         let source_tie = complete && cards.iter().all(|c| source_score(c).is_some());
-        for i in 0..3 {
+        for i in 0..N {
             if candidate_id(&cards[i]).is_some() && out[i].choice == Choice::Optional {
                 out[i].reason = if !complete {
                     Reason::PartialOffer
@@ -462,6 +462,26 @@ pub fn decide(cards: &[Candidate; 3]) -> [Decision; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compares_all_four_cards_and_withholds_the_group_winner_when_a_slot_is_missing() {
+        let [first, second, third] = cards();
+        let fourth = Candidate {
+            id: Some(4),
+            score: Some(0.99),
+            ..Candidate::default()
+        };
+        let mut offer = [first, second, third, fourth];
+        let result = decide(&offer);
+        assert_eq!(result[3].choice, Choice::Preferred);
+        assert_eq!(result[3].candidate_id, Some(4));
+        offer[1] = Candidate::default();
+        let result = decide(&offer);
+        assert_eq!(result[1].candidate_id, None);
+        assert_eq!(result[3].candidate_id, Some(4));
+        assert!(result
+            .iter()
+            .all(|decision| decision.choice != Choice::Preferred));
+    }
 
     fn rate(value: f64, games: u64) -> Rate {
         Rate {

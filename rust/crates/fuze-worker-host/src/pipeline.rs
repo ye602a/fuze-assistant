@@ -21,7 +21,7 @@ pub struct Pipeline {
     diagnostic_level: Option<u8>,
     diagnostic_ocr: Option<serde_json::Value>,
     diagnostic_active: bool,
-    pub title_reads: [fuze_contract::wire::TitleRead; 3],
+    pub title_reads: fuze_contract::CardSlots<fuze_contract::wire::TitleRead>,
     pub frames: crate::overlay_frame::Publisher,
     tiers: std::collections::HashMap<u32, u64>,
     pub(crate) art: Option<crate::overlay_art::Art>,
@@ -54,7 +54,7 @@ pub struct Delivery {
 fn finish_session(
     session: &mut Session,
     ticket: Ticket,
-    slots: [fuze_contract::Slot; 3],
+    slots: fuze_contract::CardSlots<fuze_contract::Slot>,
     selection: Selection,
     now: u64,
 ) -> Result<Option<Snapshot>> {
@@ -401,6 +401,10 @@ impl Pipeline {
             self.session.fail(ticket, self.now());
             return Err("worker-result");
         };
+        if slots.layout() != atlas.layout || title_reads.layout() != atlas.layout {
+            self.session.fail(ticket, self.now());
+            return Err("worker-layout");
+        }
         let accepted = self.screen_gate.accept_titles(&slots, title_kind);
         if self.diagnostic_active {
             self.diagnostic_ocr = Some(serde_json::json!({
@@ -409,7 +413,7 @@ impl Pipeline {
             }));
         }
         if !accepted {
-            slots = std::array::from_fn(|_| fuze_contract::Slot::Unreadable);
+            slots.fill(fuze_contract::Slot::Unreadable);
             title_kind = TitleKind::Unknown;
         }
         let selection = match title_kind {
@@ -525,15 +529,18 @@ impl Pipeline {
         self.diagnostic_ocr = None;
         let mut diagnostic_sample = None;
         let captured = crate::augment_picks::Recorder::timestamp();
-        let result = (|| match capture.next(Duration::from_millis(100)).map_err(|e| {
-            if e.to_string() == "capture-bitmap" {
-                "capture-bitmap"
-            } else {
-                "capture-frame"
-            }
-        })? {
+        let result = (|| match capture
+            .next(Duration::from_millis(100), self.screen_gate.active_layout())
+            .map_err(|e| {
+                if e.to_string() == "capture-bitmap" {
+                    "capture-bitmap"
+                } else {
+                    "capture-frame"
+                }
+            })? {
             FrameStatus::Ready => {
-                if diagnostic_due && self.diagnostics.visible() {
+                let atlas = capture.titles().map_err(|_| "capture-atlas")?;
+                if diagnostic_due && self.diagnostics.visible(atlas.layout) {
                     diagnostic_sample = Some(crate::recognition_log::Sample::frame(
                         &*capture,
                         self.diagnostic_metadata("frame-ready", &*capture),
@@ -549,27 +556,33 @@ impl Pipeline {
                     epoch: capture.key().0,
                     sequence: capture.key().1,
                 };
+                if self.screen_gate.set_layout(atlas.layout) {
+                    self.picks.cancel();
+                    self.clear_selection()?;
+                }
                 let evidence = capture.selection();
-                let pick_evidence = if evidence
+                let black_absence = evidence
                     == Some(fuze_contract::selection_pixels::Evidence::Absent)
-                    && !capture.titles().is_ok_and(|a| {
-                        a.bytes()
-                            .chunks_exact(4)
-                            .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
-                    }) {
-                    None // A black readback is not visual confirmation that a choice completed.
+                    && !atlas.has_lit_pixel();
+                self.picks
+                    .frame(if black_absence { None } else { evidence }, captured);
+                // A black readback is also insufficient to end the level's selection window.
+                let evidence = if black_absence {
+                    Some(fuze_contract::selection_pixels::Evidence::Uncertain)
                 } else {
                     evidence
                 };
-                self.picks.frame(pick_evidence, captured);
+                let now = self.now();
+                let screen = evidence.map(|e| (e, self.screen_gate.observe(e, now)));
+                if screen.as_ref().is_some_and(|(_, decision)| decision.closed) {
+                    self.clear_selection()?;
+                }
                 if !recognition_due {
                     // Pending-click confirmation only: no OCR, level-gate input or new offers.
                     self.capture_state = "waiting-selection";
                     return Ok(None);
                 }
-                if let Some(evidence) = evidence {
-                    let now = self.now();
-                    let decision = self.screen_gate.observe(evidence, now);
+                if let Some((evidence, decision)) = screen {
                     if !decision.recognize {
                         if let Some(sample) = &mut diagnostic_sample {
                             sample.metadata["stage"] = serde_json::json!("pixel-gate");
@@ -581,17 +594,10 @@ impl Pipeline {
                                 && evidence == fuze_contract::selection_pixels::Evidence::Absent,
                             now,
                         );
-                        if decision.closed {
-                            self.retention = Default::default();
-                            self.screen_gate = Default::default();
-                            self.frames.end_selection();
-                            self.overlay.visible(false)?;
-                        }
                         self.capture_state = "waiting-selection";
                         return Ok(None);
                     }
                 }
-                let atlas = capture.titles().map_err(|_| "capture-atlas")?;
                 if let Some(sample) = &mut diagnostic_sample {
                     sample.metadata["stage"] = serde_json::json!("ocr");
                 }
@@ -657,7 +663,11 @@ impl Pipeline {
                 Ok(None)
             }
         })();
-        if diagnostic_due && self.diagnostics.visible() {
+        if diagnostic_due
+            && self
+                .diagnostics
+                .visible(capture.titles().map_or(Default::default(), |a| a.layout))
+        {
             let mut sample = diagnostic_sample.unwrap_or_else(|| {
                 crate::recognition_log::Sample::without_image(
                     self.diagnostic_metadata("capture-no-frame", &*capture),
@@ -697,6 +707,11 @@ impl Pipeline {
         // A timeout still expires normally, without waiting for another captured frame.
         self.expire_retained()?;
         result
+    }
+    fn clear_selection(&mut self) -> Result<()> {
+        self.retention = Default::default();
+        self.frames.end_selection();
+        self.overlay.visible(false).map(|_| ())
     }
     fn expire_retained(&mut self) -> Result<()> {
         if self.retention.expire(self.now()) {
@@ -747,7 +762,7 @@ mod tests {
             let result = finish_session(
                 &mut session,
                 ticket,
-                std::array::from_fn(|_| fuze_contract::Slot::Unreadable),
+                Default::default(),
                 Selection::Unknown,
                 at + 3000,
             );

@@ -1,7 +1,16 @@
 //! Device-local OCR candidates. Verified account bindings use a digest; no identity strings or claims.
 use crate::Result;
+use fuze_contract::{CardSlots, Slot};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+pub(crate) const FILE_NAME: &str = "observations-v3.json";
+const FILE_VERSIONS: &[&str] = &[FILE_NAME, "observations-v2.json", "observations.json"];
+
+pub(crate) fn source_path(path: &Path) -> PathBuf {
+    crate::storage::versioned_source(path, FILE_VERSIONS)
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
@@ -48,7 +57,7 @@ pub struct Segment {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<fuze_lcu::history::ObservedCards>,
     pub champion: u32,
-    pub observations: Vec<[Option<u32>; 3]>,
+    pub observations: Vec<CardSlots<Option<u32>>>,
     pub capped: bool,
 }
 fn interrupted_default() -> bool {
@@ -63,7 +72,7 @@ struct Saved {
 pub struct Row {
     pub champion: u32,
     pub count: usize,
-    pub last: [Option<u32>; 3],
+    pub last: CardSlots<Option<u32>>,
     pub capped: bool,
 }
 /// No binding, account digest or match identifier crosses into the unbound UI.
@@ -71,7 +80,7 @@ pub struct Row {
 pub struct Unbound {
     pub champion: u32,
     pub events: Vec<fuze_lcu::history::ObservedCards>,
-    pub legacy: Vec<[Option<u32>; 3]>,
+    pub legacy: Vec<CardSlots<Option<u32>>>,
     pub capped: bool,
     pub interrupted: bool,
 }
@@ -130,23 +139,14 @@ impl Journal {
         self.level = level;
     }
     pub fn open(path: PathBuf) -> Self {
-        let legacy = path.with_file_name("observations.json");
-        let source = if !path.exists()
-            && path
-                .file_name()
-                .is_some_and(|n| n == "observations-v2.json")
-            && legacy.exists()
-        {
-            &legacy
-        } else {
-            &path
-        };
+        // Four-card rows are incompatible with the previous binary's strict arrays.
+        let source = source_path(&path);
         let read = || -> Result<Saved> {
             if !source.exists() {
                 return Ok(Saved::default());
             }
             let data: Saved =
-                serde_json::from_slice(&crate::update_channel::bounded(source, 2 * 1024 * 1024)?)
+                serde_json::from_slice(&crate::update_channel::bounded(&source, 2 * 1024 * 1024)?)
                     .map_err(|_| "records-invalid")?;
             if data.segments.len() > 100
                 || data.segments.iter().any(|s| {
@@ -201,12 +201,12 @@ impl Journal {
             },
         }
     }
-    pub fn observe(&mut self, champion: u32, slots: &[fuze_contract::Slot; 3]) {
+    pub fn observe(&mut self, champion: u32, slots: &CardSlots<Slot>) {
         if self.path.is_none() || champion == 0 {
             return;
         }
-        let cards = std::array::from_fn(|i| match slots[i] {
-            fuze_contract::Slot::Known { id, .. } if id > 0 => Some(id),
+        let cards = slots.each_ref().map(|slot| match slot {
+            Slot::Known { id, .. } if *id > 0 => Some(*id),
             _ => None,
         });
         if cards.iter().all(Option::is_none) {
@@ -294,7 +294,7 @@ impl Journal {
             .map(|s| Row {
                 champion: s.champion,
                 count: s.observations.len(),
-                last: s.observations.last().copied().unwrap_or([None; 3]),
+                last: s.observations.last().copied().unwrap_or_default(),
                 capped: s.capped,
             })
             .collect()
@@ -419,6 +419,38 @@ impl Drop for Journal {
 mod tests {
     use super::*;
     #[test]
+    fn four_slot_journal_keeps_the_previous_files_readable_on_rollback() {
+        let root = std::env::temp_dir().join(format!("fuze-four-journal-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old = root.join("observations-v2.json");
+        let current = root.join(FILE_NAME);
+        let known = |id| Slot::Known {
+            id,
+            name: "fixture".into(),
+            confidence: 1.0,
+        };
+
+        let mut journal = Journal::open(old.clone());
+        journal.observe(1, &[known(1), Slot::Unreadable, known(3)].into());
+        drop(journal);
+        let before = std::fs::read(&old).unwrap();
+
+        let mut journal = Journal::open(current.clone());
+        assert_eq!(journal.recent()[0].last, [Some(1), None, Some(3)].into());
+        journal.observe(1, &[known(1), Slot::Unreadable, known(3), known(4)].into());
+        drop(journal);
+        assert_eq!(std::fs::read(&old).unwrap(), before);
+        assert_eq!(
+            Journal::open(current.clone()).recent()[0].last,
+            [Some(1), None, Some(3), Some(4)].into(),
+        );
+        assert_eq!(Journal::open(old.clone()).recent()[0].last.len(), 3);
+        std::fs::remove_file(current).unwrap();
+        std::fs::remove_file(old).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
     fn verified_binding_isolated_reappearance_preserved_and_unknown_never_attached() {
         let root = std::env::temp_dir().join(format!("fuze-bound-records-{}", std::process::id()));
         let path = root.join("observations.json");
@@ -439,12 +471,12 @@ mod tests {
         ];
         let mut journal = Journal::open(path.clone());
         journal.bind(Some(binding.clone()));
-        journal.observe(1, &slots);
-        journal.observe(1, &slots);
+        journal.observe(1, &slots.clone().into());
+        journal.observe(1, &slots.clone().into());
         journal.visibility(false, Some(11));
-        journal.observe(1, &slots);
+        journal.observe(1, &slots.clone().into());
         journal.bind(None);
-        journal.observe(1, &slots);
+        journal.observe(1, &slots.clone().into());
         journal.finish();
         drop(journal);
         let rows = bound_observations(&path, &binding.key, "HN1").unwrap();
@@ -475,12 +507,15 @@ mod tests {
             confidence: 0.9,
         };
         for _ in 0..20 {
-            j.observe(1, &[known(2), fuze_contract::Slot::Unreadable, known(3)]);
+            j.observe(
+                1,
+                &[known(2), fuze_contract::Slot::Unreadable, known(3)].into(),
+            );
         }
-        assert_eq!(j.recent()[0].last, [Some(2), None, Some(3)]);
+        assert_eq!(j.recent()[0].last, [Some(2), None, Some(3)].into());
         assert_eq!(j.recent()[0].count, 1);
         for id in 4..100 {
-            j.observe(1, &[known(id), known(2), known(3)]);
+            j.observe(1, &[known(id), known(2), known(3)].into());
         }
         assert!(j.recent()[0].capped);
         assert_eq!(j.recent()[0].count, 80);
@@ -503,7 +538,7 @@ mod tests {
         drop(j);
         std::fs::write(&path, b"invalid").unwrap();
         let mut j = Journal::open(path.clone());
-        j.observe(1, &[known(1), known(2), known(3)]);
+        j.observe(1, &[known(1), known(2), known(3)].into());
         j.finish();
         assert!(j.error.is_some());
         assert_eq!(std::fs::read(&path).unwrap(), b"invalid");

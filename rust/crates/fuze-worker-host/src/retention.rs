@@ -1,16 +1,16 @@
 //! Display-only grace period. Observations and scheduling always use the fresh result.
-use fuze_contract::{wire::TitleKind, Slot};
+use fuze_contract::{wire::TitleKind, CardSlots, Slot};
 const GRACE_MS: u64 = 2500;
 #[derive(Default)]
 pub struct Retention {
-    previous: Option<[Slot; 3]>,
+    previous: Option<CardSlots<Slot>>,
     grace_until: Option<u64>,
     // Separate loss-of-capture deadline from the missing-slot grace period. Fresh
     // matching cards keep the window alive while missing slots downgrade in place.
     until: Option<u64>,
 }
 pub struct Display {
-    pub slots: [Slot; 3],
+    pub slots: CardSlots<Slot>,
     pub retained: bool,
     pub visible: bool,
 }
@@ -26,24 +26,28 @@ impl Retention {
             false
         }
     }
-    pub fn apply(&mut self, slots: &[Slot; 3], kind: TitleKind, now: u64) -> Display {
+    pub fn apply(&mut self, slots: &CardSlots<Slot>, kind: TitleKind, now: u64) -> Display {
         self.expire(now);
         let known = slots.iter().any(|s| matches!(s, Slot::Known { .. }));
         if kind == TitleKind::StatShard {
             *self = Self::default();
             return Display {
-                slots: std::array::from_fn(|_| Slot::Unreadable),
+                slots: CardSlots::from_fn(slots.layout(), |_| Slot::Unreadable),
                 retained: false,
                 visible: false,
             };
         }
         // Never combine cards from different frames or carry results over a changed known title.
         let subset = self.previous.as_ref().is_some_and(|old| {
-            slots.iter().zip(old).all(|(new, old)| match (new, old) {
-                (Slot::Unreadable, _) => true,
-                (Slot::Known { id: a, .. }, Slot::Known { id: b, .. }) => a == b,
-                _ => false,
-            })
+            slots.layout() == old.layout()
+                && slots
+                    .iter()
+                    .zip(old.iter())
+                    .all(|(new, old)| match (new, old) {
+                        (Slot::Unreadable, _) => true,
+                        (Slot::Known { id: a, .. }, Slot::Known { id: b, .. }) => a == b,
+                        _ => false,
+                    })
         }) && slots
             .iter()
             .filter(|s| matches!(s, Slot::Known { .. }))
@@ -83,7 +87,7 @@ impl Retention {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn cards(ids: [u32; 3]) -> [Slot; 3] {
+    fn cards(ids: [u32; 3]) -> CardSlots<Slot> {
         ids.map(|id| {
             if id == 0 {
                 Slot::Unreadable
@@ -95,6 +99,7 @@ mod tests {
                 }
             }
         })
+        .into()
     }
     #[test]
     fn animation_retention_expires_without_mixing_or_counting_as_claims() {

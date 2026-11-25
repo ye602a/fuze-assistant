@@ -278,7 +278,7 @@ fn engine(
                 events: (0..8)
                     .map(|_| fuze_lcu::history::ObservedCards {
                         observed_at: None,
-                        cards: [Some(1), None, Some(3)],
+                        cards: [Some(1), None, Some(3)].into(),
                         level: Some(11),
                         partial: true,
                         kind: "changed".into(),

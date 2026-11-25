@@ -266,7 +266,7 @@ impl Session {
     pub fn finish(
         &mut self,
         ticket: Ticket,
-        slots: [Slot; 3],
+        slots: fuze_contract::CardSlots<Slot>,
         selection: Selection,
         now: u64,
     ) -> Option<Snapshot> {
@@ -408,8 +408,8 @@ mod tests {
         s.pause(true).unwrap();
         assert_eq!(s.wake_at(4000), None);
     }
-    fn blank() -> [Slot; 3] {
-        [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable]
+    fn blank() -> fuze_contract::CardSlots<Slot> {
+        Default::default()
     }
     fn key(sequence: u64) -> FrameKey {
         FrameKey { epoch: 1, sequence }

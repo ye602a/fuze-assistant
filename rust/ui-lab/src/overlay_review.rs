@@ -33,7 +33,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
         dataset_version: prepared.identity(),
         selection_confirmed: false,
         actual_stage: ActualStage::Unknown,
-        slots: [known(0), Slot::Unreadable, known(2)],
+        slots: [known(0), Slot::Unreadable, known(2)].into(),
     };
     let mut publisher = Publisher::new(
         cards.clone(),
@@ -118,7 +118,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
         return Err("phase-panel-transition".into());
     }
     let overlay = manager.cards.as_mut().ok_or("cards-window-missing")?;
-    if overlay.ids() != [Some(cards[0].id), None, Some(cards[2].id)] || !overlay.hidden() {
+    if overlay.ids() != [Some(cards[0].id), None, Some(cards[2].id)].into() || !overlay.hidden() {
         return Err("partial-slot-or-hidden-invariant".into());
     }
     overlay.render(&output.join("host-live-cards-partial.png"))?;
@@ -153,7 +153,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
         return Err("stale-result-accepted".into());
     }
     overlay.update(None, false)?;
-    if overlay.ids() != [None; 3] || !overlay.hidden() {
+    if overlay.ids() != [None; 3].into() || !overlay.hidden() {
         return Err("clear-not-hidden".into());
     }
     // A preference toggle can re-use the exact last frame without weakening sequence rejection.
@@ -168,7 +168,7 @@ pub fn run(data: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>>
     overlay.render(&output.join("host-live-cards-retained.png"))?;
     status.connection = Some(fuze_lcu::reconnect::State::Connected(Phase::ClientReady));
     manager.update(&status)?;
-    if manager.cards.as_ref().unwrap().ids() != [None; 3]
+    if manager.cards.as_ref().unwrap().ids() != [None; 3].into()
         || manager.side.as_ref().unwrap().ui.get_augments().row_count() != 0
     {
         return Err("phase-exit-stale-content".into());

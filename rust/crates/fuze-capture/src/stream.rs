@@ -186,7 +186,11 @@ impl OwnedWindowStream {
             _apartment: apartment,
         })
     }
-    pub fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
+    pub fn next(
+        &mut self,
+        timeout: Duration,
+        active_layout: fuze_contract::Layout,
+    ) -> Result<FrameStatus> {
         self.ready = false;
         if let Some(target) = &self.target {
             if !target.valid() {
@@ -227,7 +231,6 @@ impl OwnedWindowStream {
             frame = Frame(newer);
         }
         let size = frame.0.ContentSize()?;
-        let rects = regions(size.Width as u32, size.Height as u32)?;
         if size != self.size {
             drop(frame); // No old frame may remain checked out during Recreate.
             self.capture.pool.Recreate(
@@ -251,10 +254,11 @@ impl OwnedWindowStream {
         }
         let access: IDirect3DDxgiInterfaceAccess = frame.0.Surface()?.cast()?;
         let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
-        if let Err(error) =
-            self.reader
-                .read(&texture, &rects, (size.Width as u32, size.Height as u32))
-        {
+        if let Err(error) = self.reader.read(
+            &texture,
+            (size.Width as u32, size.Height as u32),
+            active_layout,
+        ) {
             if error.is::<ReadbackBusy>() {
                 self.last_timestamp = Some(stamp);
                 return Ok(FrameStatus::Busy);
@@ -273,21 +277,20 @@ impl OwnedWindowStream {
         if !self.ready {
             return Err("no-current-frame".into());
         }
-        let rects = regions(self.size.Width as u32, self.size.Height as u32)?;
-        Ok(Atlas::new(
-            &self.reader.bytes,
-            rects[0].width,
-            rects[0].height,
-        )?)
+        self.reader.frame.titles()
     }
 }
 
 impl CaptureFeed for OwnedWindowStream {
     fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
-        self.reader.evidence
+        self.reader.frame.evidence
     }
-    fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
-        Self::next(self, timeout)
+    fn next(
+        &mut self,
+        timeout: Duration,
+        active_layout: fuze_contract::Layout,
+    ) -> Result<FrameStatus> {
+        Self::next(self, timeout, active_layout)
     }
     fn titles(&self) -> Result<Atlas<'_>> {
         Self::titles(self)

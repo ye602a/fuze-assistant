@@ -39,7 +39,7 @@ impl Review {
                 events: (0..80)
                     .map(|i| fuze_lcu::history::ObservedCards {
                         observed_at: Some(1709164800000 + i * 1000),
-                        cards: [Some(3051), None, Some(1004)],
+                        cards: [Some(3051), None, Some(1004)].into(),
                         level: Some(6),
                         partial: true,
                         kind: if i == 0 {
@@ -58,7 +58,7 @@ impl Review {
                 capped: false,
                 interrupted: true,
                 events: vec![],
-                legacy: vec![[Some(99999), None, Some(1004)]],
+                legacy: vec![[Some(99999), None, Some(1004)].into()],
             },
         ]));
         Ok(Self {

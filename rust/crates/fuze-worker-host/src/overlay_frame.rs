@@ -73,7 +73,8 @@ mod tests {
                     },
                     Slot::Unreadable,
                     Slot::Unreadable,
-                ],
+                ]
+                .into(),
             },
             true,
             true,
@@ -93,7 +94,7 @@ mod tests {
         assert_eq!(after.deadline, deadline);
         assert!(after.retained);
         assert_eq!(after.cards[0].as_ref().unwrap().win, Some(0.56));
-        assert_eq!(after.scores, [Some(0.8), None, None]);
+        assert_eq!(after.scores, [Some(0.8), None, None].into());
         assert_eq!(after.context, before.context);
         assert_eq!(after.selection_cycle, before.selection_cycle);
         assert!(Arc::ptr_eq(before.history.as_ref().unwrap(), &old_history));
@@ -141,7 +142,7 @@ mod tests {
             actual_stage: ActualStage::Unknown,
             slots,
         };
-        let display = retention.apply(&skills, TitleKind::SkillChoice, 0);
+        let display = retention.apply(&skills.into(), TitleKind::SkillChoice, 0);
         publisher.publish(
             snapshot(display.slots, 1),
             display.visible,
@@ -160,7 +161,7 @@ mod tests {
             confidence: 1.,
         };
         let cards = [regular(3051), regular(3060), Slot::Unreadable];
-        let display = retention.apply(&cards, TitleKind::Candidate, 250);
+        let display = retention.apply(&cards.clone().into(), TitleKind::Candidate, 250);
         assert!(!display.retained);
         publisher.publish(snapshot(display.slots, 2), display.visible, false, None);
         let frame = publisher.current().unwrap();
@@ -168,7 +169,7 @@ mod tests {
         assert!(frame.cards[2].is_none());
         // COMMAND LINE upgrade replaces the old card/rarity in the same slot immediately.
         let rerolled = [regular(3060), regular(3051), Slot::Unreadable];
-        let display = retention.apply(&rerolled, TitleKind::Candidate, 500);
+        let display = retention.apply(&rerolled.into(), TitleKind::Candidate, 500);
         assert!(!display.retained);
         publisher.publish(snapshot(display.slots, 3), display.visible, false, None);
         let frame = publisher.current().unwrap();
@@ -185,8 +186,8 @@ pub struct Frame {
     pub snapshot: Snapshot,
     pub retained: bool,
     pub deadline: Option<Instant>,
-    pub cards: [Option<Arc<Augment>>; 3],
-    pub scores: [Option<f64>; 3],
+    pub cards: fuze_contract::CardSlots<Option<Arc<Augment>>>,
+    pub scores: fuze_contract::CardSlots<Option<f64>>,
     pub history: Option<Arc<HistoryContext>>,
 }
 pub struct Publisher {

@@ -1,7 +1,7 @@
 //! v0.6.3 screen-first policy: persistent stream, bitmap fallback, 60s recovery cooldown.
 //! Lazy start: constructing this object never captures. The host gates it to an active match.
 use crate::native::{CaptureFeed, DesktopStream, FrameStatus, Result};
-use fuze_contract::titles::Atlas;
+use fuze_contract::{titles::Atlas, Layout};
 use std::time::{Duration, Instant};
 #[path = "screen_bitmap.rs"]
 mod bitmap;
@@ -9,8 +9,8 @@ mod bitmap;
 pub trait ScreenDriver {
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self);
-    fn stream(&mut self, timeout: Duration) -> Result<FrameStatus>;
-    fn bitmap(&mut self) -> Result<()>;
+    fn stream(&mut self, timeout: Duration, active_layout: Layout) -> Result<FrameStatus>;
+    fn bitmap(&mut self, active_layout: Layout) -> Result<()>;
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>>;
     fn diagnostic_pixels(&self, _bitmap: bool) -> Option<crate::native::DiagnosticPixels<'_>> {
         None
@@ -37,7 +37,7 @@ impl ScreenDriver for NativeScreen {
     }
     fn selection(&self, bitmap: bool) -> Option<fuze_contract::selection_pixels::Evidence> {
         if bitmap {
-            self.bitmap.evidence
+            self.bitmap.frame.evidence
         } else {
             self.stream.as_ref().and_then(DesktopStream::selection)
         }
@@ -49,11 +49,14 @@ impl ScreenDriver for NativeScreen {
     fn stop(&mut self) {
         self.stream = None;
     }
-    fn stream(&mut self, timeout: Duration) -> Result<FrameStatus> {
-        self.stream.as_mut().ok_or("capture-missing")?.next(timeout)
+    fn stream(&mut self, timeout: Duration, active_layout: Layout) -> Result<FrameStatus> {
+        self.stream
+            .as_mut()
+            .ok_or("capture-missing")?
+            .next(timeout, active_layout)
     }
-    fn bitmap(&mut self) -> Result<()> {
-        self.bitmap.read()
+    fn bitmap(&mut self, active_layout: Layout) -> Result<()> {
+        self.bitmap.read(active_layout)
     }
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>> {
         if bitmap {
@@ -131,10 +134,17 @@ impl<D: ScreenDriver> ScreenCapture<D> {
         self.ready = true;
         Ok(FrameStatus::Ready)
     }
-    fn next_at(&mut self, now: u64, timeout: Duration) -> Result<FrameStatus> {
+    fn next_at(
+        &mut self,
+        now: u64,
+        timeout: Duration,
+        active_layout: Layout,
+    ) -> Result<FrameStatus> {
         self.ready = false;
         if self.saving {
-            self.driver.bitmap().map_err(|_| "capture-bitmap")?;
+            self.driver
+                .bitmap(active_layout)
+                .map_err(|_| "capture-bitmap")?;
             self.bitmap = true;
             return self.accept();
         }
@@ -154,13 +164,9 @@ impl<D: ScreenDriver> ScreenCapture<D> {
             }
         }
         if self.running {
-            match self.driver.stream(timeout) {
+            match self.driver.stream(timeout, active_layout) {
                 Ok(FrameStatus::Ready) => {
-                    let usable = self.driver.titles(false).map(|a| {
-                        a.bytes()
-                            .chunks_exact(4)
-                            .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
-                    });
+                    let usable = self.driver.titles(false).map(|a| a.has_lit_pixel());
                     if matches!(usable, Ok(true)) {
                         self.bitmap = false;
                         self.reason = None;
@@ -173,17 +179,13 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                     match usable {
                         Err(error) => self.failed_error(now, "screen-title-read", &*error),
                         Ok(false) => {
-                            // This tests three title ROIs, not the full screen. A dark game
+                            // This tests title ROIs, not the full screen. A dark game
                             // scene is not evidence of a broken DXGI stream: compare GDI first.
                             let bitmap_lit = self
                                 .driver
-                                .bitmap()
+                                .bitmap(active_layout)
                                 .and_then(|_| self.driver.titles(true))
-                                .map(|a| {
-                                    a.bytes().chunks_exact(4).any(|p| {
-                                        u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24
-                                    })
-                                });
+                                .map(|a| a.has_lit_pixel());
                             if matches!(bitmap_lit, Ok(false)) {
                                 self.bitmap = false;
                                 self.reason = None;
@@ -195,7 +197,7 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                             }
                             self.failed(now, "screen-black-frame");
                             self.failure_details = Some(serde_json::json!({
-                                "scope": "three-title-regions", "dxgiHasLitPixel": false,
+                                "scope": "title-regions", "dxgiHasLitPixel": false,
                                 "bitmapHasLitPixel": bitmap_lit.as_ref().ok(),
                                 "bitmapError": bitmap_lit.as_ref().err().map(|e| crate::native::failure_details(&**e)),
                             }));
@@ -236,7 +238,9 @@ impl<D: ScreenDriver> ScreenCapture<D> {
                 Err(error) => self.failed_error(now, "screen-frame", &*error),
             }
         }
-        self.driver.bitmap().map_err(|_| "capture-bitmap")?;
+        self.driver
+            .bitmap(active_layout)
+            .map_err(|_| "capture-bitmap")?;
         self.bitmap = true;
         self.accept()
     }
@@ -264,10 +268,14 @@ impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
         // Resume immediately unless an actual capture failure already imposed a cooldown.
         // Saving itself is not a failure and must not delay the first selection.
     }
-    fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
+    fn next(&mut self, timeout: Duration, active_layout: Layout) -> Result<FrameStatus> {
         // Physical monitor coordinates, including a DPI-unaware embedding caller.
         let _dpi = bitmap::PhysicalPixels::new();
-        self.next_at(self.epoch.elapsed().as_millis() as u64, timeout)
+        self.next_at(
+            self.epoch.elapsed().as_millis() as u64,
+            timeout,
+            active_layout,
+        )
     }
     fn titles(&self) -> Result<Atlas<'_>> {
         if !self.ready {
@@ -325,10 +333,10 @@ mod tests {
             }
         }
         fn stop(&mut self) {}
-        fn stream(&mut self, _: Duration) -> Result<FrameStatus> {
+        fn stream(&mut self, _: Duration, _: Layout) -> Result<FrameStatus> {
             Ok(self.frame)
         }
-        fn bitmap(&mut self) -> Result<()> {
+        fn bitmap(&mut self, _: Layout) -> Result<()> {
             self.bitmaps += 1;
             Ok(())
         }
@@ -366,19 +374,19 @@ mod tests {
     fn level_one_saving_releases_stream_and_resume_has_no_artificial_cooldown() {
         let mut c = capture();
         c.saving(true);
-        c.next_at(0, Duration::ZERO).unwrap();
-        c.next_at(8000, Duration::ZERO).unwrap();
+        c.next_at(0, Duration::ZERO, Layout::Three).unwrap();
+        c.next_at(8000, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.driver.starts, 0);
         assert_eq!(c.driver.bitmaps, 2);
         c.saving(false);
-        c.next_at(8250, Duration::ZERO).unwrap();
+        c.next_at(8250, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-stream");
         c.saving(true);
         assert!(!c.running);
-        c.next_at(9000, Duration::ZERO).unwrap();
+        c.next_at(9000, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.driver.starts, 1);
         c.saving(false);
-        c.next_at(9250, Duration::ZERO).unwrap();
+        c.next_at(9250, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-stream");
         assert_eq!(c.driver.starts, 2);
         assert_eq!(c.fallback(), None);
@@ -387,12 +395,15 @@ mod tests {
     fn startup_failure_falls_back_immediately_and_recovers_after_cooldown() {
         let mut c = capture();
         c.driver.start_fail = true;
-        assert_eq!(c.next_at(0, Duration::ZERO).unwrap(), FrameStatus::Ready);
+        assert_eq!(
+            c.next_at(0, Duration::ZERO, Layout::Three).unwrap(),
+            FrameStatus::Ready
+        );
         assert_eq!(c.source(), "screen-bitmap");
-        c.next_at(59_999, Duration::ZERO).unwrap();
+        c.next_at(59_999, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.driver.starts, 1);
         c.driver.start_fail = false;
-        c.next_at(60_000, Duration::ZERO).unwrap();
+        c.next_at(60_000, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-stream");
         assert_eq!(c.fallback(), None);
         assert_eq!(c.driver.starts, 2);
@@ -402,20 +413,23 @@ mod tests {
     fn startup_stall_black_frames_and_stalled_active_stream_do_not_wait_forever() {
         let mut c = capture();
         c.driver.frame = FrameStatus::Timeout;
-        assert_eq!(c.next_at(0, Duration::ZERO).unwrap(), FrameStatus::Timeout);
         assert_eq!(
-            c.next_at(2_000, Duration::ZERO).unwrap(),
+            c.next_at(0, Duration::ZERO, Layout::Three).unwrap(),
+            FrameStatus::Timeout
+        );
+        assert_eq!(
+            c.next_at(2_000, Duration::ZERO, Layout::Three).unwrap(),
             FrameStatus::Ready
         );
         assert_eq!(c.fallback(), Some("screen-timeout"));
         let mut c = capture();
         c.driver.black = true;
-        c.next_at(0, Duration::ZERO).unwrap();
+        c.next_at(0, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.fallback(), Some("screen-black-frame"));
         let mut c = capture();
-        c.next_at(0, Duration::ZERO).unwrap();
+        c.next_at(0, Duration::ZERO, Layout::Three).unwrap();
         c.driver.frame = FrameStatus::Timeout;
-        c.next_at(8_000, Duration::ZERO).unwrap();
+        c.next_at(8_000, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-bitmap");
     }
     #[test]
@@ -423,22 +437,22 @@ mod tests {
         let mut c = capture();
         c.driver.black = true;
         c.driver.bitmap_black = true;
-        c.next_at(0, Duration::ZERO).unwrap();
+        c.next_at(0, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-stream");
         assert_eq!(c.fallback(), None);
         c.driver.title_error = true;
-        c.next_at(1, Duration::ZERO).unwrap();
+        c.next_at(1, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.fallback(), Some("screen-title-read"));
         assert_eq!(
             c.fallback_details().unwrap()["operation"],
             "contract_validation"
         );
         c.saving(true);
-        c.next_at(2, Duration::ZERO).unwrap();
+        c.next_at(2, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.fallback(), None);
         assert_eq!(c.fallback_details(), None);
         c.saving(false);
-        c.next_at(3, Duration::ZERO).unwrap();
+        c.next_at(3, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.fallback(), Some("screen-title-read"));
         assert_eq!(c.driver.starts, 1); // real failure cooldown is retained
     }
@@ -446,16 +460,16 @@ mod tests {
     fn recovering_stream_keeps_bitmap_available_until_first_frame() {
         let mut c = capture();
         c.driver.start_fail = true;
-        c.next_at(0, Duration::ZERO).unwrap();
+        c.next_at(0, Duration::ZERO, Layout::Three).unwrap();
         c.driver.start_fail = false;
         c.driver.frame = FrameStatus::Timeout;
         assert_eq!(
-            c.next_at(60_000, Duration::ZERO).unwrap(),
+            c.next_at(60_000, Duration::ZERO, Layout::Three).unwrap(),
             FrameStatus::Ready
         );
         assert_eq!(c.source(), "screen-bitmap");
         c.driver.frame = FrameStatus::Ready;
-        c.next_at(60_500, Duration::ZERO).unwrap();
+        c.next_at(60_500, Duration::ZERO, Layout::Three).unwrap();
         assert_eq!(c.source(), "screen-stream");
     }
 }

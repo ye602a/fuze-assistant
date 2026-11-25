@@ -1,7 +1,10 @@
 //! Geometry and visual roles follow the existing AugmentFloatingOverlay.vue.
 use super::*;
 pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Snapshot>) {
-    let sx = width as f64 / 760.;
+    let empty = CardSlots::default();
+    let slots = snapshot.map(|s| &s.slots).unwrap_or(&empty);
+    let extra = (slots.len() as i32 - 3) * 248;
+    let sx = width as f64 / (760 + extra) as f64;
     let sy = height as f64 / 170.;
     let rect = |l: i32, t: i32, r: i32, b: i32| RECT {
         left: (l as f64 * sx) as i32,
@@ -25,7 +28,7 @@ pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Sn
     let gold = rgb(200, 170, 110);
     let pale = rgb(240, 230, 210);
     let dim = rgb(168, 182, 189);
-    fill(dc, rect(0, 0, 760, 170), rgb(5, 16, 25));
+    fill(dc, rect(0, 0, 760 + extra, 170), rgb(5, 16, 25));
     label_at("FUZE", 9, 6, 55, 27, 11, gold);
     label_at(
         t("海克斯推荐", "海克斯推薦", "Augments"),
@@ -52,7 +55,7 @@ pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Sn
         },
         175,
         6,
-        720,
+        720 + extra,
         27,
         11,
         gold,
@@ -60,18 +63,16 @@ pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Sn
     // Draw the close mark as geometry, independent of the installed font.
     let pen = CreatePen(PS_SOLID, 1, gold);
     let old = SelectObject(dc, pen);
-    let a = rect(738, 11, 747, 20);
+    let a = rect(738 + extra, 11, 747 + extra, 20);
     MoveToEx(dc, a.left, a.top, null_mut());
     LineTo(dc, a.right, a.bottom);
     MoveToEx(dc, a.right, a.top, null_mut());
     LineTo(dc, a.left, a.bottom);
     SelectObject(dc, old);
     DeleteObject(pen);
-    let empty = std::array::from_fn(|_| Slot::Unreadable);
-    let slots = snapshot.map(|s| &s.slots).unwrap_or(&empty);
-    let stats: [Option<fuze_data::recommendations::Recommendation>; 3] = STATS.with(|s| {
+    let stats = STATS.with(|s| {
         let map = s.borrow();
-        std::array::from_fn(|i| match &slots[i] {
+        slots.each_ref().map(|slot| match slot {
             Slot::Known { id, .. } => map.get(id).cloned(),
             _ => None,
         })
@@ -81,7 +82,10 @@ pub(super) unsafe fn draw(dc: HDC, width: i32, height: i32, snapshot: Option<&Sn
         .enumerate()
         .filter_map(|(i, s)| s.as_ref()?.score.filter(|s| s.is_finite()).map(|s| (i, s)))
         .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-        .map(|v| v.0);
+        .map(|v| v.0)
+        .filter(|_| {
+            slots.layout() == fuze_contract::Layout::Three || stats.iter().all(Option::is_some)
+        });
     for (i, slot) in slots.iter().enumerate() {
         let left = 8 + i as i32 * 248;
         let top = 36;

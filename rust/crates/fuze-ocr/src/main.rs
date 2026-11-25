@@ -116,7 +116,7 @@ fn run() -> Result<()> {
             #[cfg(windows)]
             let result = if let (Some(reader), Some(uploaded)) = (&mut readback, &uploaded) {
                 let started = Instant::now();
-                let atlas = reader.read(uploaded)?;
+                let atlas = reader.read(uploaded, fuze_contract::Layout::Three)?;
                 capture_ms.push(started.elapsed().as_secs_f64() * 1000.);
                 roi_bytes = atlas.title_width as usize * atlas.title_height as usize * 12;
                 PHASE.store(7, Ordering::Relaxed);

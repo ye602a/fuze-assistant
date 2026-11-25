@@ -1,8 +1,8 @@
 //! Private parent/worker pipe. Raw title pixels only; never base64 or encoded screenshots.
-use crate::{titles::Atlas, Slot};
+use crate::{titles::Atlas, CardSlots, Layout, Slot};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
-pub const MAX_PIXELS: usize = 1365 * 256 * 12;
+pub const MAX_PIXELS: usize = 4096 * 256 * 4;
 pub const MAX_REPLY: usize = 8192;
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid-worker-protocol")
@@ -17,6 +17,7 @@ pub struct Request {
     pub id: Identity,
     pub width: u32,
     pub height: u32,
+    pub layout: Layout,
     pub pixels: Vec<u8>,
 }
 impl Request {
@@ -25,6 +26,7 @@ impl Request {
             id,
             width: atlas.title_width,
             height: atlas.title_height,
+            layout: atlas.layout,
             pixels: atlas.bytes().to_vec(),
         }
     }
@@ -32,11 +34,15 @@ impl Request {
         if self.id.generation == 0 || self.id.sequence == 0 {
             return Err(invalid());
         }
-        Atlas::new(&self.pixels, self.width, self.height).map_err(|_| invalid())
+        Atlas::with_layout(&self.pixels, self.width, self.height, self.layout)
+            .map_err(|_| invalid())
     }
     pub fn write(&self, out: &mut impl Write) -> io::Result<()> {
         self.atlas()?;
-        out.write_all(b"FZA1")?;
+        out.write_all(match self.layout {
+            Layout::Three => b"FZA1",
+            Layout::Four => b"FZA4",
+        })?;
         out.write_all(&self.id.generation.to_le_bytes())?;
         out.write_all(&self.id.sequence.to_le_bytes())?;
         out.write_all(&self.width.to_le_bytes())?;
@@ -56,9 +62,11 @@ impl Request {
             }
         }
         input.read_exact(&mut header[1..])?;
-        if &header[..4] != b"FZA1" {
-            return Err(invalid());
-        }
+        let layout = match &header[..4] {
+            b"FZA1" => Layout::Three,
+            b"FZA4" => Layout::Four,
+            _ => return Err(invalid()),
+        };
         let id = Identity {
             generation: u64::from_le_bytes(header[4..12].try_into().unwrap()),
             sequence: u64::from_le_bytes(header[12..20].try_into().unwrap()),
@@ -69,17 +77,19 @@ impl Request {
             || id.sequence == 0
             || width == 0
             || width > 1365
+            || width as usize * layout.count() > 4096
             || height == 0
             || height > 256
         {
             return Err(invalid());
         }
-        let mut pixels = vec![0; width as usize * height as usize * 12];
+        let mut pixels = vec![0; width as usize * height as usize * layout.count() * 4];
         input.read_exact(&mut pixels)?;
         Ok(Some(Self {
             id,
             width,
             height,
+            layout,
             pixels,
         }))
     }
@@ -100,11 +110,11 @@ pub enum Reply {
     },
     Result {
         id: Identity,
-        slots: [Slot; 3],
+        slots: CardSlots<Slot>,
         #[serde(default)]
         title_kind: TitleKind,
         #[serde(default)]
-        title_reads: [TitleRead; 3],
+        title_reads: CardSlots<TitleRead>,
         ocr_ms: f64,
         backend: ActiveBackend,
         fallback_count: u8,
@@ -137,7 +147,7 @@ impl InferenceFailure {
         }
     }
 }
-/// Evidence from the three fixed title regions; no full-screen or actual-claim assertion.
+/// Evidence from the title regions; no full-screen or actual-claim assertion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleKind {
@@ -185,6 +195,35 @@ pub fn read_reply(input: &mut impl Read) -> io::Result<Reply> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fourth_title_crosses_the_worker_pipe_and_three_card_packets_keep_their_format() {
+        for (layout, magic) in [(Layout::Three, b"FZA1"), (Layout::Four, b"FZA4")] {
+            let mut pixels = vec![0; layout.count() * 4];
+            pixels[layout.count() * 4 - 2] = 91;
+            let atlas = Atlas::with_layout(&pixels, 1, 1, layout).unwrap();
+            let request = Request::from_atlas(
+                Identity {
+                    generation: 1,
+                    sequence: 1,
+                },
+                &atlas,
+            );
+            let mut message = Vec::new();
+            request.write(&mut message).unwrap();
+            assert_eq!(&message[..4], magic);
+            let returned = Request::read(&mut message.as_slice()).unwrap().unwrap();
+            assert_eq!(returned.layout, layout);
+            assert_eq!(
+                returned
+                    .atlas()
+                    .unwrap()
+                    .rgb_slot(layout.count() - 1)
+                    .unwrap(),
+                [91, 0, 0],
+            );
+            assert!(Request::read(&mut &message[..message.len() - 1]).is_err());
+        }
+    }
     #[test]
     fn bounded_binary_transport_preserves_slots_and_rejects_truncation() {
         let bytes = [0u8; 24];

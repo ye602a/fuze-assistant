@@ -551,7 +551,7 @@ mod tests {
             capped: false,
             events: vec![fuze_lcu::history::ObservedCards {
                 observed_at: Some(1_700_000_123_456),
-                cards: [Some(1), None, Some(3)],
+                cards: [Some(1), None, Some(3)].into(),
                 level: Some(7),
                 partial: true,
                 kind: "changed".into(),

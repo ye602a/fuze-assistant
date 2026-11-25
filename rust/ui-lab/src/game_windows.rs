@@ -316,11 +316,12 @@ impl Manager {
         if cards.len() < 3 {
             return Err("preview-data-unavailable");
         }
-        let slots = std::array::from_fn(|i| Slot::Known {
-            id: cards[i].id,
-            name: cards[i].name.clone(),
-            confidence: 1.,
-        });
+        let slots =
+            fuze_contract::CardSlots::from_fn(fuze_contract::Layout::Three, |i| Slot::Known {
+                id: cards[i].id,
+                name: cards[i].name.clone(),
+                confidence: 1.,
+            });
         let recommendations = prepared.recommendations(4)?;
         let history = std::sync::Arc::new(fuze_data::decision_evidence::HistoryContext::new(
             prepared.identity(),

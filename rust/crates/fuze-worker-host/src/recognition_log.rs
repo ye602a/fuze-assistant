@@ -55,13 +55,14 @@ impl Sample {
             let titles = capture.titles().ok()?;
             let controls = capture.diagnostic_pixels()?;
             let buttons = controls.buttons;
-            let width = (titles.title_width.max(buttons.title_width)) * 3;
+            let count = titles.layout.count() as u32;
+            let width = titles.title_width.max(buttons.title_width) * count;
             let height = titles.title_height + buttons.title_height;
             let mut image = image::RgbImage::new(width, height);
             for (atlas, top) in [(&titles, 0), (&buttons, titles.title_height)] {
                 for (index, bgra) in atlas.bytes().chunks_exact(4).enumerate() {
-                    let x = index as u32 % (atlas.title_width * 3);
-                    let y = index as u32 / (atlas.title_width * 3);
+                    let x = index as u32 % (atlas.title_width * count);
+                    let y = index as u32 / (atlas.title_width * count);
                     image.put_pixel(x, top + y, image::Rgb([bgra[2], bgra[1], bgra[0]]));
                 }
             }
@@ -69,8 +70,8 @@ impl Sample {
                 "screen": [controls.screen.0, controls.screen.1],
                 "titles": {"slotWidth": titles.title_width, "height": titles.title_height, "top": 0},
                 "buttons": {"slotWidth": buttons.title_width, "height": buttons.title_height, "top": titles.title_height},
-                "titleRegions": regions(fuze_contract::titles::regions(controls.screen.0, controls.screen.1).ok()?),
-                "buttonRegions": regions(fuze_contract::selection_pixels::buttons(controls.screen.0, controls.screen.1).ok()?),
+                "titleRegions": regions(fuze_contract::titles::regions_for(controls.screen.0, controls.screen.1, titles.layout).ok()?),
+                "buttonRegions": regions(fuze_contract::selection_pixels::buttons_for(controls.screen.0, controls.screen.1, buttons.layout).ok()?),
             });
             Some(image)
         })();
@@ -94,7 +95,7 @@ impl Sample {
         }
     }
 }
-fn regions(regions: [fuze_contract::titles::Region; 3]) -> Value {
+fn regions(regions: fuze_contract::CardSlots<fuze_contract::titles::Region>) -> Value {
     json!(regions.map(|r| [r.x, r.y, r.width, r.height]))
 }
 impl Control {
@@ -318,31 +319,34 @@ impl Probe {
                 .as_ref()
                 .and_then(|r| fuze_capture::target::discover(r).ok().flatten());
         }
-        self.visible()
+        self.visible(fuze_contract::Layout::Three)
     }
-    pub fn visible(&self) -> bool {
+    pub fn visible(&self, layout: fuze_contract::Layout) -> bool {
         self.control.enabled()
             && self
                 .target
                 .as_ref()
-                .is_some_and(GameWindow::covers_primary_selection)
+                .is_some_and(|w| w.covers_primary_selection(layout))
     }
     /// A gated diagnostic must not consume a DXGI frame that the OCR loop still needs.
     pub fn gated(&mut self, mut metadata: Value) {
         let capture = self.bitmap.get_or_insert_with(Default::default);
         capture.saving(true); // existing primary-screen GDI ROI reader, no continuous stream
-        let result = capture.next(Duration::ZERO);
+        let result = capture.next(Duration::ZERO, fuze_contract::Layout::Three);
         metadata["source"] = json!("diagnostic-bitmap");
         metadata["frame"] = json!([capture.key().0, capture.key().1]);
         metadata["fallback"] = Value::Null;
         metadata["evidence"] = json!(capture.selection().map(|e| format!("{e:?}")));
+        let layout = capture
+            .titles()
+            .map_or(Default::default(), |atlas| atlas.layout);
         let sample = if matches!(result, Ok(fuze_capture::native::FrameStatus::Ready)) {
             Sample::frame(capture, metadata)
         } else {
             metadata["stage"] = json!("diagnostic-no-frame");
             Sample::without_image(metadata)
         };
-        if self.visible() {
+        if self.visible(layout) {
             self.control.record(sample);
         }
     }
@@ -448,7 +452,11 @@ mod tests {
         }
     }
     impl CaptureFeed for Feed {
-        fn next(&mut self, _: Duration) -> fuze_capture::native::Result<FrameStatus> {
+        fn next(
+            &mut self,
+            _: Duration,
+            _: fuze_contract::Layout,
+        ) -> fuze_capture::native::Result<FrameStatus> {
             panic!("diagnostics must not recapture")
         }
         fn titles(&self) -> fuze_capture::native::Result<Atlas<'_>> {
@@ -676,7 +684,7 @@ mod tests {
         assert!(!probe.begin());
         assert!(probe.next_discovery.is_none());
         assert!(probe.next_sample.is_none());
-        assert!(!probe.visible());
+        assert!(!probe.visible(Default::default()));
     }
     #[test]
     fn background_writer_flushes_accepted_samples_on_shutdown() {

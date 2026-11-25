@@ -58,21 +58,23 @@ impl GpuFixtureReader {
         })
     }
     pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
-        self.reader.evidence
+        self.reader.frame.evidence
     }
-    pub fn read<'a>(&'a mut self, source: &GpuFixture) -> Result<Atlas<'a>> {
+    pub fn read<'a>(
+        &'a mut self,
+        source: &GpuFixture,
+        active_layout: fuze_contract::Layout,
+    ) -> Result<Atlas<'a>> {
         // Fixtures must belong to this D3D device; never submit a foreign-device texture.
         let source_device = unsafe { source.texture.GetDevice()? };
         if source_device != self.device.device {
             return Err("fixture-device-mismatch".into());
         }
-        let rects = regions(source.width, source.height)?;
-        self.reader
-            .read(&source.texture, &rects, (source.width, source.height))?;
-        Ok(Atlas::new(
-            &self.reader.bytes,
-            rects[0].width,
-            rects[0].height,
-        )?)
+        self.reader.read(
+            &source.texture,
+            (source.width, source.height),
+            active_layout,
+        )?;
+        self.reader.frame.titles()
     }
 }

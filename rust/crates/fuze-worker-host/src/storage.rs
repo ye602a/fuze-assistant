@@ -6,6 +6,27 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
+
+/// Open the active file if present, even if it later fails to parse. Upgrades
+/// may read a previous schema, and writes always use the active path.
+pub(crate) fn versioned_source(path: &Path, versions: &[&str]) -> PathBuf {
+    if !path.exists() {
+        if let Some(index) = versions
+            .iter()
+            .position(|name| path.file_name().is_some_and(|file| file == *name))
+        {
+            if let Some(previous) = versions[index + 1..]
+                .iter()
+                .map(|name| path.with_file_name(name))
+                .find(|previous| previous.exists())
+            {
+                return previous;
+            }
+        }
+    }
+    path.to_owned()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
     path: PathBuf,
@@ -294,9 +315,11 @@ fn scan_at(root: &Path, now: SystemTime) -> Result<Preview> {
         } else if [
             "observations.json",
             "observations-v2.json",
+            crate::local_records::FILE_NAME,
             "account-history.json",
             "account-history-v2.json",
             "account-history-v3.json",
+            crate::account_history::FILE_NAME,
             "preferences.json",
             "preferences-v2.json",
             "preferences-v3.json",

@@ -292,13 +292,13 @@ fn partial_not_full_unknown_or_stat_shards_is_an_actionable_read_failure() {
     let mut t = Tracker::with_nonce(3);
     let mut s = state(Phase::Playing);
     s.analyses = 1;
-    s.title_reads = [Empty; 3];
+    s.title_reads = [Empty; 3].into();
     assert!(t.observe(s.clone(), 1).is_none());
     s.analyses = 2;
-    s.title_reads = [StatShard; 3];
+    s.title_reads = [StatShard; 3].into();
     assert!(t.observe(s.clone(), 2).is_none());
     s.analyses = 3;
-    s.title_reads = [Exact, NoCatalog, LowConfidence];
+    s.title_reads = [Exact, NoCatalog, LowConfidence].into();
     let r = t.observe(s, 3).unwrap();
     assert_eq!(r.partial_observations, 1);
 }

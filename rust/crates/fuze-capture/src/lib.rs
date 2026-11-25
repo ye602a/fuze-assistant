@@ -6,4 +6,6 @@ pub mod native;
 #[cfg(windows)]
 pub mod screen;
 #[cfg(windows)]
+mod selection_frame;
+#[cfg(windows)]
 pub mod target;

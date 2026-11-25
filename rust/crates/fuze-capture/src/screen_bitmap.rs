@@ -1,6 +1,9 @@
 //! Reusable GDI title atlas; no PNG, full-frame CPU allocation, or disk writes.
-use crate::native::Result;
-use fuze_contract::titles::{regions, Atlas};
+use crate::{
+    native::Result,
+    selection_frame::{CaptureRegions, SelectionFrame},
+};
+use fuze_contract::titles::Atlas;
 use std::{
     mem::{size_of, zeroed},
     ptr::null_mut,
@@ -89,14 +92,11 @@ impl Dib {
 #[derive(Default)]
 pub(super) struct Reader {
     dib: Option<Dib>,
-    size: (u32, u32, u32, u32),
-    bytes: Vec<u8>,
-    controls: Vec<u8>,
-    pub evidence: Option<fuze_contract::selection_pixels::Evidence>,
-    screen: (u32, u32),
+    size: (u32, u32),
+    pub frame: SelectionFrame,
 }
 impl Reader {
-    pub fn read(&mut self) -> Result<()> {
+    pub fn read(&mut self, active_layout: fuze_contract::Layout) -> Result<()> {
         unsafe {
             let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
             let mut info: MONITORINFO = zeroed();
@@ -105,32 +105,19 @@ impl Reader {
                 return Err("capture-monitor".into());
             }
             let rect = info.rcMonitor;
-            self.screen = (
+            let regions = CaptureRegions::new((
                 (rect.right - rect.left) as u32,
                 (rect.bottom - rect.top) as u32,
-            );
-            let slots = regions(
-                (rect.right - rect.left) as u32,
-                (rect.bottom - rect.top) as u32,
-            )?;
-            let buttons = fuze_contract::selection_pixels::buttons(
-                (rect.right - rect.left) as u32,
-                (rect.bottom - rect.top) as u32,
-            )?;
-            let size = (
-                slots[0].width,
-                slots[0].height,
-                slots[2].x + slots[2].width - slots[0].x,
-                buttons[0].y + buttons[0].height - slots[0].y,
-            );
+            ))?;
+            let bounds = regions.bitmap_bounds();
+            let size = (bounds.width, bounds.height);
             let dc = DisplayDc(GetDC(null_mut()));
             if dc.0.is_null() {
                 return Err("capture-bitmap-source".into());
             }
             if self.size != size || self.dib.is_none() {
-                self.dib = Some(Dib::new(dc.0, size.2, size.3)?);
+                self.dib = Some(Dib::new(dc.0, size.0, size.1)?);
                 self.size = size;
-                self.bytes.resize((size.0 * size.1 * 12) as usize, 0);
             }
             let dib = self.dib.as_ref().ok_or("capture-bitmap-missing")?;
             // One coherent band contains titles and reroll controls. No second screenshot,
@@ -139,11 +126,11 @@ impl Reader {
                 dib.dc,
                 0,
                 0,
-                size.2 as i32,
-                size.3 as i32,
+                size.0 as i32,
+                size.1 as i32,
                 dc.0,
-                rect.left + slots[0].x as i32,
-                rect.top + slots[0].y as i32,
+                rect.left + bounds.x as i32,
+                rect.top + bounds.y as i32,
                 SRCCOPY | CAPTUREBLT,
             ) == 0
             {
@@ -152,52 +139,22 @@ impl Reader {
             if GdiFlush() == 0 {
                 return Err("capture-bitmap-flush".into());
             }
-            let source_stride = size.2 as usize * 4;
-            let title_bytes = size.0 as usize * 4;
-            for (i, slot) in slots.iter().enumerate() {
-                let x = (slot.x - slots[0].x) as usize * 4;
-                for y in 0..size.1 as usize {
-                    let start = y * title_bytes * 3 + i * title_bytes;
-                    self.bytes[start..start + title_bytes].copy_from_slice(
-                        std::slice::from_raw_parts(
-                            dib.pixels.add(y * source_stride + x),
-                            title_bytes,
-                        ),
-                    );
-                }
-            }
-            let button_bytes = buttons[0].width as usize * 4;
-            self.controls
-                .resize(button_bytes * 3 * buttons[0].height as usize, 0);
-            for (i, slot) in buttons.iter().enumerate() {
-                let x = (slot.x - slots[0].x) as usize * 4;
-                let top = (slot.y - slots[0].y) as usize;
-                for y in 0..slot.height as usize {
-                    let start = (y * 3 + i) * button_bytes;
-                    self.controls[start..start + button_bytes].copy_from_slice(
-                        std::slice::from_raw_parts(
-                            dib.pixels.add((top + y) * source_stride + x),
-                            button_bytes,
-                        ),
-                    );
-                }
-            }
-            self.evidence = Some(fuze_contract::selection_pixels::classify(
-                &self.titles()?,
-                &Atlas::new(&self.controls, buttons[0].width, buttons[0].height)?,
-            ));
-            Ok(())
+            let stride = size.0 as usize * 4;
+            self.frame.read(&regions, active_layout, |area, y| {
+                let r = regions.areas[area];
+                let x = (r.x - bounds.x) as usize * 4;
+                let top = (r.y - bounds.y) as usize;
+                std::slice::from_raw_parts(
+                    dib.pixels.add((top + y) * stride + x),
+                    r.width as usize * 4,
+                )
+            })
         }
     }
     pub fn titles(&self) -> Result<Atlas<'_>> {
-        Ok(Atlas::new(&self.bytes, self.size.0, self.size.1)?)
+        self.frame.titles()
     }
     pub fn diagnostic_pixels(&self) -> Option<crate::native::DiagnosticPixels<'_>> {
-        let buttons =
-            fuze_contract::selection_pixels::buttons(self.screen.0, self.screen.1).ok()?;
-        Some(crate::native::DiagnosticPixels {
-            buttons: Atlas::new(&self.controls, buttons[0].width, buttons[0].height).ok()?,
-            screen: self.screen,
-        })
+        self.frame.diagnostic_pixels()
     }
 }

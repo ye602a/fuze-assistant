@@ -3,7 +3,7 @@ mod presentation;
 #[path = "review.rs"]
 mod review;
 thread_local! { static UI_LOCALE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) }; }
-use fuze_contract::{ContextGate, Slot, Snapshot};
+use fuze_contract::{CardSlots, ContextGate, Slot, Snapshot};
 use std::{
     mem::{size_of, zeroed},
     path::PathBuf,
@@ -47,10 +47,10 @@ fn placement(hwnd: HWND, event: u8) {
 static PAINTS: AtomicUsize = AtomicUsize::new(0);
 thread_local! { static SNAPSHOT: std::cell::RefCell<Option<Snapshot>> = const { std::cell::RefCell::new(None) }; }
 thread_local! { static RETAINED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
-thread_local! { static DISMISSED: std::cell::Cell<Option<[Option<u32>; 3]>> = const { std::cell::Cell::new(None) }; }
-fn candidate_ids(snapshot: &Snapshot) -> [Option<u32>; 3] {
-    std::array::from_fn(|i| match snapshot.slots[i] {
-        Slot::Known { id, .. } => Some(id),
+thread_local! { static DISMISSED: std::cell::Cell<Option<CardSlots<Option<u32>>>> = const { std::cell::Cell::new(None) }; }
+fn candidate_ids(snapshot: &Snapshot) -> CardSlots<Option<u32>> {
+    snapshot.slots.each_ref().map(|slot| match slot {
+        Slot::Known { id, .. } => Some(*id),
         _ => None,
     })
 }
@@ -460,7 +460,10 @@ unsafe fn visible_capture_probe(hwnd: HWND) -> serde_json::Value {
                     DeleteObject(brush);
                     ReleaseDC(hwnd, dc);
                 }
-                match stream.next(std::time::Duration::from_millis(100)) {
+                match stream.next(
+                    std::time::Duration::from_millis(100),
+                    fuze_contract::Layout::Three,
+                ) {
                     Ok(FrameStatus::Ready) => {
                         frames += 1;
                         if let Ok(atlas) = stream.titles() {
@@ -1059,7 +1062,7 @@ impl HiddenOverlay {
         if self.headless.is_some() {
             return Ok(!self.cancellation.cancelled());
         }
-        if icons.len() > 3 || icons.values().any(|p| p.len() != 48 * 48 * 4) {
+        if icons.len() > 4 || icons.values().any(|p| p.len() != 48 * 48 * 4) {
             return Err("overlay-icons-invalid");
         }
         let mut pending = self.pending_icons.lock().map_err(|_| "overlay-closed")?;
@@ -1192,7 +1195,8 @@ mod retention_tests {
                 fuze_contract::Slot::Unreadable,
                 fuze_contract::Slot::Unreadable,
                 fuze_contract::Slot::Unreadable,
-            ],
+            ]
+            .into(),
         };
         assert!(overlay.update(s.clone()).unwrap());
         assert!(!overlay.update(s.clone()).unwrap());

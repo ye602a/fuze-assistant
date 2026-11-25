@@ -82,7 +82,7 @@ function ReadRuntimeLogs([string]$Directory) {
                         if ($null -ne $row.state.title_reads) {
                             $reads = @($row.state.title_reads)
                             $allowedReads = @('unknown','empty','low-confidence','no-catalog','ambiguous','exact','alias','fuzzy','stat-shard')
-                            if ($reads.Count -eq 3 -and @($reads | Where-Object { $_ -isnot [string] -or $_ -cnotin $allowedReads }).Count -eq 0) { $safe.title_reads = $reads }
+                            if ($reads.Count -in @(3,4) -and @($reads | Where-Object { $_ -isnot [string] -or $_ -cnotin $allowedReads }).Count -eq 0) { $safe.title_reads = $reads }
                         }
                         $safe.level = SafeNumber $row.state.level 30 $true
                         if ($safe.level -eq 0) { $safe.level = $null }
@@ -90,7 +90,7 @@ function ReadRuntimeLogs([string]$Directory) {
                         $safe.readable_slots = $null
                         if ($null -ne $row.state.readable_slots) {
                             $slots = @($row.state.readable_slots)
-                            if ($slots.Count -ne 3 -or @($slots | Where-Object { $_ -isnot [bool] }).Count -ne 0) { throw 'invalid-slots' }
+                            if ($slots.Count -notin @(3,4) -or @($slots | Where-Object { $_ -isnot [bool] }).Count -ne 0) { throw 'invalid-slots' }
                             $safe.readable_slots = $slots
                         }
                         if ($row.state.overlay_prepared -isnot [bool]) { throw 'invalid-overlay' }
@@ -112,7 +112,11 @@ function ReadRuntimeLogs([string]$Directory) {
     }
 }
 try {
-    if (!$Source) { $Source = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview/observations-v2.json' }
+    if (!$Source) {
+        $Source = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview/observations-v3.json'
+        if (!(Test-Path -LiteralPath $Source)) { $Source = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview/observations-v2.json' }
+        if (!(Test-Path -LiteralPath $Source)) { $Source = Join-Path $env:LOCALAPPDATA 'FuzeRustPreview/observations.json' }
+    }
     if (!$Destination) { $Destination = Join-Path $PSScriptRoot ('Fuze-feedback-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.json') }
     $status = 'missing-observations'
     $summaries = @()
@@ -130,7 +134,7 @@ try {
             if (@($segment.events).Count -gt 80) { throw 'invalid-input' }
             foreach ($event in $segment.events) {
                 $slots = @($event.cards)
-                if ($slots.Count -ne 3) { throw 'invalid-input' }
+                if ($slots.Count -notin @(3,4)) { throw 'invalid-input' }
                 $present = @($slots | ForEach-Object { $n = SafeNumber $_ 4294967295 $true; $null -ne $n -and $n -gt 0 })
                 $kind = 'unknown'
                 if ($event.kind -is [string] -and $event.kind -cin @('first','changed','reappeared')) { $kind = $event.kind }

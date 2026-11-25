@@ -285,7 +285,7 @@ pub struct Observation {
 pub struct ObservedCards {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<u64>,
-    pub cards: [Option<u32>; 3],
+    pub cards: fuze_contract::CardSlots<Option<u32>>,
     pub level: Option<u32>,
     pub partial: bool,
     pub kind: String,
@@ -358,7 +358,7 @@ pub fn legacy_observations(owner: &Owner, v: &Value, game_id: u64) -> Result<Obs
             };
             Ok(ObservedCards {
                 observed_at: e["observedAt"].as_u64(),
-                cards,
+                cards: cards.into(),
                 level,
                 partial: e["partial"] == true || cards.iter().any(Option::is_none),
                 kind: e["kind"].as_str().ok_or("journal-schema")?.into(),
@@ -419,7 +419,7 @@ mod tests {
         ]});
         let result = legacy_observations(&o, &v, 1).unwrap();
         assert_eq!(result.events.len(), 2);
-        assert_eq!(result.events[0].cards, [Some(1), None, Some(3)]);
+        assert_eq!(result.events[0].cards, [Some(1), None, Some(3)].into());
         assert!(result.interrupted && result.capped && result.events[0].partial);
         let json = serde_json::to_string(&result).unwrap();
         for key in ["puuid", "playerName", "chosen", "observedAt", "claim"] {

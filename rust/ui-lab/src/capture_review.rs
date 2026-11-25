@@ -1,4 +1,4 @@
-//! Real OCR deliveries through the production Manager and native three-card window.
+//! Real OCR deliveries through the production Manager and native card window.
 use fuze_runtime::session::Phase;
 use fuze_worker_host::desktop::Status;
 use std::{path::Path, time::Instant};
@@ -74,7 +74,7 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, Box<dyn std::error::Err
                 renders += 1;
             }
         } else if let Some(cards) = manager.cards.as_ref() {
-            if cards.ids() != [None; 3] || !cards.hidden() {
+            if cards.ids() != fuze_contract::CardSlots::default() || !cards.hidden() {
                 return Err("capture-review-ui-clear".into());
             }
         }

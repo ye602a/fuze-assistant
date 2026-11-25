@@ -7,7 +7,7 @@ use fuze_capture::{
     native::{CaptureFeed, FrameStatus, GpuFixture, GpuFixtureReader, Result},
     screen::{NativeScreen, ScreenCapture, ScreenDriver},
 };
-use fuze_contract::{titles::Atlas, Slot};
+use fuze_contract::{titles::Atlas, Layout, Slot};
 use fuze_runtime::session::Phase;
 use std::time::{Duration, Instant};
 
@@ -64,21 +64,24 @@ struct Offline {
     texture: GpuFixture,
     bytes: Vec<u8>,
     size: (u32, u32),
+    layout: fuze_contract::Layout,
     mode: String,
     reads: u32,
     blank: GpuFixture,
     closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl Offline {
-    fn read(&mut self) -> Result<()> {
-        let atlas =
-            self.reader
-                .read(if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
-                    &self.blank
-                } else {
-                    &self.texture
-                })?;
+    fn read(&mut self, active_layout: Layout) -> Result<()> {
+        let atlas = self.reader.read(
+            if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
+                &self.blank
+            } else {
+                &self.texture
+            },
+            active_layout,
+        )?;
         self.size = (atlas.title_width, atlas.title_height);
+        self.layout = atlas.layout;
         self.bytes.clear();
         self.bytes.extend_from_slice(atlas.bytes());
         Ok(())
@@ -96,19 +99,24 @@ impl ScreenDriver for Offline {
         }
     }
     fn stop(&mut self) {}
-    fn stream(&mut self, _: Duration) -> Result<FrameStatus> {
+    fn stream(&mut self, _: Duration, active_layout: Layout) -> Result<FrameStatus> {
         self.reads += 1;
         if self.mode == "offline-drop" && self.reads > 1 {
             return Err("fixture-stream-failed".into());
         }
-        self.read()?;
+        self.read(active_layout)?;
         Ok(FrameStatus::Ready)
     }
-    fn bitmap(&mut self) -> Result<()> {
-        self.read()
+    fn bitmap(&mut self, active_layout: Layout) -> Result<()> {
+        self.read(active_layout)
     }
     fn titles(&self, _: bool) -> Result<Atlas<'_>> {
-        Ok(Atlas::new(&self.bytes, self.size.0, self.size.1)?)
+        Ok(Atlas::with_layout(
+            &self.bytes,
+            self.size.0,
+            self.size.1,
+            self.layout,
+        )?)
     }
 }
 struct BitmapOnly(NativeScreen);
@@ -122,11 +130,11 @@ impl ScreenDriver for BitmapOnly {
     fn stop(&mut self) {
         self.0.stop();
     }
-    fn stream(&mut self, _: Duration) -> Result<FrameStatus> {
+    fn stream(&mut self, _: Duration, _: Layout) -> Result<FrameStatus> {
         Err("fixture-no-stream".into())
     }
-    fn bitmap(&mut self) -> Result<()> {
-        self.0.bitmap()
+    fn bitmap(&mut self, active_layout: Layout) -> Result<()> {
+        self.0.bitmap(active_layout)
     }
     fn titles(&self, _: bool) -> Result<Atlas<'_>> {
         self.0.titles(true)
@@ -241,12 +249,14 @@ pub fn run(
             } else {
                 let reader = GpuFixtureReader::new()?;
                 let texture = reader.upload(&pixels, image.width(), image.height())?;
-                let blank = reader.upload(&vec![0; pixels.len()], image.width(), image.height())?;
+                let blank =
+                    reader.upload(&vec![16; pixels.len()], image.width(), image.height())?;
                 Box::new(ScreenCapture::with_driver(Offline {
                     reader,
                     texture,
                     bytes: Vec::new(),
                     size: (0, 0),
+                    layout: Default::default(),
                     mode: mode.into(),
                     reads: 0,
                     blank,
@@ -301,11 +311,16 @@ pub fn run(
                 frames.push(serde_json::json!({"sample":index,"repeat":repeat,"screen_gate_skipped_ocr":true}));
                 continue;
             };
-            let actual: [Option<u32>; 3] = delivery.snapshot.slots.each_ref().map(|s| match s {
+            let actual = delivery.snapshot.slots.each_ref().map(|s| match s {
                 Slot::Known { id, .. } => Some(*id),
                 _ => None,
             });
-            let expected: [Option<u32>; 3] = std::array::from_fn(|i| {
+            let layout = if sample.expected_names.len() == 4 {
+                fuze_contract::Layout::Four
+            } else {
+                fuze_contract::Layout::Three
+            };
+            let expected = fuze_contract::CardSlots::from_fn(layout, |i| {
                 // Cold single-title fixture is still read by OCR (separately tested),
                 // but must not open a production recommendation on its own.
                 if sample.expected_names.len() < 2 {
@@ -332,7 +347,7 @@ pub fn run(
                     .frames
                     .current()
                     .ok_or("capture-review-frame-missing")?;
-                for i in 0..3 {
+                for i in 0..expected.len() {
                     let expected_card =
                         expected[i].and_then(|id| details.augments.iter().find(|a| a.id == id));
                     if published.cards[i].as_deref() != expected_card {

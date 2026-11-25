@@ -61,7 +61,7 @@ fn probe(mode: &str, backend: &str) -> Result<()> {
             title_kind: fuze_contract::wire::TitleKind::Unknown,
             title_reads: Default::default(),
             id,
-            slots: std::array::from_fn(|_| Slot::Unreadable),
+            slots: request.layout.empty_slots(),
             ocr_ms: 0.,
             backend: ActiveBackend::Cpu,
             fallback_count: 0,
@@ -85,6 +85,7 @@ fn lifecycle() -> Result<()> {
             },
             width: 1,
             height: 1,
+            layout: fuze_contract::Layout::Three,
             pixels: vec![0; 12],
         };
         let result = child.run(req, Duration::from_millis(250));
@@ -124,6 +125,7 @@ fn lifecycle() -> Result<()> {
         },
         width: 1,
         height: 1,
+        layout: fuze_contract::Layout::Three,
         pixels: vec![0; 12],
     };
     for mode in ["recover", "crash", "startup-crash", "inference-error"] {
@@ -329,7 +331,10 @@ fn fixtures(args: &[String], wgc: bool) -> Result<()> {
                     std::thread::sleep(Duration::from_millis(20));
                 }
             } else {
-                let atlas = reader.read(uploaded.as_ref().ok_or("fixture-texture")?)?;
+                let atlas = reader.read(
+                    uploaded.as_ref().ok_or("fixture-texture")?,
+                    fuze_contract::Layout::Three,
+                )?;
                 pipeline
                     .recognize(FrameKey { epoch: 1, sequence }, &atlas)?
                     .ok_or("session-job-rejected")?

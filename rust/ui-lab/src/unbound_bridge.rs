@@ -94,7 +94,7 @@ impl Binding {
             name
         }
     }
-    fn cards(&self, cards: &[Option<u32>; 3]) -> String {
+    fn cards(&self, cards: &[Option<u32>]) -> String {
         cards
             .iter()
             .enumerate()
