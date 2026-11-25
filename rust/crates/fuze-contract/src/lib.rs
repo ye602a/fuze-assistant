@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
+mod card_slots;
+pub use card_slots::{CardSlots, Layout};
 pub mod frame;
 pub mod selection_pixels;
 pub mod skill_choice;
 pub mod titles;
 pub mod wire;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "state", deny_unknown_fields)]
 pub enum Slot {
     Known {
@@ -13,6 +15,7 @@ pub enum Slot {
         name: String,
         confidence: f32,
     },
+    #[default]
     Unreadable,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -30,7 +33,7 @@ pub struct Snapshot {
     pub dataset_version: String,
     pub selection_confirmed: bool,
     pub actual_stage: ActualStage,
-    pub slots: [Slot; 3],
+    pub slots: CardSlots<Slot>,
 }
 
 pub struct ContextGate {
@@ -86,7 +89,7 @@ mod tests {
             dataset_version: "fixture-v1".into(),
             selection_confirmed: false,
             actual_stage: ActualStage::Unknown,
-            slots: [Slot::Unreadable, Slot::Unreadable, Slot::Unreadable],
+            slots: CardSlots::default(),
         }
     }
     #[test]

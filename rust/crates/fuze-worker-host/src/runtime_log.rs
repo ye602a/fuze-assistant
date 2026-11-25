@@ -213,7 +213,7 @@ pub struct Snapshot {
     #[serde(default)]
     pub process_memory_mb: Option<f64>,
     #[serde(default)]
-    pub title_reads: [fuze_contract::wire::TitleRead; 3],
+    pub title_reads: fuze_contract::CardSlots<fuze_contract::wire::TitleRead>,
     pub connection: Connection,
     pub phase: Phase,
     pub capture: Capture,
@@ -235,7 +235,7 @@ pub struct Snapshot {
     pub capture_fallback: Option<CaptureFallback>,
     pub gate: Gate,
     pub interval_ms: Option<u64>,
-    pub readable_slots: Option<[bool; 3]>,
+    pub readable_slots: Option<fuze_contract::CardSlots<bool>>,
     pub overlay_prepared: bool,
 }
 impl Snapshot {

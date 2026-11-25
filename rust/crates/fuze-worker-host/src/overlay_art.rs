@@ -44,7 +44,7 @@ impl Art {
             download: false,
         })
     }
-    pub fn request(&mut self, slots: &[fuze_contract::Slot; 3]) {
+    pub fn request(&mut self, slots: &[fuze_contract::Slot]) {
         let ids: Vec<_> = slots
             .iter()
             .filter_map(|s| match s {

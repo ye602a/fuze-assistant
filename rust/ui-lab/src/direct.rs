@@ -1,5 +1,5 @@
 //! Isolated Direct2D/DirectWrite probe; never attaches to another application's window.
-use fuze_contract::Slot;
+use fuze_contract::{CardSlots, Layout, Slot};
 use fuze_worker_host::champion_assets::{
     Reply as ArtReply, Request as ArtRequest, Service as ArtService,
 };
@@ -17,46 +17,48 @@ struct Card {
     samples: String,
     ranking: String,
 }
-fn frame_cards(frame: &Frame) -> [Card; 3] {
+fn frame_cards(frame: &Frame) -> CardSlots<Card> {
     let rate = |v: Option<f64>| {
         v.map(|n| format!("{:.1}%", n * 100.))
             .unwrap_or_else(|| "—".into())
     };
-    std::array::from_fn(|i| match &frame.snapshot.slots[i] {
-        Slot::Known { id, name, .. } => Card {
-            id: Some(*id),
-            title: name.clone(),
-            win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
-            pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
-            score: frame.scores[i],
-            samples: frame.cards[i]
-                .as_ref()
-                .map(|a| a.evidence.sample_label(a.win.is_some()))
-                .unwrap_or_default(),
-            ranking: frame.cards[i]
-                .as_ref()
-                .map(|a| a.evidence.rank_label())
-                .unwrap_or_default(),
-            icon: frame.cards[i]
-                .as_ref()
-                .map(|a| a.icon.clone())
-                .unwrap_or_default(),
-            description: frame.cards[i]
-                .as_ref()
-                .map(|a| {
-                    if fuze_contract::skill_choice::get(a.id).is_some() {
-                        a.description.clone()
-                    } else {
-                        format!(
-                            "{}\n\n选取率：{}",
-                            a.description_with_evidence(),
-                            rate(a.pick)
-                        )
-                    }
-                })
-                .unwrap_or_default(),
-        },
-        _ => Card::default(),
+    CardSlots::from_fn(frame.snapshot.slots.layout(), |i| {
+        match &frame.snapshot.slots[i] {
+            Slot::Known { id, name, .. } => Card {
+                id: Some(*id),
+                title: name.clone(),
+                win: rate(frame.cards[i].as_ref().and_then(|a| a.win)),
+                pick: rate(frame.cards[i].as_ref().and_then(|a| a.pick)),
+                score: frame.scores[i],
+                samples: frame.cards[i]
+                    .as_ref()
+                    .map(|a| a.evidence.sample_label(a.win.is_some()))
+                    .unwrap_or_default(),
+                ranking: frame.cards[i]
+                    .as_ref()
+                    .map(|a| a.evidence.rank_label())
+                    .unwrap_or_default(),
+                icon: frame.cards[i]
+                    .as_ref()
+                    .map(|a| a.icon.clone())
+                    .unwrap_or_default(),
+                description: frame.cards[i]
+                    .as_ref()
+                    .map(|a| {
+                        if fuze_contract::skill_choice::get(a.id).is_some() {
+                            a.description.clone()
+                        } else {
+                            format!(
+                                "{}\n\n选取率：{}",
+                                a.description_with_evidence(),
+                                rate(a.pick)
+                            )
+                        }
+                    })
+                    .unwrap_or_default(),
+            },
+            _ => Card::default(),
+        }
     })
 }
 use windows::{
@@ -197,9 +199,9 @@ struct Scene {
     reference: std::sync::Arc<crate::stage_cards::Comparison>,
     factory: ID2D1Factory,
     formats: Vec<IDWriteTextFormat>,
-    title_metrics: std::cell::RefCell<[Option<(String, f32)>; 3]>,
+    title_metrics: std::cell::RefCell<[Option<(String, f32)>; 4]>,
     icons: Vec<image::RgbaImage>,
-    cards: [Card; 3],
+    cards: CardSlots<Card>,
     caption: String,
     image_cache: std::collections::HashMap<String, image::RgbaImage>,
     icon_urls: std::collections::HashMap<u32, String>,
@@ -278,7 +280,7 @@ impl Scene {
                 formats,
                 title_metrics: Default::default(),
                 icons,
-                cards: std::array::from_fn(|i| Card {
+                cards: CardSlots::from_fn(Layout::Three, |i| Card {
                     id: Some(i as u32 + 1),
                     title: ["巨像的勇气", "尖端发明家", "回归基本功"][i].into(),
                     win: ["52.0%", "53.0%", "54.0%"][i].into(),
@@ -300,6 +302,12 @@ impl Scene {
                 max_scroll: 0.,
             })
         }
+    }
+    fn width(&self) -> u32 {
+        WIDTH + (self.cards.len() as u32 - 3) * 250
+    }
+    fn close_start(&self) -> f32 {
+        self.width() as f32 - 40.
     }
     fn title_height(&self, index: usize) -> f32 {
         let title = &self.cards[index].title;
@@ -328,7 +336,7 @@ impl Scene {
         50. + self.title_height(index) + 4.
     }
     fn header_bottom(&self) -> f32 {
-        (0..3)
+        (0..self.cards.len())
             .map(|i| {
                 let title_bottom = 50. + self.title_height(i);
                 if self
@@ -452,7 +460,7 @@ impl Scene {
         }
     }
     fn card_bottom(&self) -> f32 {
-        (0..3)
+        (0..self.cards.len())
             .map(|i| self.card_layout(i).bottom)
             .fold(160., f32::max)
     }
@@ -540,7 +548,7 @@ impl Surface {
             let mut bgra = icon.as_raw().clone();
             for p in bgra.chunks_exact_mut(4) {
                 p.swap(0, 2);
-                for c in 0..3 {
+                for c in 0..scene.cards.len() {
                     p[c] = ((p[c] as u16 * p[3] as u16 + 127) / 255) as u8;
                 }
             }
@@ -645,7 +653,8 @@ impl Surface {
     }
     unsafe fn draw(&self, scene: &Scene, target: &ID2D1RenderTarget, partial: bool) -> Result<()> {
         target.BeginDraw();
-        let scale = target.GetSize().width / WIDTH as f32;
+        let right = scene.width() as f32;
+        let scale = target.GetSize().width / right;
         target.SetTransform(&windows_numerics::Matrix3x2 {
             M11: scale,
             M12: 0.,
@@ -668,21 +677,33 @@ impl Surface {
             target,
             &scene.caption,
             0,
-            rect(190., 5., 520., 22.),
+            rect(190., 5., right - 240., 22.),
             MUTED,
         );
         // Close affordance is geometry, independent of font coverage.
         self.brush.SetColor(&color(MUTED));
         target.DrawLine(
-            windows_numerics::Vector2 { X: 735., Y: 11. },
-            windows_numerics::Vector2 { X: 743., Y: 19. },
+            windows_numerics::Vector2 {
+                X: right - 25.,
+                Y: 11.,
+            },
+            windows_numerics::Vector2 {
+                X: right - 17.,
+                Y: 19.,
+            },
             &self.brush,
             1.,
             None,
         );
         target.DrawLine(
-            windows_numerics::Vector2 { X: 743., Y: 11. },
-            windows_numerics::Vector2 { X: 735., Y: 19. },
+            windows_numerics::Vector2 {
+                X: right - 17.,
+                Y: 11.,
+            },
+            windows_numerics::Vector2 {
+                X: right - 25.,
+                Y: 19.,
+            },
             &self.brush,
             1.,
             None,
@@ -1105,7 +1126,7 @@ impl Surface {
                 target,
                 &scene.reference.footer,
                 7,
-                rect(14., card_bottom + 8., 732., 17.),
+                rect(14., card_bottom + 8., right - 28., 17.),
                 QUIET,
             );
         }
@@ -1272,16 +1293,17 @@ impl Native {
         result
     }
 }
-unsafe fn logical_point(hwnd: HWND, lp: LPARAM) -> (f32, f32) {
+unsafe fn logical_point(hwnd: HWND, lp: LPARAM, width: u32) -> (f32, f32) {
     let mut bounds = RECT::default();
     let _ = GetClientRect(hwnd, &mut bounds);
-    let scale = (bounds.right - bounds.left).max(1) as f32 / WIDTH as f32;
+    let scale = (bounds.right - bounds.left).max(1) as f32 / width as f32;
     (
         ((lp.0 & 0xffff) as u16 as i16) as f32 / scale,
         (((lp.0 >> 16) & 0xffff) as u16 as i16) as f32 / scale,
     )
 }
-unsafe fn size_to_content(hwnd: HWND, base_height: u32, expanded: bool) {
+unsafe fn size_to_content(hwnd: HWND, scene: &Scene, expanded: bool) {
+    let width = scene.width();
     let mut r = RECT::default();
     if GetWindowRect(hwnd, &mut r).is_err() {
         return;
@@ -1299,11 +1321,11 @@ unsafe fn size_to_content(hwnd: HWND, base_height: u32, expanded: bool) {
         return;
     }
     let area = monitor.rcWork;
-    let height = base_height + if expanded { DETAIL_HEIGHT } else { 0 };
+    let height = scene.base_height() + if expanded { DETAIL_HEIGHT } else { 0 };
     let scale = (GetDpiForWindow(hwnd).max(96) as f32 / 96.)
-        .min((area.right - area.left).max(1) as f32 / WIDTH as f32)
+        .min((area.right - area.left).max(1) as f32 / width as f32)
         .min((area.bottom - area.top).max(1) as f32 / height as f32);
-    let w = (WIDTH as f32 * scale).floor().max(1.) as i32;
+    let w = (width as f32 * scale).floor().max(1.) as i32;
     let h = (height as f32 * scale).floor().max(1.) as i32;
     let _ = SetWindowPos(
         hwnd,
@@ -1317,7 +1339,7 @@ unsafe fn size_to_content(hwnd: HWND, base_height: u32, expanded: bool) {
     let _ = InvalidateRect(Some(hwnd), None, false);
 }
 unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
-    if x >= 720. && x <= WIDTH as f32 && y < 30. {
+    if x >= state.scene.close_start() && x <= state.scene.width() as f32 && y < 30. {
         if state.managed {
             state.dismissed = true;
             let _ = ShowWindow(hwnd, SW_HIDE);
@@ -1333,7 +1355,10 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
         let _ = InvalidateRect(Some(hwnd), None, false);
     } else if (34. ..state.scene.card_bottom()).contains(&y) {
         let index = ((x - 9.) / 250.).floor() as isize;
-        if x >= 9. && (0..3).contains(&index) && x < 9. + index as f32 * 250. + 242. {
+        if x >= 9.
+            && (0..state.scene.cards.len() as isize).contains(&index)
+            && x < 9. + index as f32 * 250. + 242.
+        {
             let selected = if state.scene.selected == Some(index as usize) {
                 None
             } else {
@@ -1343,7 +1368,7 @@ unsafe fn handle_click(hwnd: HWND, state: &mut Native, x: f32, y: f32) {
                 state.error = true;
             }
             let expanded = state.scene.selected.is_some();
-            size_to_content(hwnd, state.scene.base_height(), expanded);
+            size_to_content(hwnd, &state.scene, expanded);
         }
     }
 }
@@ -1361,10 +1386,12 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
         WM_NCHITTEST => {
             let mut bounds = RECT::default();
             let _ = GetWindowRect(hwnd, &mut bounds);
-            let scale = (bounds.right - bounds.left).max(1) as f32 / WIDTH as f32;
+            let scale = (bounds.right - bounds.left).max(1) as f32 / state.scene.width() as f32;
             let x = (((lp.0 & 0xffff) as u16 as i16) as i32 - bounds.left) as f32 / scale;
             let y = ((((lp.0 >> 16) & 0xffff) as u16 as i16) as i32 - bounds.top) as f32 / scale;
-            return LRESULT(if (0. ..720.).contains(&x) && (0. ..30.).contains(&y) {
+            return LRESULT(if (0. ..state.scene.close_start()).contains(&x)
+                && (0. ..30.).contains(&y)
+            {
                 HTCAPTION
             } else {
                 HTCLIENT
@@ -1373,7 +1400,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
         WM_EXITSIZEMOVE => {
             state.position_dirty = true;
             let expanded = state.scene.selected.is_some();
-            size_to_content(hwnd, state.scene.base_height(), expanded);
+            size_to_content(hwnd, &state.scene, expanded);
             LRESULT(0)
         }
         WM_DISPLAYCHANGE => {
@@ -1430,7 +1457,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 area.bottom - area.top,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             );
-            size_to_content(hwnd, state.scene.base_height(), expanded);
+            size_to_content(hwnd, &state.scene, expanded);
             let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         }
@@ -1455,8 +1482,10 @@ unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            let (x, y) = logical_point(hwnd, lp);
-            if state.scene.interactive || (x >= 720. && x <= WIDTH as f32 && y < 30.) {
+            let (x, y) = logical_point(hwnd, lp, state.scene.width());
+            if state.scene.interactive
+                || (x >= state.scene.close_start() && x <= state.scene.width() as f32 && y < 30.)
+            {
                 handle_click(hwnd, state, x, y);
             }
             LRESULT(0)
@@ -1543,7 +1572,7 @@ impl OwnWindow {
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )?;
             window.memory.restore(hwnd.0);
-            size_to_content(hwnd, window.state.scene.base_height(), false);
+            size_to_content(hwnd, &window.state.scene, false);
             Ok(window)
         }
     }
@@ -1552,8 +1581,11 @@ impl Drop for OwnWindow {
     fn drop(&mut self) {
         unsafe {
             if IsWindow(Some(self.hwnd)).as_bool() {
-                self.memory
-                    .remember_fixed(self.hwnd.0, WIDTH, self.state.scene.base_height());
+                self.memory.remember_fixed(
+                    self.hwnd.0,
+                    self.state.scene.width(),
+                    self.state.scene.base_height(),
+                );
                 let _ = DestroyWindow(self.hwnd);
             }
         }
@@ -1571,7 +1603,7 @@ pub struct HostOverlay {
     generation: u64,
     selection_cycle: u64,
     dataset: String,
-    ids: [Option<u32>; 3],
+    ids: CardSlots<Option<u32>>,
     revisions: u64,
     preview_mode: bool,
     download: bool,
@@ -1594,7 +1626,10 @@ impl HostOverlay {
         view: std::sync::Arc<crate::stage_cards::Comparison>,
     ) -> Result<()> {
         let scene = &mut self.window.state.scene;
-        if std::sync::Arc::ptr_eq(&scene.reference, &view) || *scene.reference == *view {
+        if scene.cards.layout() != view.decisions.layout()
+            || std::sync::Arc::ptr_eq(&scene.reference, &view)
+            || *scene.reference == *view
+        {
             return Ok(());
         }
         let previous_height = scene.base_height();
@@ -1624,7 +1659,7 @@ impl HostOverlay {
             if previous_height != self.window.state.scene.base_height() {
                 size_to_content(
                     self.window.hwnd,
-                    self.window.state.scene.base_height(),
+                    &self.window.state.scene,
                     self.window.state.scene.selected.is_some(),
                 );
             }
@@ -1648,7 +1683,7 @@ impl HostOverlay {
             generation: 0,
             selection_cycle: 0,
             dataset: String::new(),
-            ids: [None; 3],
+            ids: Default::default(),
             revisions: 0,
             preview_mode: false,
             download: false,
@@ -1670,7 +1705,7 @@ impl HostOverlay {
                 self.window.state.recover = false;
                 size_to_content(
                     self.window.hwnd,
-                    self.window.state.scene.base_height(),
+                    &self.window.state.scene,
                     self.window.state.scene.selected.is_some(),
                 );
                 self.window.state.position_dirty = true;
@@ -1679,7 +1714,7 @@ impl HostOverlay {
                 self.window.state.position_dirty = false;
                 self.window.memory.remember_fixed(
                     self.window.hwnd.0,
-                    WIDTH,
+                    self.window.state.scene.width(),
                     self.window.state.scene.base_height(),
                 );
             }
@@ -1699,19 +1734,16 @@ impl HostOverlay {
             self.art = None;
             self.art_request = None;
             self.art_reply = ArtReply::default();
-            self.ids = [None; 3];
+            self.ids = Default::default();
             self.window.state.scene.select(None)?;
             unsafe {
-                size_to_content(
-                    self.window.hwnd,
-                    self.window.state.scene.base_height(),
-                    false,
-                );
+                size_to_content(self.window.hwnd, &self.window.state.scene, false);
                 KillTimer(Some(self.window.hwnd), 73).ok();
                 let _ = ShowWindow(self.window.hwnd, SW_HIDE);
             }
             return Ok(true);
         };
+        let previous_width = self.window.state.scene.width();
         let previous_height = self.window.state.scene.base_height();
         let same = self.last_accepted.as_deref() == Some(&frame);
         if same && self.frame.is_some() {
@@ -1750,7 +1782,9 @@ impl HostOverlay {
                 }
                 self.dataset = frame.snapshot.dataset_version.clone();
                 self.window.state.dismissed = false;
-                self.window.state.scene.reference = std::sync::Arc::new(Default::default());
+                self.window.state.scene.reference = std::sync::Arc::new(
+                    crate::stage_cards::Comparison::for_layout(frame.snapshot.slots.layout()),
+                );
                 self.window.state.scene.select(None)?;
             } else if !self.gate.as_mut().unwrap().accept(&frame.snapshot) {
                 return Ok(false);
@@ -1767,7 +1801,9 @@ impl HostOverlay {
                 // A reroll or partial OCR result is still the same selection window.
                 // Only a confirmed closure/new context can undo the user's dismissal.
                 self.ids = ids;
-                self.window.state.scene.reference = std::sync::Arc::new(Default::default());
+                self.window.state.scene.reference = std::sync::Arc::new(
+                    crate::stage_cards::Comparison::for_layout(frame.snapshot.slots.layout()),
+                );
                 self.window.state.scene.select(None)?;
             }
             let skill_choice = frame
@@ -1841,10 +1877,12 @@ impl HostOverlay {
         self.window.state.deadline = frame.deadline;
         let expired = frame.deadline.is_some_and(|t| Instant::now() >= t);
         unsafe {
-            if previous_height != self.window.state.scene.base_height() {
+            if previous_width != self.window.state.scene.width()
+                || previous_height != self.window.state.scene.base_height()
+            {
                 size_to_content(
                     self.window.hwnd,
-                    self.window.state.scene.base_height(),
+                    &self.window.state.scene,
                     self.window.state.scene.selected.is_some(),
                 );
             }
@@ -2017,7 +2055,7 @@ impl HostOverlay {
         self.update(Some(frame), visible)?;
         Ok(())
     }
-    pub fn ids(&self) -> [Option<u32>; 3] {
+    pub fn ids(&self) -> CardSlots<Option<u32>> {
         self.ids
     }
     pub fn revisions(&self) -> u64 {
@@ -2043,11 +2081,12 @@ impl HostOverlay {
         &self,
         height: u32,
     ) -> std::result::Result<image::RgbaImage, Box<dyn std::error::Error>> {
+        let width = self.window.state.scene.width();
         unsafe {
             let imaging: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let bitmap = imaging.CreateBitmap(
-                WIDTH,
+                width,
                 height,
                 &GUID_WICPixelFormat32bppPBGRA,
                 WICBitmapCacheOnLoad,
@@ -2062,12 +2101,12 @@ impl HostOverlay {
                 .CreateWicBitmapRenderTarget(&bitmap, &props)?;
             let surface = Surface::new(&self.window.state.scene, &target)?;
             surface.draw(&self.window.state.scene, &target, false)?;
-            let mut pixels = vec![0u8; (WIDTH * height * 4) as usize];
-            bitmap.CopyPixels(std::ptr::null(), WIDTH * 4, &mut pixels)?;
+            let mut pixels = vec![0u8; (width * height * 4) as usize];
+            bitmap.CopyPixels(std::ptr::null(), width * 4, &mut pixels)?;
             for pixel in pixels.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
-            image::RgbaImage::from_raw(WIDTH, height, pixels)
+            image::RgbaImage::from_raw(width, height, pixels)
                 .ok_or_else(|| "overlay-review-image-size".into())
         }
     }
@@ -2086,7 +2125,7 @@ impl HostOverlay {
         let cards = self.window.state.scene.cards.clone();
         let ids = self.ids;
         let mut source = reference_fixture(ids);
-        if let [Some(a), Some(b), Some(c)] = ids {
+        if let &[Some(a), Some(b), Some(c)] = &*ids {
             if a != b && a != c && b != c {
                 source.combinations = Some(vec![
                     fuze_worker_host::stage_reference::Combination {
@@ -2137,7 +2176,7 @@ impl HostOverlay {
             let card_bottom = self.window.state.scene.card_bottom();
             let has_footer = !reference.footer.is_empty();
             let mut contrasting = (*reference).clone();
-            for history in &mut contrasting.history {
+            for history in contrasting.history.iter_mut() {
                 if let Some(rate) = &mut history.rate {
                     rate.value = if rate.value == 0. { 1. } else { 0. };
                 }
@@ -2266,11 +2305,14 @@ impl HostOverlay {
             // Legacy diagnostics and absence messages remain available offline;
             // none may leak back into the passive production card.
             missing.source = "阶段未就绪 · 组合未就绪".into();
-            missing.reasons = std::array::from_fn(|_| "缺少统计，测试不应绘制".into());
-            missing.stage_summary = std::array::from_fn(|_| "阶段资料未就绪".into());
-            missing.values = std::array::from_fn(|_| std::array::from_fn(|_| "99.9%".into()));
-            missing.samples = std::array::from_fn(|_| std::array::from_fn(|_| "123456".into()));
-            for history in &mut missing.history {
+            missing.reasons =
+                CardSlots::from_fn(Layout::Three, |_| "缺少统计，测试不应绘制".into());
+            missing.stage_summary = CardSlots::from_fn(Layout::Three, |_| "阶段资料未就绪".into());
+            missing.values =
+                CardSlots::from_fn(Layout::Three, |_| std::array::from_fn(|_| "99.9%".into()));
+            missing.samples =
+                CardSlots::from_fn(Layout::Three, |_| std::array::from_fn(|_| "123456".into()));
+            for history in missing.history.iter_mut() {
                 history.interval = "约95%区间：样本量未提供".into();
             }
             self.window.state.scene.reference = std::sync::Arc::new(missing);
@@ -2333,11 +2375,7 @@ impl HostOverlay {
             return Err("description-scroll-missing".into());
         }
         unsafe {
-            size_to_content(
-                self.window.hwnd,
-                self.window.state.scene.base_height(),
-                true,
-            );
+            size_to_content(self.window.hwnd, &self.window.state.scene, true);
         }
         self.render(&output.join("host-cards-description-top.png"))?;
         let detail_offset = self.window.state.scene.detail_offset();
@@ -2374,11 +2412,7 @@ impl HostOverlay {
         self.window.state.scene.cards[0].description = original;
         self.window.state.scene.select(None)?;
         unsafe {
-            size_to_content(
-                self.window.hwnd,
-                self.window.state.scene.base_height(),
-                false,
-            );
+            size_to_content(self.window.hwnd, &self.window.state.scene, false);
         }
         if !self.hidden() {
             return Err("review-window-visible".into());
@@ -2396,6 +2430,57 @@ impl HostOverlay {
 #[cfg(test)]
 mod skill_tests {
     use super::*;
+    #[test]
+    fn maestro_popup_keeps_the_last_two_columns_when_the_second_title_is_missing(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut overlay = HostOverlay::new(true)?;
+        let mut publisher =
+            fuze_worker_host::overlay_frame::Publisher::new(Vec::new(), Default::default());
+        let mut snapshot = fuze_contract::Snapshot {
+            schema_version: 1,
+            generation: 1,
+            sequence: 1,
+            dataset_version: "maestro-fixture".into(),
+            selection_confirmed: false,
+            actual_stage: fuze_contract::ActualStage::Unknown,
+            slots: [
+                (1047, "关键暴击"),
+                (3116, "将他们放倒倒倒"),
+                (3060, "单曲红人"),
+                (1996, "升级：耀光"),
+            ]
+            .map(|(id, name)| Slot::Known {
+                id,
+                name: name.into(),
+                confidence: 1.,
+            })
+            .into(),
+        };
+        publisher.publish(snapshot.clone(), true, false, None);
+        assert!(overlay.update(publisher.current(), false)?);
+        let full = overlay.pixels()?;
+        assert_eq!(full.width(), 1010);
+        snapshot.sequence += 1;
+        snapshot.slots[1] = Slot::Unreadable;
+        publisher.publish(snapshot, true, false, None);
+        assert!(overlay.update(publisher.current(), false)?);
+        assert_eq!(
+            overlay.ids(),
+            [Some(1047), None, Some(3060), Some(1996)].into()
+        );
+        assert!(overlay.hidden());
+        let partial = overlay.pixels()?;
+        assert_eq!(partial.width(), full.width());
+        let title = |image: &image::RgbaImage, column: u32| {
+            image::imageops::crop_imm(image, 82 + 250 * column, 49, 155, 46).to_image()
+        };
+        assert_ne!(title(&partial, 1), title(&full, 1));
+        for column in [0, 2, 3] {
+            assert_eq!(title(&partial, column), title(&full, column));
+        }
+        Ok(())
+    }
+
     #[test]
     fn reference_fixture_history_and_missing_stage_follow_live_adapter() {
         use fuze_data::contextual_advice::{Choice, StagePattern};
@@ -2525,7 +2610,8 @@ mod skill_tests {
                     },
                     Slot::Unreadable,
                     Slot::Unreadable,
-                ],
+                ]
+                .into(),
             },
             true,
             false,
@@ -2565,7 +2651,7 @@ mod skill_tests {
         for (i, score) in scores.into_iter().enumerate() {
             scene.cards[i].score = Some(score);
         }
-        let candidates = std::array::from_fn(|i| Candidate {
+        let candidates: [Candidate; 3] = std::array::from_fn(|i| Candidate {
             id: scene.cards[i].id,
             score: Some(scores[i]),
             stages: [Some(Rate {
@@ -2576,7 +2662,7 @@ mod skill_tests {
             ..Default::default()
         });
         let mut reference = reference_view_fixture(&scene.cards);
-        reference.decisions = contextual_advice::decide(&candidates);
+        reference.decisions = contextual_advice::decide(&candidates).into();
         let names = scene
             .cards
             .iter()
@@ -2704,7 +2790,7 @@ mod skill_tests {
             statistic: "多符文搭配胜率\n42.0% · 120 场 · 少样本".into(),
             detail: "合成少样本组合".into(),
         };
-        reference.current_combos = [true, false, true];
+        reference.current_combos = [true, false, true].into();
         reference.routes[0] = vec![reference_route_fixture(
             crate::stage_cards::RouteKind::Current,
             &[10],
@@ -2818,7 +2904,7 @@ mod skill_tests {
                 dataset_version: "fixture".into(),
                 selection_confirmed: false,
                 actual_stage: fuze_contract::ActualStage::Unknown,
-                slots: std::array::from_fn(|i| Slot::Known {
+                slots: CardSlots::from_fn(Layout::Three, |i| Slot::Known {
                     id: i as u32 + 1,
                     name: cards[i].name.clone(),
                     confidence: 1.,
@@ -2838,7 +2924,7 @@ mod skill_tests {
         assert!(scene.cards[0].description.contains("2026-10-24"));
         assert_eq!(
             scene.cards.map(|c| c.score),
-            [Some(0.9), Some(0.8), Some(0.7)]
+            [Some(0.9), Some(0.8), Some(0.7)].into()
         );
         scene.cards = frame_cards(&publisher.current().unwrap());
         scene.select(Some(0))?;
@@ -2888,7 +2974,8 @@ mod skill_tests {
                 selection_confirmed: false,
                 actual_stage: fuze_contract::ActualStage::Unknown,
                 slots: ["重型", "力量", "厄运"]
-                    .map(|n| fuze_contract::skill_choice::read(n, 1.).unwrap()),
+                    .map(|n| fuze_contract::skill_choice::read(n, 1.).unwrap())
+                    .into(),
             },
             true,
             false,
@@ -3174,11 +3261,14 @@ fn reference_candidate_stages(
     }
 }
 
-fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference::Snapshot {
+fn reference_fixture(
+    ids: impl Into<CardSlots<Option<u32>>>,
+) -> fuze_worker_host::stage_reference::Snapshot {
     use fuze_worker_host::stage_reference::{Row, Snapshot};
+    let ids = ids.into();
     let mut rows: [Vec<Row>; 5] = Default::default();
     for stage in 1..=4 {
-        for (index, id) in ids.into_iter().enumerate() {
+        for (index, id) in ids.iter().copied().enumerate() {
             let Some(id) = id else { continue };
             if index == 2 && stage == 4 {
                 continue;
@@ -3208,7 +3298,7 @@ fn reference_fixture(ids: [Option<u32>; 3]) -> fuze_worker_host::stage_reference
 }
 
 fn reference_contrast_fixture(
-    ids: [Option<u32>; 3],
+    ids: CardSlots<Option<u32>>,
 ) -> fuze_worker_host::stage_reference::Snapshot {
     let mut source = reference_fixture(ids);
     for stage in 1..=4 {
@@ -3231,7 +3321,7 @@ fn reference_contrast_fixture(
 /// Synthetic data for isolated WIC/hidden-window review, never a live data fallback.
 /// Parsing display percentages is confined to this offline fixture so the mock
 /// history describes the exact rates already drawn on the cards.
-fn reference_frame_fixture(cards: &[Card; 3]) -> Frame {
+fn reference_frame_fixture(cards: &[Card]) -> Frame {
     use fuze_data::{
         decision_evidence::{HeroReference, HistoryContext, Rate, Scope},
         recommendations::{Evidence, Recommendation},
@@ -3282,6 +3372,11 @@ fn reference_frame_fixture(cards: &[Card; 3]) -> Frame {
         }),
         &recommendations,
     );
+    let layout = if cards.len() == 4 {
+        Layout::Four
+    } else {
+        Layout::Three
+    };
     Frame {
         context: 1,
         selection_cycle: 1,
@@ -3292,7 +3387,8 @@ fn reference_frame_fixture(cards: &[Card; 3]) -> Frame {
             dataset_version: "16.20".into(),
             selection_confirmed: false,
             actual_stage: fuze_contract::ActualStage::Unknown,
-            slots: cards.each_ref().map(|card| {
+            slots: CardSlots::from_fn(layout, |i| {
+                let card = &cards[i];
                 card.id.map_or(Slot::Unreadable, |id| Slot::Known {
                     id,
                     name: card.title.clone(),
@@ -3302,14 +3398,14 @@ fn reference_frame_fixture(cards: &[Card; 3]) -> Frame {
         },
         retained: false,
         deadline: None,
-        cards: Default::default(),
-        scores: cards.each_ref().map(|card| card.score),
+        cards: layout.empty_slots(),
+        scores: CardSlots::from_fn(layout, |i| cards[i].score),
         history: Some(std::sync::Arc::new(history)),
     }
 }
 
 fn reference_view_fixture_with_source(
-    cards: &[Card; 3],
+    cards: &[Card],
     source: Option<fuze_worker_host::stage_reference::Snapshot>,
 ) -> crate::stage_cards::Comparison {
     let frame = reference_frame_fixture(cards);
@@ -3318,8 +3414,8 @@ fn reference_view_fixture_with_source(
     view
 }
 
-fn reference_view_fixture(cards: &[Card; 3]) -> crate::stage_cards::Comparison {
-    let ids = cards.each_ref().map(|card| card.id);
+fn reference_view_fixture(cards: &[Card]) -> crate::stage_cards::Comparison {
+    let ids = [cards[0].id, cards[1].id, cards[2].id];
     reference_view_fixture_with_source(cards, Some(reference_fixture(ids)))
 }
 /// Narrow artwork review: public bundle, synthetic missing URL and an isolated disk cache.
@@ -3361,7 +3457,7 @@ pub fn review_icons(
         dataset_version: prepared.identity(),
         selection_confirmed: false,
         actual_stage: ActualStage::Unknown,
-        slots: std::array::from_fn(|i| Slot::Known {
+        slots: CardSlots::from_fn(Layout::Three, |i| Slot::Known {
             id: cards[i].id,
             name: cards[i].name.clone(),
             confidence: 1.,
@@ -3639,7 +3735,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                     let mut reference = (*original_reference).clone();
                     scene.cards[0].score = Some(0.95);
                     scene.cards[1].title = "任务：沃格勒特的巫师帽".into();
-                    let candidates = std::array::from_fn(|i| Candidate {
+                    let candidates: [Candidate; 3] = std::array::from_fn(|i| Candidate {
                         id: scene.cards[i].id,
                         score: scene.cards[i].score,
                         stages: [Some(Rate {
@@ -3649,7 +3745,7 @@ pub fn review(output: &Path) -> std::result::Result<serde_json::Value, Box<dyn s
                         }); 4],
                         ..Default::default()
                     });
-                    reference.decisions = contextual_advice::decide(&candidates);
+                    reference.decisions = contextual_advice::decide(&candidates).into();
                     let names = scene
                         .cards
                         .iter()

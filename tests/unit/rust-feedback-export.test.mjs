@@ -13,7 +13,7 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
   const run=(out=destination)=>spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',script,'-Source',source,'-Destination',out],{encoding:'utf8',windowsHide:true,timeout:60000})
   const secret='private-fixture-never-export'
   try {
-    const segment={binding:{key:secret,platform:secret,game:987654321},champion:1234,recognition:{analyses:4,partial:1,total_ms:1200,ocr_ms:800,token:secret},interrupted:false,capped:false,events:[{observed_at:123456789,cards:[1111,null,2222],level:6,partial:true,kind:'first',raw:secret},{cards:[null,null,null],level:secret,kind:secret}]}
+    const segment={binding:{key:secret,platform:secret,game:987654321},champion:1234,recognition:{analyses:4,partial:1,total_ms:1200,ocr_ms:800,token:secret},interrupted:false,capped:false,events:[{observed_at:123456789,cards:[1111,null,2222],level:6,partial:true,kind:'first',raw:secret},{cards:[null,null,null],level:secret,kind:secret},{cards:[1111,null,2222,1996],level:6,partial:true,kind:'changed'}]}
     const input=JSON.stringify({token:secret,segments:Array.from({length:7},()=>segment)})
     writeFileSync(source,input)
     const logs=path.join(dir,'logs');mkdirSync(logs)
@@ -33,7 +33,8 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     assert.deepEqual(report.segments[0].events[0],{kind:'first',level:6,readableSlots:[true,false,true]})
     assert.equal(report.segments[0].events[1].kind,'unknown')
     assert.equal(report.segments[0].events[1].level,null)
-    for(const value of [secret,'987654321','123456789','1111','2222','1234'])assert.ok(!raw.includes(value))
+    assert.deepEqual(report.segments[0].events[2],{kind:'changed',level:6,readableSlots:[true,false,true,true]})
+    for(const value of [secret,'987654321','123456789','1111','2222','1996','1234'])assert.ok(!raw.includes(value))
     assert.equal(readFileSync(source,'utf8'),input)
     assert.equal(run().status,1,'never overwrite existing report')
     assert.equal(readFileSync(destination,'utf8'),raw)
@@ -66,10 +67,11 @@ test('Windows feedback export is bounded, allowlisted and never copies identitie
     assert.equal(screenReport.records[1].state.capture_fallback,'timeout')
     assert.equal(screenReport.records[2].state.capture_source,null)
     assert.equal(screenReport.records[2].state.capture_fallback,null)
-    writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,state:{...row.state,title_reads:['exact','no-catalog','low-confidence'],process_cpu_percent:12.5,process_memory_mb:180}})+'\n'+JSON.stringify({...row,state:{...row.state,title_reads:[secret,secret,secret],process_cpu_percent:secret,process_memory_mb:secret}})+'\n')
+    writeFileSync(path.join(logs,'runtime-v1.jsonl'),JSON.stringify({...row,state:{...row.state,title_reads:['exact','no-catalog','low-confidence','exact'],readable_slots:[true,false,false,true],process_cpu_percent:12.5,process_memory_mb:180}})+'\n'+JSON.stringify({...row,state:{...row.state,title_reads:[secret,secret,secret],process_cpu_percent:secret,process_memory_mb:secret}})+'\n')
     assert.equal(run(path.join(dir,'title-reads.json')).status,0)
     const typed=JSON.parse(readFileSync(path.join(dir,'title-reads.json'))).persistentLog.records
-    assert.deepEqual(typed[1].state.title_reads,['exact','no-catalog','low-confidence'])
+    assert.deepEqual(typed[1].state.title_reads,['exact','no-catalog','low-confidence','exact'])
+    assert.deepEqual(typed[1].state.readable_slots,[true,false,false,true])
     assert.equal(typed[1].state.process_cpu_percent,12.5)
     assert.deepEqual(typed[2].state.title_reads,['unknown','unknown','unknown'])
     assert.equal(typed[2].state.process_cpu_percent,null)

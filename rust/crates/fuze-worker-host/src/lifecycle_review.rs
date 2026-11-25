@@ -46,7 +46,7 @@ impl ScreenDriver for Feed {
     fn stop(&mut self) {
         self.input.lock().unwrap().stops += 1;
     }
-    fn stream(&mut self, _: Duration) -> Result<FrameStatus> {
+    fn stream(&mut self, _: Duration, _: fuze_contract::Layout) -> Result<FrameStatus> {
         let mut input = self.input.lock().unwrap();
         input.reads += 1;
         if input.stalled {
@@ -55,7 +55,7 @@ impl ScreenDriver for Feed {
         self.selected = input.image;
         Ok(FrameStatus::Ready)
     }
-    fn bitmap(&mut self) -> Result<()> {
+    fn bitmap(&mut self, _: fuze_contract::Layout) -> Result<()> {
         let mut input = self.input.lock().unwrap();
         input.reads += 1;
         self.selected = input.image;
@@ -92,7 +92,7 @@ fn fixtures(root: &str) -> Result<Vec<Pixels>> {
             .flat_map(|p| [p[2], p[1], p[0], 255])
             .collect();
         let texture = gpu.upload(&bytes, image.width(), image.height())?;
-        let atlas = gpu.read(&texture)?;
+        let atlas = gpu.read(&texture, fuze_contract::Layout::Three)?;
         result.push(Pixels {
             bytes: atlas.bytes().to_vec(),
             width: atlas.title_width,
@@ -169,13 +169,17 @@ fn require(ok: bool, error: &'static str) -> Result<()> {
         Err(error.into())
     }
 }
-fn ids(status: &Status) -> [Option<u32>; 3] {
-    status.pipeline.overlay.as_ref().map_or([None; 3], |f| {
-        f.snapshot.slots.each_ref().map(|s| match s {
-            Slot::Known { id, .. } => Some(*id),
-            _ => None,
+fn ids(status: &Status) -> fuze_contract::CardSlots<Option<u32>> {
+    status
+        .pipeline
+        .overlay
+        .as_ref()
+        .map_or(Default::default(), |f| {
+            f.snapshot.slots.each_ref().map(|s| match s {
+                Slot::Known { id, .. } => Some(*id),
+                _ => None,
+            })
         })
-    })
 }
 struct Replay<F> {
     controller: Controller,
@@ -319,7 +323,7 @@ pub fn run(
     let full = r.next(playing, Some(3), 0)?;
     let first_ms = at.elapsed().as_millis();
     require(
-        first_ms < 3000 && ids(&full) == [Some(1032), Some(1390), Some(1129)],
+        first_ms < 3000 && ids(&full) == [Some(1032), Some(1390), Some(1129)].into(),
         "capture-review-level-wakeup",
     )?;
     require(
@@ -331,7 +335,7 @@ pub fn run(
         frame.cards.iter().all(|c| {
             c.as_ref()
                 .is_some_and(|a| !a.name.is_empty() && a.win.is_none() && a.pick.is_none())
-        }) && frame.scores == [None; 3],
+        }) && frame.scores == [None; 3].into(),
         "capture-review-unknown-hero-stats",
     )?;
     let first_context = frame.context;
@@ -356,7 +360,7 @@ pub fn run(
             .ok_or("capture-review-partial-flicker")?;
         if !frame.retained {
             require(
-                ids(&status) == [Some(1032), None, None],
+                ids(&status) == [Some(1032), None, None].into(),
                 "capture-review-partial-positions",
             )?;
             break;

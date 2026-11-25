@@ -427,7 +427,7 @@ mod reply_diagnostic_tests {
         );
         let result = |ocr_ms, fallback_count| Reply::Result {
             id,
-            slots: std::array::from_fn(|_| fuze_contract::Slot::Unreadable),
+            slots: Default::default(),
             title_kind: Default::default(),
             title_reads: Default::default(),
             ocr_ms,

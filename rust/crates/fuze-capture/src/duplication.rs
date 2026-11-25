@@ -63,7 +63,11 @@ impl DesktopStream {
         }
         Err("desktop-output-missing".into())
     }
-    pub fn next(&mut self, timeout: Duration) -> Result<FrameStatus> {
+    pub fn next(
+        &mut self,
+        timeout: Duration,
+        active_layout: fuze_contract::Layout,
+    ) -> Result<FrameStatus> {
         self.ready = false;
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
@@ -88,10 +92,7 @@ impl DesktopStream {
         if (desc.Width, desc.Height) != self.size {
             return Err("desktop-size-changed".into());
         }
-        match self
-            .reader
-            .read(&texture, &regions(self.size.0, self.size.1)?, self.size)
-        {
+        match self.reader.read(&texture, self.size, active_layout) {
             Ok(()) => (),
             Err(e) if e.is::<ReadbackBusy>() => return Ok(FrameStatus::Busy),
             Err(e) => return Err(e),
@@ -100,23 +101,18 @@ impl DesktopStream {
         Ok(FrameStatus::Ready)
     }
     pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
-        self.reader.evidence
+        self.reader.frame.evidence
     }
     pub fn diagnostic_pixels(&self) -> Option<DiagnosticPixels<'_>> {
         if !self.ready {
             return None;
         }
-        let buttons = fuze_contract::selection_pixels::buttons(self.size.0, self.size.1).ok()?;
-        Some(DiagnosticPixels {
-            buttons: Atlas::new(&self.reader.controls, buttons[0].width, buttons[0].height).ok()?,
-            screen: self.size,
-        })
+        self.reader.frame.diagnostic_pixels()
     }
     pub fn titles(&self) -> Result<Atlas<'_>> {
         if !self.ready {
             return Err("no-current-frame".into());
         }
-        let r = regions(self.size.0, self.size.1)?;
-        Ok(Atlas::new(&self.reader.bytes, r[0].width, r[0].height)?)
+        self.reader.frame.titles()
     }
 }

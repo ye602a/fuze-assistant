@@ -647,11 +647,11 @@ impl Retry {
 pub struct PipelineStatus {
     pub pick_diagnostics: Option<crate::augment_picks::Diagnostics>,
     pub picked: crate::augment_picks::Owned,
-    pub title_reads: [fuze_contract::wire::TitleRead; 3],
+    pub title_reads: fuze_contract::CardSlots<fuze_contract::wire::TitleRead>,
     pub overlay: Option<std::sync::Arc<crate::overlay_frame::Frame>>,
     pub schedule: Option<(fuze_runtime::gate::Mode, u64, Option<u8>)>,
-    pub recent_tiers: [Option<u64>; 3],
-    pub recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
+    pub recent_tiers: fuze_contract::CardSlots<Option<u64>>,
+    pub recent: Option<std::sync::Arc<fuze_contract::CardSlots<fuze_contract::Slot>>>,
     pub skipped_frames: u64,
     pub analyses: u64,
     pub analysis_ms: Option<f64>,
@@ -670,10 +670,10 @@ pub struct Controller {
     pub(crate) screenshots: crate::recognition_log::Control,
     gate_context: Option<Context>,
     gate_resume: Option<(Context, fuze_runtime::gate::ClosedWindow)>,
-    recent_tiers: [Option<u64>; 3],
+    recent_tiers: fuze_contract::CardSlots<Option<u64>>,
     analyses: u64,
     analysis_ms: Option<f64>,
-    recent: Option<std::sync::Arc<[fuze_contract::Slot; 3]>>,
+    recent: Option<std::sync::Arc<fuze_contract::CardSlots<fuze_contract::Slot>>>,
     level_reader: Option<crate::live_level::Reader>,
     records: crate::local_records::Journal,
     last_frame: Option<Instant>,
@@ -700,7 +700,9 @@ impl Controller {
     pub fn enable_local_records(&mut self) {
         if let Some(root) = std::env::var_os("LOCALAPPDATA") {
             self.records = crate::local_records::Journal::open(
-                std::path::PathBuf::from(root).join("FuzeRustPreview/observations-v2.json"),
+                std::path::PathBuf::from(root)
+                    .join("FuzeRustPreview")
+                    .join(crate::local_records::FILE_NAME),
             );
         }
     }
@@ -826,7 +828,7 @@ impl Controller {
             screenshots: Default::default(),
             gate_context: None,
             gate_resume: None,
-            recent_tiers: [None; 3],
+            recent_tiers: Default::default(),
             analyses: 0,
             analysis_ms: None,
             recent: None,
@@ -843,7 +845,7 @@ impl Controller {
         }
     }
     fn clear(&mut self) {
-        self.recent_tiers = [None; 3];
+        self.recent_tiers = Default::default();
         self.recent = None;
         if let Some(reader) = &self.level_reader {
             reader.enable(false);
@@ -1033,8 +1035,8 @@ impl Controller {
                         .any(|s| matches!(s, fuze_contract::Slot::Known { .. }))
                 {
                     self.recent = Some(std::sync::Arc::new(delivery.snapshot.slots.clone()));
-                    self.recent_tiers = std::array::from_fn(|i| match delivery.snapshot.slots[i] {
-                        fuze_contract::Slot::Known { id, .. } => pipeline.tier(id),
+                    self.recent_tiers = delivery.snapshot.slots.each_ref().map(|slot| match slot {
+                        fuze_contract::Slot::Known { id, .. } => pipeline.tier(*id),
                         _ => None,
                     });
                 }
@@ -1458,7 +1460,7 @@ mod tests {
     }
     #[test]
     fn hero_game_and_disconnect_cancel_old_window_without_live_discovery() {
-        use fuze_contract::{ActualStage, Slot, Snapshot};
+        use fuze_contract::{ActualStage, Snapshot};
         use fuze_native_overlay::native::HiddenOverlay;
         let context = |hero, game| {
             let flow = format!(
@@ -1488,7 +1490,7 @@ mod tests {
                 dataset_version: "zh-CN@fixture-v1".into(),
                 selection_confirmed: false,
                 actual_stage: ActualStage::Unknown,
-                slots: std::array::from_fn(|_| Slot::Unreadable),
+                slots: Default::default(),
             };
             assert!(window.update(snapshot(1)).unwrap());
             let cancellation = window.cancellation();

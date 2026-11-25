@@ -70,7 +70,7 @@ impl GameWindow {
         unsafe { GetForegroundWindow() == self.hwnd as HWND }
     }
     /// Diagnostic images may only include the primary-screen ROI inside the foreground game.
-    pub fn covers_primary_selection(&self) -> bool {
+    pub fn covers_primary_selection(&self, layout: fuze_contract::Layout) -> bool {
         use windows_sys::Win32::Graphics::Gdi::*;
         unsafe {
             if !self.valid() || self.minimized() || !self.foreground() {
@@ -92,15 +92,17 @@ impl GameWindow {
                 (screen.right - screen.left) as u32,
                 (screen.bottom - screen.top) as u32,
             );
-            let Ok(titles) = fuze_contract::titles::regions(w, h) else {
+            let Ok(titles) = fuze_contract::titles::regions_for(w, h, layout) else {
                 return false;
             };
-            let Ok(buttons) = fuze_contract::selection_pixels::buttons(w, h) else {
+            let Ok(buttons) = fuze_contract::selection_pixels::buttons_for(w, h, layout) else {
                 return false;
             };
             screen.left + titles[0].x as i32 >= origin.x
                 && screen.top + titles[0].y as i32 >= origin.y
-                && screen.left + (titles[2].x + titles[2].width) as i32 <= origin.x + rect.right
+                && screen.left
+                    + (titles[layout.count() - 1].x + titles[layout.count() - 1].width) as i32
+                    <= origin.x + rect.right
                 && screen.top + (buttons[0].y + buttons[0].height) as i32 <= origin.y + rect.bottom
         }
     }

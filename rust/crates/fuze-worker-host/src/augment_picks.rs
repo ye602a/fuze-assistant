@@ -1,5 +1,7 @@
 //! Passive game clicks followed by a definite visual close. Never supplies a claim stage.
-use fuze_contract::{selection_pixels::Evidence, wire::TitleKind, Slot};
+use fuze_contract::{
+    selection_pixels::Evidence, titles::pick_regions, wire::TitleKind, CardSlots, Layout, Slot,
+};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -35,12 +37,13 @@ pub type Owned = Arc<Vec<(u32, String)>>;
 
 #[derive(Clone, PartialEq)]
 struct Offer {
-    cards: [Option<(u32, String)>; 3],
+    cards: CardSlots<Option<(u32, String)>>,
     screen: (u32, u32),
     at: u64,
 }
 struct Pending {
     card: (u32, String),
+    layout: Layout,
     slot: usize,
     screen: (u32, u32),
     at: u64,
@@ -72,7 +75,7 @@ impl Tracker {
         self.down = None;
         self.pending = None;
     }
-    fn show(&mut self, slots: &[Slot; 3], kind: TitleKind, screen: (u32, u32), at: u64) {
+    fn show(&mut self, slots: &CardSlots<Slot>, kind: TitleKind, screen: (u32, u32), at: u64) {
         // A reroll can be clicked while an older capture is still in the OCR worker.
         if self.invalidated_at != 0 && at <= self.invalidated_at {
             return;
@@ -103,12 +106,15 @@ impl Tracker {
         let changed_pending = self.pending.as_ref().is_some_and(|p| {
             p.absent.is_some()
                 || p.screen != screen
+                || p.layout != cards.layout()
                 || cards[p.slot].as_ref().map(|c| c.0) != Some(p.card.0)
         });
         let changed_press = self.down.is_some_and(|(slot, _)| {
-            self.offer
-                .as_ref()
-                .is_none_or(|o| o.screen != screen || o.cards[slot] != cards[slot])
+            self.offer.as_ref().is_none_or(|o| {
+                o.screen != screen
+                    || o.cards.layout() != cards.layout()
+                    || o.cards[slot] != cards[slot]
+            })
         });
         if changed_pending || changed_press {
             self.cancel();
@@ -120,15 +126,17 @@ impl Tracker {
             .offer
             .as_ref()
             .filter(|o| at.saturating_sub(o.at) <= FRESH_MS)?;
-        // Same primary-screen card columns as OCR. Exclude the reroll controls below the cards.
-        let regions = fuze_contract::titles::regions(o.screen.0, o.screen.1).ok()?;
-        if y < (o.screen.1 as f64 * 0.19) as i32 || y >= (o.screen.1 as f64 * 0.61) as i32 {
-            return None;
-        }
+        let regions = pick_regions(o.screen.0, o.screen.1, o.cards.layout()).ok()?;
         regions
             .iter()
             .enumerate()
-            .find(|(i, r)| o.cards[*i].is_some() && x >= r.x as i32 && x < (r.x + r.width) as i32)
+            .find(|(i, r)| {
+                o.cards[*i].is_some()
+                    && x >= r.x as i32
+                    && x < (r.x + r.width) as i32
+                    && y >= r.y as i32
+                    && y < (r.y + r.height) as i32
+            })
             .map(|(i, _)| i)
     }
     fn pointer(&mut self, down: bool, point: Option<(i32, i32)>, at: u64) {
@@ -161,17 +169,16 @@ impl Tracker {
             if let (Some(slot), Some((pressed, since))) = (slot, previous) {
                 if pressed == slot && at.saturating_sub(since) <= FRESH_MS {
                     self.diagnostics.clicks = self.diagnostics.clicks.saturating_add(1);
-                    self.pending =
-                        self.offer
-                            .as_ref()
-                            .and_then(|o| o.cards[slot].clone())
-                            .map(|card| Pending {
-                                card,
-                                slot,
-                                screen: self.offer.as_ref().unwrap().screen,
-                                at,
-                                absent: None,
-                            });
+                    self.pending = self.offer.as_ref().and_then(|offer| {
+                        offer.cards[slot].clone().map(|card| Pending {
+                            card,
+                            layout: offer.cards.layout(),
+                            slot,
+                            screen: offer.screen,
+                            at,
+                            absent: None,
+                        })
+                    });
                     return;
                 }
             }
@@ -308,7 +315,13 @@ impl Recorder {
             s.cancel();
         }
     }
-    pub fn offer(&mut self, slots: &[Slot; 3], kind: TitleKind, captured: u64, screen: (u32, u32)) {
+    pub fn offer(
+        &mut self,
+        slots: &CardSlots<Slot>,
+        kind: TitleKind,
+        captured: u64,
+        screen: (u32, u32),
+    ) {
         let at = now();
         if self.root.is_none() || at.saturating_sub(captured) > FRESH_MS {
             self.cancel();
@@ -363,12 +376,49 @@ mod native;
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn cards(ids: [u32; 3]) -> [Slot; 3] {
+    #[test]
+    fn fourth_card_is_recorded_even_when_the_second_title_is_unreadable() {
+        let mut tracker = Tracker::default();
+        let mut slots = cards([1047, 3116, 3060, 1996]);
+        slots[1] = Slot::Unreadable;
+        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 100);
+        let card = Some((1512, 445));
+        tracker.pointer(true, card, 110);
+        tracker.pointer(false, card, 120);
+        tracker.frame(Some(Evidence::Absent), 200);
+        assert!(tracker.owned.is_empty());
+        tracker.frame(Some(Evidence::Absent), 700);
+        assert_eq!(
+            tracker.owned.iter().map(|c| c.0).collect::<Vec<_>>(),
+            [1996]
+        );
+    }
+
+    #[test]
+    fn fourth_reroll_invalidates_the_old_offer_and_never_records_a_pick() {
+        let mut tracker = Tracker::default();
+        let slots = cards([1047, 3116, 3060, 1996]);
+        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 100);
+        let reroll = Some((1516, 764));
+        tracker.pointer(true, reroll, 110);
+        tracker.pointer(false, reroll, 120);
+        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 105);
+        assert!(tracker.offer.is_none());
+        tracker.frame(Some(Evidence::Absent), 200);
+        tracker.frame(Some(Evidence::Absent), 700);
+        assert_eq!(tracker.diagnostics.clicks, 0);
+        assert!(tracker.owned.is_empty());
+    }
+    fn cards<const N: usize>(ids: [u32; N]) -> CardSlots<Slot>
+    where
+        CardSlots<Slot>: From<[Slot; N]>,
+    {
         ids.map(|id| Slot::Known {
             id,
             name: format!("符文{id}"),
             confidence: 1.,
         })
+        .into()
     }
     fn offer() -> Tracker {
         let mut s = Tracker::default();
@@ -683,12 +733,14 @@ mod tests {
 #[cfg(test)]
 mod gameplay_regressions {
     use super::*;
-    fn cards() -> [Slot; 3] {
-        [1004, 2018, 3060].map(|id| Slot::Known {
-            id,
-            name: format!("rune{id}"),
-            confidence: 1.0,
-        })
+    fn cards() -> CardSlots<Slot> {
+        [1004, 2018, 3060]
+            .map(|id| Slot::Known {
+                id,
+                name: format!("rune{id}"),
+                confidence: 1.0,
+            })
+            .into()
     }
     fn click(s: &mut Tracker, at: u64) {
         let p = Some((550, 400));

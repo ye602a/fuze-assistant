@@ -1,5 +1,5 @@
 //! One geometry contract shared by raw-frame, GPU-atlas and OCR paths.
-use crate::frame::BgraFrame;
+use crate::{frame::BgraFrame, CardSlots, Layout};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Region {
@@ -29,26 +29,75 @@ pub fn regions(width: u32, height: u32) -> Result<[Region; 3], &'static str> {
     Ok(regions)
 }
 
-/// Three equal-sized title crops packed horizontally in original left/center/right order.
+/// The Maestro panel uses a different horizontal spacing and center for every card.
+pub(crate) fn four_center(i: usize) -> f64 {
+    (408. + i as f64 * 368.) / 1920.
+}
+
+pub fn regions_for(
+    width: u32,
+    height: u32,
+    layout: Layout,
+) -> Result<CardSlots<Region>, &'static str> {
+    let ordinary = regions(width, height)?;
+    Ok(match layout {
+        Layout::Three => ordinary.into(),
+        Layout::Four => CardSlots::from_fn(layout, |i| Region {
+            x: ((four_center(i) - 0.16128 / 2.) * width as f64).round() as u32,
+            ..ordinary[0]
+        }),
+    })
+}
+
+pub fn pick_regions(
+    width: u32,
+    height: u32,
+    layout: Layout,
+) -> Result<CardSlots<Region>, &'static str> {
+    // Interior of the four-card body (192–720 at 1080p). Reroll starts at y=743.
+    let (top, bottom) = match layout {
+        Layout::Three => (0.19, 0.61),
+        Layout::Four => (198. / 1080., 714. / 1080.),
+    };
+    let top = (height as f64 * top) as u32;
+    let bottom = (height as f64 * bottom) as u32;
+    Ok(regions_for(width, height, layout)?.map(|r| Region {
+        y: top,
+        height: bottom - top,
+        ..r
+    }))
+}
+
+/// Equal-sized title crops packed horizontally in the game's left-to-right order.
 pub struct Atlas<'a> {
     frame: BgraFrame<'a>,
+    pub layout: Layout,
     pub title_width: u32,
     pub title_height: u32,
 }
 impl<'a> Atlas<'a> {
     pub fn new(bytes: &'a [u8], title_width: u32, title_height: u32) -> Result<Self, &'static str> {
+        Self::with_layout(bytes, title_width, title_height, Layout::Three)
+    }
+    pub fn with_layout(
+        bytes: &'a [u8],
+        title_width: u32,
+        title_height: u32,
+        layout: Layout,
+    ) -> Result<Self, &'static str> {
         if title_width == 0 || title_width > 1365 || title_height == 0 || title_height > 256 {
             return Err("invalid-title-atlas");
         }
-        let width = title_width as usize * 3;
+        let width = title_width as usize * layout.count();
         Ok(Self {
             frame: BgraFrame::new(bytes, width, title_height as usize, width * 4)?,
+            layout,
             title_width,
             title_height,
         })
     }
     pub fn rgb_slot(&self, slot: usize) -> Result<Vec<u8>, &'static str> {
-        if slot >= 3 {
+        if slot >= self.layout.count() {
             return Err("invalid-slot");
         }
         self.frame.rgb_roi(
@@ -57,6 +106,11 @@ impl<'a> Atlas<'a> {
             self.title_width as usize,
             self.title_height as usize,
         )
+    }
+    pub fn has_lit_pixel(&self) -> bool {
+        self.bytes()
+            .chunks_exact(4)
+            .any(|p| u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2]) > 24)
     }
     pub fn bytes(&self) -> &[u8] {
         self.frame.bytes()

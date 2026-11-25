@@ -835,8 +835,9 @@ pub(super) unsafe fn page(hwnd: HWND, dc: HDC, u: &Ui) {
         x(12),
         MUTED,
     );
-    let card = (width - x(96 + 24)) / 3;
-    for i in 0..3 {
+    let count = p.recent.as_ref().map_or(3, |slots| slots.len());
+    let card = (width - x(96 + 12 * (count as i32 - 1))) / count as i32;
+    for i in 0..count {
         let l = x(48) + i as i32 * (card + x(12));
         box_rect(
             dc,
@@ -1111,19 +1112,22 @@ pub(super) unsafe fn review(hwnd: HWND, u: &mut Ui, directory: &str) -> Result<(
         snapshot(hwnd, &directory.join(name).to_string_lossy(), u)
     };
     let result = (|| {
-        u.shown.pipeline.recent = Some(Arc::new([
-            fuze_contract::Slot::Known {
-                id: 1,
-                name: "珠光护手".into(),
-                confidence: 0.99,
-            },
-            fuze_contract::Slot::Unreadable,
-            fuze_contract::Slot::Known {
-                id: 2,
-                name: "万用瞄准镜".into(),
-                confidence: 0.99,
-            },
-        ]));
+        u.shown.pipeline.recent = Some(Arc::new(
+            [
+                fuze_contract::Slot::Known {
+                    id: 1,
+                    name: "珠光护手".into(),
+                    confidence: 0.99,
+                },
+                fuze_contract::Slot::Unreadable,
+                fuze_contract::Slot::Known {
+                    id: 2,
+                    name: "万用瞄准镜".into(),
+                    confidence: 0.99,
+                },
+            ]
+            .into(),
+        ));
         u.shown.pipeline.frame_age = Some(0);
         u.shown.pipeline.backend = Some(fuze_contract::wire::ActiveBackend::Cpu);
         u.shown.pipeline.capture = "receiving";

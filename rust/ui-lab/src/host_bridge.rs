@@ -609,7 +609,7 @@ pub fn attach_recovered(
                     && next.pipeline.recent.as_ref().is_some_and(|slots| slots.iter().any(|slot| matches!(slot, fuze_contract::Slot::Known { .. })))
             );
             if old.as_ref().is_none_or(|s| s.pipeline.recent != next.pipeline.recent || s.pipeline.recent_tiers != next.pipeline.recent_tiers) {
-                state.set_slots(Rc::new(VecModel::from((0..3).map(|i| {
+                state.set_slots(Rc::new(VecModel::from((0..next.pipeline.recent.as_ref().map_or(3, |slots| slots.len())).map(|i| {
                     let (name, hint, known) = match next.pipeline.recent.as_ref().map(|slots| &slots[i]) {
                         Some(fuze_contract::Slot::Known { name, .. }) => (name.clone(), next.pipeline.recent_tiers[i].map(|v| format!("梯队 T{v}")).unwrap_or_default(), true),
                         _ => (String::new(), String::new(), false),

@@ -83,7 +83,7 @@ fn key(owner: &Owner) -> Result<String> {
     Ok(crate::update_io::hex(&hash?))
 }
 pub fn path() -> Result<PathBuf> {
-    Ok(crate::preferences::path()?.with_file_name("account-history-v3.json"))
+    Ok(crate::preferences::path()?.with_file_name(FILE_NAME))
 }
 /// Explicit offline browsing; never claims this is the currently logged-in account.
 pub fn offline(path: &Path, index: usize) -> Result<View> {
@@ -101,34 +101,21 @@ pub fn offline(path: &Path, index: usize) -> Result<View> {
         ..Default::default()
     })
 }
+pub(crate) const FILE_NAME: &str = "account-history-v4.json";
+const FILE_VERSIONS: &[&str] = &[
+    FILE_NAME,
+    "account-history-v3.json",
+    "account-history-v2.json",
+    "account-history.json",
+];
+
 fn read(path: &Path) -> Result<Saved> {
-    // New fields never rewrite an older binary's strict schema. Read old data only
-    // until the first successful save; malformed new schemas never silently fall back.
-    let legacy;
-    let path = if !path.exists()
-        && path
-            .file_name()
-            .is_some_and(|n| n == "account-history-v2.json" || n == "account-history-v3.json")
-    {
-        let v2 = path.with_file_name("account-history-v2.json");
-        legacy = if path
-            .file_name()
-            .is_some_and(|n| n == "account-history-v3.json")
-            && v2.exists()
-        {
-            v2
-        } else {
-            path.with_file_name("account-history.json")
-        };
-        legacy.as_path()
-    } else {
-        path
-    };
+    let path = crate::storage::versioned_source(path, FILE_VERSIONS);
     if !path.exists() {
         return Ok(Saved::default());
     }
     let mut data: Saved =
-        serde_json::from_slice(&crate::update_channel::bounded(path, 6 * 1024 * 1024)?)
+        serde_json::from_slice(&crate::update_channel::bounded(&path, 6 * 1024 * 1024)?)
             .map_err(|_| "history-cache-invalid")?;
     let mut keys = std::collections::HashSet::new();
     if data.accounts.len() > 5
@@ -146,17 +133,13 @@ fn read(path: &Path) -> Result<Saved> {
     {
         return Err("history-cache-invalid");
     }
-    if path.file_name().is_some_and(|n| {
-        n == "account-history-v3.json"
-            || n == "account-history-v2.json"
-            || n == "account-history.json"
-    }) {
-        let new_journal = path.with_file_name("observations-v2.json");
-        let journal = if new_journal.exists() {
-            new_journal
-        } else {
-            path.with_file_name("observations.json")
-        };
+    if path
+        .file_name()
+        .is_some_and(|name| FILE_VERSIONS.iter().any(|file| name == *file))
+    {
+        let journal = crate::local_records::source_path(
+            &path.with_file_name(crate::local_records::FILE_NAME),
+        );
         for account in &mut data.accounts {
             if let Ok(records) =
                 crate::local_records::bound_observations(&journal, &account.key, &account.platform)
@@ -543,6 +526,36 @@ mod tests {
         assert_eq!(read(&v3).unwrap().accounts[0].rows.len(), 2);
         merge(&v3, &account, vec![row(3)], false).unwrap();
         assert_eq!(std::fs::read(&new).unwrap(), v2_bytes);
+        let v4 = root.join(FILE_NAME);
+        let v3_bytes = std::fs::read(&v3).unwrap();
+        assert_eq!(read(&v4).unwrap().accounts[0].rows.len(), 3);
+        let event = fuze_lcu::history::ObservedCards {
+            observed_at: None,
+            cards: [Some(1), None, Some(3), Some(4)].into(),
+            level: Some(11),
+            partial: true,
+            kind: "first".into(),
+        };
+        save_observation(
+            &v4,
+            &account,
+            fuze_lcu::history::Observation {
+                recognition: None,
+                game_id: 3,
+                interrupted: false,
+                capped: false,
+                events: vec![event.clone()],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read(&v4).unwrap().accounts[0].observations[0].events,
+            vec![event]
+        );
+        assert_eq!(std::fs::read(&v3).unwrap(), v3_bytes);
+        std::fs::write(&v4, b"invalid").unwrap();
+        assert!(matches!(read(&v4), Err("history-cache-invalid")));
+        std::fs::remove_file(v4).unwrap();
         std::fs::write(&v3, b"invalid").unwrap();
         assert!(matches!(read(&v3), Err("history-cache-invalid")));
         std::fs::remove_file(v3).unwrap();
@@ -567,7 +580,7 @@ mod tests {
             capped: false,
             events: vec![fuze_lcu::history::ObservedCards {
                 observed_at: None,
-                cards: [Some(1), None, Some(3)],
+                cards: [Some(1), None, Some(3)].into(),
                 level: Some(11),
                 partial: true,
                 kind: "changed".into(),

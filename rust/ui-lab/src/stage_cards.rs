@@ -1,4 +1,5 @@
 //! Comparable historical evidence for the displayed offer. Never infers a claim stage.
+use fuze_contract::{CardSlots, Layout};
 use fuze_data::{
     contextual_advice::{self, Candidate, Choice, Decision, Reason, StagePattern},
     decision_evidence::{self, AugmentHistory, HeroReference, HistoryContext, Rate},
@@ -63,56 +64,60 @@ pub struct RouteTarget {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
-    pub decisions: [Decision; 3],
-    pub reasons: [String; 3],
-    pub stage_summary: [String; 3],
-    pub history: [HistoryDisplay; 3],
+    pub decisions: CardSlots<Decision>,
+    pub reasons: CardSlots<String>,
+    pub stage_summary: CardSlots<String>,
+    pub history: CardSlots<HistoryDisplay>,
     /// Only rows satisfying the existing batch/patch gates are drawn as stage charts.
-    pub stage_rates: [[Option<Rate>; 4]; 3],
-    pub stage_contrast: [Option<StageDisplay>; 3],
-    pub routes: [Vec<RouteDisplay>; 3],
+    pub stage_rates: CardSlots<[Option<Rate>; 4]>,
+    pub stage_contrast: CardSlots<Option<StageDisplay>>,
+    pub routes: CardSlots<Vec<RouteDisplay>>,
     /// Existing future-route order: first target, then at most three other targets.
-    pub future_targets: [Vec<RouteTarget>; 3],
+    pub future_targets: CardSlots<Vec<RouteTarget>>,
     /// One source line only when every visible numeric/route module shares this scope.
     pub footer: String,
-    pub mechanisms: [Option<fuze_data::mechanism_reference::Notice>; 3],
-    pub combos: [fuze_worker_host::augment_combos::Reference; 3],
+    pub mechanisms: CardSlots<Option<fuze_data::mechanism_reference::Notice>>,
+    pub combos: CardSlots<fuze_worker_host::augment_combos::Reference>,
     /// Other champions' observed routes are display-only and never become hero evidence.
-    pub cross_hero: [Option<fuze_worker_host::cross_hero_routes::Reference>; 3],
-    pub combo_secondary: [String; 3],
-    pub current_combos: [bool; 3],
-    pub combo_alternatives: [usize; 3],
-    pub values: [[String; 4]; 3],
-    pub samples: [[String; 4]; 3],
-    pub details: [String; 3],
+    pub cross_hero: CardSlots<Option<fuze_worker_host::cross_hero_routes::Reference>>,
+    pub combo_secondary: CardSlots<String>,
+    pub current_combos: CardSlots<bool>,
+    pub combo_alternatives: CardSlots<usize>,
+    pub values: CardSlots<[String; 4]>,
+    pub samples: CardSlots<[String; 4]>,
+    pub details: CardSlots<String>,
     pub source: String,
 }
 impl Default for Comparison {
     fn default() -> Self {
-        Self {
-            decisions: Default::default(),
-            reasons: Default::default(),
-            stage_summary: Default::default(),
-            history: Default::default(),
-            stage_rates: Default::default(),
-            stage_contrast: Default::default(),
-            routes: Default::default(),
-            future_targets: Default::default(),
-            footer: String::new(),
-            mechanisms: Default::default(),
-            combos: Default::default(),
-            cross_hero: Default::default(),
-            combo_secondary: Default::default(),
-            current_combos: Default::default(),
-            combo_alternatives: Default::default(),
-            values: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
-            samples: std::array::from_fn(|_| std::array::from_fn(|_| "—".into())),
-            details: Default::default(),
-            source: "阶段参考暂无缓存 · 选人及加载时准备，局内不联网".into(),
-        }
+        Self::for_layout(Layout::Three)
     }
 }
 impl Comparison {
+    pub(crate) fn for_layout(layout: Layout) -> Self {
+        Self {
+            decisions: layout.empty_slots(),
+            reasons: layout.empty_slots(),
+            stage_summary: layout.empty_slots(),
+            history: layout.empty_slots(),
+            stage_rates: layout.empty_slots(),
+            stage_contrast: layout.empty_slots(),
+            routes: layout.empty_slots(),
+            future_targets: layout.empty_slots(),
+            footer: String::new(),
+            mechanisms: layout.empty_slots(),
+            combos: layout.empty_slots(),
+            cross_hero: layout.empty_slots(),
+            combo_secondary: layout.empty_slots(),
+            current_combos: layout.empty_slots(),
+            combo_alternatives: layout.empty_slots(),
+            values: CardSlots::from_fn(layout, |_| std::array::from_fn(|_| "—".into())),
+            samples: CardSlots::from_fn(layout, |_| std::array::from_fn(|_| "—".into())),
+            details: layout.empty_slots(),
+            source: "阶段参考暂无缓存 · 选人及加载时准备，局内不联网".into(),
+        }
+    }
+
     pub fn decision(&self, index: usize, id: Option<u32>) -> Option<&Decision> {
         self.decisions
             .get(index)
@@ -126,11 +131,12 @@ impl Comparison {
 pub fn compare(
     snapshot: Option<&Snapshot>,
     champion: u32,
-    ids: [Option<u32>; 3],
+    ids: impl Into<CardSlots<Option<u32>>>,
     dataset: &str,
     at: u64,
 ) -> Comparison {
-    let mut view = Comparison::default();
+    let ids = ids.into();
+    let mut view = Comparison::for_layout(ids.layout());
     let Some(s) = snapshot.filter(|s| s.usable(champion, at)) else {
         if snapshot.is_some_and(|s| s.champion == champion && s.fetched <= at) {
             view.source = "阶段缓存已过期 · 暂不参与情境判断".into();
@@ -152,7 +158,7 @@ pub fn compare(
             ""
         }
     );
-    for (i, id) in ids.into_iter().enumerate() {
+    for (i, id) in ids.iter().copied().enumerate() {
         let Some(id) = id else { continue };
         let mut details = Vec::new();
         for j in 0..4 {
@@ -286,7 +292,7 @@ pub(crate) fn stage_text(decision: &Decision) -> String {
 /// Explain a comparison within each stage, never the same augment across populations.
 /// The candidates already passed the source/batch checks used by the decision engine.
 fn stage_comparison(
-    candidates: &[Candidate; 3],
+    candidates: &[Candidate],
     index: usize,
     decision: &Decision,
     names: &HashMap<u32, String>,
@@ -527,7 +533,7 @@ fn display_scope(source: &str, patch: &str, date: &str) -> Option<(String, Strin
 
 fn shared_footer(
     view: &Comparison,
-    ids: [Option<u32>; 3],
+    ids: CardSlots<Option<u32>>,
     history: Option<&HistoryContext>,
     snapshot: Option<&Snapshot>,
     routes: Option<&fuze_data::combination_routes::Index>,
@@ -544,7 +550,7 @@ fn shared_footer(
             true
         }
     };
-    for (i, id) in ids.into_iter().enumerate() {
+    for (i, id) in ids.iter().copied().enumerate() {
         if view.history[i].rate.is_some() {
             let Some(row) = history.and_then(|h| id.and_then(|id| h.by_augment.get(&id))) else {
                 return String::new();
@@ -594,9 +600,9 @@ fn same_arc<T: PartialEq>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 struct Rendered {
     champion: u32,
     dataset: String,
-    ids: [Option<u32>; 3],
-    cards: [Option<Arc<fuze_data::champion_detail::Augment>>; 3],
-    scores: [Option<f64>; 3],
+    ids: CardSlots<Option<u32>>,
+    cards: CardSlots<Option<Arc<fuze_data::champion_detail::Augment>>>,
+    scores: CardSlots<Option<f64>>,
     history: Option<Arc<HistoryContext>>,
     snapshot: Option<Arc<Snapshot>>,
     routes: Option<Arc<fuze_data::combination_routes::Index>>,
@@ -879,10 +885,10 @@ impl Reference {
                 names.insert(*id, name.clone());
             }
         }
-        let mut evidence: [Option<fuze_worker_host::augment_combos::CandidateEvidence>; 3] =
-            Default::default();
-        let mut eligible = [false; 3];
-        let candidates: [Candidate; 3] = std::array::from_fn(|i| {
+        let layout = ids.layout();
+        let mut evidence = layout.empty_slots();
+        let mut eligible = layout.empty_slots::<bool>();
+        let candidates = CardSlots::from_fn(layout, |i| {
             let Some(id) = ids[i].filter(|id| fuze_contract::skill_choice::get(*id).is_none())
             else {
                 return Candidate::default();
@@ -951,7 +957,10 @@ impl Reference {
             evidence[i] = Some(e);
             candidate
         });
-        view.decisions = contextual_advice::decide(&candidates);
+        view.decisions = match &candidates {
+            CardSlots::Three(cards) => contextual_advice::decide(cards).into(),
+            CardSlots::Four(cards) => contextual_advice::decide(cards).into(),
+        };
         view.stage_rates = candidates
             .each_ref()
             .map(|candidate| candidate.stages.map(display_rate));
@@ -970,7 +979,7 @@ impl Reference {
             .filter(|patch| *patch == (2026, 22))
             .map(|_| "16.22");
         let mut withheld = false;
-        for i in 0..3 {
+        for i in 0..ids.len() {
             let Some(e) = evidence[i].as_ref() else {
                 continue;
             };
@@ -1154,7 +1163,7 @@ mod tests {
                 dataset_version: dataset.into(),
                 selection_confirmed: false,
                 actual_stage: fuze_contract::ActualStage::Unknown,
-                slots: ids.map(|id| {
+                slots: CardSlots::Three(ids).map(|id| {
                     id.map_or(fuze_contract::Slot::Unreadable, |id| {
                         fuze_contract::Slot::Known {
                             id,
@@ -1167,7 +1176,7 @@ mod tests {
             retained: false,
             deadline: None,
             cards: Default::default(),
-            scores: [None; 3],
+            scores: Default::default(),
             history: None,
         }
     }
@@ -1432,7 +1441,7 @@ mod tests {
             wins: None,
         };
         let mut frame = frame([Some(1), Some(2), Some(3)], "16.22");
-        frame.scores = [Some(0.9), Some(0.8), Some(0.7)];
+        frame.scores = [Some(0.9), Some(0.8), Some(0.7)].into();
         frame.history = Some(Arc::new(HistoryContext {
             dataset: "16.22".into(),
             champion: 145,
@@ -1518,7 +1527,7 @@ mod tests {
             frame.snapshot.actual_stage,
             fuze_contract::ActualStage::Unknown
         );
-        assert_eq!(frame.scores, [Some(0.9), Some(0.8), Some(0.7)]);
+        assert_eq!(frame.scores, [Some(0.9), Some(0.8), Some(0.7)].into());
 
         // Without contextual rows the original relative ordering remains available,
         // even though all three augment cohorts are below the hero's broad mean.
@@ -1528,7 +1537,7 @@ mod tests {
         assert_eq!(overall.decisions[0].reason, Reason::OverallRank);
         assert_eq!(overall.history[0].delta, "-15.0 个百分点");
         let preview = Reference::preview(&frame, 145);
-        assert!(preview.preferred(0, Some(1)) && preview.current_combos == [false; 3]);
+        assert!(preview.preferred(0, Some(1)) && preview.current_combos == [false; 3].into());
         assert_eq!(preview.history[0].relation, "低于英雄均值");
 
         let mut near = frame.clone();
@@ -1610,7 +1619,7 @@ mod tests {
     #[test]
     fn partial_evidence_and_future_routes_do_not_create_contextual_priority() {
         let (mut reference, mut frame, at) = contextual_fixture();
-        frame.scores = [None; 3];
+        frame.scores = Default::default();
         let source = Arc::make_mut(reference.snapshot.as_mut().unwrap());
         source.rows[4].clear();
         source.combinations = Some(vec![stage_reference::Combination {
@@ -1628,7 +1637,7 @@ mod tests {
         assert!(view.combos[0].summary.contains("99.0%") && !view.current_combos[0]);
         assert!(view.combos[1].summary.contains("暂无此符文"));
         frame.snapshot.slots[2] = fuze_contract::Slot::Unreadable;
-        frame.scores = [Some(0.9), Some(0.8), None];
+        frame.scores = [Some(0.9), Some(0.8), None].into();
         let partial = reference.cards_at(&frame, at);
         assert!(partial
             .decisions
@@ -1641,7 +1650,7 @@ mod tests {
     fn mechanism_notices_require_matching_reviewed_patch_without_changing_choices() {
         let (mut reference, _, at) = contextual_fixture();
         let mut frame = frame([Some(1011), Some(12317), Some(3)], "zh-CN@16.22.1");
-        frame.scores = [Some(0.9), Some(0.8), Some(0.7)];
+        frame.scores = [Some(0.9), Some(0.8), Some(0.7)].into();
         reference.owned = Arc::new(vec![(1004, "回归基本功".into())]);
         reference.patch = "16.22.1".into();
         let shown = reference.cards_at(&frame, at);

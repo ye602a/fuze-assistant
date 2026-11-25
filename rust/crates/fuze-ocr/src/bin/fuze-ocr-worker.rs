@@ -61,7 +61,7 @@ fn run() -> fuze_ocr::Result<()> {
     )?;
     let mut last = None;
     let mut reuse = fuze_ocr::reuse::TitleReuse::default();
-    let mut last_reads = [wire::TitleRead::Unknown; 3];
+    let mut last_reads = fuze_contract::CardSlots::default();
     while let Some(request) = Request::read(&mut input)? {
         let id = request.id;
         if last.is_some_and(|old: wire::Identity| {

@@ -141,7 +141,8 @@ pub(super) unsafe fn command(hwnd: HWND, u: &mut Ui, id: usize) {
                         name: crate::i18n::text("测试预览 · 可关闭窗口").into(),
                         confidence: 1.0,
                     },
-                ],
+                ]
+                .into(),
             })?;
             o.visible(true)?;
             Ok::<_, &'static str>(o)

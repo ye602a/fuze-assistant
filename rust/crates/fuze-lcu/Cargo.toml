@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 [dependencies]
+fuze-contract = { path = "../fuze-contract" }
 fuze-runtime = { path = "../fuze-runtime" }
 serde_json.workspace = true
 serde.workspace = true

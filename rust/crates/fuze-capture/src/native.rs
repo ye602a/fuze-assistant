@@ -39,7 +39,13 @@ pub struct DiagnosticPixels<'a> {
 pub trait CaptureFeed {
     /// Release continuous capture during the level-one saving gate; probes still work.
     fn saving(&mut self, _saving: bool) {}
-    fn next(&mut self, timeout: Duration) -> Result<FrameStatus>;
+    /// Preserve a confirmed layout across a reroll or a capture backend switch.
+    /// Without an active four-card offer, select the layout from this frame's pixels.
+    fn next(
+        &mut self,
+        timeout: Duration,
+        active_layout: fuze_contract::Layout,
+    ) -> Result<FrameStatus>;
     fn titles(&self) -> Result<fuze_contract::titles::Atlas<'_>>;
     fn diagnostic_pixels(&self) -> Option<DiagnosticPixels<'_>> {
         None
@@ -194,7 +200,7 @@ fn validate_regions(width: u32, height: u32, regions: &[Region]) -> Result<(u32,
     Ok((atlas_width, atlas_height))
 }
 
-/// Reuses one staging atlas and one CPU allocation. Copies only the three title ROIs.
+/// Reuses one staging atlas and one CPU allocation for bounded selection regions.
 pub struct RoiReader {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -307,51 +313,36 @@ impl RoiReader {
     }
 }
 
-/// Titles and reroll controls from ONE GPU texture and ONE map. Only small ROIs
-/// cross to CPU; the OCR wire still receives the original title atlas alone.
+/// Title and control regions from one GPU texture and one map.
 struct SelectionReader {
     reader: RoiReader,
-    bytes: Vec<u8>,
-    controls: Vec<u8>,
-    evidence: Option<fuze_contract::selection_pixels::Evidence>,
+    frame: crate::selection_frame::SelectionFrame,
 }
 impl SelectionReader {
     fn new(device: &Device) -> Self {
         Self {
             reader: RoiReader::new(device),
-            bytes: Vec::new(),
-            controls: Vec::new(),
-            evidence: None,
+            frame: Default::default(),
         }
     }
     fn read(
         &mut self,
         source: &ID3D11Texture2D,
-        titles: &[Region; 3],
         size: (u32, u32),
+        active_layout: fuze_contract::Layout,
     ) -> Result<()> {
-        use fuze_contract::{selection_pixels, titles::Atlas};
-        let buttons = selection_pixels::buttons(size.0, size.1)?;
-        let all = [
-            titles[0], titles[1], titles[2], buttons[0], buttons[1], buttons[2],
-        ];
-        self.reader.read(source, &all)?;
-        let tw = titles[0].width as usize * 3 * 4;
-        let bw = buttons[0].width as usize * 3 * 4;
-        let stride = tw + bw;
-        self.bytes.resize(tw * titles[0].height as usize, 0);
-        self.controls.resize(bw * buttons[0].height as usize, 0);
-        for (y, row) in self.bytes.chunks_exact_mut(tw).enumerate() {
-            row.copy_from_slice(&self.reader.bytes[y * stride..y * stride + tw]);
+        let regions = crate::selection_frame::CaptureRegions::new(size)?;
+        self.reader.read(source, &regions.areas)?;
+        let mut offsets = [0; 8];
+        for i in 1..regions.areas.len() {
+            offsets[i] = offsets[i - 1] + regions.areas[i - 1].width as usize * 4;
         }
-        for (y, row) in self.controls.chunks_exact_mut(bw).enumerate() {
-            row.copy_from_slice(&self.reader.bytes[y * stride + tw..y * stride + stride]);
-        }
-        self.evidence = Some(selection_pixels::classify(
-            &Atlas::new(&self.bytes, titles[0].width, titles[0].height)?,
-            &Atlas::new(&self.controls, buttons[0].width, buttons[0].height)?,
-        ));
-        Ok(())
+        let stride = self.reader.size.0 as usize * 4;
+        let bytes = &self.reader.bytes;
+        self.frame.read(&regions, active_layout, |area, y| {
+            let start = y * stride + offsets[area];
+            &bytes[start..start + regions.areas[area].width as usize * 4]
+        })
     }
 }
 
