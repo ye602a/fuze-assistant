@@ -433,17 +433,26 @@ pub fn run(
         require(Instant::now() < until, "capture-review-gate-close")?;
         std::thread::sleep(Duration::from_millis(100));
     }
-    let reads = r.input.lock().unwrap().reads;
+    let analyses = r.controller.status().analyses;
     r.controller.suspend();
     r.monitor.control().enable(false);
-    r.input.lock().unwrap().evidence = Some(fuze_contract::selection_pixels::Evidence::Visible);
     for level in [4, 5, 6] {
         let resumed = r.tick(known, Some(level))?;
         require(
-            resumed.pipeline.overlay.is_none() && r.input.lock().unwrap().reads == reads,
-            "capture-review-pause-rearmed-gate",
+            resumed.pipeline.overlay.is_none()
+                && resumed.pipeline.analyses == analyses
+                && resumed
+                    .pipeline
+                    .schedule
+                    .is_some_and(|(mode, interval, _)| mode == Mode::Saving && interval == 1500),
+            "capture-review-pause-lost-saving-probes",
         )?;
     }
+    r.input.lock().unwrap().evidence = Some(fuze_contract::selection_pixels::Evidence::Visible);
+    require(
+        ids(&r.next(known, Some(6), 0)?) == ids(&full),
+        "capture-review-reopen-at-same-threshold",
+    )?;
     for level in [7, 11, 15] {
         require(
             ids(&r.next(known, Some(level), 0)?) == ids(&full),
@@ -488,7 +497,7 @@ pub fn run(
         "occlusion_expired_without_frames":true,"reroll_preserved_positions":true,"shards_hidden":true,
         "title_offsets_recognized":true,"continuous_partial_remained_visible":true,
         "formal_after_shards_recognized":true,"new_match_isolated":true,"statistics_scope":"overall",
-        "pause_keeps_closed_gate":true,"isolated_new_title_rejected":true,
+        "pause_keeps_saving_probes":true,"reopened_below_seven":true,"isolated_new_title_rejected":true,
         "selection_confirmed":false,"actual_stage":null,"game_access":false,"system_input":false,
         "native_screen_tested":false,"real_game_verified":false}),
     )

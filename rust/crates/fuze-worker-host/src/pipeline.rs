@@ -528,6 +528,7 @@ impl Pipeline {
         self.diagnostic_active = diagnostic_due;
         self.diagnostic_ocr = None;
         let mut diagnostic_sample = None;
+        capture.pick_probe(self.picks.probe());
         let captured = crate::augment_picks::Recorder::timestamp();
         let result = (|| match capture
             .next(Duration::from_millis(100), self.screen_gate.active_layout())
@@ -556,16 +557,22 @@ impl Pipeline {
                     epoch: capture.key().0,
                     sequence: capture.key().1,
                 };
-                if self.screen_gate.set_layout(atlas.layout) {
-                    self.picks.cancel();
-                    self.clear_selection()?;
-                }
                 let evidence = capture.selection();
                 let black_absence = evidence
                     == Some(fuze_contract::selection_pixels::Evidence::Absent)
                     && !atlas.has_lit_pixel();
-                self.picks
-                    .frame(if black_absence { None } else { evidence }, captured);
+                let pick_pixels = capture.pick_pixels();
+                // An immediate next offer, including a different layout or a
+                // champion skill choice, can share the frame that shows the new icon.
+                self.picks.frame(
+                    if black_absence { None } else { evidence },
+                    pick_pixels,
+                    captured,
+                );
+                if self.screen_gate.set_layout(atlas.layout) {
+                    self.picks.clear_offer();
+                    self.clear_selection()?;
+                }
                 // A black readback is also insufficient to end the level's selection window.
                 let evidence = if black_absence {
                     Some(fuze_contract::selection_pixels::Evidence::Uncertain)
@@ -589,9 +596,7 @@ impl Pipeline {
                         }
                         self.session.screen_probe(
                             evidence == fuze_contract::selection_pixels::Evidence::Visible,
-                            // Occlusion may hide cards without ending this level's window.
-                            decision.closed
-                                && evidence == fuze_contract::selection_pixels::Evidence::Absent,
+                            decision.closed,
                             now,
                         );
                         self.capture_state = "waiting-selection";
@@ -606,10 +611,15 @@ impl Pipeline {
                     if let (Some(d), Some(pixels)) = (&delivery, capture.diagnostic_pixels()) {
                         // The raw snapshot identifies only freshly read slots. Never
                         // pass the display retainer's substituted cards to the picker.
-                        self.picks
-                            .offer(&d.snapshot.slots, d.title_kind, captured, pixels.screen);
+                        self.picks.offer(
+                            &d.snapshot.slots,
+                            d.title_kind,
+                            captured,
+                            pixels.screen,
+                            pick_pixels,
+                        );
                     } else {
-                        self.picks.cancel();
+                        self.picks.clear_offer();
                     }
                 }
                 if evidence == Some(fuze_contract::selection_pixels::Evidence::Visible)

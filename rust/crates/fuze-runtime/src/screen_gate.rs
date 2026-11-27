@@ -158,8 +158,8 @@ mod tests {
         assert!(g.accept_titles(&ordinary, TitleKind::Candidate));
     }
     #[test]
-    fn changing_button_evidence_keeps_the_close_event_and_opening_gate() {
-        use crate::gate::{LevelGate, Selection};
+    fn changing_button_evidence_preserves_closure_and_same_level_reopen() {
+        use crate::gate::{LevelGate, Mode, Selection};
         for (first, next) in [
             (Evidence::Visible, Evidence::TitlesOnly),
             (Evidence::TitlesOnly, Evidence::Visible),
@@ -183,13 +183,17 @@ mod tests {
                 level.observe(Selection::Candidate, 1000);
             }
             assert!(!screen.observe(Evidence::Absent, 1500).closed);
-            let end = screen.observe(Evidence::Absent, 2000);
-            assert!(end.closed);
-            if end.closed {
-                level.screen_closed();
-            }
+            assert!(screen.observe(Evidence::Absent, 2000).closed);
+            level.record_capture(2000);
+            level.screen_closed();
             level.update_level(6, 3000);
-            assert!(!level.decision(3000).capture);
+            assert_eq!(level.decision(3000).mode, Mode::Saving);
+            assert_eq!(level.wake_at(3000), 3500);
+            assert!(!screen.observe(Evidence::Visible, 3500).recognize);
+            level.record_capture(3500);
+            level.screen_visible(3500);
+            assert_eq!(level.wake_at(3500), 3750);
+            assert!(screen.observe(Evidence::Visible, 3750).recognize);
             level.update_level(7, 4000);
             assert!(level.decision(4000).capture);
         }

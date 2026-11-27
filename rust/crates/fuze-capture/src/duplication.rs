@@ -1,11 +1,14 @@
 //! GPU desktop duplication, without WGC's capture indicator or a permission dialog.
-//! Only title ROIs are copied to CPU memory; no hooks, game handles or image encoding.
+//! Only selection and pick ROIs are copied to CPU memory.
 use super::*;
+use crate::pick_pixels::{PickPixels, PickProbe};
 use fuze_contract::titles::{regions, Atlas};
 
 pub struct DesktopStream {
     duplication: IDXGIOutputDuplication,
     reader: SelectionReader,
+    pick_reader: RoiReader,
+    pick_regions: Option<[Region; 2]>,
     size: (u32, u32),
     ready: bool,
 }
@@ -55,6 +58,8 @@ impl DesktopStream {
                     return Ok(Self {
                         duplication,
                         reader: SelectionReader::new(&device),
+                        pick_reader: RoiReader::new(&device),
+                        pick_regions: None,
                         size,
                         ready: false,
                     });
@@ -67,8 +72,10 @@ impl DesktopStream {
         &mut self,
         timeout: Duration,
         active_layout: fuze_contract::Layout,
+        pick: PickProbe,
     ) -> Result<FrameStatus> {
         self.ready = false;
+        self.pick_regions = None;
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
         unsafe {
@@ -97,11 +104,21 @@ impl DesktopStream {
             Err(e) if e.is::<ReadbackBusy>() => return Ok(FrameStatus::Busy),
             Err(e) => return Err(e),
         }
+        if let Some(regions) = pick.regions(self.selection(), self.size) {
+            // The supplemental data comes from the same DXGI frame lease. A busy
+            // supplemental readback must not invalidate the title frame.
+            if self.pick_reader.read(&texture, &regions).is_ok() {
+                self.pick_regions = Some(regions);
+            }
+        }
         self.ready = true;
         Ok(FrameStatus::Ready)
     }
     pub fn selection(&self) -> Option<fuze_contract::selection_pixels::Evidence> {
         self.reader.frame.evidence
+    }
+    pub fn pick_pixels(&self) -> Option<PickPixels<'_>> {
+        PickPixels::packed(&self.pick_reader.bytes, self.pick_regions?, self.size)
     }
     pub fn diagnostic_pixels(&self) -> Option<DiagnosticPixels<'_>> {
         if !self.ready {

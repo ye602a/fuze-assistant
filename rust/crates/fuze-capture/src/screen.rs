@@ -1,6 +1,7 @@
 //! v0.6.3 screen-first policy: persistent stream, bitmap fallback, 60s recovery cooldown.
 //! Lazy start: constructing this object never captures. The host gates it to an active match.
 use crate::native::{CaptureFeed, DesktopStream, FrameStatus, Result};
+use crate::pick_pixels::{PickPixels, PickProbe};
 use fuze_contract::{titles::Atlas, Layout};
 use std::time::{Duration, Instant};
 #[path = "screen_bitmap.rs"]
@@ -9,6 +10,10 @@ mod bitmap;
 pub trait ScreenDriver {
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self);
+    fn pick_probe(&mut self, _probe: PickProbe) {}
+    fn pick_pixels(&self, _bitmap: bool) -> Option<PickPixels<'_>> {
+        None
+    }
     fn stream(&mut self, timeout: Duration, active_layout: Layout) -> Result<FrameStatus>;
     fn bitmap(&mut self, active_layout: Layout) -> Result<()>;
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>>;
@@ -24,8 +29,19 @@ pub trait ScreenDriver {
 pub struct NativeScreen {
     stream: Option<DesktopStream>,
     bitmap: bitmap::Reader,
+    pick: PickProbe,
 }
 impl ScreenDriver for NativeScreen {
+    fn pick_probe(&mut self, probe: PickProbe) {
+        self.pick = probe;
+    }
+    fn pick_pixels(&self, bitmap: bool) -> Option<PickPixels<'_>> {
+        if bitmap {
+            self.bitmap.pick_pixels()
+        } else {
+            self.stream.as_ref()?.pick_pixels()
+        }
+    }
     fn diagnostic_pixels(&self, bitmap: bool) -> Option<crate::native::DiagnosticPixels<'_>> {
         if bitmap {
             self.bitmap.diagnostic_pixels()
@@ -53,10 +69,10 @@ impl ScreenDriver for NativeScreen {
         self.stream
             .as_mut()
             .ok_or("capture-missing")?
-            .next(timeout, active_layout)
+            .next(timeout, active_layout, self.pick)
     }
     fn bitmap(&mut self, active_layout: Layout) -> Result<()> {
-        self.bitmap.read(active_layout)
+        self.bitmap.read(active_layout, self.pick)
     }
     fn titles(&self, bitmap: bool) -> Result<Atlas<'_>> {
         if bitmap {
@@ -246,6 +262,14 @@ impl<D: ScreenDriver> ScreenCapture<D> {
     }
 }
 impl<D: ScreenDriver> CaptureFeed for ScreenCapture<D> {
+    fn pick_probe(&mut self, probe: PickProbe) {
+        self.driver.pick_probe(probe);
+    }
+    fn pick_pixels(&self) -> Option<PickPixels<'_>> {
+        self.ready
+            .then(|| self.driver.pick_pixels(self.bitmap))
+            .flatten()
+    }
     fn diagnostic_pixels(&self) -> Option<crate::native::DiagnosticPixels<'_>> {
         self.ready
             .then(|| self.driver.diagnostic_pixels(self.bitmap))

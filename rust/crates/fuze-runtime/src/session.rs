@@ -316,7 +316,7 @@ impl Session {
 mod tests {
     use super::*;
     #[test]
-    fn closed_window_survives_pause_dataset_and_capture_changes_until_next_threshold() {
+    fn closed_panel_probe_schedule_survives_pause_dataset_and_capture_changes() {
         let mut s = Session::new("zh-CN@v1".into()).unwrap();
         s.update_phase(Phase::InProgress).unwrap();
         s.update_level(3, 0);
@@ -328,10 +328,15 @@ mod tests {
         s.dataset_changed("zh-CN@v2".into()).unwrap();
         s.capture_replaced().unwrap();
         s.update_level(6, 2000);
+        let (schedule, next_level) = s.level_schedule(50000);
+        assert_eq!(schedule.mode, crate::gate::Mode::Saving);
+        assert!(schedule.capture);
+        assert_eq!(next_level, Some(7));
+        s.screen_probe(false, false, 50000);
         assert!(s.begin(key(2), 50000).is_none());
-        s.update_level(7, 50001);
-        let t = s.begin(key(3), 50001).unwrap();
-        s.finish(t, blank(), Selection::Candidate, 50002).unwrap();
+        s.update_level(7, 50250);
+        let t = s.begin(key(3), 50250).unwrap();
+        s.finish(t, blank(), Selection::Candidate, 50251).unwrap();
         s.screen_probe(false, true, 51000);
         assert!(s.begin(key(4), 52000).is_none());
         s.update_phase(Phase::PostGame).unwrap();
