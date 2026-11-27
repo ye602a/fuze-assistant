@@ -1,4 +1,4 @@
-//! v0.6.3 title + reroll-button screen gate. Bounded pixel sampling, no OCR/encoding.
+//! Selection screen evidence from bounded pixel samples, without OCR or encoding.
 use crate::{
     titles::{four_center, regions, Atlas, Region},
     CardSlots, Layout,
@@ -108,8 +108,51 @@ pub fn aligned_four_buttons(atlas: &Atlas<'_>) -> usize {
         .unwrap_or(0)
 }
 
-pub fn classify_four(titles: &Atlas<'_>, aligned_buttons: usize) -> Evidence {
+/// Recognize the four-card geometry independently of the reroll controls.
+/// Three framed slots suffice while the fourth card is animating.
+pub fn has_four_card_borders(
+    width: usize,
+    height: usize,
+    pixel: impl Fn(usize, usize, usize) -> [u8; 3],
+) -> bool {
+    // The title crops cut just inside the sides of each Maestro card. Compare
+    // each upright side against the darker interior, above the title line.
+    let edge = (width * 6 / 100).max(1);
+    let inset = width / 6;
+    let span = height * 2 / 3;
+    let brightness = |p: [u8; 3]| p.into_iter().map(i16::from).sum::<i16>();
+    (0..4)
+        .filter(|&slot| {
+            let upright = |side: std::ops::Range<usize>, inward: fn(usize, usize) -> usize| {
+                side.into_iter().any(|x| {
+                    (0..20)
+                        .filter(|&row| {
+                            let y = row * span / 19;
+                            let inside = pixel(slot, inward(x, inset), y);
+                            inside.into_iter().all(|v| v < 65)
+                                && brightness(pixel(slot, x, y)) - brightness(inside) >= 90
+                        })
+                        .take(16)
+                        .count()
+                        == 16
+                })
+            };
+            upright(0..edge, |x, n| x + n) && upright(width - edge..width, |x, n| x - n)
+        })
+        .take(3)
+        .count()
+        == 3
+}
+
+pub fn classify_four(titles: &Atlas<'_>, aligned_buttons: usize, card_borders: bool) -> Evidence {
     let has_title = (0..4).any(|slot| title_visible(titles, slot));
+    if card_borders {
+        return if has_title {
+            Evidence::Visible
+        } else {
+            Evidence::Partial
+        };
+    }
     match (has_title, aligned_buttons) {
         (true, 2..) => Evidence::Visible,
         (true, 1) => Evidence::Partial,

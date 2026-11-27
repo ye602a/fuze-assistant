@@ -1,6 +1,6 @@
 ; Extract the selected payload; do not run installers or FUZE.
 #ifndef AppRelease
-  #define AppRelease "0.7.18"
+  #define AppRelease "0.7.19"
 #endif
 #ifndef Payload
   #error Payload is required
