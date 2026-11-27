@@ -1,9 +1,10 @@
 //! Reusable GDI title atlas; no PNG, full-frame CPU allocation, or disk writes.
 use crate::{
     native::Result,
+    pick_pixels::{PickPixels, PickProbe},
     selection_frame::{CaptureRegions, SelectionFrame},
 };
-use fuze_contract::titles::Atlas;
+use fuze_contract::titles::{Atlas, Region};
 use std::{
     mem::{size_of, zeroed},
     ptr::null_mut,
@@ -88,15 +89,35 @@ impl Dib {
             })
         }
     }
+    fn copy(&self, source: HDC, monitor: RECT, x: u32, area: Region) -> bool {
+        unsafe {
+            BitBlt(
+                self.dc,
+                x as i32,
+                0,
+                area.width as i32,
+                area.height as i32,
+                source,
+                monitor.left + area.x as i32,
+                monitor.top + area.y as i32,
+                SRCCOPY | CAPTUREBLT,
+            ) != 0
+        }
+    }
 }
 #[derive(Default)]
 pub(super) struct Reader {
     dib: Option<Dib>,
     size: (u32, u32),
     pub frame: SelectionFrame,
+    pick_dib: Option<Dib>,
+    pick_size: (u32, u32),
+    pick_regions: Option<[Region; 2]>,
+    screen: (u32, u32),
 }
 impl Reader {
-    pub fn read(&mut self, active_layout: fuze_contract::Layout) -> Result<()> {
+    pub fn read(&mut self, active_layout: fuze_contract::Layout, pick: PickProbe) -> Result<()> {
+        self.pick_regions = None;
         unsafe {
             let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
             let mut info: MONITORINFO = zeroed();
@@ -105,10 +126,11 @@ impl Reader {
                 return Err("capture-monitor".into());
             }
             let rect = info.rcMonitor;
-            let regions = CaptureRegions::new((
+            self.screen = (
                 (rect.right - rect.left) as u32,
                 (rect.bottom - rect.top) as u32,
-            ))?;
+            );
+            let regions = CaptureRegions::new(self.screen)?;
             let bounds = regions.bitmap_bounds();
             let size = (bounds.width, bounds.height);
             let dc = DisplayDc(GetDC(null_mut()));
@@ -120,20 +142,7 @@ impl Reader {
                 self.size = size;
             }
             let dib = self.dib.as_ref().ok_or("capture-bitmap-missing")?;
-            // One coherent band contains titles and reroll controls. No second screenshot,
-            // encoder, full-screen CPU buffer or image file is required for the UI gate.
-            if BitBlt(
-                dib.dc,
-                0,
-                0,
-                size.0 as i32,
-                size.1 as i32,
-                dc.0,
-                rect.left + bounds.x as i32,
-                rect.top + bounds.y as i32,
-                SRCCOPY | CAPTUREBLT,
-            ) == 0
-            {
+            if !dib.copy(dc.0, rect, 0, bounds) {
                 return Err("capture-bitmap-copy".into());
             }
             if GdiFlush() == 0 {
@@ -148,7 +157,27 @@ impl Reader {
                     dib.pixels.add((top + y) * stride + x),
                     r.width as usize * 4,
                 )
-            })
+            })?;
+            if let Some([hud, cards]) = pick.regions(self.frame.evidence, self.screen) {
+                let size = (hud.width + cards.width, hud.height.max(cards.height));
+                if self.pick_size != size || self.pick_dib.is_none() {
+                    self.pick_dib = Dib::new(dc.0, size.0, size.1).ok();
+                    if let Some(dib) = &self.pick_dib {
+                        // The shorter strip leaves a few rows untouched by BitBlt.
+                        std::ptr::write_bytes(dib.pixels, 0, (size.0 * size.1 * 4) as usize);
+                        self.pick_size = size;
+                    }
+                }
+                if let Some(dib) = &self.pick_dib {
+                    // Always flush the two copies, including a partially failed probe.
+                    let hud_copied = dib.copy(dc.0, rect, 0, hud);
+                    let cards_copied = dib.copy(dc.0, rect, hud.width, cards);
+                    if GdiFlush() != 0 && hud_copied && cards_copied {
+                        self.pick_regions = Some([hud, cards]);
+                    }
+                }
+            }
+            Ok(())
         }
     }
     pub fn titles(&self) -> Result<Atlas<'_>> {
@@ -156,5 +185,17 @@ impl Reader {
     }
     pub fn diagnostic_pixels(&self) -> Option<crate::native::DiagnosticPixels<'_>> {
         self.frame.diagnostic_pixels()
+    }
+
+    pub fn pick_pixels(&self) -> Option<PickPixels<'_>> {
+        let dib = self.pick_dib.as_ref()?;
+        let regions = self.pick_regions?;
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                dib.pixels,
+                (self.pick_size.0 * self.pick_size.1 * 4) as usize,
+            )
+        };
+        PickPixels::packed(bytes, regions, self.screen)
     }
 }

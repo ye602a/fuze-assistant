@@ -4,6 +4,8 @@ pub mod adapter;
 #[cfg(windows)]
 pub mod native;
 #[cfg(windows)]
+pub mod pick_pixels;
+#[cfg(windows)]
 pub mod screen;
 #[cfg(windows)]
 mod selection_frame;

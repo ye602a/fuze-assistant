@@ -53,9 +53,6 @@ fn band(level: u8) -> u8 {
     }
 }
 impl LevelGate {
-    fn opening_closed(&self) -> bool {
-        self.window_closed && self.band < 7 && !self.disabled
-    }
     pub fn closed_window(&self) -> Option<ClosedWindow> {
         self.window_closed.then_some(ClosedWindow(self.band))
     }
@@ -112,9 +109,6 @@ impl LevelGate {
         self.level = Some((level, now));
     }
     pub fn observe(&mut self, selection: Selection, now: u64) {
-        if self.opening_closed() {
-            return;
-        }
         match selection {
             Selection::Candidate => self.candidate_seen = true,
             // A shard/anvil chain cannot inherit a preceding candidate's closure.
@@ -139,8 +133,8 @@ impl LevelGate {
         }
     }
     pub fn screen_closed(&mut self) {
-        // Close a recognition window, not a reward/claim counter. Shards alone
-        // must not suppress a delayed real choice in the same level band.
+        // A closed candidate panel can be reopened at the same level. Save
+        // capture work while it is hidden and let fresh pixels wake recognition.
         self.window_closed |= self.candidate_seen && self.band != 0;
         self.last_evidence = None;
         self.unreadable_since = None;
@@ -157,14 +151,6 @@ impl LevelGate {
         }
     }
     pub fn decision(&self, now: u64) -> Decision {
-        if self.opening_closed() {
-            return Decision {
-                mode: Mode::Saving,
-                capture: false,
-                prepare: false,
-                interval_ms: 8000,
-            };
-        }
         let level = self
             .level
             .filter(|(_, at)| now >= *at && now - *at <= LEVEL_TTL_MS)
@@ -181,16 +167,15 @@ impl LevelGate {
         let skill = self
             .skill_wake
             .is_some_and(|at| now >= at && now - at < BURST_MS);
+        let closed_window = self.window_closed && !self.disabled;
         let mode = if evidence {
             Mode::Selection
+        } else if level.is_some() && (death || skill) && (!closed_window || self.band >= 7) {
+            Mode::Pending
+        } else if closed_window {
+            Mode::Saving
         } else if level.is_none() {
             Mode::Fallback
-        } else if death || skill {
-            Mode::Pending
-        } else if self.window_closed && !self.disabled {
-            // After level 7, disappearance cannot distinguish an extra offer from
-            // the fixed-level choice. Keep cheap pixel probes, not continuous OCR.
-            Mode::Saving
         } else if level.is_some_and(|v| matches!(v, 1 | 4 | 5 | 8 | 9 | 12 | 13 | 16..=30))
             && !burst
         {
@@ -201,8 +186,8 @@ impl LevelGate {
             Mode::Fallback
         };
         let interval_ms = match mode {
-            Mode::Saving => 8000,
-            Mode::Fallback => 1500,
+            Mode::Saving if !closed_window => 8000,
+            Mode::Saving | Mode::Fallback => 1500,
             _ => 250,
         };
         Decision {
@@ -218,16 +203,11 @@ impl LevelGate {
         self.last_probe = Some(now);
     }
     pub fn screen_visible(&mut self, now: u64) {
-        if !self.opening_closed() {
-            self.window_closed = false;
-            self.last_evidence = Some(now);
-            self.unreadable_since = None;
-        }
+        self.window_closed = false;
+        self.last_evidence = Some(now);
+        self.unreadable_since = None;
     }
     pub fn wake_at(&self, now: u64) -> u64 {
-        if self.opening_closed() {
-            return now.saturating_add(8000);
-        }
         let due = self.last_probe.map_or(now, |last| {
             last.saturating_add(self.decision(now).interval_ms).max(now)
         });
@@ -245,6 +225,30 @@ impl LevelGate {
 mod tests {
     use super::*;
     #[test]
+    fn a_hidden_panel_can_reopen_at_the_same_level() {
+        for level in [3, 4, 5, 6, 8, 18] {
+            let mut g = LevelGate::default();
+            g.update_level(level, 0);
+            g.observe(Selection::Candidate, 100);
+            g.record_capture(1_000);
+            g.screen_closed();
+
+            assert_eq!(g.decision(1_000).mode, Mode::Saving);
+            assert_eq!(g.wake_at(1_000), 2_500);
+            assert!(!g.decision(2_499).capture);
+            assert!(g.decision(2_500).capture);
+            g.clear_level();
+            assert_eq!(g.decision(2_500).mode, Mode::Saving);
+
+            g.record_capture(2_500);
+            g.screen_visible(2_500);
+            assert!(g.closed_window().is_none());
+            assert_eq!(g.decision(2_500).mode, Mode::Selection);
+            assert_eq!(g.wake_at(2_500), 2_750);
+        }
+    }
+
+    #[test]
     fn skill_choices_do_not_close_the_opening_or_create_a_fifth_normal_stage() {
         let mut g = LevelGate::default();
         g.update_level(3, 0);
@@ -253,6 +257,7 @@ mod tests {
         assert!(g.decision(1000).capture);
         assert_eq!(g.next_level(), Some(7));
         g.observe(Selection::Candidate, 1001);
+        g.record_capture(1001);
         g.screen_closed();
         g.update_level(6, 2000);
         g.update_dead(Some(true), 2001);
@@ -274,26 +279,26 @@ mod tests {
         g.screen_closed();
         assert_eq!(g.next_level(), None);
         g.update_level(18, 51000);
-        assert_eq!(g.decision(51000).interval_ms, 8000);
+        assert_eq!(g.decision(51000).interval_ms, 1500);
         g.clear_level();
         g.update_level(18, 52000);
-        assert_eq!(g.decision(52000).interval_ms, 8000);
+        assert_eq!(g.decision(52000).interval_ms, 1500);
         let mut ordinary = LevelGate::default();
         ordinary.update_level(15, 0);
         ordinary.observe(Selection::Candidate, 1);
         ordinary.screen_closed();
         ordinary.update_level(18, 30000);
-        assert_eq!(ordinary.decision(30000).interval_ms, 8000);
+        assert_eq!(ordinary.decision(30000).interval_ms, 1500);
     }
     #[test]
-    fn a_skill_offer_after_ordinary_cards_does_not_reopen_level_six() {
+    fn a_skill_offer_after_ordinary_cards_keeps_the_closed_panel_schedule() {
         let mut g = LevelGate::default();
         g.update_level(3, 0);
         g.observe(Selection::Candidate, 1);
         g.observe(Selection::SkillChoice, 500);
         g.screen_closed();
         g.update_level(6, 1000);
-        assert!(!g.decision(1000).capture);
+        assert_eq!(g.decision(1000).mode, Mode::Saving);
         g.update_level(7, 2000);
         assert!(g.decision(2000).capture);
     }
@@ -383,7 +388,7 @@ mod tests {
         assert_eq!(g.next_level(), Some(11));
     }
     #[test]
-    fn closed_opening_stays_off_through_six_death_and_missing_telemetry() {
+    fn closed_opening_keeps_saving_probes_through_six_and_missing_telemetry() {
         let mut g = LevelGate::default();
         g.update_level(3, 0);
         g.observe(Selection::Candidate, 1);
@@ -392,13 +397,12 @@ mod tests {
             g.update_level(level, now);
             g.update_dead(Some(true), now);
             g.update_dead(Some(false), now + 1);
-            g.screen_visible(now + 2);
-            assert!(!g.decision(now + 3).capture);
+            assert_eq!(g.decision(now + 1).mode, Mode::Saving);
         }
         g.clear_level();
-        assert!(!g.decision(100000).capture);
+        assert_eq!(g.decision(100000).mode, Mode::Saving);
         g.update_level(1, 100000);
-        assert!(!g.decision(100000).capture);
+        assert_eq!(g.decision(100000).mode, Mode::Saving);
         assert_eq!(g.next_level(), Some(7));
         g.update_level(7, 100001);
         assert!(g.decision(100001).capture);
@@ -419,17 +423,17 @@ mod tests {
             g.record_capture(1500);
             g.screen_closed();
             assert!(!g.decision(1501).capture);
-            assert_eq!(g.wake_at(1501), 9500);
-            assert!(g.decision(9500).capture);
-            g.screen_visible(9500);
-            assert_eq!(g.decision(9500).mode, Mode::Selection);
-            g.observe(Selection::StatShard, 9501);
+            assert_eq!(g.wake_at(1501), 3000);
+            assert!(g.decision(3000).capture);
+            g.screen_visible(3000);
+            assert_eq!(g.decision(3000).mode, Mode::Selection);
+            g.observe(Selection::StatShard, 3001);
             g.screen_closed();
             assert!(g.closed_window().is_none());
         }
     }
     #[test]
-    fn death_rechecks_closed_later_band_but_not_closed_opening() {
+    fn death_accelerates_probes_after_later_closed_windows() {
         for level in [6, 7, 8, 11, 15] {
             let mut g = LevelGate::default();
             g.update_level(level, 0);
@@ -453,8 +457,8 @@ mod tests {
         assert!(g.decision(2).capture);
         g.observe(Selection::Candidate, 3);
         g.screen_closed();
-        assert!(!g.decision(4).capture);
+        assert_eq!(g.decision(4).mode, Mode::Saving);
         g.enable(false);
-        assert!(g.decision(5).capture);
+        assert_eq!(g.decision(5).mode, Mode::Fallback);
     }
 }

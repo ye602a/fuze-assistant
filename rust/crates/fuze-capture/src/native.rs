@@ -37,8 +37,12 @@ pub struct DiagnosticPixels<'a> {
 }
 /// Capture itself never encodes or writes images. Diagnostic export is opt-in in the host.
 pub trait CaptureFeed {
-    /// Release continuous capture during the level-one saving gate; probes still work.
+    /// Release continuous capture in saving mode; scheduled pixel probes still work.
     fn saving(&mut self, _saving: bool) {}
+    fn pick_probe(&mut self, _probe: crate::pick_pixels::PickProbe) {}
+    fn pick_pixels(&self) -> Option<crate::pick_pixels::PickPixels<'_>> {
+        None
+    }
     /// Preserve a confirmed layout across a reroll or a capture backend switch.
     /// Without an active four-card offer, select the layout from this frame's pixels.
     fn next(

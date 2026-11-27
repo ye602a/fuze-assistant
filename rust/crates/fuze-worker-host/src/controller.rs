@@ -1150,7 +1150,9 @@ mod tests {
         let mut resumed = fuze_runtime::gate::LevelGate::default();
         resumed.restore_closed_window(saved);
         resumed.update_level(6, 0);
-        assert!(!resumed.decision(50000).capture);
+        let schedule = resumed.decision(50000);
+        assert_eq!(schedule.mode, fuze_runtime::gate::Mode::Saving);
+        assert!(schedule.capture);
         resumed.update_level(7, 50001);
         assert!(resumed.decision(50001).capture);
         for next in [context(9, 1), context(8, 2), Context::idle(Phase::PostGame)] {

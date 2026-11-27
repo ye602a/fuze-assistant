@@ -1,11 +1,16 @@
-//! Passive game clicks followed by a definite visual close. Never supplies a claim stage.
+use fuze_capture::pick_pixels::{PickPixels, PickProbe};
 use fuze_contract::{
-    selection_pixels::Evidence, titles::pick_regions, wire::TitleKind, CardSlots, Layout, Slot,
+    selection_pixels::Evidence, titles::pick_regions, wire::TitleKind, CardSlots, Slot,
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
+
+mod hud;
+mod native;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -16,8 +21,8 @@ pub enum Reason {
     StaleOffer,
     WindowUnavailable,
     Interrupted,
-    CloseTimeout,
-    AmbiguousFrame,
+    HudUnavailable,
+    HudTimeout,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,31 +35,59 @@ pub struct Diagnostics {
 }
 
 const FRESH_MS: u64 = 900;
-const CLOSE_MS: u64 = 2000;
+const HUD_MS: u64 = 2000;
 const PANDORAS_BOX: u32 = 12317;
 /// Confirmed augments still known to be owned, not the history of all choices.
 pub type Owned = Arc<Vec<(u32, String)>>;
 
-#[derive(Clone, PartialEq)]
 struct Offer {
     cards: CardSlots<Option<(u32, String)>>,
+    visual: Option<hud::Offer>,
     screen: (u32, u32),
     at: u64,
 }
-struct Pending {
-    card: (u32, String),
-    layout: Layout,
+impl Offer {
+    fn slot(&self, x: i32, y: i32) -> Option<usize> {
+        pick_regions(self.screen.0, self.screen.1, self.cards.layout())
+            .ok()?
+            .iter()
+            .enumerate()
+            .find(|(i, r)| {
+                self.cards[*i].is_some()
+                    && x >= r.x as i32
+                    && x < (r.x + r.width) as i32
+                    && y >= r.y as i32
+                    && y < (r.y + r.height) as i32
+            })
+            .map(|(i, _)| i)
+    }
+}
+struct Press {
+    offer: Arc<Offer>,
     slot: usize,
-    screen: (u32, u32),
     at: u64,
-    absent: Option<u64>,
+}
+struct Pending {
+    press: Press,
+    at: u64,
+}
+impl Pending {
+    fn card(&self) -> &(u32, String) {
+        self.press.offer.cards[self.press.slot].as_ref().unwrap()
+    }
+    fn matches(&self, pixels: PickPixels<'_>) -> bool {
+        self.press.offer.screen == pixels.screen
+            && self.press.offer.visual.as_ref().is_some_and(|visual| {
+                visual.confirms(self.press.slot, self.card().0 == PANDORAS_BOX, pixels.hud)
+            })
+    }
 }
 #[derive(Default)]
 pub(crate) struct Tracker {
     diagnostics: Diagnostics,
-    offer: Option<Offer>,
-    down: Option<(usize, u64)>,
-    pending: Option<Pending>,
+    offer: Option<Arc<Offer>>,
+    down: Option<Press>,
+    pending: Option<Arc<Pending>>,
     owned: Owned,
     hwnd: isize,
     invalidated_at: u64,
@@ -66,22 +99,34 @@ impl Tracker {
             self.invalidated_at = at;
         }
     }
-    fn cancel(&mut self) {
-        if self.pending.is_some() || self.down.is_some() {
-            self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
-            self.diagnostics.reason = Reason::Interrupted;
-        }
+    fn clear_offer(&mut self) {
         self.offer = None;
-        self.down = None;
-        self.pending = None;
     }
-    fn show(&mut self, slots: &CardSlots<Slot>, kind: TitleKind, screen: (u32, u32), at: u64) {
+    fn cancel(&mut self) {
+        let had_press = self.down.take().is_some();
+        if self.pending.take().is_some() || had_press {
+            self.interrupted(Reason::Interrupted);
+        }
+        self.clear_offer();
+    }
+    fn interrupted(&mut self, reason: Reason) {
+        self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
+        self.diagnostics.reason = reason;
+    }
+    fn show(
+        &mut self,
+        slots: &CardSlots<Slot>,
+        kind: TitleKind,
+        screen: (u32, u32),
+        at: u64,
+        visual: Option<hud::Offer>,
+    ) {
         // A reroll can be clicked while an older capture is still in the OCR worker.
         if self.invalidated_at != 0 && at <= self.invalidated_at {
             return;
         }
         if kind != TitleKind::Candidate {
-            self.cancel();
+            self.clear_offer();
             return;
         }
         let cards = slots.each_ref().map(|s| match s {
@@ -91,109 +136,78 @@ impl Tracker {
             _ => None,
         });
         // A missing unrelated title must not invalidate a known clicked slot.
-        // Duplicate known IDs are ambiguous and still reject this offer.
         if cards.iter().all(Option::is_none)
             || cards.iter().enumerate().any(|(i, c)| {
                 c.as_ref()
                     .is_some_and(|c| cards[..i].iter().flatten().any(|p| p.0 == c.0))
             })
         {
-            self.cancel();
+            self.clear_offer();
             self.diagnostics.reason = Reason::IncompleteCards;
             return;
         }
-        // OCR changes in another slot do not change the card the player clicked.
-        let changed_pending = self.pending.as_ref().is_some_and(|p| {
-            p.absent.is_some()
-                || p.screen != screen
-                || p.layout != cards.layout()
-                || cards[p.slot].as_ref().map(|c| c.0) != Some(p.card.0)
-        });
-        let changed_press = self.down.is_some_and(|(slot, _)| {
-            self.offer.as_ref().is_none_or(|o| {
-                o.screen != screen
-                    || o.cards.layout() != cards.layout()
-                    || o.cards[slot] != cards[slot]
-            })
-        });
-        if changed_pending || changed_press {
-            self.cancel();
-        }
-        self.offer = Some(Offer { cards, screen, at });
-    }
-    fn slot(&self, x: i32, y: i32, at: u64) -> Option<usize> {
-        let o = self
-            .offer
-            .as_ref()
-            .filter(|o| at.saturating_sub(o.at) <= FRESH_MS)?;
-        let regions = pick_regions(o.screen.0, o.screen.1, o.cards.layout()).ok()?;
-        regions
-            .iter()
-            .enumerate()
-            .find(|(i, r)| {
-                o.cards[*i].is_some()
-                    && x >= r.x as i32
-                    && x < (r.x + r.width) as i32
-                    && y >= r.y as i32
-                    && y < (r.y + r.height) as i32
-            })
-            .map(|(i, _)| i)
+        self.offer = Some(Arc::new(Offer {
+            cards,
+            visual,
+            screen,
+            at,
+        }));
     }
     fn pointer(&mut self, down: bool, point: Option<(i32, i32)>, at: u64) {
-        // After a definite close, ordinary game clicks belong to gameplay. Keep
-        // waiting for the second absent frame; foreign input still cancels below.
-        if point.is_some() && self.pending.as_ref().is_some_and(|p| p.absent.is_some()) {
+        let Some((x, y)) = point else {
+            self.cancel();
+            self.invalidated_at = at;
             return;
-        }
-        let stale = self
-            .offer
-            .as_ref()
-            .is_some_and(|o| at.saturating_sub(o.at) > FRESH_MS);
-        let slot = point.and_then(|(x, y)| self.slot(x, y, at));
+        };
         if down {
-            if self.pending.take().is_some() {
-                self.diagnostics.cancelled = self.diagnostics.cancelled.saturating_add(1);
-                self.diagnostics.reason = Reason::Interrupted;
-            }
-            self.down = slot.map(|slot| (slot, at));
-            // A reroll or hide click invalidates the old offer immediately, before the next OCR.
-            if slot.is_none() {
-                self.invalidated_at = at;
-                self.cancel();
-                if stale {
+            self.down = None;
+            if let Some(offer) = &self.offer {
+                if at.saturating_sub(offer.at) > FRESH_MS {
                     self.diagnostics.reason = Reason::StaleOffer;
-                }
-            }
-        } else {
-            let previous = self.down.take();
-            if let (Some(slot), Some((pressed, since))) = (slot, previous) {
-                if pressed == slot && at.saturating_sub(since) <= FRESH_MS {
-                    self.diagnostics.clicks = self.diagnostics.clicks.saturating_add(1);
-                    self.pending = self.offer.as_ref().and_then(|offer| {
-                        offer.cards[slot].clone().map(|card| Pending {
-                            card,
-                            layout: offer.cards.layout(),
-                            slot,
-                            screen: offer.screen,
-                            at,
-                            absent: None,
-                        })
+                } else if let Some(slot) = offer.slot(x, y) {
+                    // Freeze both the hit region and the visual baseline. The game
+                    // may start hiding the card before the mouse-up reaches us.
+                    self.down = Some(Press {
+                        offer: offer.clone(),
+                        slot,
+                        at,
                     });
                     return;
                 }
             }
-            self.invalidated_at = at;
-            self.cancel();
+        } else if let Some(press) = self.down.take() {
+            if press.offer.slot(x, y) == Some(press.slot) && at.saturating_sub(press.at) <= FRESH_MS
+            {
+                self.diagnostics.clicks = self.diagnostics.clicks.saturating_add(1);
+                if self.pending.take().is_some() {
+                    self.interrupted(Reason::Interrupted);
+                }
+                let transforms = press.offer.cards[press.slot].as_ref().unwrap().0 == PANDORAS_BOX;
+                if press
+                    .offer
+                    .visual
+                    .as_ref()
+                    .is_some_and(|v| v.can_follow(press.slot, transforms))
+                {
+                    self.pending = Some(Arc::new(Pending { press, at }));
+                } else {
+                    self.interrupted(Reason::HudUnavailable);
+                }
+            }
         }
+        // A completed card click or a hide/reroll click retires the offer and
+        // invalidates in-flight OCR. A later game click needs its own fresh offer.
+        self.invalidated_at = at;
+        self.clear_offer();
     }
     fn expire(&mut self, at: u64) {
         if self
             .pending
             .as_ref()
-            .is_some_and(|p| at.saturating_sub(p.at) > CLOSE_MS)
+            .is_some_and(|p| at.saturating_sub(p.at) > HUD_MS)
         {
-            self.cancel();
-            self.diagnostics.reason = Reason::CloseTimeout;
+            self.pending = None;
+            self.interrupted(Reason::HudTimeout);
         }
     }
     fn capture_at(&mut self, scheduled: Option<u64>, next_capture: u64, at: u64) -> Option<u64> {
@@ -207,55 +221,30 @@ impl Tracker {
             }
         })
     }
-    fn frame(&mut self, evidence: Option<Evidence>, at: u64) {
-        // A capture already in flight when the click arrived cannot confirm its result.
-        if self.pending.as_ref().is_some_and(|p| at <= p.at) {
-            return;
+    fn frame(&mut self, evidence: Option<Evidence>, at: u64) -> Option<Arc<Pending>> {
+        if evidence != Some(Evidence::Visible) && at > self.invalidated_at {
+            self.clear_offer();
         }
         self.expire(at);
-        match evidence {
-            Some(Evidence::Visible) => {
-                if self.pending.as_ref().is_some_and(|p| p.absent.is_some()) {
-                    self.cancel();
-                }
-            }
-            Some(Evidence::Partial | Evidence::Uncertain)
-                if self.pending.as_ref().is_some_and(|p| p.absent.is_none()) =>
-            {
-                // Fade-out is not confirmation. Keep only the actual click until
-                // fresh absent frames arrive; do not accept clicks on stale cards.
-                self.offer = None;
-                self.down = None;
-            }
-            Some(Evidence::Absent) => {
-                self.offer = None;
-                self.down = None;
-                if let Some(p) = &mut self.pending {
-                    let since = *p.absent.get_or_insert(at);
-                    // Two fresh captures spanning the existing screen-close grace, not OCR misses.
-                    if at.saturating_sub(since) >= 500 {
-                        let p = self.pending.take().unwrap();
-                        if p.card.0 == PANDORAS_BOX {
-                            // All previous augments are replaced by unknown random
-                            // prismatics. Neither they nor this transformation are
-                            // confirmed prerequisites for later combination advice.
-                            self.owned = Owned::default();
-                            self.diagnostics.reason = Reason::None;
-                        } else if !self.owned.iter().any(|c| c.0 == p.card.0) {
-                            Arc::make_mut(&mut self.owned).push(p.card);
-                            self.diagnostics.reason = Reason::None;
-                        }
-                    }
-                }
-            }
-            _ => {
-                let pending = self.pending.is_some();
-                self.cancel();
-                if pending {
-                    self.diagnostics.reason = Reason::AmbiguousFrame;
-                }
-            }
+        // A capture already in flight when the click arrived cannot confirm its result.
+        self.pending.as_ref().filter(|p| at > p.at).cloned()
+    }
+    fn confirm(&mut self, pending: &Arc<Pending>) {
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|live| !Arc::ptr_eq(live, pending))
+        {
+            return;
         }
+        self.pending = None;
+        let card = pending.card();
+        if card.0 == PANDORAS_BOX {
+            self.owned = Owned::default();
+        } else if !self.owned.iter().any(|c| c.0 == card.0) {
+            Arc::make_mut(&mut self.owned).push(card.clone());
+        }
+        self.diagnostics.reason = Reason::None;
     }
 }
 
@@ -293,6 +282,18 @@ impl Recorder {
     pub fn cancel(&mut self) {
         self.shared.lock().unwrap().cancel();
     }
+    pub fn clear_offer(&mut self) {
+        self.shared.lock().unwrap().clear_offer();
+    }
+    pub fn probe(&self) -> PickProbe {
+        if self.root.is_none() || self.error.is_some() {
+            PickProbe::Off
+        } else if self.shared.lock().unwrap().pending.is_some() {
+            PickProbe::Click
+        } else {
+            PickProbe::Offer
+        }
+    }
     /// Finish the observed click even if closing the popup already slowed recognition.
     /// None still means paused/disconnected/faulted; this never starts recognition.
     pub fn capture_at(&self, scheduled: Option<u64>, next_capture: u64) -> Option<u64> {
@@ -301,18 +302,29 @@ impl Recorder {
             .unwrap()
             .capture_at(scheduled, next_capture, now())
     }
-    pub fn frame(&mut self, evidence: Option<Evidence>, captured: u64) {
-        let visible = self
-            .target
-            .as_ref()
-            .and_then(|w| w.primary_client())
-            .is_some();
-        let mut s = self.shared.lock().unwrap();
-        s.lost_input(self.input_lost.load(Ordering::Acquire));
-        if visible {
-            s.frame(evidence, captured);
-        } else {
-            s.cancel();
+    pub fn frame(
+        &mut self,
+        evidence: Option<Evidence>,
+        pixels: Option<PickPixels<'_>>,
+        captured: u64,
+    ) {
+        let pending = {
+            let mut state = self.shared.lock().unwrap();
+            state.lost_input(self.input_lost.load(Ordering::Acquire));
+            state.frame(evidence, captured)
+        };
+        let Some(pending) = pending else { return };
+        let client = self.target.as_ref().and_then(|w| w.primary_client());
+        if client.map(|(_, w, h)| (w, h)) != Some(pending.press.offer.screen) {
+            self.cancel();
+            return;
+        }
+        // Keep pixel work outside the input lock. If another input cancelled
+        // this attempt while we compared images, its result is now stale.
+        if pixels.is_some_and(|pixels| pending.matches(pixels)) {
+            let mut state = self.shared.lock().unwrap();
+            state.lost_input(self.input_lost.load(Ordering::Acquire));
+            state.confirm(&pending);
         }
     }
     pub fn offer(
@@ -321,19 +333,17 @@ impl Recorder {
         kind: TitleKind,
         captured: u64,
         screen: (u32, u32),
+        pixels: Option<PickPixels<'_>>,
     ) {
         let at = now();
-        if self.root.is_none() || at.saturating_sub(captured) > FRESH_MS {
-            self.cancel();
-            self.shared.lock().unwrap().diagnostics.reason = Reason::StaleOffer;
+        if self.root.is_none() || self.error.is_some() || kind != TitleKind::Candidate {
+            self.clear_offer();
             return;
         }
-        {
-            let mut s = self.shared.lock().unwrap();
-            s.show(slots, kind, screen, captured);
-            if s.offer.is_none() {
-                return;
-            }
+        if at.saturating_sub(captured) > FRESH_MS {
+            self.clear_offer();
+            self.shared.lock().unwrap().diagnostics.reason = Reason::StaleOffer;
+            return;
         }
         if self.target.as_ref().is_some_and(|w| !w.valid()) {
             self.target = None;
@@ -355,589 +365,30 @@ impl Recorder {
             self.cancel();
             return;
         }
-        if self.input.is_none() && self.error.is_none() {
+        if self.input.is_none() {
             match native::Observer::start(self.shared.clone(), self.input_lost.clone()) {
                 Ok(input) => self.input = Some(input),
-                Err(error) => self.error = Some(error),
+                Err(error) => {
+                    self.error = Some(error);
+                    return;
+                }
             }
         }
-        if self.input.is_some() {
-            let mut s = self.shared.lock().unwrap();
-            s.hwnd = hwnd;
-        }
+        let previous = self.shared.lock().unwrap().offer.clone();
+        let previous = previous.as_ref().filter(|offer| offer.screen == screen);
+        let visual = pixels.and_then(|pixels| {
+            hud::Offer::read(
+                pixels,
+                slots.layout(),
+                previous.and_then(|offer| offer.visual.as_ref()),
+            )
+        });
+        let mut state = self.shared.lock().unwrap();
+        state.lost_input(self.input_lost.load(Ordering::Acquire));
+        state.hwnd = hwnd;
+        state.show(slots, kind, screen, captured, visual);
     }
     pub(crate) fn timestamp() -> u64 {
         now()
-    }
-}
-
-mod native;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn fourth_card_is_recorded_even_when_the_second_title_is_unreadable() {
-        let mut tracker = Tracker::default();
-        let mut slots = cards([1047, 3116, 3060, 1996]);
-        slots[1] = Slot::Unreadable;
-        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 100);
-        let card = Some((1512, 445));
-        tracker.pointer(true, card, 110);
-        tracker.pointer(false, card, 120);
-        tracker.frame(Some(Evidence::Absent), 200);
-        assert!(tracker.owned.is_empty());
-        tracker.frame(Some(Evidence::Absent), 700);
-        assert_eq!(
-            tracker.owned.iter().map(|c| c.0).collect::<Vec<_>>(),
-            [1996]
-        );
-    }
-
-    #[test]
-    fn fourth_reroll_invalidates_the_old_offer_and_never_records_a_pick() {
-        let mut tracker = Tracker::default();
-        let slots = cards([1047, 3116, 3060, 1996]);
-        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 100);
-        let reroll = Some((1516, 764));
-        tracker.pointer(true, reroll, 110);
-        tracker.pointer(false, reroll, 120);
-        tracker.show(&slots, TitleKind::Candidate, (1920, 1080), 105);
-        assert!(tracker.offer.is_none());
-        tracker.frame(Some(Evidence::Absent), 200);
-        tracker.frame(Some(Evidence::Absent), 700);
-        assert_eq!(tracker.diagnostics.clicks, 0);
-        assert!(tracker.owned.is_empty());
-    }
-    fn cards<const N: usize>(ids: [u32; N]) -> CardSlots<Slot>
-    where
-        CardSlots<Slot>: From<[Slot; N]>,
-    {
-        ids.map(|id| Slot::Known {
-            id,
-            name: format!("符文{id}"),
-            confidence: 1.,
-        })
-        .into()
-    }
-    fn offer() -> Tracker {
-        let mut s = Tracker::default();
-        s.show(
-            &cards([1004, 2018, 3060]),
-            TitleKind::Candidate,
-            (1920, 1080),
-            100,
-        );
-        s
-    }
-    fn click(s: &mut Tracker, slot: usize, at: u64) {
-        let r = fuze_contract::titles::regions(1920, 1080).unwrap()[slot];
-        let p = Some(((r.x + r.width / 2) as i32, 400));
-        s.pointer(true, p, at);
-        s.pointer(false, p, at + 20);
-    }
-    fn close(s: &mut Tracker, at: u64) {
-        s.frame(Some(Evidence::Absent), at);
-        s.frame(Some(Evidence::Absent), at + 500);
-    }
-    #[test]
-    fn candidates_and_disappearance_alone_never_become_owned() {
-        let mut s = offer();
-        assert!(s.owned.is_empty());
-        close(&mut s, 300);
-        assert!(s.owned.is_empty());
-        s = offer();
-        click(&mut s, 1, 200);
-        s.frame(Some(Evidence::Visible), 500);
-        assert!(s.owned.is_empty());
-        s.frame(Some(Evidence::Visible), 2500);
-        assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
-        assert_eq!(s.diagnostics.cancelled, 1);
-        close(&mut s, 2600);
-        assert!(s.owned.is_empty());
-    }
-    #[test]
-    fn real_card_click_then_two_absent_frames_records_only_that_id_and_feeds_combos() {
-        let mut s = offer();
-        click(&mut s, 0, 200);
-        s.frame(Some(Evidence::Absent), 300);
-        assert!(s.owned.is_empty());
-        s.frame(Some(Evidence::Absent), 800);
-        assert_eq!(&*s.owned, &[(1004, "符文1004".into())]);
-        assert_eq!(s.diagnostics.clicks, 1);
-        assert_eq!(s.diagnostics.cancelled, 0);
-        assert_eq!(s.diagnostics.reason, Reason::None);
-        let previous = s.owned.clone();
-        s.show(
-            &cards([1004, 2018, 3060]),
-            TitleKind::Candidate,
-            (1920, 1080),
-            1100,
-        );
-        click(&mut s, 0, 1200);
-        close(&mut s, 1300);
-        assert!(Arc::ptr_eq(&previous, &s.owned));
-        let snapshot = crate::stage_reference::Snapshot {
-            schema: 1,
-            champion: 145,
-            patch: "16.22".into(),
-            date: "2026-11-06".into(),
-            data_path: String::new(),
-            fetched: 100,
-            rows: Default::default(),
-            combinations: Some(vec![crate::stage_reference::Combination {
-                ids: vec![1004, 3086],
-                win: 0.6495,
-                samples: 6819,
-            }]),
-        };
-        let combo =
-            crate::augment_combos::reference(Some(&snapshot), 145, "16.22", &s.owned, 3086, 101);
-        assert_eq!(combo.partners, "符文1004");
-        assert_eq!(combo.statistic, "两符文搭配胜率\n65.0% · 6819 场");
-    }
-    #[test]
-    fn pandoras_box_invalidates_owned_only_after_the_existing_close_confirmation() {
-        let mut s = offer();
-        click(&mut s, 0, 200);
-        close(&mut s, 300);
-        let previous = s.owned.clone();
-        s.show(
-            &cards([PANDORAS_BOX, 2018, 3060]),
-            TitleKind::Candidate,
-            (1920, 1080),
-            1100,
-        );
-        assert!(Arc::ptr_eq(&previous, &s.owned));
-        click(&mut s, 0, 1200);
-        s.frame(Some(Evidence::Absent), 1210); // Capture began before mouse-up.
-        s.frame(Some(Evidence::Partial), 1250);
-        s.frame(Some(Evidence::Absent), 1300);
-        s.frame(Some(Evidence::Absent), 1799);
-        assert!(Arc::ptr_eq(&previous, &s.owned));
-        s.frame(Some(Evidence::Absent), 1800);
-        assert!(s.owned.is_empty());
-        assert!(s.pending.is_none());
-        assert_eq!(s.diagnostics.reason, Reason::None);
-        assert_eq!(s.diagnostics.clicks, 2);
-        assert_eq!(s.diagnostics.cancelled, 0);
-        // Readers may retain the old snapshot, but it is no longer the live set.
-        assert_eq!(previous[0].0, 1004);
-        assert!(!Arc::ptr_eq(&previous, &s.owned));
-    }
-    #[test]
-    fn unconfirmed_or_cancelled_pandoras_box_preserves_previous_owned() {
-        for interrupted in 0..5 {
-            let previous = Arc::new(vec![(1004, "符文1004".into())]);
-            let mut s = Tracker {
-                owned: previous.clone(),
-                ..Default::default()
-            };
-            s.show(
-                &cards([PANDORAS_BOX, 2018, 3060]),
-                TitleKind::Candidate,
-                (1920, 1080),
-                100,
-            );
-            if interrupted != 0 {
-                click(&mut s, 0, 200);
-            }
-            match interrupted {
-                0 => close(&mut s, 300), // Disappearance without a click.
-                1 => {
-                    s.frame(Some(Evidence::Absent), 300);
-                    s.frame(Some(Evidence::Absent), 2500); // Original 2s deadline.
-                }
-                2 => {
-                    s.frame(None, 300);
-                    close(&mut s, 400);
-                }
-                3 => {
-                    s.pointer(true, None, 300); // Foreign input interrupts the click.
-                    close(&mut s, 400);
-                }
-                _ => {
-                    s.frame(Some(Evidence::Absent), 300);
-                    s.frame(Some(Evidence::Visible), 400);
-                    close(&mut s, 500);
-                }
-            }
-            assert!(Arc::ptr_eq(&previous, &s.owned));
-            assert!(s.pending.is_none());
-        }
-    }
-    #[test]
-    fn recorder_restore_keeps_transformed_ownership_empty_until_a_new_confirmed_pick() {
-        let mut recorder = Recorder::default();
-        recorder.restore(Arc::new(vec![
-            (1004, "符文1004".into()),
-            (2018, "符文2018".into()),
-        ]));
-        {
-            let mut s = recorder.shared.lock().unwrap();
-            s.show(
-                &cards([PANDORAS_BOX, 2018, 3060]),
-                TitleKind::Candidate,
-                (1920, 1080),
-                100,
-            );
-            click(&mut s, 0, 200);
-            close(&mut s, 300);
-        }
-        recorder.cancel();
-        // Controller recovery stores owned(), including an empty set, and passes
-        // that exact snapshot to the replacement worker's Recorder::restore().
-        let saved = recorder.owned();
-        assert!(saved.is_empty());
-        let mut resumed = Recorder::default();
-        resumed.restore(saved.clone());
-        assert!(Arc::ptr_eq(&saved, &resumed.owned()));
-        assert_eq!(resumed.diagnostics().owned, 0);
-        {
-            let mut s = resumed.shared.lock().unwrap();
-            s.show(
-                &cards([1004, 2018, 3060]),
-                TitleKind::Candidate,
-                (1920, 1080),
-                1100,
-            );
-            click(&mut s, 2, 1200);
-            close(&mut s, 1300);
-        }
-        assert_eq!(&*resumed.owned(), &[(3060, "符文3060".into())]);
-        let mut restarted = Recorder::default();
-        restarted.restore(resumed.owned());
-        assert_eq!(&*restarted.owned(), &[(3060, "符文3060".into())]);
-    }
-    #[test]
-    fn reroll_invalidates_inflight_ocr_and_does_not_record_replacement_in_old_slot() {
-        let mut s = offer();
-        s.pointer(true, Some((1000, 700)), 200); // below card: reroll, not choice
-        s.pointer(false, Some((1000, 700)), 220);
-        s.show(
-            &cards([1004, 2018, 3060]),
-            TitleKind::Candidate,
-            (1920, 1080),
-            180,
-        );
-        click(&mut s, 0, 250);
-        close(&mut s, 300);
-        assert!(s.owned.is_empty());
-        s.show(
-            &cards([9999, 2018, 3060]),
-            TitleKind::Candidate,
-            (1920, 1080),
-            900,
-        );
-        click(&mut s, 0, 1000);
-        close(&mut s, 1100);
-        assert_eq!(s.owned[0].0, 9999);
-    }
-    #[test]
-    fn black_frame_shards_skills_and_unreadable_clicked_card_never_confirm_a_pick() {
-        for evidence in [None, Some(Evidence::TitlesOnly)] {
-            let mut s = offer();
-            click(&mut s, 1, 200);
-            s.frame(evidence, 300);
-            close(&mut s, 500);
-            assert!(s.owned.is_empty());
-        }
-        for kind in [
-            TitleKind::Unknown,
-            TitleKind::StatShard,
-            TitleKind::SkillChoice,
-        ] {
-            let mut s = offer();
-            s.show(&cards([1004, 2018, 3060]), kind, (1920, 1080), 200);
-            click(&mut s, 0, 300);
-            close(&mut s, 400);
-            assert!(s.owned.is_empty());
-        }
-        let mut s = offer();
-        let mut partial = cards([1004, 2018, 3060]);
-        partial[1] = Slot::Unreadable;
-        s.show(&partial, TitleKind::Candidate, (1920, 1080), 200);
-        click(&mut s, 1, 300);
-        close(&mut s, 400);
-        assert!(s.owned.is_empty());
-    }
-    #[test]
-    fn stale_drag_outside_and_untrusted_window_clicks_are_ignored() {
-        let mut s = offer();
-        click(&mut s, 0, 1100);
-        close(&mut s, 1200);
-        assert!(s.owned.is_empty());
-        s = offer();
-        click(&mut s, 0, 200);
-        s.lost_input(250);
-        close(&mut s, 300);
-        assert!(s.owned.is_empty());
-        s = offer();
-        s.pointer(true, Some((550, 400)), 200);
-        s.pointer(false, Some((950, 400)), 220);
-        close(&mut s, 300);
-        assert!(s.owned.is_empty());
-        s = offer();
-        click(&mut s, 0, 200);
-        s.pointer(true, None, 250); // FUZE/another app/injected input
-        close(&mut s, 300);
-        assert!(s.owned.is_empty());
-    }
-    #[test]
-    fn changed_cards_or_reopened_offer_cancel_pending_without_touching_owned() {
-        for changed in [false, true] {
-            let mut s = offer();
-            click(&mut s, 1, 200);
-            if !changed {
-                s.frame(Some(Evidence::Absent), 300);
-            }
-            s.show(
-                &cards(if changed {
-                    [1004, 9999, 3060]
-                } else {
-                    [1004, 2018, 3060]
-                }),
-                TitleKind::Candidate,
-                (1920, 1080),
-                400,
-            );
-            close(&mut s, 600);
-            assert!(s.owned.is_empty());
-        }
-    }
-    #[test]
-    fn hit_regions_follow_ocr_columns_and_exclude_reroll_buttons_at_each_resolution() {
-        for (w, h) in [(1280, 720), (1920, 1080), (2560, 1440)] {
-            let mut s = Tracker::default();
-            s.show(&cards([1, 2, 3]), TitleKind::Candidate, (w, h), 100);
-            for (i, r) in fuze_contract::titles::regions(w, h)
-                .unwrap()
-                .iter()
-                .enumerate()
-            {
-                assert_eq!(
-                    s.slot((r.x + r.width / 2) as i32, (h as f64 * 0.4) as i32, 200),
-                    Some(i)
-                );
-            }
-            for b in fuze_contract::selection_pixels::buttons(w, h).unwrap() {
-                assert_eq!(
-                    s.slot((b.x + b.width / 2) as i32, (b.y + b.height / 2) as i32, 200),
-                    None
-                );
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod gameplay_regressions {
-    use super::*;
-    fn cards() -> CardSlots<Slot> {
-        [1004, 2018, 3060]
-            .map(|id| Slot::Known {
-                id,
-                name: format!("rune{id}"),
-                confidence: 1.0,
-            })
-            .into()
-    }
-    fn click(s: &mut Tracker, at: u64) {
-        let p = Some((550, 400));
-        s.pointer(true, p, at);
-        s.pointer(false, p, at + 20);
-    }
-    #[test]
-    fn closed_level_gate_allows_only_the_pending_close_confirmation_then_sleeps() {
-        use fuze_runtime::{
-            screen_gate::ScreenGate,
-            session::{FrameKey, Phase, Session},
-        };
-        let mut session = Session::new("zh-CN@fixture".into()).unwrap();
-        session.update_phase(Phase::InProgress).unwrap();
-        session.update_level(3, 0);
-        let ticket = session
-            .begin(
-                FrameKey {
-                    epoch: 1,
-                    sequence: 1,
-                },
-                0,
-            )
-            .unwrap();
-        assert!(session
-            .finish(
-                ticket,
-                cards(),
-                fuze_runtime::gate::Selection::Candidate,
-                100
-            )
-            .is_some());
-        session.screen_visible(100);
-        let mut gate = ScreenGate::default();
-        gate.observe(Evidence::Visible, 0);
-        gate.observe(Evidence::Visible, 100);
-        let mut s = Tracker::default();
-        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-        click(&mut s, 200);
-        s.frame(Some(Evidence::Uncertain), 600);
-        gate.observe(Evidence::Uncertain, 600);
-        s.frame(Some(Evidence::Absent), 1100);
-        let decision = gate.observe(Evidence::Absent, 1100);
-        assert!(decision.closed);
-        session.screen_probe(false, decision.closed, 1100);
-        assert!(session.wake_at(1100).unwrap() > 2220);
-        assert_eq!(s.capture_at(session.wake_at(1100), 1600, 1100), Some(1600));
-        assert_eq!(s.capture_at(None, 1600, 1100), None);
-        assert!(session
-            .begin(
-                FrameKey {
-                    epoch: 1,
-                    sequence: 2
-                },
-                1600
-            )
-            .is_none());
-        s.frame(Some(Evidence::Absent), 1600);
-        assert_eq!(s.owned[0].0, 1004);
-        session.update_level(6, 1600);
-        assert_eq!(
-            s.capture_at(session.wake_at(1600), 2100, 1600),
-            session.wake_at(1600)
-        );
-        assert_eq!(
-            session.level_schedule(1600).0.mode,
-            fuze_runtime::gate::Mode::Saving
-        );
-    }
-    #[test]
-    fn missing_capture_cannot_keep_confirmation_polling_after_timeout() {
-        let mut s = Tracker::default();
-        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-        click(&mut s, 200);
-        assert_eq!(s.capture_at(Some(9000), 800, 300), Some(800));
-        // No usable capture ever arrives; the scheduling boundary must expire the click.
-        assert_eq!(s.capture_at(Some(9000), 2800, 2500), Some(9000));
-        assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
-        assert!(s.owned.is_empty());
-    }
-    #[test]
-    fn unrelated_ocr_change_during_press_and_after_click_keeps_clicked_identity() {
-        let mut s = Tracker::default();
-        let mut shown = cards();
-        s.show(&shown, TitleKind::Candidate, (1920, 1080), 100);
-        s.pointer(true, Some((550, 400)), 200);
-        shown[2] = Slot::Unreadable;
-        s.show(&shown, TitleKind::Candidate, (1920, 1080), 210);
-        s.pointer(false, Some((550, 400)), 220);
-        shown[1] = Slot::Unreadable;
-        s.show(&shown, TitleKind::Candidate, (1920, 1080), 250);
-        s.frame(Some(Evidence::Absent), 300);
-        s.frame(Some(Evidence::Absent), 800);
-        assert_eq!(s.owned.iter().map(|c| c.0).collect::<Vec<_>>(), [1004]);
-        assert_eq!(s.diagnostics.clicks, 1);
-        assert_eq!(s.diagnostics.cancelled, 0);
-    }
-    #[test]
-    fn fade_only_waits_for_two_fresh_absent_frames_and_does_not_extend_deadline() {
-        for late in [false, true] {
-            let mut s = Tracker::default();
-            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-            click(&mut s, 200);
-            s.frame(Some(Evidence::Partial), 300);
-            s.frame(Some(Evidence::Uncertain), 600);
-            assert!(s.owned.is_empty());
-            assert_eq!(s.slot(550, 400, 650), None);
-            let first = if late { 2000 } else { 800 };
-            s.frame(Some(Evidence::Absent), first);
-            assert!(s.owned.is_empty());
-            s.frame(Some(Evidence::Absent), first + 500);
-            assert_eq!(s.owned.len(), usize::from(!late));
-            if late {
-                assert_eq!(s.diagnostics.reason, Reason::CloseTimeout);
-            }
-        }
-    }
-    #[test]
-    fn pre_click_capture_cannot_start_close_confirmation() {
-        let mut s = Tracker::default();
-        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-        click(&mut s, 200);
-        // Capture started before mouse-up; its delivery must not count as a post-click close.
-        s.frame(Some(Evidence::Absent), 210);
-        s.frame(Some(Evidence::Absent), 750);
-        assert!(s.owned.is_empty());
-        s.frame(Some(Evidence::Absent), 1250);
-        assert_eq!(s.owned[0].0, 1004);
-    }
-    #[test]
-    fn fade_does_not_survive_black_frame_foreign_click_or_changed_target() {
-        for kind in 0..4 {
-            let mut s = Tracker::default();
-            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-            click(&mut s, 200);
-            s.frame(Some(Evidence::Partial), 300);
-            match kind {
-                0 => s.frame(None, 400),
-                1 => s.pointer(true, None, 400),
-                2 => {
-                    let mut next = cards();
-                    next[0] = Slot::Unreadable;
-                    s.show(&next, TitleKind::Candidate, (1920, 1080), 400);
-                }
-                _ => s.show(&cards(), TitleKind::Candidate, (1280, 720), 400),
-            }
-            s.frame(Some(Evidence::Absent), 500);
-            s.frame(Some(Evidence::Absent), 1000);
-            assert!(s.owned.is_empty());
-        }
-    }
-    #[test]
-    fn known_clicked_card_survives_unreadable_other_card() {
-        let mut s = Tracker::default();
-        let mut offer = cards();
-        offer[2] = Slot::Unreadable;
-        s.show(&offer, TitleKind::Candidate, (1920, 1080), 100);
-        click(&mut s, 200);
-        s.frame(Some(Evidence::Absent), 300);
-        s.frame(Some(Evidence::Absent), 800);
-        assert_eq!(s.owned[0].0, 1004);
-        assert_eq!(s.diagnostics.clicks, 1);
-        assert_eq!(s.diagnostics.reason, Reason::None);
-    }
-    #[test]
-    fn post_close_foreign_input_reopen_and_ambiguity_still_cancel() {
-        for kind in 0..4 {
-            let mut s = Tracker::default();
-            s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-            click(&mut s, 200);
-            s.frame(Some(Evidence::Absent), 300);
-            match kind {
-                0 => s.pointer(true, None, 400),
-                1 => {
-                    s.frame(Some(Evidence::Visible), 400);
-                    s.show(&cards(), TitleKind::Candidate, (1920, 1080), 400);
-                }
-                2 => s.frame(None, 400),
-                _ => s.frame(Some(Evidence::Uncertain), 400),
-            }
-            s.frame(Some(Evidence::Absent), 500);
-            s.frame(Some(Evidence::Absent), 1000);
-            assert!(s.owned.is_empty());
-        }
-    }
-    #[test]
-    fn game_click_after_first_absent_frame_preserves_pending_selection() {
-        let mut s = Tracker::default();
-        s.show(&cards(), TitleKind::Candidate, (1920, 1080), 100);
-        click(&mut s, 200);
-        s.frame(Some(Evidence::Absent), 300);
-        // Another genuine left click after the choice closes, before confirmation completes.
-        s.pointer(true, Some((1000, 800)), 400);
-        s.pointer(false, Some((1000, 800)), 420);
-        s.frame(Some(Evidence::Absent), 800);
-        assert_eq!(s.owned[0].0, 1004);
-        assert_eq!(s.diagnostics.clicks, 1);
-        assert_eq!(s.diagnostics.cancelled, 0);
     }
 }

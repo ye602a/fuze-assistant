@@ -37,13 +37,13 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, Box<dyn std::error::Err
         if inputs[6].starts_with("lifecycle") {
             fuze_worker_host::lifecycle_review::run(&inputs, present)
         } else {
-            fuze_worker_host::capture_review::run(&inputs, |pipeline, delivery, index| {
+            fuze_worker_host::capture_review::run(&inputs, |pipeline, _, index| {
                 let mut status = Status::default();
                 status.mode = 1;
                 status.preferences.augment_overlay = true;
                 status.preferences.icon_downloads = false;
                 status.connection = Some(fuze_lcu::reconnect::State::Connected(
-                    if delivery.is_some() {
+                    if pipeline.has_capture() {
                         Phase::InProgress
                     } else {
                         Phase::PostGame

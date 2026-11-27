@@ -8,7 +8,7 @@ use fuze_capture::{
     screen::{NativeScreen, ScreenCapture, ScreenDriver},
 };
 use fuze_contract::{titles::Atlas, Layout, Slot};
-use fuze_runtime::session::Phase;
+use fuze_runtime::{gate::Mode, session::Phase};
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -200,6 +200,8 @@ pub fn run(
     let mut frames = Vec::new();
     let mut last_snapshot = None;
     let mut closes = Vec::new();
+    let mut reopens = Vec::new();
+    let mut hidden_bitmap_probes = 0;
     for (index, sample) in samples.iter().enumerate() {
         let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let path = root.join(&sample.file).canonicalize()?;
@@ -265,6 +267,7 @@ pub fn run(
             };
             pipeline.capture_feed(feed)?;
         }
+        let mut reopen_at: Option<Instant> = None;
         for repeat in 0..3 {
             pipeline.level(3);
             let deadline = Instant::now() + Duration::from_secs(12);
@@ -368,21 +371,50 @@ pub fn run(
                 "statistics_slots":pipeline.frames.current().map(|f|f.cards.each_ref().map(|c|c.as_ref().is_some_and(|c|c.win.is_some() && c.pick.is_some()))),
                 "ocr_ms":delivery.ocr_ms,"total_ms":delivery.total_ms,"roi_bytes":delivery.roi_bytes}));
             last_snapshot = Some(delivery.snapshot);
-        }
-        if !ci && pipeline.frames.current().is_some() {
-            closed.store(true, std::sync::atomic::Ordering::Relaxed);
-            let start = Instant::now();
-            while pipeline.frames.current().is_some() {
-                if pipeline.tick_wgc()?.is_some() {
-                    return Err("capture-review-ocr-on-absent-ui".into());
-                }
-                if start.elapsed() > Duration::from_millis(1600) {
-                    return Err("capture-review-close-delay".into());
-                }
-                std::thread::sleep(Duration::from_millis(20));
+            if let Some(start) = reopen_at.take() {
+                reopens.push(start.elapsed().as_secs_f64() * 1000.);
             }
-            closes.push(start.elapsed().as_secs_f64() * 1000.);
-            present(&pipeline, None, frames.len())?;
+            // Reopen the identical offer on the last repeat, still at level three.
+            if !ci && repeat == 1 && pipeline.frames.current().is_some() {
+                closed.store(true, std::sync::atomic::Ordering::Relaxed);
+                let start = Instant::now();
+                while pipeline.frames.current().is_some() {
+                    if pipeline.tick_wgc()?.is_some() {
+                        return Err("capture-review-ocr-on-absent-ui".into());
+                    }
+                    if start.elapsed() > Duration::from_millis(1600) {
+                        return Err("capture-review-close-delay".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                closes.push(start.elapsed().as_secs_f64() * 1000.);
+                present(&pipeline, None, frames.len())?;
+                let (mode, interval, _) = pipeline.scheduling();
+                if (mode, interval) != (Mode::Saving, 1500) {
+                    return Err("capture-review-hidden-schedule".into());
+                }
+                // Leave the cards hidden through an actual scheduled probe so
+                // an immediate reopen cannot hide OCR or continuous capture here.
+                let last_capture = pipeline.last_capture;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while pipeline.last_capture == last_capture {
+                    let wake = pipeline.wake_at().ok_or("capture-review-hidden-schedule")?;
+                    let wait = wake.saturating_sub(pipeline.now()).clamp(20, 500);
+                    std::thread::sleep(Duration::from_millis(wait));
+                    if pipeline.tick_wgc()?.is_some() || pipeline.frames.current().is_some() {
+                        return Err("capture-review-ocr-on-absent-ui".into());
+                    }
+                    if Instant::now() >= deadline {
+                        return Err("capture-review-hidden-probe-timeout".into());
+                    }
+                }
+                if pipeline.capture_source() != "screen-bitmap" {
+                    return Err("capture-review-hidden-probe-not-bitmap".into());
+                }
+                hidden_bitmap_probes += 1;
+                closed.store(false, std::sync::atomic::Ordering::Relaxed);
+                reopen_at = Some(Instant::now());
+            }
         }
         pipeline.phase(Phase::Loading)?;
         if pipeline.has_capture() || pipeline.frames.current().is_some() {
@@ -409,6 +441,7 @@ pub fn run(
         "loading_capture_started":false,"worker_launches":pipeline.worker.launches(),"worker_reaped":true,
         "data_version":data.version(),"statistics_scope":"overall","selection_confirmed":false,
         "actual_stage":null,"game_access":false,"system_input":false,
-        "absent_ui_close_ms":closes,"native_screen_tested":ci,"real_game_verified":false}),
+        "absent_ui_close_ms":closes,"same_level_ui_reopen_ms":reopens,"hidden_bitmap_probes":hidden_bitmap_probes,
+        "native_screen_tested":ci,"real_game_verified":false}),
     )
 }
